@@ -57,5 +57,6 @@ class User {
   int get hashCode => Object.hash(id, email, displayName);
 
   @override
-  String toString() => 'User(id: $id, email: $email, displayName: $displayName)';
+  String toString() =>
+      'User(id: $id, email: $email, displayName: $displayName)';
 }

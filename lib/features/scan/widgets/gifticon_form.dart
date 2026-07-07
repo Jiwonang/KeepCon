@@ -78,7 +78,8 @@ class GifticonForm extends ConsumerWidget {
                   if (saved != null && context.mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
-                        content: Text('저장됨: ${saved.brand} ${saved.productName}'),
+                        content:
+                            Text('저장됨: ${saved.brand} ${saved.productName}'),
                       ),
                     );
                     Navigator.of(context).maybePop(saved);

@@ -47,10 +47,8 @@ class FirebaseGifticonRepository implements GifticonRepository {
 
   @override
   Stream<List<Gifticon>> watchGifticons(String ownerId) {
-    return _col
-        .where('ownerId', isEqualTo: ownerId)
-        .snapshots()
-        .map((QuerySnapshot<Map<String, dynamic>> snap) =>
+    return _col.where('ownerId', isEqualTo: ownerId).snapshots().map(
+        (QuerySnapshot<Map<String, dynamic>> snap) =>
             snap.docs.map(_fromDoc).toList(growable: false));
   }
 

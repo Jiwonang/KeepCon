@@ -29,8 +29,7 @@ class FirebaseAuthRepository implements AuthRepository {
   User? get currentUser => _mapUser(_auth.currentUser);
 
   @override
-  Stream<User?> watchCurrentUser() =>
-      _auth.authStateChanges().map(_mapUser);
+  Stream<User?> watchCurrentUser() => _auth.authStateChanges().map(_mapUser);
 
   /// firebase_auth의 [fb.User]를 계약 [User]로 매핑한다.
   ///
@@ -44,10 +43,9 @@ class FirebaseAuthRepository implements AuthRepository {
     if (raw == null) return null;
 
     final String uid = raw.uid;
-    final String email =
-        (raw.email != null && raw.email!.isNotEmpty)
-            ? raw.email!
-            : '$uid@keepcon.local';
+    final String email = (raw.email != null && raw.email!.isNotEmpty)
+        ? raw.email!
+        : '$uid@keepcon.local';
 
     final String displayName = _resolveDisplayName(
       rawDisplayName: raw.displayName,

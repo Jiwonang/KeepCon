@@ -215,8 +215,9 @@ class GifticonFormController extends StateNotifier<GifticonFormState> {
     state = state.copyWith(submit: const ScanSubmitInProgress());
 
     // 폼 원시 입력 → 계약 Gifticon 매핑. 필수 필드를 빠짐없이 채운다.
-    final String category =
-        state.category.trim().isEmpty ? kDefaultCategory : state.category.trim();
+    final String category = state.category.trim().isEmpty
+        ? kDefaultCategory
+        : state.category.trim();
     final String? barcode =
         state.barcode.trim().isEmpty ? null : state.barcode.trim();
 
