@@ -1,0 +1,28 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+# CodeRabbit 리뷰 설정 — KeepCon 협업 규칙에 맞춰 한국어로 리뷰한다.
+# CI(Format·Analyze·Test) + 커밋 전 /code-review 와 층위가 달라 중첩 운영한다.
+language: ko-KR
+reviews:
+  profile: chill
+  high_level_summary: true
+  poem: false
+  request_changes_workflow: false
+  auto_review:
+    enabled: true
+    drafts: false
+  path_instructions:
+    - path: "lib/features/**"
+      instructions: >-
+        KeepCon 협업 규칙 준수를 중점 확인하라.
+        (1) 공유 모델·인터페이스·enum·라우트·테마는 lib/shared의 단일 정의만 사용하고
+        페이지 내부에서 재정의하지 않았는지.
+        (2) Repository 메서드를 계약(abstract 인터페이스)의 이름·파라미터 그대로 호출하는지
+        (추측 호출/오타 없는지).
+        (3) 상태·정렬·필터에 매직 스트링 대신 계약의 enum을 쓰는지.
+        (4) 색상·폰트·모양을 하드코딩하지 않고 Theme.of(context) 토큰을 소비하는지.
+        (5) 일반적인 버그·엣지케이스·널 안전성·네이밍.
+    - path: "lib/shared/**"
+      instructions: >-
+        공유 계약(SSOT) 영역이다. 인터페이스·모델·enum 변경이 기존 소비자(페이지)를
+        깨지 않는지(하위호환), 네이밍 일관성(Dart 관례), null 안전성, 그리고 계약이
+        페이지 간 경계면을 명확히 규정하는지 확인하라.
