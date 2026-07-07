@@ -114,7 +114,7 @@ flutter run
 
 > ⚠️ **플랜 제약:** 이 저장소는 **Private + Free 플랜**이라 Rulesets·Branch protection을 켤 수 없습니다(API/UI 모두 `Upgrade to GitHub Pro or make this repository public` 응답). 활성화하려면 **GitHub Pro(유료)** 로 업그레이드하거나 저장소를 **Public**으로 전환해야 합니다.
 >
-> **현재 운영:** 하드 차단 없이 **규칙 문서 + CI(`Format · Analyze · Test`) + Claude 리뷰봇**의 *소프트 강제*로 운영합니다. 아래 설정은 Pro 업그레이드 또는 Public 전환 후에 적용하세요.
+> **현재 운영:** 하드 차단 없이 **규칙 문서 + CI(`Format · Analyze · Test`) + 커밋 전 `/code-review`**의 *소프트 강제*로 운영합니다. 아래 설정은 Pro 업그레이드 또는 Public 전환 후에 적용하세요.
 
 **방법 A — GitHub UI (Rulesets)**
 1. 저장소 → **Settings → Rules → Rulesets → New ruleset → New branch ruleset**
@@ -150,17 +150,15 @@ gh api -X POST repos/Jiwonang/KeepCon/rulesets --input ruleset.json
 
 > 설정 후에는 `main`·`develop`에 직접 push가 거부되고, PR은 CI(`Format · Analyze · Test`)가 통과해야 병합할 수 있습니다. (필요 시 승인 수는 팀 규모에 맞게 조정)
 
-### PR 리뷰 봇 (Claude)
+### 코드 리뷰 정책
 
-`.github/workflows/claude-review.yml` — PR이 열리거나 갱신되면 Claude가 협업 규칙 준수(공유 계약·enum·테마 토큰 등)와 버그를 자동 리뷰합니다.
+자동 AI 리뷰 봇(CodeRabbit 같은 외부 앱·상시 접근, 또는 API 키가 필요한 GitHub Action)은 **두지 않습니다.** Private 저장소의 보안(외부 상시 접근·비밀 관리 최소화)과 비용을 고려한 선택입니다. 대신 3층으로 품질을 관리합니다:
 
-활성화하려면 **`ANTHROPIC_API_KEY` 시크릿**을 한 번 등록하세요(소유자 권한):
-```bash
-gh secret set ANTHROPIC_API_KEY   # 실행 후 API 키 붙여넣기
-```
-또는 GitHub UI: **Settings → Secrets and variables → Actions → New repository secret** (`ANTHROPIC_API_KEY`).
+- **CI 게이트 (필수·자동):** 모든 PR에서 `Format · Analyze · Test`(dart format · flutter analyze · flutter test) 통과 — 안정성의 기반.
+- **AI 코드 리뷰 (온디맨드):** Claude Code로 작업할 때 **커밋 전 `/code-review`** 로 변경 diff를 리뷰하고 수정한 뒤 커밋합니다.
+- **보안 점검:** 릴리스 전 `/security-review`로 별도 점검.
 
-> 시크릿이 없으면 리뷰 단계를 건너뛰고 CI는 통과합니다(그린 유지). Claude Code 터미널에서 `/install-github-app`으로 설정하는 방법도 있습니다.
+> 팀이 커지거나 비-AI 기여자가 늘면 자동 PR 리뷰 봇(예: CodeRabbit) 도입을 재검토합니다.
 
 ---
 
