@@ -110,9 +110,11 @@ flutter run
 
 ### 브랜치 보호 규칙 (저장소 소유자 설정)
 
-문서/CLAUDE.md는 "지침"일 뿐, 직접 push를 물리적으로 막지는 않습니다. `main`·`develop` 직접 push를 차단하고 **PR + CI 통과**를 강제하려면 저장소 소유자가 아래를 한 번 설정합니다.
+문서/CLAUDE.md는 "지침"일 뿐, 직접 push를 물리적으로 막지는 않습니다. `main`·`develop` 직접 push를 차단하고 **PR + CI 통과**를 강제하려면 아래 브랜치 보호를 설정합니다.
 
-> 프라이빗 저장소는 **Rulesets**가 무료로 제공됩니다(권장). (classic Branch protection은 프라이빗의 경우 유료 플랜 필요.)
+> ⚠️ **플랜 제약:** 이 저장소는 **Private + Free 플랜**이라 Rulesets·Branch protection을 켤 수 없습니다(API/UI 모두 `Upgrade to GitHub Pro or make this repository public` 응답). 활성화하려면 **GitHub Pro(유료)** 로 업그레이드하거나 저장소를 **Public**으로 전환해야 합니다.
+>
+> **현재 운영:** 하드 차단 없이 **규칙 문서 + CI(`Format · Analyze · Test`) + Claude 리뷰봇**의 *소프트 강제*로 운영합니다. 아래 설정은 Pro 업그레이드 또는 Public 전환 후에 적용하세요.
 
 **방법 A — GitHub UI (Rulesets)**
 1. 저장소 → **Settings → Rules → Rulesets → New ruleset → New branch ruleset**
@@ -121,7 +123,7 @@ flutter run
 4. **Rules** 체크:
    - ✅ Restrict deletions (브랜치 삭제 금지)
    - ✅ Block force pushes (강제 push 금지)
-   - ✅ Require a pull request before merging (직접 push 금지 → PR 필수, 승인 1건 이상 권장)
+   - ✅ Require a pull request before merging (직접 push 금지 → PR 필수. 승인 수는 솔로면 0, 팀이면 1건 이상)
    - ✅ Require status checks to pass → 검색해서 **`Format · Analyze · Test`** 추가, "Require branches to be up to date" 체크
 5. **Create**
 
@@ -137,7 +139,7 @@ flutter run
   "rules": [
     { "type": "deletion" },
     { "type": "non_fast_forward" },
-    { "type": "pull_request", "parameters": { "required_approving_review_count": 1, "dismiss_stale_reviews_on_push": false, "require_code_owner_review": false, "require_last_push_approval": false, "required_review_thread_resolution": false } },
+    { "type": "pull_request", "parameters": { "required_approving_review_count": 0, "dismiss_stale_reviews_on_push": false, "require_code_owner_review": false, "require_last_push_approval": false, "required_review_thread_resolution": false } },
     { "type": "required_status_checks", "parameters": { "strict_required_status_checks_policy": true, "required_status_checks": [ { "context": "Format · Analyze · Test" } ] } }
   ]
 }
