@@ -210,8 +210,7 @@ class Gifticon {
       );
 
   @override
-  String toString() =>
-      'Gifticon(id: $id, ownerId: $ownerId, brand: $brand, '
+  String toString() => 'Gifticon(id: $id, ownerId: $ownerId, brand: $brand, '
       'productName: $productName, price: $price, category: $category, '
       'expiryDate: $expiryDate, status: $status)';
 }

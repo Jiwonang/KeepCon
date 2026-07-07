@@ -40,7 +40,7 @@ void main() {
     // 스트림/비동기 provider가 정착하도록 프레임을 진행한다.
     await tester.pumpAndSettle();
 
-    expect(find.text('나의 기프티콘'), findsOneWidget);
+    expect(find.text('내 기프티콘'), findsOneWidget);
     expect(find.text('스타벅스'), findsWidgets);
   });
 }

@@ -28,8 +28,7 @@ class InMemoryGifticonRepository implements GifticonRepository {
 
   @override
   Future<Gifticon> addGifticon(Gifticon gifticon) async {
-    final String id =
-        gifticon.id.isEmpty ? 'gifticon-${++_seq}' : gifticon.id;
+    final String id = gifticon.id.isEmpty ? 'gifticon-${++_seq}' : gifticon.id;
     final Gifticon saved = gifticon.copyWith(id: id);
     _store.add(saved);
     _emit();

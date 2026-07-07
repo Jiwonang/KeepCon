@@ -115,8 +115,8 @@ abstract final class AppTheme {
 
       // 텍스트 — 볼드 타이틀 + 보조색 라벨.
       textTheme: TextTheme(
-        headlineSmall: TextStyle(
-            color: ink, fontSize: 22, fontWeight: FontWeight.w700),
+        headlineSmall:
+            TextStyle(color: ink, fontSize: 22, fontWeight: FontWeight.w700),
         titleLarge:
             TextStyle(color: ink, fontSize: 18, fontWeight: FontWeight.w700),
         titleMedium:
@@ -166,8 +166,9 @@ abstract final class AppTheme {
 
       // FAB(+) — darkSurface 강조(정본).
       floatingActionButtonTheme: FloatingActionButtonThemeData(
-        backgroundColor:
-            brightness == Brightness.light ? AppColorsLight.darkSurface : AppColorsDark.darkSurface,
+        backgroundColor: brightness == Brightness.light
+            ? AppColorsLight.darkSurface
+            : AppColorsDark.darkSurface,
         foregroundColor: AppColorsCommon.onDark,
         elevation: 2,
         shape: const CircleBorder(),
