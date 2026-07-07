@@ -1,17 +1,138 @@
-# keepcon
+# KeepCon 🎁
 
-A new Flutter project.
+흩어진 기프티콘을 한 곳에서 관리·보관하고, 그룹 공유로 가족·친구가 자유롭게 사용하도록 하는 Flutter 앱.
 
-## Getting Started
+여러 앱에 흩어진 기프티콘을 한 번에 관리하고, 공유 기능으로 가족·친구끼리 함께 쓰는 것이 목표입니다.
 
-This project is a starting point for a Flutter application.
+---
 
-A few resources to get you started if this is your first Flutter project:
+## ✨ 주요 기능
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+| 영역 | 기능 |
+|------|------|
+| **홈(메인)** | 내 기프티콘 목록, 만료 임박 알림 배너, 요약 통계(보유중·만료임박·총금액), 정렬·필터, 검색 |
+| **스캔·추가** | 카메라 스캔 · 갤러리 불러오기 · 직접 입력으로 기프티콘 등록 |
+| **공유** *(준비 중)* | 그룹 관리, 멤버 초대, 그룹 공유 기프티콘, 사용 이력 |
+| **로그인/설정** *(예정)* | 회원가입·로그인·비밀번호 찾기, 마이 페이지, 다크모드 등 설정 |
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+> 하단 내비게이션: **홈 / ＋(추가) / 공유**. 설정(다크모드 등)은 홈 우측 상단 톱니 아이콘 → 추후 '마이' 페이지로 확장.
+
+---
+
+## 🛠 기술 스택
+
+- **Flutter** (Dart, Material 3) — 크로스플랫폼
+- **Riverpod** (`flutter_riverpod`) — 상태 관리 (프로젝트 전역 표준)
+- **Firebase** (`firebase_auth`, `cloud_firestore`) — 백엔드 데이터 계층 *(스캐폴딩 완료, 설정 시 활성화)*
+- 기본 실행은 **in-memory mock** 저장소 — 백엔드 설정 없이 바로 실행/개발 가능
+
+---
+
+## 📁 프로젝트 구조
+
+```
+lib/
+├── main.dart                      # 앱 조립부(ProviderScope·테마·시드)
+├── firebase_options.dart          # flutterfire configure가 생성 (현재 placeholder)
+├── app/
+│   └── keepcon_shell.dart         # 하단 내비 셸 (홈 / + / 공유)
+├── shared/                        # ⭐ 공유 계약 (SSOT) — 모든 페이지가 참조
+│   ├── models/                    # User, Gifticon (+ enum: GifticonStatus/SortOption/FilterOption)
+│   ├── repositories/              # AuthRepository, GifticonRepository (abstract 인터페이스)
+│   │   └── impl/                  # in_memory_* (기본) · firebase/* (백엔드)
+│   ├── providers/                 # repositories(DI), theme_mode_provider
+│   ├── theme/                     # app_colors, app_theme (라이트/다크 ThemeData)
+│   ├── firebase/                  # firebase_bootstrap (초기화·override 전환)
+│   └── routes.dart                # named route 상수
+└── features/                      # 페이지별 담당 영역
+    ├── main/                      # 홈 (목록·정렬·필터·통계·카드)
+    ├── scan/                      # 스캔·추가
+    └── share/                     # 공유 (준비 중 자리표시)
+```
+
+---
+
+## 🚀 시작하기
+
+### 사전 준비
+- [Flutter SDK](https://docs.flutter.dev/get-started/install) 3.22 이상 (Dart 3.4+)
+- 확인: `flutter doctor`
+
+### 설치 & 실행
+```bash
+git clone https://github.com/Jiwonang/KeepCon.git
+cd KeepCon
+flutter pub get
+
+# 웹으로 실행 (web 플랫폼은 이미 설정됨)
+flutter run -d chrome
+
+# 모바일로 실행하려면 플랫폼 폴더 생성 후
+flutter create . --platforms=android,ios
+flutter run
+```
+
+> 별도 백엔드 설정 없이 in-memory mock 데이터(시드 기프티콘)로 즉시 실행됩니다.
+
+---
+
+## 🤝 협업 규약 (페이지별 담당 — 필독)
+
+4개 페이지(로그인/설정·메인·스캔·공유)를 **담당자별로 나눠 병렬 개발**합니다. 페이지 간 연동 버그(중복 구현·잘못된 함수명·값 불일치)를 막기 위해 아래를 반드시 지킵니다.
+
+- 공유 모델·인터페이스·enum·라우트·**테마**는 `lib/shared/`의 **단일 정의만** 사용합니다. 페이지 내부 재정의 금지.
+- Repository 메서드는 계약에 적힌 **이름·파라미터 그대로** 호출합니다(추측 호출 금지).
+- 상태/정렬/필터는 매직 스트링이 아니라 **계약의 enum**을 사용합니다.
+- 색상·폰트·모양은 하드코딩하지 말고 `Theme.of(context)` **테마 토큰**을 소비합니다.
+- 계약에 없는 것이 필요하면 임의로 만들지 말고 **공유 계약(`lib/shared`)에 먼저 추가**합니다.
+
+> 계약의 소비/생산 관계와 크로스페이지 주의점은 [`_workspace/01_contract_dependency_matrix.md`](_workspace/01_contract_dependency_matrix.md) 참조.
+
+### 브랜치 전략 (권장)
+- `main` — 항상 빌드/실행 가능한 안정 브랜치 (직접 push 지양)
+- `feat/<page>-<기능>` — 페이지별 작업 브랜치 (예: `feat/share-group-create`)
+- PR로 병합, 병합 전 `flutter analyze` 통과 확인
+
+---
+
+## 🎨 디자인 시스템
+
+- **기본 = 라이트(화이트) 모드**, 다크모드는 설정에서 토글 (`themeModeProvider`)
+- 색/타이포/모양은 `lib/shared/theme/`의 SSOT(`AppTheme.light` / `AppTheme.dark`)에 정의
+- 페이지는 테마 토큰만 소비 → 테마를 바꾸면 전 페이지에 즉시 반영
+- 디자인 토큰·레퍼런스: [`_workspace/design/behance_style_tokens.md`](_workspace/design/behance_style_tokens.md)
+
+---
+
+## 🔥 Firebase 연동 (백엔드 활성화)
+
+현재는 in-memory mock이 기본입니다. 실제 Firebase 백엔드로 전환하려면:
+
+1. [Firebase 콘솔](https://console.firebase.google.com)에서 프로젝트 생성
+2. FlutterFire 설정 — `lib/firebase_options.dart`가 실제 값으로 생성됩니다:
+   ```bash
+   dart pub global activate flutterfire_cli
+   flutterfire configure
+   ```
+3. 콘솔에서 **Authentication** · **Cloud Firestore** 활성화
+4. 앱 조립부(`lib/main.dart`)에서 `firebase_bootstrap`의 override를 `ProviderScope`에 주입
+
+> 인터페이스(`AuthRepository`/`GifticonRepository`)는 그대로 두고 구현만 교체하는 구조라, 페이지 코드 변경 없이 백엔드가 전환됩니다.
+
+---
+
+## 🧭 개발 하네스 (`.claude/`)
+
+이 저장소에는 **페이지별 개발 팀 하네스**가 포함되어 있습니다. Claude Code에서 KeepCon 개발을 요청하면 `keepcon-orchestrator`가 계약 설계자·페이지 담당·통합 QA 에이전트를 조율합니다.
+
+- 에이전트: `.claude/agents/` (계약 설계자 + 4페이지 담당 + 통합 QA)
+- 스킬: `.claude/skills/` (오케스트레이터, 계약 설계, 페이지 개발 규약, 통합 검증)
+- 트리거·규약: [`CLAUDE.md`](CLAUDE.md)
+
+---
+
+## 📚 참고 문서 (`_workspace/`)
+
+- `01_contract_dependency_matrix.md` — 공유 계약·페이지별 소비/생산·크로스페이지 주의점 (SSOT 기준 문서)
+- `design/behance_style_tokens.md` — 디자인 방향·토큰
+- `qa_report.md` — 통합 정합성 검증 리포트
