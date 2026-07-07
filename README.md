@@ -112,9 +112,7 @@ flutter run
 
 문서/CLAUDE.md는 "지침"일 뿐, 직접 push를 물리적으로 막지는 않습니다. `main`·`develop` 직접 push를 차단하고 **PR + CI 통과**를 강제하려면 아래 브랜치 보호를 설정합니다.
 
-> ⚠️ **플랜 제약:** 이 저장소는 **Private + Free 플랜**이라 Rulesets·Branch protection을 켤 수 없습니다(API/UI 모두 `Upgrade to GitHub Pro or make this repository public` 응답). 활성화하려면 **GitHub Pro(유료)** 로 업그레이드하거나 저장소를 **Public**으로 전환해야 합니다.
->
-> **현재 운영:** 하드 차단 없이 **규칙 문서 + CI(`Format · Analyze · Test`) + 커밋 전 `/code-review`**의 *소프트 강제*로 운영합니다. 아래 설정은 Pro 업그레이드 또는 Public 전환 후에 적용하세요.
+> ✅ **적용됨:** 저장소가 **Public**이라 `protect-main-develop` Ruleset이 **활성(active)** 상태로 적용돼 있습니다 — `main`·`develop` 직접 push·삭제·강제 push 차단 + PR 필수 + `Format · Analyze · Test` 통과 필수(승인 0건, 솔로 셀프 머지 허용). 아래는 재현·수정용 참고 설정입니다.
 
 **방법 A — GitHub UI (Rulesets)**
 1. 저장소 → **Settings → Rules → Rulesets → New ruleset → New branch ruleset**
@@ -152,13 +150,11 @@ gh api -X POST repos/Jiwonang/KeepCon/rulesets --input ruleset.json
 
 ### 코드 리뷰 정책
 
-자동 AI 리뷰 봇(CodeRabbit 같은 외부 앱·상시 접근, 또는 API 키가 필요한 GitHub Action)은 **두지 않습니다.** Private 저장소의 보안(외부 상시 접근·비밀 관리 최소화)과 비용을 고려한 선택입니다. 대신 3층으로 품질을 관리합니다:
+세 층으로 품질을 관리합니다 (층위가 서로 달라 **중첩 운영**):
 
 - **CI 게이트 (필수·자동):** 모든 PR에서 `Format · Analyze · Test`(dart format · flutter analyze · flutter test) 통과 — 안정성의 기반.
-- **AI 코드 리뷰 (온디맨드):** Claude Code로 작업할 때 **커밋 전 `/code-review`** 로 변경 diff를 리뷰하고 수정한 뒤 커밋합니다.
-- **보안 점검:** 릴리스 전 `/security-review`로 별도 점검.
-
-> 팀이 커지거나 비-AI 기여자가 늘면 자동 PR 리뷰 봇(예: CodeRabbit) 도입을 재검토합니다.
+- **자동 AI 리뷰 — CodeRabbit (자동):** PR이 열리거나 갱신되면 CodeRabbit이 협업 규칙 준수·버그를 자동 리뷰합니다. 공개 저장소라 **무료**. 리뷰 설정은 [`.coderabbit.yaml`](.coderabbit.yaml)에 한국어로 정의(별도 API 키·워크플로 불필요). **활성화(1회):** 소유자가 [github.com/marketplace/coderabbitai](https://github.com/marketplace/coderabbitai)에서 앱 설치 → `Jiwonang/KeepCon` 선택.
+- **커밋 전 AI 리뷰 — `/code-review` (온디맨드):** Claude Code로 작업할 때 **커밋 전** 변경 diff를 리뷰·수정한 뒤 커밋. 릴리스 전 `/security-review`로 보안 점검.
 
 ---
 
