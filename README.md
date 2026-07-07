@@ -148,6 +148,18 @@ gh api -X POST repos/Jiwonang/KeepCon/rulesets --input ruleset.json
 
 > 설정 후에는 `main`·`develop`에 직접 push가 거부되고, PR은 CI(`Format · Analyze · Test`)가 통과해야 병합할 수 있습니다. (필요 시 승인 수는 팀 규모에 맞게 조정)
 
+### PR 리뷰 봇 (Claude)
+
+`.github/workflows/claude-review.yml` — PR이 열리거나 갱신되면 Claude가 협업 규칙 준수(공유 계약·enum·테마 토큰 등)와 버그를 자동 리뷰합니다.
+
+활성화하려면 **`ANTHROPIC_API_KEY` 시크릿**을 한 번 등록하세요(소유자 권한):
+```bash
+gh secret set ANTHROPIC_API_KEY   # 실행 후 API 키 붙여넣기
+```
+또는 GitHub UI: **Settings → Secrets and variables → Actions → New repository secret** (`ANTHROPIC_API_KEY`).
+
+> 시크릿이 없으면 리뷰 단계를 건너뛰고 CI는 통과합니다(그린 유지). Claude Code 터미널에서 `/install-github-app`으로 설정하는 방법도 있습니다.
+
 ---
 
 ## 🎨 디자인 시스템
