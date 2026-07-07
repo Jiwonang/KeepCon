@@ -150,17 +150,16 @@ gh api -X POST repos/Jiwonang/KeepCon/rulesets --input ruleset.json
 
 > 설정 후에는 `main`·`develop`에 직접 push가 거부되고, PR은 CI(`Format · Analyze · Test`)가 통과해야 병합할 수 있습니다. (필요 시 승인 수는 팀 규모에 맞게 조정)
 
-### PR 리뷰 봇 (Claude)
+### PR 리뷰 봇 (CodeRabbit)
 
-`.github/workflows/claude-review.yml` — PR이 열리거나 갱신되면 Claude가 협업 규칙 준수(공유 계약·enum·테마 토큰 등)와 버그를 자동 리뷰합니다.
+PR이 열리거나 갱신되면 [CodeRabbit](https://coderabbit.ai)이 협업 규칙 준수(공유 계약·enum·테마 토큰 등)와 버그를 자동 리뷰합니다. 리뷰 설정은 [`.coderabbit.yaml`](.coderabbit.yaml)에 한국어로 정의돼 있습니다(별도 API 키·워크플로 파일 불필요).
 
-활성화하려면 **`ANTHROPIC_API_KEY` 시크릿**을 한 번 등록하세요(소유자 권한):
-```bash
-gh secret set ANTHROPIC_API_KEY   # 실행 후 API 키 붙여넣기
-```
-또는 GitHub UI: **Settings → Secrets and variables → Actions → New repository secret** (`ANTHROPIC_API_KEY`).
+**설정 (저장소 소유자, 1회):**
+1. [github.com/marketplace/coderabbitai](https://github.com/marketplace/coderabbitai) 또는 [coderabbit.ai](https://coderabbit.ai)에서 **GitHub로 로그인 → 앱 설치**
+2. 대상으로 **`Jiwonang/KeepCon`** 저장소 선택(권한 부여)
+3. 이후 PR마다 자동으로 요약 + 리뷰 코멘트가 달립니다. PR에서 `@coderabbitai`로 대화도 가능
 
-> 시크릿이 없으면 리뷰 단계를 건너뛰고 CI는 통과합니다(그린 유지). Claude Code 터미널에서 `/install-github-app`으로 설정하는 방법도 있습니다.
+**비용:** 공개 저장소는 무료. **Private은 Free 티어($0, PR 요약 등) + 14일 Pro Plus 체험**, 본격 라인 리뷰는 **Pro $24/PR 작성자·월(연간)**. 자세한 요금은 [coderabbit.ai/pricing](https://coderabbit.ai/pricing).
 
 ---
 
