@@ -88,10 +88,25 @@ flutter run
 
 > 계약의 소비/생산 관계와 크로스페이지 주의점은 [`_workspace/01_contract_dependency_matrix.md`](_workspace/01_contract_dependency_matrix.md) 참조.
 
-### 브랜치 전략 (권장)
-- `main` — 항상 빌드/실행 가능한 안정 브랜치 (직접 push 지양)
-- `feat/<page>-<기능>` — 페이지별 작업 브랜치 (예: `feat/share-group-create`)
-- PR로 병합, 병합 전 `flutter analyze` 통과 확인
+### 브랜치 전략
+
+- **기본 브랜치:** `develop` — 모든 작업 머지 대상
+- **통합 브랜치:** `main` — 배포 시점에 `develop → main` squash 병합
+- **작업 브랜치:** `{type}/{설명}` (예: `feat/be-me-clubs-and-application-scope`, `fix/calendar-month-nav-and-resize`)
+- **API 1개 / 페이지 1개 = 브랜치 1개 = PR 1개** 원칙
+- 모든 작업 브랜치는 `develop`에서 분기하고, `develop`으로 PR을 올립니다. `main`·`develop`에 직접 push하지 않습니다.
+
+### 커밋 / PR
+
+- **커밋 메시지: Conventional Commits (한국어)**
+  `feat(backend): …` · `fix(frontend): …` · `refactor(…): …` · `docs(spec): …` · `ci: …` · `perf(frontend): …`
+- **PR 본문 템플릿** — [`.github/PULL_REQUEST_TEMPLATE.md`](.github/PULL_REQUEST_TEMPLATE.md)가 PR 작성 시 자동 적용됩니다:
+  - 🚀 작업 내용
+  - 🤔 고민했던 내용
+  - 💬 리뷰 중점사항
+- 병합 전 `flutter analyze` 통과를 확인합니다.
+
+> AI(Claude Code)로 작업하는 팀원도 위 규칙을 따르도록, 동일 내용을 자동 로드되는 [`CLAUDE.md`](CLAUDE.md)에도 명시해 두었습니다.
 
 ---
 

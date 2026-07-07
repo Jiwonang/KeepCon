@@ -14,9 +14,17 @@
 - 상태/정렬/필터는 매직 스트링이 아니라 계약의 enum을 사용한다.
 - 계약에 없는 것이 필요하면 만들지 말고 `contract-architect`에게 요청한다.
 
+**협업 규칙(git 작업 시 반드시 준수):**
+- **브랜치:** 기본 브랜치 `develop`(모든 작업 머지 대상), 통합 브랜치 `main`(배포 시 `develop → main` squash). 작업 브랜치는 반드시 `develop`에서 분기하고 `{type}/{설명}` 형식(예: `feat/share-group-create`). **`main`·`develop`에 직접 커밋/푸시 금지.** PR은 `develop`을 대상으로 올린다.
+- **원칙:** API 1개 / 페이지 1개 = 브랜치 1개 = PR 1개.
+- **커밋 메시지:** Conventional Commits(한국어) — `feat(backend): …`, `fix(frontend): …`, `refactor(…): …`, `docs(spec): …`, `ci: …`, `perf(frontend): …`.
+- **PR 본문:** `.github/PULL_REQUEST_TEMPLATE.md` 형식(🚀 작업 내용 / 🤔 고민했던 내용 / 💬 리뷰 중점사항).
+- 병합 전 `flutter analyze` 통과 확인. 상세는 `README.md`의 "협업 규칙" 참조.
+
 **변경 이력:**
 | 날짜 | 변경 내용 | 대상 | 사유 |
 |------|----------|------|------|
 | 2026-07-06 | 초기 구성 (에이전트 6, 스킬 4) | 전체 | 페이지별 담당 분리 + 계약/통합 검증 하네스 구축 |
 | 2026-07-06 | 검증 실행 (scan→main 슬라이스, 서브에이전트 모드) | contract-architect·scan·main·integration-qa | 하네스 실동작 검증. 가드레일(모델 재정의·매직스트링 방지) 정상, QA가 provider 인스턴스 분기 결함 포착·수정 후 회귀 통과 |
 | 2026-07-06 | 공유 DI provider 규약 추가 | skills/contract-design, skills/flutter-page-dev | 검증에서 드러난 교훈 — 공유 Riverpod provider는 `lib/shared/providers/` 정본에 두어야 인스턴스 분기 버그 예방 |
+| 2026-07-07 | 협업 규칙(브랜치·커밋·PR) 추가 | CLAUDE.md, README.md, .github/PULL_REQUEST_TEMPLATE.md | AI 팀원이 자동 준수하도록 CLAUDE.md에 명시(README만으로는 자동 적용 안 됨). develop 기본 브랜치 전환 |
