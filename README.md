@@ -108,6 +108,46 @@ flutter run
 
 > AI(Claude Code)로 작업하는 팀원도 위 규칙을 따르도록, 동일 내용을 자동 로드되는 [`CLAUDE.md`](CLAUDE.md)에도 명시해 두었습니다.
 
+### 브랜치 보호 규칙 (저장소 소유자 설정)
+
+문서/CLAUDE.md는 "지침"일 뿐, 직접 push를 물리적으로 막지는 않습니다. `main`·`develop` 직접 push를 차단하고 **PR + CI 통과**를 강제하려면 저장소 소유자가 아래를 한 번 설정합니다.
+
+> 프라이빗 저장소는 **Rulesets**가 무료로 제공됩니다(권장). (classic Branch protection은 프라이빗의 경우 유료 플랜 필요.)
+
+**방법 A — GitHub UI (Rulesets)**
+1. 저장소 → **Settings → Rules → Rulesets → New ruleset → New branch ruleset**
+2. **Ruleset Name**: `protect-main-develop`, **Enforcement status**: `Active`
+3. **Target branches → Add target → Include by pattern**: `main`, `develop` 두 개 추가
+4. **Rules** 체크:
+   - ✅ Restrict deletions (브랜치 삭제 금지)
+   - ✅ Block force pushes (강제 push 금지)
+   - ✅ Require a pull request before merging (직접 push 금지 → PR 필수, 승인 1건 이상 권장)
+   - ✅ Require status checks to pass → 검색해서 **`Format · Analyze · Test`** 추가, "Require branches to be up to date" 체크
+5. **Create**
+
+**방법 B — `gh` CLI (프로그램적 설정)**
+
+아래 JSON을 `ruleset.json`으로 저장하고 소유자 계정으로 실행합니다:
+```json
+{
+  "name": "protect-main-develop",
+  "target": "branch",
+  "enforcement": "active",
+  "conditions": { "ref_name": { "include": ["refs/heads/main", "refs/heads/develop"], "exclude": [] } },
+  "rules": [
+    { "type": "deletion" },
+    { "type": "non_fast_forward" },
+    { "type": "pull_request", "parameters": { "required_approving_review_count": 1, "dismiss_stale_reviews_on_push": false, "require_code_owner_review": false, "require_last_push_approval": false, "required_review_thread_resolution": false } },
+    { "type": "required_status_checks", "parameters": { "strict_required_status_checks_policy": true, "required_status_checks": [ { "context": "Format · Analyze · Test" } ] } }
+  ]
+}
+```
+```bash
+gh api -X POST repos/Jiwonang/KeepCon/rulesets --input ruleset.json
+```
+
+> 설정 후에는 `main`·`develop`에 직접 push가 거부되고, PR은 CI(`Format · Analyze · Test`)가 통과해야 병합할 수 있습니다. (필요 시 승인 수는 팀 규모에 맞게 조정)
+
 ---
 
 ## 🎨 디자인 시스템
