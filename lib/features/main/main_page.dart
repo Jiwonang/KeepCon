@@ -25,7 +25,7 @@ import 'widgets/format.dart';
 import 'widgets/gifticon_card.dart';
 import 'widgets/gifticon_status_label.dart';
 import 'widgets/main_tokens.dart';
-import 'widgets/settings_sheet.dart';
+import '../mypage/mypage_page.dart';
 
 /// 메인(홈) 화면. [AppRoutes.main]에 등록해 사용한다.
 class MainPage extends ConsumerWidget {
@@ -135,11 +135,13 @@ class _GreetingHeader extends StatelessWidget {
           ),
         ),
         const SizedBox(width: 4),
-        // 설정 기어 — 임시 설정 시트(다크모드 토글) 진입점.
+        // 설정 기어 — 마이 페이지(프로필·다크모드·로그아웃) 진입점.
         IconButton(
-          onPressed: () => showSettingsSheet(context),
+          onPressed: () => Navigator.of(context).push(
+            MaterialPageRoute<void>(builder: (_) => const MyPage()),
+          ),
           icon: const Icon(Icons.settings_outlined),
-          tooltip: '설정',
+          tooltip: '마이',
         ),
       ],
     );
