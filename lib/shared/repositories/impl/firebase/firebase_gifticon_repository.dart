@@ -1,0 +1,152 @@
+/// KeepCon 공유 계약 — FirebaseGifticonRepository (cloud_firestore 구현체).
+///
+/// [GifticonRepository] 계약을 Cloud Firestore로 구현한다.
+/// **인터페이스는 그대로**이므로, provider override만으로 in-memory ↔ Firebase가 교체된다.
+///
+/// 정렬/필터는 계약대로 하지 않는다(소비자 책임) — 소유자별 원천 목록/스트림만 제공한다.
+///
+/// ## 문서 매핑 규약 (Firestore ↔ 계약 [Gifticon])
+/// - 컬렉션: `'gifticons'`, 문서 id = [Gifticon.id].
+/// - enum([GifticonStatus])은 `.name` 문자열로 저장하고 역매핑한다(매직 스트링 금지 —
+///   저장 문자열은 enum 이름에 고정).
+/// - [DateTime]([Gifticon.expiryDate], [Gifticon.registeredAt])은 Firestore [Timestamp]로
+///   저장하고 역매핑한다.
+///
+/// ⚠️ 기본 실행 경로에서 인스턴스화하지 마라 — `Firebase.initializeApp()` 선행 필요.
+/// 부트스트랩([firebase_bootstrap.dart]) 경유로만 활성화한다.
+library;
+
+import 'package:cloud_firestore/cloud_firestore.dart';
+
+import '../../../models/gifticon.dart';
+import '../../gifticon_repository.dart';
+
+/// [GifticonRepository]의 Cloud Firestore 구현.
+class FirebaseGifticonRepository implements GifticonRepository {
+  /// 주입받는 [FirebaseFirestore] 인스턴스. 미지정 시 [FirebaseFirestore.instance] 사용.
+  FirebaseGifticonRepository({FirebaseFirestore? firestore})
+      : _db = firestore ?? FirebaseFirestore.instance;
+
+  final FirebaseFirestore _db;
+
+  /// 기프티콘 컬렉션 이름(SSOT).
+  static const String collectionName = 'gifticons';
+
+  CollectionReference<Map<String, dynamic>> get _col =>
+      _db.collection(collectionName);
+
+  @override
+  Future<Gifticon> addGifticon(Gifticon gifticon) async {
+    // id가 비어 있으면 Firestore가 문서 id를 발급하도록 하고, 그 id를 [Gifticon]에 반영한다.
+    final DocumentReference<Map<String, dynamic>> ref =
+        gifticon.id.isEmpty ? _col.doc() : _col.doc(gifticon.id);
+    final Gifticon saved = gifticon.copyWith(id: ref.id);
+    await ref.set(_toDoc(saved));
+    return saved;
+  }
+
+  @override
+  Stream<List<Gifticon>> watchGifticons(String ownerId) {
+    return _col
+        .where('ownerId', isEqualTo: ownerId)
+        .snapshots()
+        .map((QuerySnapshot<Map<String, dynamic>> snap) =>
+            snap.docs.map(_fromDoc).toList(growable: false));
+  }
+
+  @override
+  Future<List<Gifticon>> getGifticons(String ownerId) async {
+    final QuerySnapshot<Map<String, dynamic>> snap =
+        await _col.where('ownerId', isEqualTo: ownerId).get();
+    return snap.docs.map(_fromDoc).toList(growable: false);
+  }
+
+  @override
+  Future<Gifticon?> getGifticonById(String id) async {
+    final DocumentSnapshot<Map<String, dynamic>> doc = await _col.doc(id).get();
+    if (!doc.exists) return null;
+    return _fromDoc(doc);
+  }
+
+  @override
+  Future<Gifticon> updateStatus(String id, GifticonStatus status) async {
+    final DocumentReference<Map<String, dynamic>> ref = _col.doc(id);
+
+    // 상태 전이 검증은 트랜잭션 내부에서 현재 값을 읽어 계약 규칙으로 판정한다.
+    // 위반 시 [StateError]를 던지는 것이 계약([GifticonRepository.updateStatus]).
+    return _db.runTransaction<Gifticon>((Transaction tx) async {
+      final DocumentSnapshot<Map<String, dynamic>> doc = await tx.get(ref);
+      if (!doc.exists) {
+        throw StateError('Gifticon not found: $id');
+      }
+      final Gifticon current = _fromDoc(doc);
+      if (!GifticonStatusTransition.isAllowed(current.status, status)) {
+        throw StateError(
+          'Illegal status transition: ${current.status} -> $status',
+        );
+      }
+      tx.update(ref, <String, dynamic>{'status': status.name});
+      return current.copyWith(status: status);
+    });
+  }
+
+  // --- 매핑 헬퍼 ---------------------------------------------------------
+
+  /// 계약 [Gifticon] → Firestore 문서 맵.
+  ///
+  /// enum은 `.name`, [DateTime]은 [Timestamp]로 저장한다.
+  Map<String, dynamic> _toDoc(Gifticon g) => <String, dynamic>{
+        'ownerId': g.ownerId,
+        'brand': g.brand,
+        'productName': g.productName,
+        'price': g.price,
+        'barcode': g.barcode,
+        'category': g.category,
+        'expiryDate': Timestamp.fromDate(g.expiryDate),
+        'registeredAt': Timestamp.fromDate(g.registeredAt),
+        'status': g.status.name,
+        'imagePath': g.imagePath,
+      };
+
+  /// Firestore 문서 → 계약 [Gifticon].
+  ///
+  /// 문서 id를 [Gifticon.id]로, `status` 문자열을 [GifticonStatus]로 역매핑한다.
+  Gifticon _fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
+    final Map<String, dynamic> data = doc.data() ?? const <String, dynamic>{};
+    return Gifticon(
+      id: doc.id,
+      ownerId: data['ownerId'] as String? ?? '',
+      brand: data['brand'] as String? ?? '',
+      productName: data['productName'] as String? ?? '',
+      // price는 required 계약. Firestore num(int/double) 또는 문자열 방어적 파싱.
+      // 손상/누락 시 0(무료·미상)으로 폴백해 역매핑이 깨지지 않게 한다.
+      price: (data['price'] as num?)?.toInt() ??
+          int.tryParse('${data['price'] ?? ''}') ??
+          0,
+      barcode: data['barcode'] as String?,
+      category: data['category'] as String? ?? '',
+      expiryDate: _toDate(data['expiryDate']),
+      registeredAt: _toDate(data['registeredAt']),
+      status: _statusFromName(data['status'] as String?),
+      imagePath: data['imagePath'] as String?,
+    );
+  }
+
+  /// Firestore [Timestamp]/기타 값을 [DateTime]으로 역매핑한다.
+  DateTime _toDate(Object? value) {
+    if (value is Timestamp) return value.toDate();
+    if (value is DateTime) return value;
+    // 손상/누락 데이터에 대한 방어적 기본값(epoch). 정상 경로에서는 도달하지 않는다.
+    return DateTime.fromMillisecondsSinceEpoch(0);
+  }
+
+  /// 저장된 `status` 문자열을 [GifticonStatus]로 역매핑한다.
+  ///
+  /// 알 수 없는 값은 [GifticonStatus.available]로 폴백한다(방어적).
+  GifticonStatus _statusFromName(String? name) {
+    for (final GifticonStatus s in GifticonStatus.values) {
+      if (s.name == name) return s;
+    }
+    return GifticonStatus.available;
+  }
+}

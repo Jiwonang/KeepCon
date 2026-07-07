@@ -1,0 +1,191 @@
+# KeepCon 공유 계약 의존성 매트릭스 (v1)
+
+> 단일 진실 원천(SSOT). 페이지 개발자와 QA는 이 문서를 경계면 검증의 기준으로 삼는다.
+> 이번 검증 슬라이스 범위: **scan(생산) → main(소비)**. auth는 인터페이스+mock으로 대체.
+> 계약 위치: `lib/shared/`. 이 문서와 소스가 어긋나면 소스가 아니라 **양쪽을 함께** 갱신한다.
+
+작성일: 2026-07-06 · 최종 갱신: 2026-07-07 · 계약 버전: v1.3
+
+---
+
+## 계약 요약
+
+| 계약 | 종류 | 위치 | v |
+|------|------|------|---|
+| `User` | model | `lib/shared/models/user.dart` | 1 |
+| `Gifticon` | model | `lib/shared/models/gifticon.dart` | 1 |
+| `GifticonStatus` (available/used/expired) | enum | `lib/shared/models/gifticon.dart` | 1 |
+| `SortOption` (expiryAsc/registeredDesc/brandAsc) | enum | `lib/shared/models/gifticon.dart` | 1 |
+| `FilterOption` (status/category) | enum | `lib/shared/models/gifticon.dart` | 1 |
+| `GifticonStatusTransition.isAllowed(from, to)` | 전이 규칙 | `lib/shared/models/gifticon.dart` | 1 |
+| `AuthRepository` | interface | `lib/shared/repositories/auth_repository.dart` | 1 |
+| `AuthRepository.currentUser` → `User?` (getter) | method | 〃 | 1 |
+| `AuthRepository.watchCurrentUser()` → `Stream<User?>` | method | 〃 | 1 |
+| `GifticonRepository` | interface | `lib/shared/repositories/gifticon_repository.dart` | 1 |
+| `GifticonRepository.addGifticon(Gifticon)` → `Future<Gifticon>` | method | 〃 | 1 |
+| `GifticonRepository.watchGifticons(String ownerId)` → `Stream<List<Gifticon>>` | method | 〃 | 1 |
+| `GifticonRepository.getGifticons(String ownerId)` → `Future<List<Gifticon>>` | method | 〃 | 1 |
+| `GifticonRepository.getGifticonById(String id)` → `Future<Gifticon?>` | method | 〃 | 1 |
+| `GifticonRepository.updateStatus(String id, GifticonStatus status)` → `Future<Gifticon>` | method | 〃 | 1 |
+| `InMemoryAuthRepository` | mock impl | `lib/shared/repositories/impl/in_memory_auth_repository.dart` | 1 |
+| `InMemoryGifticonRepository` | mock impl | `lib/shared/repositories/impl/in_memory_gifticon_repository.dart` | 1 |
+| `authRepositoryProvider` (`Provider<AuthRepository>`) — **SSOT** | provider | `lib/shared/providers/repositories.dart` | 1 |
+| `gifticonRepositoryProvider` (`Provider<GifticonRepository>`) — **SSOT** | provider | `lib/shared/providers/repositories.dart` | 1 |
+| `FirebaseAuthRepository` (`AuthRepository` 구현) | firebase impl | `lib/shared/repositories/impl/firebase/firebase_auth_repository.dart` | 1 |
+| `FirebaseGifticonRepository` (`GifticonRepository` 구현) | firebase impl | `lib/shared/repositories/impl/firebase/firebase_gifticon_repository.dart` | 1 |
+| `initFirebaseAndBuildOverrides()` → `Future<List<Override>>`, `firebaseProviderOverrides()` → `List<Override>` | bootstrap | `lib/shared/firebase/firebase_bootstrap.dart` | 1 |
+| `DefaultFirebaseOptions.currentPlatform` (플레이스홀더 스텁) | firebase config | `lib/firebase_options.dart` | 1 |
+| `AppRoutes.main` = `'/main'`, `AppRoutes.scan` = `'/scan'`, `AppRoutes.share` = `'/share'` | route | `lib/shared/routes.dart` | 1 |
+| **공유 디자인 테마 = SSOT** (`AppColorsLight`/`AppColorsDark`/`AppColorsCommon`) | design tokens | `lib/shared/theme/app_colors.dart` | 1.3 |
+| `AppTheme.light` / `AppTheme.dark` → `ThemeData` (Material3) | theme factory | `lib/shared/theme/app_theme.dart` | 1.3 |
+| `themeModeProvider` (`NotifierProvider<ThemeModeController, ThemeMode>`, 기본 `ThemeMode.light`) — **SSOT** | provider | `lib/shared/providers/theme_mode_provider.dart` | 1.3 |
+| `ThemeModeController.set(ThemeMode)` / `.setDark(bool)` / `.toggle()` | method | 〃 | 1.3 |
+| `Gifticon.price` (`int`, KRW, **required·non-nullable**) | model field | `lib/shared/models/gifticon.dart` | 1.3 |
+
+### `Gifticon` 필드 계약
+
+| 필드 | 타입 | nullable | 생산자(scan) 책임 | 소비자(main) 용도 |
+|------|------|:---:|------|------|
+| `id` | `String` | no | 생성 or Repo 발급 | 식별 |
+| `ownerId` | `String` | no | 현재 로그인 `User.id`로 채움 | 소유자별 조회 키 |
+| `brand` | `String` | no | 반드시 채움(미상 시 입력 강제) | 브랜드명순 정렬·표시 |
+| `productName` | `String` | no | 반드시 채움 | 표시 |
+| `price` | `int` | **no** | 반드시 채움(미상 시 입력 강제, 무료/사은품=0) | 카드 가격 표시 + 홈 총금액 통계 합산 |
+| `barcode` | `String?` | **yes** | 인식/입력 실패 시 null 허용 | (미사용) |
+| `category` | `String` | no | 반드시 채움(미분류 시 "기타") | 카테고리 필터 |
+| `expiryDate` | `DateTime` | no | 반드시 채움(인식 실패 시 입력 강제) | 만료임박순 정렬·만료 판정 |
+| `registeredAt` | `DateTime` | no | 생성 시 채움 or Repo 발급 | 최신 등록순 정렬 |
+| `status` | `GifticonStatus` | no | 항상 `available`로 시작 | 상태 필터 |
+| `imagePath` | `String?` | **yes** | 수동 입력은 이미지 없이 가능 → null 허용 | 썸네일(있으면) |
+
+---
+
+## 페이지별 소비/생산
+
+| 페이지 | 소비 (읽음) | 생산 (씀) |
+|--------|------|------|
+| **auth** (mock) | `User` | `AuthRepository.currentUser`, `watchCurrentUser()` (→ `InMemoryAuthRepository` 제공) |
+| **scan** (생산자) | `authRepositoryProvider`→`AuthRepository.currentUser` (소유자 식별), `gifticonRepositoryProvider`, `Gifticon`, `GifticonStatus.available`, `AppRoutes.scan` | `GifticonRepository.addGifticon(Gifticon)` |
+| **main** (소비자) | `gifticonRepositoryProvider`→`watchGifticons(ownerId)`, `Gifticon`(+`price`), `SortOption`, `FilterOption`, `GifticonStatus`, `AppRoutes.main`, `Theme.of(context)`(AppTheme) | 총금액 통계 = `price` 합산, (상태 변경 시) `GifticonRepository.updateStatus(id, status)` |
+| **auth/설정('마이')** | `themeModeProvider`(watch) | `ThemeModeController.setDark(bool)`/`.set(mode)` (다크 토글) |
+| **앱 조립부(main.dart)** | `themeModeProvider`(watch), `AppTheme.light`/`AppTheme.dark` | `MaterialApp.theme`/`darkTheme`/`themeMode` 배선 |
+
+---
+
+## 크로스페이지 주의점 (경계면 버그 방어선)
+
+1. **scan이 반드시 채워야 하는 `Gifticon` 필수 필드**
+   `id`(또는 Repo 발급 위임), `ownerId`, `brand`, `productName`, `category`, `expiryDate`, `registeredAt`, `status`.
+   - 이 중 하나라도 비면 main의 정렬/필터가 깨진다. `barcode`·`imagePath`만 null 허용.
+   - `category` 미분류 시 **빈 문자열 금지** — "기타" 같은 기본값을 넣는다(카테고리 필터가 빈 값을 항목으로 오인하지 않게).
+
+2. **소유자 일관성**
+   scan은 `authRepository.currentUser!.id`를 `ownerId`에 넣고, main은 같은 `ownerId`로 `watchGifticons`를 구독해야 목록이 이어진다. mock의 `InMemoryAuthRepository.defaultUser.id == 'user-1'`이 양쪽 공유 기준값.
+
+3. **정렬/필터는 소비자(main)가 수행**
+   Repository는 정렬/필터하지 않은 원천 목록만 준다. main은 `SortOption`/`FilterOption` enum에 따라 자기 상태 계층에서 적용한다. scan/Repo에 정렬 파라미터를 요구하지 말 것(계약에 없음).
+
+4. **허용 상태 전이 (SSOT)** — `GifticonStatusTransition.isAllowed`로만 검증
+   - `available → used` (사용 완료 / 공유 사용 동기화)
+   - `available → expired` (만료 경과)
+   - 그 외(되돌리기, `used↔expired`)는 **불허**. `InMemoryGifticonRepository.updateStatus`는 위반 시 `StateError`를 던진다. main이 사용완료 처리 시 이 규칙을 어기면 예외 발생 → QA 체크 포인트.
+
+5. **매직 스트링 금지**
+   route는 `AppRoutes.main`/`AppRoutes.scan` 상수만 사용. 상태/정렬/필터는 문자열이 아니라 enum으로만 비교.
+
+6. **모델/함수 중복 정의 금지**
+   페이지 내부에 `Gifticon`/`User`/status enum을 재정의하지 말 것. 반드시 `lib/shared/`의 단일 정의를 import.
+
+8. **공유 테마 = SSOT (`lib/shared/theme`)**
+   - 색·라운드·타이포·인풋·칩·내비 톤은 `AppTheme.light`/`AppTheme.dark`에 담겨 있다.
+     페이지는 **색을 하드코딩하지 말고** `Theme.of(context)`(colorScheme/textTheme/컴포넌트 테마)를 소비한다.
+     원색 토큰이 직접 필요할 때만 `AppColorsLight`/`AppColorsDark`/`AppColorsCommon` 참조.
+   - 페이지 내부에 별도 `ThemeData`/색 상수를 재정의하지 말 것(테마 교체 시 갈라짐).
+   - **기본 = 라이트(`ThemeMode.light`)**, 다크는 설정('마이')에서 `themeModeProvider`로 토글.
+
+9. **`themeModeProvider` = SSOT (`lib/shared/providers/theme_mode_provider.dart`)**
+   - `ThemeMode`는 오직 이 provider가 소유한다. 설정 페이지·앱 조립부만 소비.
+   - 앱 조립부: `ref.watch(themeModeProvider)` → `MaterialApp.themeMode`.
+   - 설정 토글: `ref.read(themeModeProvider.notifier).setDark(bool)` / `.set(ThemeMode)`.
+   - 영구 저장은 후속(현재 in-memory, 재시작 시 라이트로 리셋). `shared_preferences`는 TODO.
+
+10. **`Gifticon.price` = required·non-nullable (`int`, KRW)**
+   - scan은 세 경로(카메라/갤러리/수동) 모두에서 반드시 채운다(미상 시 입력 강제, 무료/사은품=0).
+   - main 총금액 통계 = 원천 목록의 `price` 합산(소비자 계산). 카드 가격 표시도 이 필드.
+   - `price` 누락/빈 값 금지. required이므로 생성 시 반드시 인자 전달(생략 시 컴파일 에러).
+
+7. **Repository provider = SSOT (경계면 결함 원인 #1)**
+   - `authRepositoryProvider`·`gifticonRepositoryProvider`는 **오직**
+     `lib/shared/providers/repositories.dart`에만 존재한다. 페이지(`lib/features/*`)는
+     이 provider를 **재선언하지 말고 import 해서 소비**한다.
+   - 페이지마다 provider를 중복 선언하면 페이지별로 **다른 Repository 인스턴스**를 참조하게 되어
+     scan이 추가한 기프티콘이 main에 반영되지 않는다(통합 QA 실검출 결함). provider는 모델·인터페이스와
+     동급의 공유 관심사이므로 계약 레벨에서 하나로 둔다.
+   - **override 조립 규칙(main.dart):** `ProviderScope(overrides: [...])`에서
+     ① `authRepositoryProvider`를 auth 페이지 제공 실구현으로 override 하고,
+     ② `gifticonRepositoryProvider`는 **scan·main·share가 같은 단일 인스턴스를 공유**하도록
+     조립부에서 하나의 인스턴스를 만들어 `overrideWithValue(...)`로 주입한다. 인스턴스가 갈라지면
+     동일 결함이 재발한다. (기본값도 SSOT라 단일 인스턴스지만, 실구현 교체 시 인스턴스 분기를 막기 위해
+     조립부에서 명시적으로 하나만 생성한다.)
+   - import 심볼: `package:keepcon/shared/providers/repositories.dart`의
+     `authRepositoryProvider`, `gifticonRepositoryProvider` (또는 상대경로
+     `../../../shared/providers/repositories.dart`).
+
+---
+
+## 데이터 소스 = 인터페이스 뒤에서 교체 가능 (in-memory ↔ Firebase)
+
+**핵심:** 페이지들은 `AuthRepository`/`GifticonRepository` **abstract 인터페이스에만** 의존한다.
+따라서 백엔드(데이터 소스)는 인터페이스 뒤에서 교체 가능하다 — 페이지 코드는 한 줄도 바뀌지 않는다.
+이것이 계약(SSOT)의 가치다.
+
+| 데이터 소스 | 구현체 | 위치 | 활성화 방법 |
+|------|------|------|------|
+| **in-memory (기본)** | `InMemoryAuthRepository`, `InMemoryGifticonRepository` | `lib/shared/repositories/impl/` | 기본값. override 불필요. 데모/개발/테스트용 |
+| **Firebase (선택)** | `FirebaseAuthRepository`(firebase_auth), `FirebaseGifticonRepository`(cloud_firestore) | `lib/shared/repositories/impl/firebase/` | 부트스트랩으로 provider override |
+
+- **기본 실행은 in-memory 유지.** Firebase는 강제로 초기화되지 않는다 —
+  `firebase_bootstrap.dart`의 전환 함수를 **명시적으로 호출**해야만 켜진다.
+  사용자가 `flutterfire configure`를 아직 안 했어도 앱은 정상 실행되고 컴파일도 안 깨진다.
+- `abstract class AuthRepository`/`GifticonRepository`는 **절대 변경하지 않았다.**
+  Firebase 구현은 **새 구현체 추가**일 뿐, 계약 시그니처는 그대로다(breaking change 없음).
+
+### Firebase 문서 매핑 규약 (`FirebaseGifticonRepository`)
+- 컬렉션 `'gifticons'`, 문서 id = `Gifticon.id`.
+- `GifticonStatus` enum은 `.name` **문자열**로 저장·역매핑(매직 스트링 방지 — enum 이름에 고정).
+- `DateTime`(`expiryDate`/`registeredAt`)은 Firestore `Timestamp`로 저장·역매핑.
+- `watchGifticons(ownerId)` = `where('ownerId', isEqualTo: ownerId).snapshots()` (정렬/필터 없음 — 소비자 책임).
+- `updateStatus`는 트랜잭션 안에서 현재 상태를 읽어 `GifticonStatusTransition.isAllowed`로 검증,
+  위반 시 `StateError`(계약 준수). in-memory 구현과 동일한 전이 규칙.
+- `FirebaseAuthRepository`: `currentUser`=`FirebaseAuth.instance.currentUser` 매핑,
+  `watchCurrentUser()`=`authStateChanges()` 매핑. `User.displayName` **빈 문자열 금지** 규칙 준수
+  (firebase displayName 없으면 이메일 로컬파트 → uid 앞부분 순으로 채움).
+
+### 사용자가 Firebase를 켜는 절차
+1. **Firebase 콘솔에서 프로젝트 생성** — https://console.firebase.google.com
+2. **FlutterFire CLI 구성** —
+   `dart pub global activate flutterfire_cli` 실행 후, 프로젝트 루트에서 `flutterfire configure`.
+   → `lib/firebase_options.dart`가 실제 값으로 **자동 생성·덮어쓰기**된다
+   (현재는 `UnimplementedError`를 던지는 플레이스홀더 스텁이며, 손으로 채우지 않는다).
+3. **Auth/Firestore 활성화** — 콘솔에서 Authentication과 Cloud Firestore를 켠다.
+4. **부트스트랩으로 provider override 활성화** — 앱 조립부(`main.dart`)에서
+   `await initFirebaseAndBuildOverrides()`가 반환한 override를 `ProviderScope(overrides: ...)`에 주입.
+   (in-memory로 되돌리려면 override를 비우면 된다.)
+
+> 참고: `lib/main.dart`는 이 스캐폴딩에서 수정하지 않았다. 앱 조립부(하단 탭 셸 배선 포함)는
+> 오케스트레이터가 담당하며, 그 배선에서 `firebase_bootstrap.dart`를 호출해 전환한다.
+
+---
+
+## 변경 이력
+
+| 버전 | 날짜 | 변경 | 영향 페이지 |
+|------|------|------|------|
+| v1 | 2026-07-06 | scan→main 슬라이스 초기 계약 확정 | scan, main (auth mock) |
+| v1.1 | 2026-07-06 | **경계면 결함 수정**: Repository provider를 계약 SSOT로 신설(`lib/shared/providers/repositories.dart`). scan/main이 각각 `authRepositoryProvider`/`gifticonRepositoryProvider`를 중복 선언해 서로 다른 InMemory 인스턴스를 참조 → scan 추가분이 main에 미반영되던 결함의 근본 원인 제거. 페이지는 공유 provider를 import 하고 자기 중복 선언을 삭제해야 함(scan/main 개발자 후속 처리). 크로스페이지 주의점 #7(override 조립 규칙) 추가. | scan, main, share(향후) |
+| v1.2 | 2026-07-06 | **Firebase 데이터 계층 스캐폴딩 (non-breaking)**: `pubspec.yaml`에 firebase_core/firebase_auth/cloud_firestore 추가. `AuthRepository`/`GifticonRepository` 인터페이스는 **무수정** — Firebase 구현체(`FirebaseAuthRepository`, `FirebaseGifticonRepository`)를 `impl/firebase/`에 신규 추가하고, 전환 부트스트랩(`firebase_bootstrap.dart`)과 플레이스홀더 `firebase_options.dart` 스텁을 제공. 기본 실행은 in-memory 유지(Firebase 강제 초기화 없음). `AppRoutes.share` 추가(하단 탭 셸 공유 탭). "데이터 소스 = 인터페이스 뒤 교체 가능" 절 신설. 페이지 코드 변경 불필요(계약 시그니처 불변). | (없음 — non-breaking. share 라우트만 하단 탭 셸/share 페이지가 소비) |
+| v1.3 | 2026-07-07 | **공유 디자인 시스템(SSOT) + 가격 필드 확정.** (1) 라이트(기본·화이트)/다크 색 토큰을 `lib/shared/theme/app_colors.dart`에, `AppTheme.light`/`AppTheme.dark`(Material3)를 `lib/shared/theme/app_theme.dart`에 신설 — 페이지가 `Theme.of(context)`만 소비해도 KeepCon 틀 디자인이 나오게 함. (2) `themeModeProvider`(NotifierProvider, 기본 `ThemeMode.light`)를 `lib/shared/providers/theme_mode_provider.dart`에 신설(설정 토글·앱 조립부 소비). (3) **`Gifticon.price`(`int`, KRW, required·non-nullable) 추가** — 생성자/copyWith/==/hashCode/toString 반영. Repository 인터페이스(`AuthRepository`/`GifticonRepository`)는 **무수정**. **⚠️ Breaking(모델 생성부):** `price` required로 인해 계약 외부의 `Gifticon(...)` 생성 지점(`lib/main.dart` 시드 5건, `lib/features/scan/state/gifticon_form_state.dart:194` draft)이 컴파일 에러 → 각 담당(assembly, scan-page-dev)이 `price` 인자를 채워야 함(의도된 것). 계약 소유 파일(`firebase_gifticon_repository.dart` 매핑)은 contract-architect가 함께 갱신 완료. | main(price 통계·표시, 테마), auth/설정(테마 토글), scan(price 입력), 앱 조립부(테마 배선). scan/main/앱조립부 = **생성부 갱신 필요** |
+
+## 후속 확장 예정(이번 슬라이스 범위 밖)
+
+`Group`, `GroupMember`, `SharedGifticon`, `UsageLog`, `ShareStatus`, `NotificationType`, `GroupRepository`, `ShareRepository`, `NotificationService`, auth/share 라우트 — 공유 페이지 검증 슬라이스에서 확정한다.
