@@ -19,6 +19,7 @@
 - **원칙:** API 1개 / 페이지 1개 = 브랜치 1개 = PR 1개.
 - **커밋 메시지:** Conventional Commits(한국어) — `feat(backend): …`, `fix(frontend): …`, `refactor(…): …`, `docs(spec): …`, `ci: …`, `perf(frontend): …`.
 - **PR 본문:** `.github/PULL_REQUEST_TEMPLATE.md` 형식(🚀 작업 내용 / 🤔 고민했던 내용 / 💬 리뷰 중점사항).
+- **코드 리뷰:** 자동 리뷰 봇은 두지 않는다(보안·비용). Claude Code로 작업 시 **코드 변경을 커밋하기 전에 `/code-review`로 변경 diff를 자체 리뷰하고 수정한 뒤 커밋**한다. CI(`Format·Analyze·Test`)가 안정성 게이트, 릴리스 전 `/security-review`.
 - 병합 전 `flutter analyze` 통과 확인. 상세는 `README.md`의 "협업 규칙" 참조.
 
 **변경 이력:**
@@ -28,3 +29,4 @@
 | 2026-07-06 | 검증 실행 (scan→main 슬라이스, 서브에이전트 모드) | contract-architect·scan·main·integration-qa | 하네스 실동작 검증. 가드레일(모델 재정의·매직스트링 방지) 정상, QA가 provider 인스턴스 분기 결함 포착·수정 후 회귀 통과 |
 | 2026-07-06 | 공유 DI provider 규약 추가 | skills/contract-design, skills/flutter-page-dev | 검증에서 드러난 교훈 — 공유 Riverpod provider는 `lib/shared/providers/` 정본에 두어야 인스턴스 분기 버그 예방 |
 | 2026-07-07 | 협업 규칙(브랜치·커밋·PR) 추가 | CLAUDE.md, README.md, .github/PULL_REQUEST_TEMPLATE.md | AI 팀원이 자동 준수하도록 CLAUDE.md에 명시(README만으로는 자동 적용 안 됨). develop 기본 브랜치 전환 |
+| 2026-07-07 | 리뷰 정책 확정: 자동 봇 제거, 커밋 전 `/code-review` | CLAUDE.md, README.md, .github/workflows/claude-review.yml(삭제) | 자동 AI 봇은 외부 상시 접근·비밀·비용 부담 → Private 보안 위해 CI + 커밋 전 세션 내 `/code-review`로 전환 |
