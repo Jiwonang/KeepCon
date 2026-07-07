@@ -10,6 +10,7 @@ library;
 
 import 'package:flutter/material.dart';
 
+import '../../app/keepcon_shell.dart';
 import 'reset_password_page.dart';
 import 'signup_page.dart';
 
@@ -74,10 +75,14 @@ class LoginPage extends StatelessWidget {
                 ElevatedButton(
                   onPressed: () {
                     // TODO(auth): AuthRepository.signIn(email, password) 연동 →
-                    //   성공 시 세션 시작(currentUser 노출)하고 홈으로 이동.
-                    if (Navigator.of(context).canPop()) {
-                      Navigator.of(context).pop();
-                    }
+                    //   성공 시 세션 시작(currentUser 노출).
+                    // 로그인 성공 → 메인(홈)으로 이동하고 인증 스택 제거.
+                    Navigator.of(context).pushAndRemoveUntil(
+                      MaterialPageRoute<void>(
+                        builder: (_) => const KeepConShell(),
+                      ),
+                      (route) => false,
+                    );
                   },
                   child: const Text('로그인'),
                 ),
