@@ -36,7 +36,8 @@ class _SheetScaffold extends StatelessWidget {
               width: 40,
               height: 4,
               decoration: BoxDecoration(
-                color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.4),
+                color:
+                    theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.4),
                 borderRadius: BorderRadius.circular(999),
               ),
             ),
@@ -70,7 +71,14 @@ class _CreateGroupSheet extends StatefulWidget {
 
 class _CreateGroupSheetState extends State<_CreateGroupSheet> {
   static const List<String> _emojis = <String>[
-    '🏠', '👥', '💼', '🎓', '🎁', '⚽', '🍻', '✈️',
+    '🏠',
+    '👥',
+    '💼',
+    '🎓',
+    '🎁',
+    '⚽',
+    '🍻',
+    '✈️',
   ];
   final TextEditingController _nameCtrl = TextEditingController();
   String _emoji = _emojis.first;
@@ -256,7 +264,8 @@ class _ShareGifticonSheet extends StatelessWidget {
                       return Card(
                         child: ListTile(
                           leading: const EmojiAvatar(emoji: '🎁', size: 40),
-                          title: Text(g.product, style: theme.textTheme.titleMedium),
+                          title: Text(g.product,
+                              style: theme.textTheme.titleMedium),
                           subtitle: Text('${g.brand} · ${g.expiryLabel}',
                               style: theme.textTheme.bodySmall),
                           trailing: const Icon(Icons.add_circle_outline),

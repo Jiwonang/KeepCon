@@ -46,11 +46,9 @@ class _MemberInvitePageState extends State<MemberInvitePage> {
             const SizedBox(height: 4),
             Text('아래 링크나 코드를 공유하세요.', style: theme.textTheme.bodySmall),
             const SizedBox(height: 20),
-
             _CopyField(label: '초대 링크', value: g.inviteUrl, onCopy: _copy),
             const SizedBox(height: 12),
             _CopyField(label: '초대코드', value: g.inviteCode, onCopy: _copy),
-
             const SizedBox(height: 24),
             Text('초대코드 만료', style: theme.textTheme.titleMedium),
             const SizedBox(height: 10),
@@ -65,7 +63,6 @@ class _MemberInvitePageState extends State<MemberInvitePage> {
                   ),
               ],
             ),
-
             const SizedBox(height: 12),
             Card(
               child: SwitchListTile(
@@ -76,7 +73,6 @@ class _MemberInvitePageState extends State<MemberInvitePage> {
                     style: theme.textTheme.bodySmall),
               ),
             ),
-
             const SizedBox(height: 24),
             ElevatedButton.icon(
               onPressed: () => _copy(g.inviteUrl, '초대 링크'),

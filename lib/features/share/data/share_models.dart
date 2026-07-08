@@ -127,8 +127,8 @@ class Group {
   String get inviteUrl => 'https://keepcon.app/invite/$inviteCode';
 
   /// 방장 멤버.
-  GroupMember get owner =>
-      members.firstWhere((GroupMember m) => m.isOwner, orElse: () => members.first);
+  GroupMember get owner => members.firstWhere((GroupMember m) => m.isOwner,
+      orElse: () => members.first);
 
   /// 멤버 수.
   int get memberCount => members.length;

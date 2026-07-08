@@ -50,7 +50,8 @@ class SharedGifticonCard extends StatelessWidget {
                     color: scheme.surfaceContainerHighest,
                     borderRadius: BorderRadius.circular(14),
                   ),
-                  child: Icon(Icons.card_giftcard, color: scheme.onSurfaceVariant),
+                  child:
+                      Icon(Icons.card_giftcard, color: scheme.onSurfaceVariant),
                 ),
                 const SizedBox(width: 14),
                 Expanded(

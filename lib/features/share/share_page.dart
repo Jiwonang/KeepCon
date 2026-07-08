@@ -130,7 +130,9 @@ class SharePage extends StatelessWidget {
                     clipBehavior: Clip.antiAlias,
                     child: Column(
                       children: <Widget>[
-                        for (int i = 0; i < logs.length && i < 3; i++) ...<Widget>[
+                        for (int i = 0;
+                            i < logs.length && i < 3;
+                            i++) ...<Widget>[
                           if (i > 0)
                             const Divider(height: 1, indent: 16, endIndent: 16),
                           _UsageLogTile(log: logs[i]),

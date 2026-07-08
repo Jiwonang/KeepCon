@@ -104,7 +104,8 @@ class _DetailBody extends StatelessWidget {
             // 바코드 placeholder.
             Card(
               child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
+                padding:
+                    const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
                 child: Column(
                   children: <Widget>[
                     Icon(Icons.qr_code_2, size: 96, color: scheme.onSurface),
@@ -132,9 +133,11 @@ class _DetailBody extends StatelessWidget {
             if (!item.isUsed && !locked) ...<Widget>[
               OutlinedButton.icon(
                 // 다른 멤버가 이미 찜했으면 비활성(남의 찜을 덮어쓰지 않음).
-                onPressed:
-                    reservedByOther ? null : () => store.toggleReservation(item),
-                icon: Icon(reservedByMe ? Icons.bookmark : Icons.bookmark_border),
+                onPressed: reservedByOther
+                    ? null
+                    : () => store.toggleReservation(item),
+                icon:
+                    Icon(reservedByMe ? Icons.bookmark : Icons.bookmark_border),
                 label: Text(reservedByMe ? '찜 해제' : '찜하기 (사용 예정)'),
               ),
               const SizedBox(height: 10),

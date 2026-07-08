@@ -61,7 +61,8 @@ class ShareStore extends ChangeNotifier {
       List<GroupNotification>.unmodifiable(_notifications);
 
   /// 아직 공유하지 않은 내 기프티콘(공유 대상 후보).
-  List<MyGifticon> get myGifticons => List<MyGifticon>.unmodifiable(_myGifticons);
+  List<MyGifticon> get myGifticons =>
+      List<MyGifticon>.unmodifiable(_myGifticons);
 
   /// 특정 그룹의 공유 기프티콘 목록.
   List<SharedGifticon> sharedOf(String groupId) =>
@@ -276,10 +277,14 @@ class ShareStore extends ChangeNotifier {
       emoji: '🏠',
       inviteCode: '482913',
       members: const <GroupMember>[
-        GroupMember(id: myId, name: myName, emoji: myEmoji, role: MemberRole.owner),
-        GroupMember(id: 'u_mom', name: '엄마', emoji: '👩', role: MemberRole.member),
-        GroupMember(id: 'u_dad', name: '아빠', emoji: '🧔', role: MemberRole.member),
-        GroupMember(id: 'u_sis', name: '누나', emoji: '👧', role: MemberRole.member),
+        GroupMember(
+            id: myId, name: myName, emoji: myEmoji, role: MemberRole.owner),
+        GroupMember(
+            id: 'u_mom', name: '엄마', emoji: '👩', role: MemberRole.member),
+        GroupMember(
+            id: 'u_dad', name: '아빠', emoji: '🧔', role: MemberRole.member),
+        GroupMember(
+            id: 'u_sis', name: '누나', emoji: '👧', role: MemberRole.member),
       ],
     );
     final Group friends = Group(
@@ -288,9 +293,12 @@ class ShareStore extends ChangeNotifier {
       emoji: '👥',
       inviteCode: '771205',
       members: const <GroupMember>[
-        GroupMember(id: 'u_gil', name: '홍길동', emoji: '🧑', role: MemberRole.owner),
-        GroupMember(id: myId, name: myName, emoji: myEmoji, role: MemberRole.member),
-        GroupMember(id: 'u_kim', name: '김철수', emoji: '👨', role: MemberRole.member),
+        GroupMember(
+            id: 'u_gil', name: '홍길동', emoji: '🧑', role: MemberRole.owner),
+        GroupMember(
+            id: myId, name: myName, emoji: myEmoji, role: MemberRole.member),
+        GroupMember(
+            id: 'u_kim', name: '김철수', emoji: '👨', role: MemberRole.member),
       ],
     );
     _groups.addAll(<Group>[family, friends]);
@@ -349,7 +357,8 @@ class ShareStore extends ChangeNotifier {
 
     _usageLogs.addAll(const <UsageLog>[
       UsageLog(who: '누나', what: 'CU 5,000원 금액권', groupName: '가족', when: '4일 전'),
-      UsageLog(who: '홍길동', what: '스타벅스 아메리카노', groupName: '친구 모임', when: '1주 전'),
+      UsageLog(
+          who: '홍길동', what: '스타벅스 아메리카노', groupName: '친구 모임', when: '1주 전'),
       UsageLog(who: '엄마', what: '올리브영 1만원권', groupName: '가족', when: '2주 전'),
     ]);
 
@@ -375,10 +384,26 @@ class ShareStore extends ChangeNotifier {
     ]);
 
     _myGifticons.addAll(const <MyGifticon>[
-      MyGifticon(id: 'm_1', brand: '메가커피', product: '아이스 아메리카노', expiryLabel: '~2026.12.31'),
-      MyGifticon(id: 'm_2', brand: 'GS25', product: '3,000원 금액권', expiryLabel: '~2026.09.15'),
-      MyGifticon(id: 'm_3', brand: '교촌치킨', product: '허니콤보', expiryLabel: '~2026.10.05'),
-      MyGifticon(id: 'm_4', brand: '투썸플레이스', product: '조각케이크', expiryLabel: '~2026.08.30'),
+      MyGifticon(
+          id: 'm_1',
+          brand: '메가커피',
+          product: '아이스 아메리카노',
+          expiryLabel: '~2026.12.31'),
+      MyGifticon(
+          id: 'm_2',
+          brand: 'GS25',
+          product: '3,000원 금액권',
+          expiryLabel: '~2026.09.15'),
+      MyGifticon(
+          id: 'm_3',
+          brand: '교촌치킨',
+          product: '허니콤보',
+          expiryLabel: '~2026.10.05'),
+      MyGifticon(
+          id: 'm_4',
+          brand: '투썸플레이스',
+          product: '조각케이크',
+          expiryLabel: '~2026.08.30'),
     ]);
   }
 }

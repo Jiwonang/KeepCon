@@ -104,7 +104,8 @@ class _GroupDetailBody extends StatelessWidget {
               child: Column(
                 children: <Widget>[
                   for (int i = 0; i < group.members.length; i++) ...<Widget>[
-                    if (i > 0) const Divider(height: 1, indent: 16, endIndent: 16),
+                    if (i > 0)
+                      const Divider(height: 1, indent: 16, endIndent: 16),
                     _MemberTile(member: group.members[i]),
                   ],
                 ],
@@ -190,7 +191,8 @@ class _GroupDetailBody extends StatelessWidget {
       if (context.mounted) _leftSnack(context);
       return;
     }
-    final bool ok = await _confirm(context, '그룹 나가기', '"${group.name}"에서 나갈까요?');
+    final bool ok =
+        await _confirm(context, '그룹 나가기', '"${group.name}"에서 나갈까요?');
     if (ok && context.mounted) {
       store.leaveGroup(group.id);
       _leftSnack(context);
