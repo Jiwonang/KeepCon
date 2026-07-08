@@ -19,7 +19,9 @@
 - **원칙:** API 1개 / 페이지 1개 = 브랜치 1개 = PR 1개.
 - **커밋 메시지:** Conventional Commits(한국어) — `feat(backend): …`, `fix(frontend): …`, `refactor(…): …`, `docs(spec): …`, `ci: …`, `perf(frontend): …`.
 - **PR 본문:** `.github/PULL_REQUEST_TEMPLATE.md` 형식(🚀 작업 내용 / 🤔 고민했던 내용 / 💬 리뷰 중점사항).
-- **코드 리뷰(3층 중첩):** ①CI(`Format·Analyze·Test`) 게이트 ②PR마다 **CodeRabbit** 자동 리뷰(공개 저장소·무료, 설정 `.coderabbit.yaml`) ③Claude Code로 작업 시 **코드 변경을 커밋하기 전에 `/code-review`로 자체 리뷰·수정 후 커밋**. 릴리스 전 `/security-review`.
+- **코드 리뷰(3층 중첩):** ①CI(`Format·Analyze·Test`) 게이트 ②PR마다 **CodeRabbit** 자동 리뷰 ③Claude Code로 작업 시 **코드 변경을 커밋하기 전에 `/code-review`로 자체 리뷰·수정 후 커밋**. 릴리스 전 `/security-review`.
+  - CodeRabbit은 **GitHub App**이라 `.coderabbit.yaml`(리뷰 설정)만으로는 동작하지 않는다. **App이 이 저장소에 설치·접근 허용**되어야 리뷰가 붙는다(계정에 설치 후 *Only select repositories*로 골랐다면 KeepCon을 범위에 추가). 설정은 https://github.com/settings/installations.
+  - **비용:** Public 저장소는 **무료**, Private는 **유료(Pro)** 또는 무료 체험. KeepCon은 Public이라 App 범위에만 추가하면 무료로 동작한다. (동작 여부=App 접근 범위, 비용=공개여부 — 두 축은 별개.)
 - 병합 전 `flutter analyze` 통과 확인. 상세는 `README.md`의 "협업 규칙" 참조.
 
 **변경 이력:**
@@ -31,3 +33,4 @@
 | 2026-07-07 | 협업 규칙(브랜치·커밋·PR) 추가 | CLAUDE.md, README.md, .github/PULL_REQUEST_TEMPLATE.md | AI 팀원이 자동 준수하도록 CLAUDE.md에 명시(README만으로는 자동 적용 안 됨). develop 기본 브랜치 전환 |
 | 2026-07-07 | 리뷰 정책 확정: 자동 봇 제거, 커밋 전 `/code-review` | CLAUDE.md, README.md, .github/workflows/claude-review.yml(삭제) | 자동 AI 봇은 외부 상시 접근·비밀·비용 부담 → Private 보안 위해 CI + 커밋 전 세션 내 `/code-review`로 전환 |
 | 2026-07-07 | Public 전환 → 브랜치 보호 Ruleset 적용 + CodeRabbit 중첩 도입 | GitHub Ruleset(protect-main-develop), .coderabbit.yaml, README.md, CLAUDE.md | 공개 전환으로 Rulesets·CodeRabbit 무료 가능. CI+/code-review에 CodeRabbit 자동 리뷰를 3층으로 중첩 |
+| 2026-07-08 | CodeRabbit 동작 전제 정정 | CLAUDE.md | PR #10에서 CodeRabbit 미동작 발견. 원인은 `.coderabbit.yaml`은 있으나 **App 저장소 접근 범위에 KeepCon 미포함**(App은 계정에 설치됨 — private passgen에서 동작 확인). 설정만으론 부족·App 설치+범위 필요, 비용은 Public=무료/Private=유료로 문구 정정 |
