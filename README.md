@@ -153,7 +153,9 @@ gh api -X POST repos/Jiwonang/KeepCon/rulesets --input ruleset.json
 세 층으로 품질을 관리합니다 (층위가 서로 달라 **중첩 운영**):
 
 - **CI 게이트 (필수·자동):** 모든 PR에서 `Format · Analyze · Test`(dart format · flutter analyze · flutter test) 통과 — 안정성의 기반.
-- **자동 AI 리뷰 — CodeRabbit (자동):** PR이 열리거나 갱신되면 CodeRabbit이 협업 규칙 준수·버그를 자동 리뷰합니다. 공개 저장소라 **무료**. 리뷰 설정은 [`.coderabbit.yaml`](.coderabbit.yaml)에 한국어로 정의(별도 API 키·워크플로 불필요). **활성화(1회):** 소유자가 [github.com/marketplace/coderabbitai](https://github.com/marketplace/coderabbitai)에서 앱 설치 → `Jiwonang/KeepCon` 선택.
+- **자동 AI 리뷰 — CodeRabbit (자동):** App이 저장소에 연결돼 있으면 PR이 열리거나 갱신될 때 CodeRabbit이 협업 규칙 준수·버그를 자동 리뷰합니다. 리뷰 설정은 [`.coderabbit.yaml`](.coderabbit.yaml)에 한국어로 정의(별도 API 키·워크플로 불필요). **단, 설정 파일만으로는 동작하지 않는다** — CodeRabbit은 **GitHub App**이라 저장소에 설치·접근 허용되어야 리뷰가 붙습니다.
+  - **활성화(1회, 소유자):** [github.com/settings/installations](https://github.com/settings/installations) → CodeRabbit → *Configure* → *Repository access*에 `Jiwonang/KeepCon` 추가(*All repositories*도 가능). 계정에 아직 App이 없으면 [github.com/apps/coderabbitai](https://github.com/apps/coderabbitai)에서 설치.
+  - **비용:** **Public 저장소는 무료**, Private는 유료(Pro)·무료 체험. KeepCon은 Public이라 App 범위에만 추가하면 무료로 동작합니다. (동작 여부=App 접근 범위, 비용=공개여부 — 별개.)
 - **커밋 전 AI 리뷰 — `/code-review` (온디맨드):** Claude Code로 작업할 때 **커밋 전** 변경 diff를 리뷰·수정한 뒤 커밋. 릴리스 전 `/security-review`로 보안 점검.
 
 ---
