@@ -15,6 +15,7 @@ library;
 
 import 'package:flutter/foundation.dart';
 
+import 'korean_particle.dart';
 import 'share_models.dart';
 
 /// share 기능 전용 인메모리 저장소(싱글턴).
@@ -199,7 +200,7 @@ class ShareStore extends ChangeNotifier {
     _pushNotification(GroupNotification(
       type: GroupNotificationType.registered,
       title: '새 기프티콘 공유',
-      message: '$myName님이 ${g.brand} ${g.product}을(를) 공유했어요.',
+      message: '$myName님이 ${g.brand} ${g.product}${g.product.eulReul} 공유했어요.',
       when: '방금',
     ));
     // ★ TODO(contract): 원본 Gifticon을 '공유중'으로 표시(GifticonRepository 상태 갱신).
@@ -242,7 +243,7 @@ class ShareStore extends ChangeNotifier {
     _pushNotification(GroupNotification(
       type: GroupNotificationType.used,
       title: '사용 완료',
-      message: '$myName님이 ${item.brand} ${item.product}을(를) 사용했어요.',
+      message: '$myName님이 ${item.brand} ${item.product}${item.product.eulReul} 사용했어요.',
       when: '방금',
     ));
     // ★ TODO(contract): 원본 Gifticon 상태를 available → used 로 전이

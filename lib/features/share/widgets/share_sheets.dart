@@ -6,6 +6,7 @@ library;
 
 import 'package:flutter/material.dart';
 
+import '../data/korean_particle.dart';
 import '../data/share_models.dart';
 import '../data/share_store.dart';
 import 'share_common.dart';
@@ -276,7 +277,7 @@ class _ShareGifticonSheet extends StatelessWidget {
                             ScaffoldMessenger.of(context)
                               ..hideCurrentSnackBar()
                               ..showSnackBar(SnackBar(
-                                  content: Text('${g.product}을(를) 공유했어요.')));
+                                  content: Text('${g.product}${g.product.eulReul} 공유했어요.')));
                           },
                         ),
                       );
