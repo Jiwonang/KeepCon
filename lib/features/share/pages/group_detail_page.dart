@@ -54,20 +54,23 @@ class _GroupDetailBody extends StatelessWidget {
     final ThemeData theme = Theme.of(context);
     final ShareStore store = ShareStore.instance;
     final List<SharedGifticon> shared = store.sharedOf(group.id);
+    // 초대 권한(방장 한정 정책 반영) — 없으면 초대 진입점을 숨긴다.
+    final bool canInvite = store.canInvite(group.id);
 
     return Scaffold(
       appBar: AppBar(
         title: Text(group.name),
         actions: <Widget>[
-          IconButton(
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute<void>(
-                builder: (_) => MemberInvitePage(group: group),
+          if (canInvite)
+            IconButton(
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => MemberInvitePage(group: group),
+                ),
               ),
+              icon: const Icon(Icons.person_add_outlined),
+              tooltip: '멤버 초대',
             ),
-            icon: const Icon(Icons.person_add_outlined),
-            tooltip: '멤버 초대',
-          ),
         ],
       ),
       body: SafeArea(
@@ -152,16 +155,18 @@ class _GroupDetailBody extends StatelessWidget {
             const SizedBox(height: 28),
 
             // 하단 액션.
-            OutlinedButton.icon(
-              onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute<void>(
-                  builder: (_) => MemberInvitePage(group: group),
+            if (canInvite) ...<Widget>[
+              OutlinedButton.icon(
+                onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => MemberInvitePage(group: group),
+                  ),
                 ),
+                icon: const Icon(Icons.person_add_outlined),
+                label: const Text('멤버 초대'),
               ),
-              icon: const Icon(Icons.person_add_outlined),
-              label: const Text('멤버 초대'),
-            ),
-            const SizedBox(height: 10),
+              const SizedBox(height: 10),
+            ],
             _DangerAction(
               icon: Icons.logout,
               label: '그룹 나가기',

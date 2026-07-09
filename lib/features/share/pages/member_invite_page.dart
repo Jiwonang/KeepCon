@@ -1,7 +1,9 @@
 /// share 페이지 — 멤버 초대(전체 화면).
 ///
-/// 초대 URL + 초대코드(각 복사 버튼), 만료시간 선택, "방장만 초대" 권한 토글(UI만).
-/// 색 하드코딩 없음. 실제 초대 발송/권한 저장은 계약 이관 시 연동한다.
+/// 초대 URL + 초대코드(각 복사 버튼), 만료시간 선택(프로토타입 UI), "방장만 초대"
+/// 권한 토글. 권한 토글은 [ShareStore.setInviteOwnerOnly]로 그룹 정책에 반영되며
+/// 방장만 편집할 수 있다(그룹 상세의 초대 진입점은 [ShareStore.canInvite]로 게이팅).
+/// 색 하드코딩 없음. 실제 초대 발송/만료는 계약 이관 시 연동한다.
 library;
 
 import 'package:flutter/material.dart';
@@ -9,6 +11,7 @@ import 'package:flutter/services.dart';
 
 import '../data/korean_particle.dart';
 import '../data/share_models.dart';
+import '../data/share_store.dart';
 
 /// 멤버 초대 화면. 그룹 상세에서 push 한다.
 class MemberInvitePage extends StatefulWidget {
@@ -23,7 +26,8 @@ class MemberInvitePage extends StatefulWidget {
 
 class _MemberInvitePageState extends State<MemberInvitePage> {
   InviteExpiry _expiry = InviteExpiry.oneDay;
-  bool _ownerOnly = false;
+
+  bool get _iAmOwner => widget.group.owner.id == ShareStore.myId;
 
   void _copy(String value, String label) {
     Clipboard.setData(ClipboardData(text: value));
@@ -67,11 +71,19 @@ class _MemberInvitePageState extends State<MemberInvitePage> {
             const SizedBox(height: 12),
             Card(
               child: SwitchListTile(
-                value: _ownerOnly,
-                onChanged: (bool v) => setState(() => _ownerOnly = v),
+                value: g.inviteOwnerOnly,
+                // 정책 변경은 방장만. 일반 멤버에게는 비활성(현재 정책만 표시).
+                onChanged: _iAmOwner
+                    ? (bool v) {
+                        ShareStore.instance.setInviteOwnerOnly(g.id, v);
+                        setState(() {});
+                      }
+                    : null,
                 title: const Text('방장만 초대 가능'),
-                subtitle: Text('켜면 방장 외 멤버는 초대할 수 없어요.',
-                    style: theme.textTheme.bodySmall),
+                subtitle: Text(
+                  _iAmOwner ? '켜면 방장 외 멤버는 초대할 수 없어요.' : '방장만 이 설정을 바꿀 수 있어요.',
+                  style: theme.textTheme.bodySmall,
+                ),
               ),
             ),
             const SizedBox(height: 24),
