@@ -6,6 +6,7 @@ library;
 
 import 'package:flutter/material.dart';
 
+import '../data/korean_particle.dart';
 import '../data/share_models.dart';
 import '../data/share_store.dart';
 import '../widgets/share_common.dart';
@@ -176,7 +177,7 @@ class _DetailBody extends StatelessWidget {
       context: context,
       builder: (BuildContext ctx) => AlertDialog(
         title: const Text('공유 취소'),
-        content: Text('${item.product}을(를) 그룹에서 회수할까요?'),
+        content: Text('${item.product}${item.product.eulReul} 그룹에서 회수할까요?'),
         actions: <Widget>[
           TextButton(
               onPressed: () => Navigator.of(ctx).pop(false),

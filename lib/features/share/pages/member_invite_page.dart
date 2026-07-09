@@ -7,6 +7,7 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../data/korean_particle.dart';
 import '../data/share_models.dart';
 
 /// 멤버 초대 화면. 그룹 상세에서 push 한다.
@@ -28,7 +29,7 @@ class _MemberInvitePageState extends State<MemberInvitePage> {
     Clipboard.setData(ClipboardData(text: value));
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(content: Text('$label을(를) 복사했어요.')));
+      ..showSnackBar(SnackBar(content: Text('$label${label.eulReul} 복사했어요.')));
   }
 
   @override
