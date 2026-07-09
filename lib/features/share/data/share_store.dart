@@ -144,8 +144,15 @@ class ShareStore extends ChangeNotifier {
     return g;
   }
 
-  /// 내가 [g]의 방장인지.
+  /// 내가 [g]의 방장인지(내부용 — 그룹 객체를 이미 가진 경우).
   bool _iAmOwnerOf(Group g) => g.owner.id == myId;
+
+  /// 내가 [groupId] 그룹의 방장인지. 방장 판정의 단일 공개 진입점 — 페이지는
+  /// 판정 로직을 재구현하지 말고 이 메서드를 소비한다(로직 drift 방지).
+  bool isOwner(String groupId) {
+    final Group? g = groupById(groupId);
+    return g != null && _iAmOwnerOf(g);
+  }
 
   /// 그룹 나가기(멤버). 방장이면 [transferOwnershipAndLeave]를 먼저 써야 한다.
   ///

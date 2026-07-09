@@ -27,7 +27,7 @@ class MemberInvitePage extends StatefulWidget {
 class _MemberInvitePageState extends State<MemberInvitePage> {
   InviteExpiry _expiry = InviteExpiry.oneDay;
 
-  bool get _iAmOwner => widget.group.owner.id == ShareStore.myId;
+  bool get _iAmOwner => ShareStore.instance.isOwner(widget.group.id);
 
   void _copy(String value, String label) {
     Clipboard.setData(ClipboardData(text: value));

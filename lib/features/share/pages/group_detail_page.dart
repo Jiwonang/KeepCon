@@ -47,7 +47,7 @@ class _GroupDetailBody extends StatelessWidget {
 
   final Group group;
 
-  bool get _iAmOwner => group.owner.id == ShareStore.myId;
+  bool get _iAmOwner => ShareStore.instance.isOwner(group.id);
 
   @override
   Widget build(BuildContext context) {
