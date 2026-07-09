@@ -186,27 +186,30 @@ class _GroupDetailBody extends StatelessWidget {
     if (_iAmOwner && group.memberCount > 1) {
       final GroupMember? newOwner = await _pickNewOwner(context);
       if (newOwner == null) return;
-      store.transferOwnershipAndLeave(
+      final bool ok = store.transferOwnershipAndLeave(
           groupId: group.id, newOwnerId: newOwner.id);
-      if (context.mounted) _leftSnack(context);
+      if (context.mounted) {
+        // 이전 성공 시 그룹은 남지만 내 멤버십은 사라진다 → 상세를 명시적으로 닫는다
+        // (leaveGroup/deleteGroup은 그룹 제거로 ListenableBuilder가 자동 pop).
+        if (ok) Navigator.of(context).pop();
+        _snack(context, ok ? '그룹에서 나갔어요.' : '지금은 나갈 수 없어요.');
+      }
       return;
     }
-    final bool ok =
+    final bool confirmed =
         await _confirm(context, '그룹 나가기', '"${group.name}"에서 나갈까요?');
-    if (ok && context.mounted) {
-      store.leaveGroup(group.id);
-      _leftSnack(context);
+    if (confirmed && context.mounted) {
+      final bool ok = store.leaveGroup(group.id);
+      _snack(context, ok ? '그룹에서 나갔어요.' : '지금은 나갈 수 없어요.');
     }
   }
 
   Future<void> _onDelete(BuildContext context, ShareStore store) async {
-    final bool ok = await _confirm(
+    final bool confirmed = await _confirm(
         context, '그룹 삭제', '"${group.name}" 그룹을 삭제할까요? 되돌릴 수 없어요.');
-    if (ok && context.mounted) {
-      store.deleteGroup(group.id);
-      ScaffoldMessenger.of(context)
-        ..hideCurrentSnackBar()
-        ..showSnackBar(const SnackBar(content: Text('그룹을 삭제했어요.')));
+    if (confirmed && context.mounted) {
+      final bool ok = store.deleteGroup(group.id);
+      _snack(context, ok ? '그룹을 삭제했어요.' : '방장만 삭제할 수 있어요.');
     }
   }
 
@@ -247,10 +250,10 @@ class _GroupDetailBody extends StatelessWidget {
     );
   }
 
-  void _leftSnack(BuildContext context) {
+  void _snack(BuildContext context, String message) {
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
-      ..showSnackBar(const SnackBar(content: Text('그룹에서 나갔어요.')));
+      ..showSnackBar(SnackBar(content: Text(message)));
   }
 
   Future<bool> _confirm(BuildContext context, String title, String body) async {

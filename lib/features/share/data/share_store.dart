@@ -51,8 +51,12 @@ class ShareStore extends ChangeNotifier {
   String _nextId(String prefix) => '$prefix${_seq++}';
 
   // ── 읽기 ─────────────────────────────────────────────────────────
-  /// 내 그룹 목록(읽기 전용 뷰).
-  List<Group> get groups => List<Group>.unmodifiable(_groups);
+  /// 내가 멤버로 속한 그룹(내부 공통). 소유권 이전으로 그룹을 떠나면 여기서 빠진다.
+  Iterable<Group> get _myGroups => _groups
+      .where((Group g) => g.members.any((GroupMember m) => m.id == myId));
+
+  /// 내 그룹 목록(읽기 전용 뷰) — **내가 멤버인 그룹만** 노출한다.
+  List<Group> get groups => List<Group>.unmodifiable(_myGroups);
 
   /// 전체 사용 이력(최신순).
   List<UsageLog> get usageLogs => List<UsageLog>.unmodifiable(_usageLogs);
@@ -70,9 +74,9 @@ class ShareStore extends ChangeNotifier {
       List<SharedGifticon>.unmodifiable(
           _sharedByGroup[groupId] ?? const <SharedGifticon>[]);
 
-  /// 전체 그룹의 공유 기프티콘(공유 메인 요약용).
+  /// 내 그룹의 공유 기프티콘(공유 메인 요약용) — 떠난 그룹 것은 제외.
   List<SharedGifticon> get allShared => <SharedGifticon>[
-        for (final Group g in _groups) ...?_sharedByGroup[g.id],
+        for (final Group g in _myGroups) ...?_sharedByGroup[g.id],
       ];
 
   /// id로 그룹 조회.
@@ -140,37 +144,70 @@ class ShareStore extends ChangeNotifier {
     return g;
   }
 
-  /// 그룹 나가기(멤버). 방장이면 [transferOwnershipAndLeave]를 먼저 쓴다.
-  void leaveGroup(String groupId) {
+  /// 내가 [g]의 방장인지.
+  bool _iAmOwnerOf(Group g) => g.owner.id == myId;
+
+  /// 그룹 나가기(멤버). 방장이면 [transferOwnershipAndLeave]를 먼저 써야 한다.
+  ///
+  /// 정본 가드(UI 노출 조건과 별개):
+  /// - 내가 그룹의 멤버여야 한다.
+  /// - 내가 방장이면서 다른 멤버가 남아 있으면 나갈 수 없다(소유권 이전이 선행).
+  ///   방장이 단독 멤버일 때만 나가기로 그룹을 정리할 수 있다.
+  ///
+  /// 조건 위반/대상 없음이면 `false`, 실제로 나가면 `true`.
+  bool leaveGroup(String groupId) {
+    final Group? g = groupById(groupId);
+    if (g == null) return false;
+    if (!g.members.any((GroupMember m) => m.id == myId)) return false; // 비멤버
+    if (_iAmOwnerOf(g) && g.memberCount > 1) return false; // 이전 선행 필요
     _removeGroup(groupId);
+    return true;
   }
 
-  /// 그룹 삭제(방장).
-  void deleteGroup(String groupId) {
+  /// 그룹 삭제(방장 전용).
+  ///
+  /// 정본 가드: 방장 본인만 삭제할 수 있다. 위반/대상 없음이면 `false`, 삭제 시 `true`.
+  bool deleteGroup(String groupId) {
+    final Group? g = groupById(groupId);
+    if (g == null) return false;
+    if (!_iAmOwnerOf(g)) return false; // 방장만
     _removeGroup(groupId);
+    return true;
   }
 
   /// 소유권 이전 후 나가기 — 지정 멤버를 방장으로 올리고 '나'만 그룹에서 빠진다.
   ///
   /// 이전 구현은 멤버를 재계산한 뒤 그룹을 통째로 삭제(`_removeGroup`)해, 승격이
   /// 반영되지 않고 그룹·공유 기프티콘이 모두 사라지는 버그가 있었다. 이제는
-  /// [newOwnerId]를 방장으로 승격하고 '나'만 멤버에서 제거하며 **그룹은 유지**한다.
-  /// (내가 속한 그룹만 노출하는 프로토타입 특성상, 나간 그룹은 방장이 바뀐 채
-  /// 목록에 남아 이전 결과를 확인할 수 있다.)
+  /// [newOwnerId]를 방장으로 승격하고 '나'만 멤버에서 제거한다. 그룹 객체 자체는
+  /// `_groups`에 남지만, 내 멤버십이 사라지므로 [groups]·[allShared] 뷰에서는
+  /// **빠진다**(다른 멤버 관점의 그룹 유지를 단일 store로 근사). 상세 화면은
+  /// 나가기 성공 시 호출부가 pop한다.
+  ///
+  /// 정본 가드: 방장 본인만 이전할 수 있고, [newOwnerId]는 나를 제외한 기존 멤버여야
+  /// 한다. 위반/대상 없음이면 `false`, 성공 시 `true`.
   // ★ TODO(contract): 계약 이관 시 남은 멤버 관점의 그룹 유지·내 소속 해제를
   //    GroupRepository로 처리.
-  void transferOwnershipAndLeave({
+  bool transferOwnershipAndLeave({
     required String groupId,
     required String newOwnerId,
   }) {
     final Group? g = groupById(groupId);
-    if (g == null) return;
-    g.members = <GroupMember>[
-      for (final GroupMember m in g.members)
-        if (m.id != myId)
-          if (m.id == newOwnerId) m.copyWith(role: MemberRole.owner) else m,
-    ];
+    if (g == null) return false;
+    if (!_iAmOwnerOf(g)) return false; // 방장만 이전 가능
+    // 신임 방장은 나를 제외한 기존 멤버여야 한다.
+    if (newOwnerId == myId ||
+        !g.members.any((GroupMember m) => m.id == newOwnerId)) {
+      return false;
+    }
+    // '나'를 제외하고, 신임 방장만 owner로 승격한다.
+    g.members = g.members
+        .where((GroupMember m) => m.id != myId)
+        .map((GroupMember m) =>
+            m.id == newOwnerId ? m.copyWith(role: MemberRole.owner) : m)
+        .toList();
     notifyListeners();
+    return true;
   }
 
   void _removeGroup(String groupId) {
