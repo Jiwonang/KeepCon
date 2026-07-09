@@ -253,12 +253,26 @@ class ShareStore extends ChangeNotifier {
     return true;
   }
 
-  /// 공유 취소(회수) — 목록에서 제거.
-  void cancelShare(SharedGifticon item) {
-    _sharedByGroup[item.groupId]
-        ?.removeWhere((SharedGifticon s) => s.id == item.id);
+  /// 공유 취소(회수) — 공유자 본인이, 사용 가능한 항목만 목록에서 제거한다.
+  ///
+  /// 권한·상태 방어는 UI 노출 조건과 **별개로** 이 정본에서 강제한다(다른 호출
+  /// 경로·향후 코드에서도 불변식을 지키기 위함):
+  /// - 공유자 본인만 회수 가능 — [SharedGifticon.sharedByName] == [myName].
+  /// - [ShareStatus.available] 상태만 회수 가능. 사용중·사용완료 항목은 불가
+  ///   ('회수=reclaim'은 아직 소비되지 않은 공유에만 의미가 있다).
+  ///
+  /// 조건 위반이거나 대상이 없으면 아무 것도 하지 않고 `false`, 실제 제거 시 `true`.
+  bool cancelShare(SharedGifticon item) {
+    if (item.sharedByName != myName) return false; // 공유자 본인만
+    if (item.status != ShareStatus.available) return false; // 사용가능만 회수
+    final List<SharedGifticon>? list = _sharedByGroup[item.groupId];
+    if (list == null) return false;
+    final int before = list.length;
+    list.removeWhere((SharedGifticon s) => s.id == item.id);
+    if (list.length == before) return false; // 이미 없던 항목
     // ★ TODO(contract): 원본 Gifticon의 공유 상태를 원복(GifticonRepository 갱신).
     notifyListeners();
+    return true;
   }
 
   void _pushNotification(GroupNotification n) {
