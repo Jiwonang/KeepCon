@@ -189,8 +189,14 @@ class _DetailBody extends StatelessWidget {
       ),
     );
     if (ok == true && context.mounted) {
-      store.cancelShare(item);
-      Navigator.of(context).pop();
+      // 버튼은 이미 공유자·미사용중일 때만 노출되지만, store 가드가 최종 판정한다.
+      if (store.cancelShare(item)) {
+        Navigator.of(context).pop();
+      } else {
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(const SnackBar(content: Text('지금은 회수할 수 없어요.')));
+      }
     }
   }
 }
