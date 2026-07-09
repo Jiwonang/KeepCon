@@ -243,7 +243,8 @@ class ShareStore extends ChangeNotifier {
     _pushNotification(GroupNotification(
       type: GroupNotificationType.used,
       title: '사용 완료',
-      message: '$myName님이 ${item.brand} ${item.product}${item.product.eulReul} 사용했어요.',
+      message:
+          '$myName님이 ${item.brand} ${item.product}${item.product.eulReul} 사용했어요.',
       when: '방금',
     ));
     // ★ TODO(contract): 원본 Gifticon 상태를 available → used 로 전이

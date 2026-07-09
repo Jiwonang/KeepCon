@@ -277,7 +277,8 @@ class _ShareGifticonSheet extends StatelessWidget {
                             ScaffoldMessenger.of(context)
                               ..hideCurrentSnackBar()
                               ..showSnackBar(SnackBar(
-                                  content: Text('${g.product}${g.product.eulReul} 공유했어요.')));
+                                  content: Text(
+                                      '${g.product}${g.product.eulReul} 공유했어요.')));
                           },
                         ),
                       );
