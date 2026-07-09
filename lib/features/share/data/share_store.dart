@@ -144,8 +144,15 @@ class ShareStore extends ChangeNotifier {
     return g;
   }
 
-  /// 내가 [g]의 방장인지.
+  /// 내가 [g]의 방장인지(내부용 — 그룹 객체를 이미 가진 경우).
   bool _iAmOwnerOf(Group g) => g.owner.id == myId;
+
+  /// 내가 [groupId] 그룹의 방장인지. 방장 판정의 단일 공개 진입점 — 페이지는
+  /// 판정 로직을 재구현하지 말고 이 메서드를 소비한다(로직 drift 방지).
+  bool isOwner(String groupId) {
+    final Group? g = groupById(groupId);
+    return g != null && _iAmOwnerOf(g);
+  }
 
   /// 그룹 나가기(멤버). 방장이면 [transferOwnershipAndLeave]를 먼저 써야 한다.
   ///
@@ -214,6 +221,33 @@ class ShareStore extends ChangeNotifier {
     _groups.removeWhere((Group g) => g.id == groupId);
     _sharedByGroup.remove(groupId);
     notifyListeners();
+  }
+
+  /// 내가 [groupId] 그룹에 멤버를 초대할 수 있는지.
+  ///
+  /// 방장은 항상 가능하고, 일반 멤버는 [Group.inviteOwnerOnly]가 꺼져 있을 때만
+  /// 가능하다. 비멤버/그룹 없음이면 `false`. UI 초대 진입점 노출을 이 판정으로
+  /// 중앙화한다(권한 로직 중복 방지).
+  bool canInvite(String groupId) {
+    final Group? g = groupById(groupId);
+    if (g == null) return false;
+    if (!g.members.any((GroupMember m) => m.id == myId)) return false; // 비멤버
+    return _iAmOwnerOf(g) || !g.inviteOwnerOnly;
+  }
+
+  /// 초대 권한 정책(방장 한정 여부)을 설정한다.
+  ///
+  /// 정본 가드: **방장 본인만** 정책을 바꿀 수 있다. 위반/대상 없음이면 `false`,
+  /// 변경 시 `true`(값이 같아도 방장이면 `true`).
+  bool setInviteOwnerOnly(String groupId, bool value) {
+    final Group? g = groupById(groupId);
+    if (g == null) return false;
+    if (!_iAmOwnerOf(g)) return false; // 방장만 정책 변경
+    if (g.inviteOwnerOnly != value) {
+      g.inviteOwnerOnly = value;
+      notifyListeners();
+    }
+    return true;
   }
 
   // ── 공유 기프티콘 ─────────────────────────────────────────────────
@@ -345,6 +379,8 @@ class ShareStore extends ChangeNotifier {
       name: '친구 모임',
       emoji: '👥',
       inviteCode: '771205',
+      // 방장(홍길동) 한정 초대 — 멤버인 '나'에겐 초대 진입점이 숨겨진다(시연용).
+      inviteOwnerOnly: true,
       members: const <GroupMember>[
         GroupMember(
             id: 'u_gil', name: '홍길동', emoji: '🧑', role: MemberRole.owner),

@@ -106,6 +106,7 @@ class Group {
     required this.emoji,
     required this.members,
     required this.inviteCode,
+    this.inviteOwnerOnly = false,
   });
 
   /// 그룹 식별자.
@@ -122,6 +123,10 @@ class Group {
 
   /// 초대코드(프로토타입 고정값).
   final String inviteCode;
+
+  /// 초대 권한 정책 — `true`면 방장만 멤버를 초대할 수 있다(기본 `false`, 누구나).
+  /// 정책 변경은 방장만 가능하며 [ShareStore.setInviteOwnerOnly]로만 바꾼다.
+  bool inviteOwnerOnly;
 
   /// 초대 URL(프로토타입 — 초대코드 기반 조립).
   String get inviteUrl => 'https://keepcon.app/invite/$inviteCode';
