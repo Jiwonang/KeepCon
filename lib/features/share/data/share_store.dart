@@ -200,11 +200,12 @@ class ShareStore extends ChangeNotifier {
         !g.members.any((GroupMember m) => m.id == newOwnerId)) {
       return false;
     }
-    g.members = <GroupMember>[
-      for (final GroupMember m in g.members)
-        if (m.id != myId)
-          if (m.id == newOwnerId) m.copyWith(role: MemberRole.owner) else m,
-    ];
+    // '나'를 제외하고, 신임 방장만 owner로 승격한다.
+    g.members = g.members
+        .where((GroupMember m) => m.id != myId)
+        .map((GroupMember m) =>
+            m.id == newOwnerId ? m.copyWith(role: MemberRole.owner) : m)
+        .toList();
     notifyListeners();
     return true;
   }
