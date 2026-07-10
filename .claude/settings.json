@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "git fetch --quiet 2>/dev/null; w=\"\"; u=$(git rev-list --count HEAD..@{upstream} 2>/dev/null); if [ -n \"$u\" ] && [ \"$u\" -gt 0 ] 2>/dev/null; then w=\"현재 브랜치가 origin보다 ${u}커밋 뒤처짐. \"; fi; d=$(git rev-list --count develop..origin/develop 2>/dev/null); if [ -n \"$d\" ] && [ \"$d\" -gt 0 ] 2>/dev/null; then w=\"${w}로컬 develop이 origin/develop보다 ${d}커밋 뒤처짐. \"; fi; if [ -n \"$w\" ]; then m=\"⚠️ 최신화 필요 — ${w}작업 전 develop 최신화 후 분기하세요: git checkout develop && git pull --ff-only (규칙은 CLAUDE.md 참조)\"; printf '{\"hookSpecificOutput\":{\"hookEventName\":\"SessionStart\",\"additionalContext\":\"%s\"},\"systemMessage\":\"%s\"}' \"$m\" \"$m\"; fi; exit 0",
+            "shell": "bash",
+            "timeout": 10,
+            "statusMessage": "develop 최신 상태 확인 중…"
+          }
+        ]
+      }
+    ]
+  }
+}

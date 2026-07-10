@@ -20,6 +20,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # 공유 계약(lib/shared) 타입·provider를 lib/features에서 재정의/재선언하지 못하게 막는다.
+      # analyze는 "잘못된 호출"만 잡고 "로컬 재정의"는 통과시키므로, 이 가드가 SSOT를 강제한다.
+      - name: SSOT guard
+        run: bash tool/check_ssot.sh
+
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
