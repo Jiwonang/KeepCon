@@ -43,3 +43,15 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Secrets — 절대 커밋 금지 (CLAUDE.md "비밀정보 커밋 금지" 참조)
+# 진짜 비밀: admin SDK 키·서명 키스토어·환경 시크릿·토큰
+.env
+.env.*
+!.env.example
+*.jks
+*.keystore
+key.properties
+**/*firebase-adminsdk*.json
+**/service-account*.json
+**/secrets*.json

@@ -1,0 +1,6 @@
+# 셸 스크립트는 항상 LF로 저장 — Windows 기여자의 autocrlf 설정과 무관하게
+# 리눅스 CI에서 `bash\r` 오류 없이 실행되도록 강제한다.
+*.sh text eol=lf
+
+# 기본: 텍스트는 git이 줄바꿈을 정규화(저장은 LF)
+* text=auto
