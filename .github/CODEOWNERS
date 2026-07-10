@@ -1,0 +1,17 @@
+# CODEOWNERS — 계약(SSOT)·하네스 설정 변경은 지정 소유자(contract-architect 역할)의
+# 리뷰가 있어야 머지된다. 페이지 담당이 lib/shared를 임의 수정하는 것을 막는 하드 백스톱.
+#
+# ⚠️ 동작 조건: 브랜치 보호 룰셋에서 "Require review from Code Owners"를 켜야
+#    이 파일이 강제력을 갖는다(끄면 리뷰 자동 요청만 되고 머지는 안 막힘).
+#    소유자를 교체/추가하려면 아래 @핸들을 바꾼다.
+
+# 공유 계약(SSOT) — 모델·인터페이스·enum·라우트·provider·테마
+/lib/shared/               @Jiwonang
+
+# SSOT 가드 스크립트 — 이걸 약화시키면 계약 강제가 무력화되므로 소유자 리뷰 필수
+/tool/check_ssot.sh        @Jiwonang
+
+# 하네스 설정(SSOT) — 규칙·에이전트·스킬·CI·CODEOWNERS 자신
+/CLAUDE.md                 @Jiwonang
+/.claude/                  @Jiwonang
+/.github/                  @Jiwonang

@@ -13,6 +13,10 @@
 - Repository 메서드는 계약에 적힌 이름·파라미터 그대로 호출한다(추측 호출 금지).
 - 상태/정렬/필터는 매직 스트링이 아니라 계약의 enum을 사용한다.
 - 계약에 없는 것이 필요하면 만들지 말고 `contract-architect`에게 요청한다.
+- **공유될 필드가 새로 필요할 때(승격 워크플로):**
+  - **① 재사용 우선:** 만들기 전에 먼저 `lib/shared`를 검색한다 — 이미 있으면 그대로 소비하고 로컬 유사 필드를 새로 만들지 않는다. (탐지는 팀원이 분산 수행)
+  - **② 승격은 요청으로:** 없고 둘 이상 페이지가 쓸 것 같으면 **직접 `lib/shared`를 고치지 말고** `contract-architect`에게 요청한다. 계약 파일은 **`CODEOWNERS`로 소유자 리뷰가 강제**되므로 페이지 담당의 임의 수정은 머지되지 않는다. (결정·실행은 계약 소유자에게 집중)
+  - **③ 늦게 승격:** "혹시 필요할까"가 아니라 **실제 두 번째 소비자가 생겼을 때** 승격한다. 공유는 빼기·이름변경이 전부 breaking이므로 투기적 승격을 금한다. breaking 변경은 조정 시점(월요일 동기화)에서만.
 - 위 SSOT 규약은 CI의 **`SSOT guard`(`tool/check_ssot.sh`)로 기계적으로 강제**된다 — `lib/features`에서 공유 모델·enum·인터페이스·SSOT provider를 재정의/재선언하면 CI가 실패한다(`analyze`는 잘못된 호출만 잡고 로컬 재정의는 통과시키므로 이 가드가 그 구멍을 막는다).
 
 **하네스 설정도 SSOT(저장소 루트 한 벌):**
@@ -51,3 +55,4 @@
 | 2026-07-10 | 공유(share) 도메인 계약 승격 (PR #16) | lib/shared, lib/features/share, _workspace | 페이지에 갇혀 있던 공유 도메인(`Group`·`SharedGifticon`·`UsageLog`·`ShareRepository` 등)을 `lib/shared` 정본으로 승격. 이중 사용 회귀 수정 + CodeRabbit 리뷰(로딩 상태 분리·그룹 불변식·본인 라벨) 반영. non-breaking |
 | 2026-07-10 | 설정 SSOT·안전 최신화 규칙 명문화 | CLAUDE.md | 하네스 설정(`CLAUDE.md`·에이전트·스킬)은 저장소 루트 한 벌·페이지 폴더 복제 금지(상속). git 최신화는 "항상 fetch, pull은 깨끗한 지점에서만, 스테일 머지는 룰셋으로 강제" 규칙 추가 |
 | 2026-07-10 | 허점 보강: SSOT CI 가드 + 최신화 훅 + 비밀정보 규칙 | .github/workflows/ci.yml, tool/check_ssot.sh, .claude/settings.json, CLAUDE.md, .gitignore | soft 규칙을 hard 백스톱으로 승격. ①`lib/features`의 공유 타입·provider 재정의를 CI `SSOT guard`로 차단(analyze 미탐 구멍) ②SessionStart 훅으로 세션 시작 시 뒤처짐 자동 경고(팀 공유) ③비밀정보 커밋 금지 규칙+.gitignore 보강(Firebase 대비) |
+| 2026-07-10 | 필드 승격 워크플로 + CODEOWNERS 하드 강제 | CLAUDE.md, .github/CODEOWNERS | 승격 규칙 명문화(①재사용 우선 ②승격은 요청 ③늦게 승격). 규칙②를 `CODEOWNERS`로 하드 강제 — `lib/shared`·하네스 설정 변경은 계약 소유자 리뷰 필수(페이지 담당 임의 수정 차단). 룰셋 "Require review from Code Owners" 켜야 동작 |
