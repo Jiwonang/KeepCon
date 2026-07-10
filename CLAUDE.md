@@ -33,7 +33,9 @@
 - **코드 리뷰(3층 중첩):** ①CI(`Format·Analyze·Test`) 게이트 ②PR마다 **CodeRabbit** 자동 리뷰 ③Claude Code로 작업 시 **코드 변경을 커밋하기 전에 `/code-review`로 자체 리뷰·수정 후 커밋**. 릴리스 전 `/security-review`.
   - CodeRabbit은 **GitHub App**이라 `.coderabbit.yaml`(리뷰 설정)만으로는 동작하지 않는다. **App이 이 저장소에 설치·접근 허용**되어야 리뷰가 붙는다(계정에 설치 후 *Only select repositories*로 골랐다면 KeepCon을 범위에 추가). 설정은 https://github.com/settings/installations.
   - **비용:** Public 저장소는 **무료**, Private는 **유료(Pro)** 또는 무료 체험. KeepCon은 Public이라 App 범위에만 추가하면 무료로 동작한다. (동작 여부=App 접근 범위, 비용=공개여부 — 두 축은 별개.)
-- **비밀정보 커밋 금지:** 서비스 계정 키(`*-firebase-adminsdk-*.json`), 서명 키스토어(`*.jks`·`*.keystore`·`key.properties`), `.env`·토큰·API 시크릿은 **절대 커밋하지 않는다**(`.gitignore`로 관리). Public 저장소라 한 번 올라가면 즉시 노출되며 히스토리에 남는다. 릴리스 전 `/security-review`로 점검. (참고: 클라이언트용 `firebase_options.dart`·`google-services.json`의 API 키는 "비밀"이 아니라 프로젝트 식별자다 — 백엔드는 Firebase 보안 규칙·App Check로 보호하며 키를 숨겨 보호하지 않는다. 진짜 비밀은 admin SDK 키·키스토어·토큰이다.)
+- **비밀정보 커밋 금지:** 서비스 계정 키(`*-firebase-adminsdk-*.json`), 서명 키스토어(`*.jks`·`*.keystore`·`key.properties`), `.env`·토큰·API 시크릿은 **절대 커밋하지 않는다**(`.gitignore`로 관리). Public 저장소라 한 번 올라가면 즉시 노출되며 히스토리에 남는다. 릴리스 전 `/security-review`로 점검.
+  - **`.gitignore`는 게이트가 아니다:** 추적 안 되는 파일의 실수 추가만 줄일 뿐, `git add -f`나 이미 추적 중인 파일에 박힌 비밀은 못 막는다. **하드 백스톱은 GitHub Secret Scanning + Push Protection**(Public 저장소 무료)을 켜는 것 — 비밀이 포함된 push를 서버가 거부한다. 설정: 저장소 Settings → Code security → *Secret scanning* / *Push protection*.
+  - (참고: 클라이언트용 `firebase_options.dart`·`google-services.json`의 API 키는 "비밀"이 아니라 프로젝트 식별자다 — 백엔드는 Firebase 보안 규칙·App Check로 보호하며 키를 숨겨 보호하지 않는다. 진짜 비밀은 admin SDK 키·키스토어·토큰이다.)
 - 병합 전 `flutter analyze` 통과 확인. 상세는 `README.md`의 "협업 규칙" 참조.
 
 **변경 이력:**
