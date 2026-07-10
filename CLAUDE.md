@@ -35,6 +35,8 @@
 - **커밋 메시지:** Conventional Commits(한국어) — `feat(backend): …`, `fix(frontend): …`, `refactor(…): …`, `docs(spec): …`, `ci: …`, `perf(frontend): …`.
 - **PR 본문:** `.github/PULL_REQUEST_TEMPLATE.md` 형식(🚀 작업 내용 / 🤔 고민했던 내용 / 💬 리뷰 중점사항).
 - **코드 리뷰(3층 중첩):** ①CI(`Format·Analyze·Test`) 게이트 ②PR마다 **CodeRabbit** 자동 리뷰 ③Claude Code로 작업 시 **코드 변경을 커밋하기 전에 `/code-review`로 자체 리뷰·수정 후 커밋**. 릴리스 전 `/security-review`.
+  - **검증 실패 시 수정 루프(필수):** PR을 올린 뒤 CI(`Format·Analyze·Test` + `SSOT guard`)와 CodeRabbit 결과를 확인한다. **하나라도 실패(red)하면 머지하지 말고**, 원인을 진단해 수정 → 커밋 → 푸시를 **전부 green이 될 때까지 반복**한다(빨간 PR을 방치하거나 머지하지 않는다). CodeRabbit이 남긴 유효 지적도 같은 루프로 반영한다. Claude Code로 작업 시 이 수정 루프를 **자동 수행**하며, 실패를 사용자에게 떠넘기지 않는다.
+    - **강제 근거:** CI·CodeRabbit은 브랜치 보호 룰셋의 **필수 상태 체크(required status checks)** 로 등록되어 있어 **red 상태로는 머지 자체가 불가**하다 — 즉 "빨간 채로 방치"는 규칙 위반 이전에 **애초에 '작업 완료'가 성립하지 않는다**(게이트가 결과를 강제, 규칙이 행동을 안내).
   - CodeRabbit은 **GitHub App**이라 `.coderabbit.yaml`(리뷰 설정)만으로는 동작하지 않는다. **App이 이 저장소에 설치·접근 허용**되어야 리뷰가 붙는다(계정에 설치 후 *Only select repositories*로 골랐다면 KeepCon을 범위에 추가). 설정은 https://github.com/settings/installations.
   - **비용:** Public 저장소는 **무료**, Private는 **유료(Pro)** 또는 무료 체험. KeepCon은 Public이라 App 범위에만 추가하면 무료로 동작한다. (동작 여부=App 접근 범위, 비용=공개여부 — 두 축은 별개.)
 - **비밀정보 커밋 금지:** 서비스 계정 키(`*-firebase-adminsdk-*.json`), 서명 키스토어(`*.jks`·`*.keystore`·`key.properties`), `.env`·토큰·API 시크릿은 **절대 커밋하지 않는다**(`.gitignore`로 관리). Public 저장소라 한 번 올라가면 즉시 노출되며 히스토리에 남는다. 릴리스 전 `/security-review`로 점검.
@@ -56,3 +58,4 @@
 | 2026-07-10 | 설정 SSOT·안전 최신화 규칙 명문화 | CLAUDE.md | 하네스 설정(`CLAUDE.md`·에이전트·스킬)은 저장소 루트 한 벌·페이지 폴더 복제 금지(상속). git 최신화는 "항상 fetch, pull은 깨끗한 지점에서만, 스테일 머지는 룰셋으로 강제" 규칙 추가 |
 | 2026-07-10 | 허점 보강: SSOT CI 가드 + 최신화 훅 + 비밀정보 규칙 | .github/workflows/ci.yml, tool/check_ssot.sh, .claude/settings.json, CLAUDE.md, .gitignore | soft 규칙을 hard 백스톱으로 승격. ①`lib/features`의 공유 타입·provider 재정의를 CI `SSOT guard`로 차단(analyze 미탐 구멍) ②SessionStart 훅으로 세션 시작 시 뒤처짐 자동 경고(팀 공유) ③비밀정보 커밋 금지 규칙+.gitignore 보강(Firebase 대비) |
 | 2026-07-10 | 필드 승격 워크플로 + CODEOWNERS 하드 강제 | CLAUDE.md, .github/CODEOWNERS | 승격 규칙 명문화(①재사용 우선 ②승격은 요청 ③늦게 승격). 규칙②를 `CODEOWNERS`로 하드 강제 — `lib/shared`·하네스 설정 변경은 계약 소유자 리뷰 필수(페이지 담당 임의 수정 차단). 룰셋 "Require review from Code Owners" 켜야 동작 |
+| 2026-07-10 | 검증 실패 시 수정 루프 규칙 + required checks 강제 | CLAUDE.md, GitHub Ruleset(protect-main-develop) | CI·CodeRabbit 실패 시 green까지 수정 루프를 도는 규칙 명문화(Claude 자동 수행). 강제 근거로 CI·CodeRabbit을 룰셋 필수 상태 체크로 등록 → red 머지 불가("방치=작업 미완료") |
