@@ -4,7 +4,7 @@
 > 이번 검증 슬라이스 범위: **scan(생산) → main(소비)**. auth는 인터페이스+mock으로 대체.
 > 계약 위치: `lib/shared/`. 이 문서와 소스가 어긋나면 소스가 아니라 **양쪽을 함께** 갱신한다.
 
-작성일: 2026-07-06 · 최종 갱신: 2026-07-07 · 계약 버전: v1.3
+작성일: 2026-07-06 · 최종 갱신: 2026-07-10 · 계약 버전: v2 (share 도메인 승격)
 
 ---
 
@@ -41,6 +41,30 @@
 | `themeModeProvider` (`NotifierProvider<ThemeModeController, ThemeMode>`, 기본 `ThemeMode.light`) — **SSOT** | provider | `lib/shared/providers/theme_mode_provider.dart` | 1.3 |
 | `ThemeModeController.set(ThemeMode)` / `.setDark(bool)` / `.toggle()` | method | 〃 | 1.3 |
 | `Gifticon.price` (`int`, KRW, **required·non-nullable**) | model field | `lib/shared/models/gifticon.dart` | 1.3 |
+| `Group` / `GroupMember` | model | `lib/shared/models/group.dart` | 2 |
+| `MemberRole` (owner/member) | enum | `lib/shared/models/group.dart` | 2 |
+| `InviteExpiry` (oneHour/oneDay/sevenDays/never) | enum | `lib/shared/models/group.dart` | 2 |
+| `Group.isOwnedBy/isMember/canInvite/memberById(userId)` | predicate | 〃 | 2 |
+| `SharedGifticon` (원본 `Gifticon.id`를 `gifticonId`로 참조) | model | `lib/shared/models/share.dart` | 2 |
+| `UsageLog` / `GroupNotification` | model | `lib/shared/models/share.dart` | 2 |
+| `ShareStatus` (available/inUse/used) | enum | `lib/shared/models/share.dart` | 2 |
+| `ShareStatusTransition.isAllowed(from, to)` | 전이 규칙 | `lib/shared/models/share.dart` | 2 |
+| `GroupNotificationType` (registered/expiringSoon/used) | enum | `lib/shared/models/share.dart` | 2 |
+| `ShareRepository` | interface | `lib/shared/repositories/share_repository.dart` | 2 |
+| `ShareRepository.watchGroups(String userId)` → `Stream<List<Group>>` | method | 〃 | 2 |
+| `ShareRepository.getGroups(userId)` / `getGroupById(groupId)` | method | 〃 | 2 |
+| `ShareRepository.createGroup({name, emoji})` / `joinGroup(inviteCode)` → `Future<Group>` | method | 〃 | 2 |
+| `ShareRepository.leaveGroup(groupId)` / `deleteGroup(groupId)` → `Future<void>` | method | 〃 | 2 |
+| `ShareRepository.transferOwnershipAndLeave({groupId, newOwnerUserId})` → `Future<Group>` | method | 〃 | 2 |
+| `ShareRepository.setInviteOwnerOnly({groupId, ownerOnly})` → `Future<Group>` | method | 〃 | 2 |
+| `ShareRepository.watchSharedGifticons(groupId)` / `getSharedGifticons(groupId)` | method | 〃 | 2 |
+| `ShareRepository.shareGifticon({groupId, Gifticon gifticon})` → `Future<SharedGifticon>` | method | 〃 | 2 |
+| `ShareRepository.toggleReservation(id)` / `markUsed(id)` → `Future<SharedGifticon>` | method | 〃 | 2 |
+| `ShareRepository.cancelShare(id)` → `Future<void>` | method | 〃 | 2 |
+| `ShareRepository.watch/getUsageLogs(userId)` / `watch/getNotifications(userId)` | method | 〃 | 2 |
+| `InMemoryShareRepository` (AuthRepository·GifticonRepository 주입) | mock impl | `lib/shared/repositories/impl/in_memory_share_repository.dart` | 2 |
+| `shareRepositoryProvider` (`Provider<ShareRepository>`) — **SSOT** | provider | `lib/shared/providers/repositories.dart` | 2 |
+| `josa(word, withBatchim, withoutBatchim)` / `KoreanJosa` 확장(`eulReul`/`iGa`/`eunNeun`/`waGwa`) | util | `lib/shared/util/korean_particle.dart` | 2 |
 
 ### `Gifticon` 필드 계약
 
@@ -67,6 +91,7 @@
 | **auth** (mock) | `User` | `AuthRepository.currentUser`, `watchCurrentUser()` (→ `InMemoryAuthRepository` 제공) |
 | **scan** (생산자) | `authRepositoryProvider`→`AuthRepository.currentUser` (소유자 식별), `gifticonRepositoryProvider`, `Gifticon`, `GifticonStatus.available`, `AppRoutes.scan` | `GifticonRepository.addGifticon(Gifticon)` |
 | **main** (소비자) | `gifticonRepositoryProvider`→`watchGifticons(ownerId)`, `Gifticon`(+`price`), `SortOption`, `FilterOption`, `GifticonStatus`, `AppRoutes.main`, `Theme.of(context)`(AppTheme) | 총금액 통계 = `price` 합산, (상태 변경 시) `GifticonRepository.updateStatus(id, status)` |
+| **share** (그룹/공유) | `shareRepositoryProvider`→`ShareRepository`(그룹 CRUD·멤버·초대·공유/취소·`markUsed`·이력·알림), `Group`/`GroupMember`/`SharedGifticon`/`UsageLog`/`GroupNotification`, `ShareStatus`/`MemberRole`/`GroupNotificationType`, `authRepositoryProvider`→`currentUser`(행위자 식별), `gifticonRepositoryProvider`→`watchGifticons(uid)`(공유 후보 = `Gifticon`), `AppRoutes.share` | `SharedGifticon`/`UsageLog`/`GroupNotification`(share repo에 씀), **`GifticonRepository.updateStatus(gifticonId, GifticonStatus.used)`**(원본 사용 동기화, `markUsed` 경유) |
 | **auth/설정('마이')** | `themeModeProvider`(watch) | `ThemeModeController.setDark(bool)`/`.set(mode)` (다크 토글) |
 | **앱 조립부(main.dart)** | `themeModeProvider`(watch), `AppTheme.light`/`AppTheme.dark` | `MaterialApp.theme`/`darkTheme`/`themeMode` 배선 |
 
@@ -113,6 +138,26 @@
    - scan은 세 경로(카메라/갤러리/수동) 모두에서 반드시 채운다(미상 시 입력 강제, 무료/사은품=0).
    - main 총금액 통계 = 원천 목록의 `price` 합산(소비자 계산). 카드 가격 표시도 이 필드.
    - `price` 누락/빈 값 금지. required이므로 생성 시 반드시 인자 전달(생략 시 컴파일 에러).
+
+11. **share 경계면 (v2 승격) — 공유 사용 동기화·행위자 식별**
+   - **행위자(actor) = `AuthRepository.currentUser`.** `ShareRepository`의 변경 메서드는
+     현재 사용자를 행위자로 본다. 멤버 식별은 `GroupMember.userId == currentUser.id`
+     (프로토타입의 이름 문자열/`'me'` 하드코딩 비교를 대체). share는 auth 세션과 반드시 일치해야 한다.
+   - **`markUsed` = 유일한 원본 상태 전이 지점.** 공유 항목이 사용 완료되면
+     `GifticonRepository.updateStatus(sharedGifticon.gifticonId, GifticonStatus.used)`로 원본을
+     `available → used`로 전이한다 → main 목록/필터에 반영. **기존 `GifticonRepository` 계약을 소비**할 뿐
+     시그니처를 바꾸지 않는다. `GifticonStatus`에 'shared' 상태를 추가하지 않는다(전이표·main 스위치 보호).
+   - **`shareGifticon`/`cancelShare`는 원본 상태 불변.** 공유/회수는 원본을 available로 유지한다.
+   - **인스턴스 공유 필수.** `shareRepositoryProvider`는 `authRepositoryProvider`·
+     `gifticonRepositoryProvider`를 `watch`해 **같은 인스턴스**를 주입받는다. 갈라지면 사용 동기화가
+     main에 반영되지 않는다(#7과 동일 원인).
+   - **가드 위반 = `StateError`(예외).** `ShareRepository`는 GifticonRepository와 동일 규약으로
+     권한/상태 위반에 `StateError`를 던진다(프로토타입 스토어의 `bool` 반환과 다름). UI 버튼 게이팅은
+     예외가 아니라 모델 predicate(`Group.isOwnedBy/canInvite`, `SharedGifticon.isLockedFor`)로 판정.
+   - **`ShareStatus` ≠ `GifticonStatus`.** 전자는 그룹 내 사용 흐름(available/inUse/used), 후자는
+     원본 보관 상태(available/used/expired). 혼용 금지. 전이 검증은 각 `*Transition.isAllowed` 사용.
+   - **표시 필드는 스냅샷.** `SharedGifticon`의 brand/productName/expiryDate/barcode는 공유 시점
+     원본 스냅샷(다른 멤버는 공유자 개인 목록 조회 불가). 원본 연결은 `gifticonId`.
 
 7. **Repository provider = SSOT (경계면 결함 원인 #1)**
    - `authRepositoryProvider`·`gifticonRepositoryProvider`는 **오직**
@@ -184,8 +229,13 @@
 | v1 | 2026-07-06 | scan→main 슬라이스 초기 계약 확정 | scan, main (auth mock) |
 | v1.1 | 2026-07-06 | **경계면 결함 수정**: Repository provider를 계약 SSOT로 신설(`lib/shared/providers/repositories.dart`). scan/main이 각각 `authRepositoryProvider`/`gifticonRepositoryProvider`를 중복 선언해 서로 다른 InMemory 인스턴스를 참조 → scan 추가분이 main에 미반영되던 결함의 근본 원인 제거. 페이지는 공유 provider를 import 하고 자기 중복 선언을 삭제해야 함(scan/main 개발자 후속 처리). 크로스페이지 주의점 #7(override 조립 규칙) 추가. | scan, main, share(향후) |
 | v1.2 | 2026-07-06 | **Firebase 데이터 계층 스캐폴딩 (non-breaking)**: `pubspec.yaml`에 firebase_core/firebase_auth/cloud_firestore 추가. `AuthRepository`/`GifticonRepository` 인터페이스는 **무수정** — Firebase 구현체(`FirebaseAuthRepository`, `FirebaseGifticonRepository`)를 `impl/firebase/`에 신규 추가하고, 전환 부트스트랩(`firebase_bootstrap.dart`)과 플레이스홀더 `firebase_options.dart` 스텁을 제공. 기본 실행은 in-memory 유지(Firebase 강제 초기화 없음). `AppRoutes.share` 추가(하단 탭 셸 공유 탭). "데이터 소스 = 인터페이스 뒤 교체 가능" 절 신설. 페이지 코드 변경 불필요(계약 시그니처 불변). | (없음 — non-breaking. share 라우트만 하단 탭 셸/share 페이지가 소비) |
+| v2 | 2026-07-10 | **공유(share) 도메인 계약 승격 (non-breaking, 순수 추가).** 프로토타입(`lib/features/share/data/`)의 로컬 모델·스토어를 `lib/shared/` 정본으로 승격. (1) 모델 신설: `lib/shared/models/group.dart`(`Group`/`GroupMember`/`MemberRole`/`InviteExpiry`), `lib/shared/models/share.dart`(`SharedGifticon`/`UsageLog`/`GroupNotification`/`ShareStatus`+전이 SSOT/`GroupNotificationType`). (2) `ShareRepository` abstract + `InMemoryShareRepository`(스토어 가드 로직 이관, AuthRepository·GifticonRepository 주입) 신설. (3) `shareRepositoryProvider`(SSOT) 추가 — auth·gifticon provider를 watch해 동일 인스턴스 공유. **개선점:** 이름 문자열→`User.id` 참조, `GroupMember.id` 하드코딩→세션 기반, `MyGifticon` 폐기(원본 `Gifticon` 소비), `SharedGifticon.gifticonId`로 원본 참조, 라벨 String→DateTime, 가드 `bool`→`StateError`. **기존 계약(`Gifticon`/`User`/`GifticonRepository`/`AuthRepository`/`GifticonStatus`) 무수정 — breaking 없음.** 상세: `_workspace/02_share_contract_promotion.md`. 후속 리팩터(로컬 모델 제거→계약 소비)는 share-page-dev 담당. | share(신규 소비/생산), main(공유 `markUsed`의 원본 used 동기화를 `watchGifticons`로 수신) |
+| v2.1 | 2026-07-10 | **`korean_particle` 유틸 승격 (non-breaking, 순수 추가).** 프로토타입 `lib/features/share/data/korean_particle.dart`를 범용 유틸 `lib/shared/util/korean_particle.dart`로 승격(`josa()` + `KoreanJosa` 확장 `eulReul`/`iGa`/`eunNeun`/`waGwa`). 도메인 결합 없는 순수 언어 유틸이라 모델/Repository와 달리 `util/`에 둔다. 승격·테스트는 share-page-dev가 완료, features 3곳이 소비 중. 계약 요약 표에 항목 반영(문서 드리프트 정정). `in_memory_share_repository.dart`의 로컬 `_eulReul` 헬퍼는 공유 `KoreanJosa.eulReul`로 대체(중복 제거). | (없음 — non-breaking. 알림 문구 조립 시 어느 페이지든 소비 가능) |
 | v1.3 | 2026-07-07 | **공유 디자인 시스템(SSOT) + 가격 필드 확정.** (1) 라이트(기본·화이트)/다크 색 토큰을 `lib/shared/theme/app_colors.dart`에, `AppTheme.light`/`AppTheme.dark`(Material3)를 `lib/shared/theme/app_theme.dart`에 신설 — 페이지가 `Theme.of(context)`만 소비해도 KeepCon 틀 디자인이 나오게 함. (2) `themeModeProvider`(NotifierProvider, 기본 `ThemeMode.light`)를 `lib/shared/providers/theme_mode_provider.dart`에 신설(설정 토글·앱 조립부 소비). (3) **`Gifticon.price`(`int`, KRW, required·non-nullable) 추가** — 생성자/copyWith/==/hashCode/toString 반영. Repository 인터페이스(`AuthRepository`/`GifticonRepository`)는 **무수정**. **⚠️ Breaking(모델 생성부):** `price` required로 인해 계약 외부의 `Gifticon(...)` 생성 지점(`lib/main.dart` 시드 5건, `lib/features/scan/state/gifticon_form_state.dart:194` draft)이 컴파일 에러 → 각 담당(assembly, scan-page-dev)이 `price` 인자를 채워야 함(의도된 것). 계약 소유 파일(`firebase_gifticon_repository.dart` 매핑)은 contract-architect가 함께 갱신 완료. | main(price 통계·표시, 테마), auth/설정(테마 토글), scan(price 입력), 앱 조립부(테마 배선). scan/main/앱조립부 = **생성부 갱신 필요** |
 
 ## 후속 확장 예정(이번 슬라이스 범위 밖)
 
-`Group`, `GroupMember`, `SharedGifticon`, `UsageLog`, `ShareStatus`, `NotificationType`, `GroupRepository`, `ShareRepository`, `NotificationService`, auth/share 라우트 — 공유 페이지 검증 슬라이스에서 확정한다.
+- ✅ **승격 완료(v2):** `Group`, `GroupMember`, `SharedGifticon`, `UsageLog`, `ShareStatus`, `GroupNotification`/`GroupNotificationType`, `MemberRole`, `InviteExpiry`, `ShareRepository`(+`InMemoryShareRepository`, `shareRepositoryProvider`). → `lib/shared/models/group.dart`·`share.dart`, `lib/shared/repositories/share_repository.dart`. 상세 `02_share_contract_promotion.md`.
+  - 그룹 관리 행위(생성/삭제/나가기/소유권이전/초대정책)와 `GroupRepository`로 따로 나눌 필요 없이 **하나의 `ShareRepository`**로 통합했다(그룹과 공유가 강결합 도메인).
+- **미착수:** 기기 푸시 알림용 `NotificationService`/범용 `NotificationType`(그룹 알림은 `ShareRepository`가 충족), auth/share **세부** 라우트(그룹 상세·초대 등 페이지 내부 내비게이션 — 현재 `AppRoutes.share` 탭 라우트만 존재).
+- **후속 리팩터(share-page-dev):** `lib/features/share/data/`(로컬 `share_models.dart`·`share_store.dart`) 제거 → 계약 소비로 교체, `test/features/share/*` 재작성. 매핑은 `02_share_contract_promotion.md` D절.

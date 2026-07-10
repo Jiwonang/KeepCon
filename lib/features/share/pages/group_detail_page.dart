@@ -2,13 +2,19 @@
 ///
 /// 그룹명·방장·멤버 수 헤더 + 멤버 목록(방장 뱃지) + 그룹 공유 기프티콘 목록 +
 /// 하단 액션(멤버 초대 / 나가기 / 방장이면 그룹 삭제). 방장이 나갈 때 소유권 이전 UI.
-/// 색 하드코딩 없음. 상태 변경은 [ShareStore]에 반영된다.
+/// 색 하드코딩 없음. 상태 변경은 계약 [ShareRepository]에 반영된다.
+///
+/// UI 게이팅은 모델 predicate([Group.isOwnedBy]/[Group.canInvite])로 사전 판정하고,
+/// 저장소 호출부는 가드 위반 시 [StateError]를 던지므로 try/catch로 스낵바 처리한다(이중 방어).
 library;
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../data/share_models.dart';
-import '../data/share_store.dart';
+import '../../../shared/models/group.dart';
+import '../../../shared/models/share.dart';
+import '../../../shared/providers/repositories.dart';
+import '../state/share_providers.dart';
 import '../widgets/share_common.dart';
 import '../widgets/share_sheets.dart';
 import '../widgets/shared_gifticon_card.dart';
@@ -16,46 +22,42 @@ import 'member_invite_page.dart';
 import 'shared_gifticon_detail_page.dart';
 
 /// 그룹 상세 화면. 공유 메인의 그룹 카드에서 push 한다.
-class GroupDetailPage extends StatelessWidget {
+class GroupDetailPage extends ConsumerWidget {
   const GroupDetailPage({super.key, required this.groupId});
 
   /// 표시할 그룹 id.
   final String groupId;
 
   @override
-  Widget build(BuildContext context) {
-    final ShareStore store = ShareStore.instance;
-    return ListenableBuilder(
-      listenable: store,
-      builder: (BuildContext context, _) {
-        final Group? group = store.groupById(groupId);
-        if (group == null) {
-          // 나가기/삭제 후 그룹이 사라지면 이전 화면으로 복귀.
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (context.mounted) Navigator.of(context).maybePop();
-          });
-          return const Scaffold(body: SizedBox.shrink());
-        }
-        return _GroupDetailBody(group: group);
-      },
-    );
+  Widget build(BuildContext context, WidgetRef ref) {
+    final Group? group = ref.watch(groupByIdProvider(groupId));
+    if (group == null) {
+      // 나가기/삭제/이전 후 내 멤버십이 사라지면 이전 화면으로 복귀.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (context.mounted) Navigator.of(context).maybePop();
+      });
+      return const Scaffold(body: SizedBox.shrink());
+    }
+    return _GroupDetailBody(group: group);
   }
 }
 
-class _GroupDetailBody extends StatelessWidget {
+class _GroupDetailBody extends ConsumerWidget {
   const _GroupDetailBody({required this.group});
 
   final Group group;
 
-  bool get _iAmOwner => ShareStore.instance.isOwner(group.id);
-
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final ThemeData theme = Theme.of(context);
-    final ShareStore store = ShareStore.instance;
-    final List<SharedGifticon> shared = store.sharedOf(group.id);
+    final String? uid = ref.watch(shareCurrentUserProvider).value?.id;
+    final MemberNames names = ref.watch(memberNamesProvider);
+    final List<SharedGifticon> shared =
+        ref.watch(sharedGifticonsProvider(group.id)).value ??
+            const <SharedGifticon>[];
     // 초대 권한(방장 한정 정책 반영) — 없으면 초대 진입점을 숨긴다.
-    final bool canInvite = store.canInvite(group.id);
+    final bool canInvite = uid != null && group.canInvite(uid);
+    final bool iAmOwner = uid != null && group.isOwnedBy(uid);
 
     return Scaffold(
       appBar: AppBar(
@@ -63,11 +65,7 @@ class _GroupDetailBody extends StatelessWidget {
         actions: <Widget>[
           if (canInvite)
             IconButton(
-              onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute<void>(
-                  builder: (_) => MemberInvitePage(group: group),
-                ),
-              ),
+              onPressed: () => _openInvite(context),
               icon: const Icon(Icons.person_add_outlined),
               tooltip: '멤버 초대',
             ),
@@ -89,7 +87,7 @@ class _GroupDetailBody extends StatelessWidget {
                       Text(group.name, style: theme.textTheme.headlineSmall),
                       const SizedBox(height: 4),
                       Text(
-                        '방장 ${group.owner.name} · 멤버 ${group.memberCount}명',
+                        '방장 ${group.owner.displayName} · 멤버 ${group.memberCount}명',
                         style: theme.textTheme.bodySmall,
                       ),
                     ],
@@ -109,7 +107,10 @@ class _GroupDetailBody extends StatelessWidget {
                   for (int i = 0; i < group.members.length; i++) ...<Widget>[
                     if (i > 0)
                       const Divider(height: 1, indent: 16, endIndent: 16),
-                    _MemberTile(member: group.members[i]),
+                    _MemberTile(
+                      member: group.members[i],
+                      isMe: uid != null && group.members[i].userId == uid,
+                    ),
                   ],
                 ],
               ),
@@ -143,6 +144,8 @@ class _GroupDetailBody extends StatelessWidget {
                 if (i > 0) const SizedBox(height: 12),
                 SharedGifticonCard(
                   item: shared[i],
+                  names: names,
+                  currentUserId: uid,
                   onTap: () => Navigator.of(context).push(
                     MaterialPageRoute<void>(
                       builder: (_) =>
@@ -157,11 +160,7 @@ class _GroupDetailBody extends StatelessWidget {
             // 하단 액션.
             if (canInvite) ...<Widget>[
               OutlinedButton.icon(
-                onPressed: () => Navigator.of(context).push(
-                  MaterialPageRoute<void>(
-                    builder: (_) => MemberInvitePage(group: group),
-                  ),
-                ),
+                onPressed: () => _openInvite(context),
                 icon: const Icon(Icons.person_add_outlined),
                 label: const Text('멤버 초대'),
               ),
@@ -170,14 +169,14 @@ class _GroupDetailBody extends StatelessWidget {
             _DangerAction(
               icon: Icons.logout,
               label: '그룹 나가기',
-              onTap: () => _onLeave(context, store),
+              onTap: () => _onLeave(context, ref, uid, iAmOwner),
             ),
-            if (_iAmOwner) ...<Widget>[
+            if (iAmOwner) ...<Widget>[
               const SizedBox(height: 10),
               _DangerAction(
                 icon: Icons.delete_outline,
                 label: '그룹 삭제',
-                onTap: () => _onDelete(context, store),
+                onTap: () => _onDelete(context, ref),
               ),
             ],
           ],
@@ -186,43 +185,71 @@ class _GroupDetailBody extends StatelessWidget {
     );
   }
 
-  Future<void> _onLeave(BuildContext context, ShareStore store) async {
+  void _openInvite(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => MemberInvitePage(groupId: group.id),
+      ),
+    );
+  }
+
+  Future<void> _onLeave(
+    BuildContext context,
+    WidgetRef ref,
+    String? uid,
+    bool iAmOwner,
+  ) async {
+    final repo = ref.read(shareRepositoryProvider);
     // 방장이 나갈 땐 소유권 이전이 먼저다.
-    if (_iAmOwner && group.memberCount > 1) {
-      final GroupMember? newOwner = await _pickNewOwner(context);
-      if (newOwner == null) return;
-      final bool ok = store.transferOwnershipAndLeave(
-          groupId: group.id, newOwnerId: newOwner.id);
-      if (context.mounted) {
-        // 이전 성공 시 그룹은 남지만 내 멤버십은 사라진다 → 상세를 명시적으로 닫는다
-        // (leaveGroup/deleteGroup은 그룹 제거로 ListenableBuilder가 자동 pop).
-        if (ok) Navigator.of(context).pop();
-        _snack(context, ok ? '그룹에서 나갔어요.' : '지금은 나갈 수 없어요.');
+    if (iAmOwner && group.memberCount > 1) {
+      final GroupMember? newOwner = await _pickNewOwner(context, uid);
+      if (newOwner == null || !context.mounted) return;
+      final NavigatorState navigator = Navigator.of(context);
+      final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
+      try {
+        await repo.transferOwnershipAndLeave(
+          groupId: group.id,
+          newOwnerUserId: newOwner.userId,
+        );
+        // 이전 성공 시 그룹은 남지만 내 멤버십은 사라진다 → 상세를 명시적으로 닫는다.
+        navigator.pop();
+        _snack(messenger, '그룹에서 나갔어요.');
+      } on StateError {
+        _snack(messenger, '지금은 나갈 수 없어요.');
       }
       return;
     }
+
     final bool confirmed =
         await _confirm(context, '그룹 나가기', '"${group.name}"에서 나갈까요?');
-    if (confirmed && context.mounted) {
-      final bool ok = store.leaveGroup(group.id);
-      _snack(context, ok ? '그룹에서 나갔어요.' : '지금은 나갈 수 없어요.');
+    if (!confirmed || !context.mounted) return;
+    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
+    try {
+      await repo.leaveGroup(group.id);
+      _snack(messenger, '그룹에서 나갔어요.');
+    } on StateError {
+      _snack(messenger, '지금은 나갈 수 없어요.');
     }
   }
 
-  Future<void> _onDelete(BuildContext context, ShareStore store) async {
+  Future<void> _onDelete(BuildContext context, WidgetRef ref) async {
     final bool confirmed = await _confirm(
         context, '그룹 삭제', '"${group.name}" 그룹을 삭제할까요? 되돌릴 수 없어요.');
-    if (confirmed && context.mounted) {
-      final bool ok = store.deleteGroup(group.id);
-      _snack(context, ok ? '그룹을 삭제했어요.' : '방장만 삭제할 수 있어요.');
+    if (!confirmed || !context.mounted) return;
+    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
+    try {
+      await ref.read(shareRepositoryProvider).deleteGroup(group.id);
+      _snack(messenger, '그룹을 삭제했어요.');
+    } on StateError {
+      _snack(messenger, '방장만 삭제할 수 있어요.');
     }
   }
 
   /// 소유권 이전 대상 멤버 선택 바텀시트.
-  Future<GroupMember?> _pickNewOwner(BuildContext context) {
+  Future<GroupMember?> _pickNewOwner(BuildContext context, String? uid) {
     final List<GroupMember> candidates = <GroupMember>[
       for (final GroupMember m in group.members)
-        if (m.id != ShareStore.myId) m,
+        if (m.userId != uid) m,
     ];
     return showModalBottomSheet<GroupMember>(
       context: context,
@@ -242,8 +269,9 @@ class _GroupDetailBody extends StatelessWidget {
                 const SizedBox(height: 12),
                 for (final GroupMember m in candidates)
                   ListTile(
-                    leading: EmojiAvatar(emoji: m.emoji, size: 40),
-                    title: Text(m.name, style: theme.textTheme.titleMedium),
+                    leading: EmojiAvatar(emoji: m.avatarEmoji, size: 40),
+                    title:
+                        Text(m.displayName, style: theme.textTheme.titleMedium),
                     trailing: const Icon(Icons.chevron_right),
                     onTap: () => Navigator.of(ctx).pop(m),
                   ),
@@ -255,8 +283,8 @@ class _GroupDetailBody extends StatelessWidget {
     );
   }
 
-  void _snack(BuildContext context, String message) {
-    ScaffoldMessenger.of(context)
+  void _snack(ScaffoldMessengerState messenger, String message) {
+    messenger
       ..hideCurrentSnackBar()
       ..showSnackBar(SnackBar(content: Text(message)));
   }
@@ -283,23 +311,23 @@ class _GroupDetailBody extends StatelessWidget {
 
 /// 멤버 한 줄 타일 — 아바타 + 이름 + (방장/나) 뱃지.
 class _MemberTile extends StatelessWidget {
-  const _MemberTile({required this.member});
+  const _MemberTile({required this.member, required this.isMe});
 
   final GroupMember member;
+  final bool isMe;
 
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
-    final bool isMe = member.id == ShareStore.myId;
 
     return ListTile(
-      leading: EmojiAvatar(emoji: member.emoji, size: 40),
+      leading: EmojiAvatar(emoji: member.avatarEmoji, size: 40),
       title: Row(
         children: <Widget>[
           Flexible(
             child: Text(
-              isMe ? '${member.name} (나)' : member.name,
+              isMe ? '${member.displayName} (나)' : member.displayName,
               style: theme.textTheme.titleMedium,
               overflow: TextOverflow.ellipsis,
             ),

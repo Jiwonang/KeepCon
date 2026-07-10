@@ -1,12 +1,14 @@
 /// share 페이지 — 공유 기프티콘 카드(그룹 상세·공유 메인 공용).
 ///
+/// 계약 [SharedGifticon]을 소비한다. 표시 이름(공유자/찜)은 [SharedGifticon]이 userId만
+/// 담으므로 상위에서 [MemberNames]로 해석해 넘긴다. 잠김/사용완료 판정은 모델 predicate로.
 /// 색/라운드는 전부 `Theme.of(context)`에서 온다. 하드코딩 색 없음.
 library;
 
 import 'package:flutter/material.dart';
 
-import '../data/share_models.dart';
-import '../data/share_store.dart';
+import '../../../shared/models/share.dart';
+import '../state/share_providers.dart';
 import 'share_common.dart';
 
 /// 그룹에 공유된 기프티콘 한 개 카드. 탭하면 상세로 이동한다.
@@ -16,11 +18,19 @@ class SharedGifticonCard extends StatelessWidget {
   const SharedGifticonCard({
     super.key,
     required this.item,
+    required this.names,
+    required this.currentUserId,
     required this.onTap,
   });
 
   /// 표시할 공유 기프티콘.
   final SharedGifticon item;
+
+  /// userId→표시 이름 해석기.
+  final MemberNames names;
+
+  /// 현재 사용자 id(잠김/찜 판정 기준). 미로그인이면 null.
+  final String? currentUserId;
 
   /// 카드 탭 콜백(상세 이동).
   final VoidCallback onTap;
@@ -29,7 +39,8 @@ class SharedGifticonCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
-    final bool locked = ShareStore.instance.isLockedForMe(item);
+    final String uid = currentUserId ?? '';
+    final bool locked = item.isLockedFor(uid);
     final bool dimmed = locked || item.isUsed;
 
     return Card(
@@ -66,7 +77,7 @@ class SharedGifticonCard extends StatelessWidget {
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        item.product,
+                        item.productName,
                         style: theme.textTheme.titleMedium,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
@@ -79,7 +90,7 @@ class SharedGifticonCard extends StatelessWidget {
                           const SizedBox(width: 4),
                           Expanded(
                             child: Text(
-                              '${item.sharedByName}님이 공유',
+                              '${names.labelFor(item.sharedByUserId)}님이 공유',
                               style: theme.textTheme.bodySmall,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
@@ -87,9 +98,10 @@ class SharedGifticonCard extends StatelessWidget {
                           ),
                         ],
                       ),
-                      if (item.reservedByName != null) ...<Widget>[
+                      if (item.reservedByUserId != null) ...<Widget>[
                         const SizedBox(height: 6),
-                        ReservedBadge(name: item.reservedByName!),
+                        ReservedBadge(
+                            name: names.labelFor(item.reservedByUserId!)),
                       ],
                     ],
                   ),

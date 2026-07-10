@@ -5,7 +5,7 @@ library;
 
 import 'package:flutter/material.dart';
 
-import '../data/share_models.dart';
+import '../../../shared/models/share.dart';
 import 'share_tokens.dart';
 
 /// 이모지 아바타 원(darkSurface 강조면). 그룹/멤버 공용.

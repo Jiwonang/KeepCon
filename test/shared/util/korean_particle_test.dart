@@ -2,10 +2,12 @@
 //
 // 받침 유무에 따른 을/를·이/가·은/는·와/과 선택과, 한글이 아닌 문자로 끝나는
 // 경우(영문·숫자·기호)의 fallback(받침 없음 취급) 동작을 검증한다.
+//
+// 프로토타입(features/share)에서 lib/shared/util/로 승격됨 — import 경로도 shared로 갱신.
 
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:keepcon/features/share/data/korean_particle.dart';
+import 'package:keepcon/shared/util/korean_particle.dart';
 
 void main() {
   group('josa — 을/를', () {

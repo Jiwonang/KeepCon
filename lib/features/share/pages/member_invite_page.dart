@@ -1,33 +1,33 @@
 /// share 페이지 — 멤버 초대(전체 화면).
 ///
 /// 초대 URL + 초대코드(각 복사 버튼), 만료시간 선택(프로토타입 UI), "방장만 초대"
-/// 권한 토글. 권한 토글은 [ShareStore.setInviteOwnerOnly]로 그룹 정책에 반영되며
-/// 방장만 편집할 수 있다(그룹 상세의 초대 진입점은 [ShareStore.canInvite]로 게이팅).
-/// 색 하드코딩 없음. 실제 초대 발송/만료는 계약 이관 시 연동한다.
+/// 권한 토글. 권한 토글은 [ShareRepository.setInviteOwnerOnly]로 그룹 정책에 반영되며
+/// 방장만 편집할 수 있다(그룹 상세의 초대 진입점은 [Group.canInvite]로 게이팅).
+/// 색 하드코딩 없음. 실제 초대 발송/만료는 후속 계약에서 연동한다.
 library;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../data/korean_particle.dart';
-import '../data/share_models.dart';
-import '../data/share_store.dart';
+import '../../../shared/models/group.dart';
+import '../../../shared/providers/repositories.dart';
+import '../../../shared/util/korean_particle.dart';
+import '../state/share_providers.dart';
 
 /// 멤버 초대 화면. 그룹 상세에서 push 한다.
-class MemberInvitePage extends StatefulWidget {
-  const MemberInvitePage({super.key, required this.group});
+class MemberInvitePage extends ConsumerStatefulWidget {
+  const MemberInvitePage({super.key, required this.groupId});
 
-  /// 초대 대상 그룹.
-  final Group group;
+  /// 초대 대상 그룹 id.
+  final String groupId;
 
   @override
-  State<MemberInvitePage> createState() => _MemberInvitePageState();
+  ConsumerState<MemberInvitePage> createState() => _MemberInvitePageState();
 }
 
-class _MemberInvitePageState extends State<MemberInvitePage> {
+class _MemberInvitePageState extends ConsumerState<MemberInvitePage> {
   InviteExpiry _expiry = InviteExpiry.oneDay;
-
-  bool get _iAmOwner => ShareStore.instance.isOwner(widget.group.id);
 
   void _copy(String value, String label) {
     Clipboard.setData(ClipboardData(text: value));
@@ -36,10 +36,33 @@ class _MemberInvitePageState extends State<MemberInvitePage> {
       ..showSnackBar(SnackBar(content: Text('$label${label.eulReul} 복사했어요.')));
   }
 
+  Future<void> _setOwnerOnly(String groupId, bool value) async {
+    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
+    try {
+      await ref.read(shareRepositoryProvider).setInviteOwnerOnly(
+            groupId: groupId,
+            ownerOnly: value,
+          );
+    } on StateError {
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(const SnackBar(content: Text('방장만 이 설정을 바꿀 수 있어요.')));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
-    final Group g = widget.group;
+    final Group? g = ref.watch(groupByIdProvider(widget.groupId));
+    if (g == null) {
+      // 그룹이 사라지면(나가기/삭제) 이전 화면으로 복귀.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (context.mounted) Navigator.of(context).maybePop();
+      });
+      return const Scaffold(body: SizedBox.shrink());
+    }
+    final String? uid = ref.watch(shareCurrentUserProvider).value?.id;
+    final bool iAmOwner = uid != null && g.isOwnedBy(uid);
 
     return Scaffold(
       appBar: AppBar(title: const Text('멤버 초대')),
@@ -73,15 +96,10 @@ class _MemberInvitePageState extends State<MemberInvitePage> {
               child: SwitchListTile(
                 value: g.inviteOwnerOnly,
                 // 정책 변경은 방장만. 일반 멤버에게는 비활성(현재 정책만 표시).
-                onChanged: _iAmOwner
-                    ? (bool v) {
-                        ShareStore.instance.setInviteOwnerOnly(g.id, v);
-                        setState(() {});
-                      }
-                    : null,
+                onChanged: iAmOwner ? (bool v) => _setOwnerOnly(g.id, v) : null,
                 title: const Text('방장만 초대 가능'),
                 subtitle: Text(
-                  _iAmOwner ? '켜면 방장 외 멤버는 초대할 수 없어요.' : '방장만 이 설정을 바꿀 수 있어요.',
+                  iAmOwner ? '켜면 방장 외 멤버는 초대할 수 없어요.' : '방장만 이 설정을 바꿀 수 있어요.',
                   style: theme.textTheme.bodySmall,
                 ),
               ),
