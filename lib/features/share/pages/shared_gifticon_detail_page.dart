@@ -93,12 +93,15 @@ class _DetailBody extends ConsumerWidget {
             ),
             const SizedBox(height: 8),
             Text(
-                '${names.labelFor(item.sharedByUserId)}님이 공유 · '
+                '${names.isMe(item.sharedByUserId) ? '내가' : '${names.labelFor(item.sharedByUserId)}님이'} 공유 · '
                 '유효기간 ${formatExpiryLabel(item.expiryDate)}',
                 style: theme.textTheme.bodySmall),
             if (item.reservedByUserId != null) ...<Widget>[
               const SizedBox(height: 10),
-              ReservedBadge(name: names.labelFor(item.reservedByUserId!)),
+              ReservedBadge(
+                name: names.labelFor(item.reservedByUserId!),
+                isMe: names.isMe(item.reservedByUserId!),
+              ),
             ],
             const SizedBox(height: 20),
 

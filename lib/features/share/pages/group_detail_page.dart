@@ -30,15 +30,25 @@ class GroupDetailPage extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final Group? group = ref.watch(groupByIdProvider(groupId));
-    if (group == null) {
-      // 나가기/삭제/이전 후 내 멤버십이 사라지면 이전 화면으로 복귀.
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (context.mounted) Navigator.of(context).maybePop();
-      });
-      return const Scaffold(body: SizedBox.shrink());
-    }
-    return _GroupDetailBody(group: group);
+    return ref.watch(groupByIdProvider(groupId)).when(
+          // 세션/그룹 로딩 중엔 pop 하지 않고 대기(스피너).
+          loading: () => const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          ),
+          error: (Object e, StackTrace _) => const Scaffold(
+            body: Center(child: Text('그룹을 불러오지 못했어요.')),
+          ),
+          data: (Group? group) {
+            if (group == null) {
+              // 로딩이 끝났는데도 그룹이 없다 = 나가기/삭제/이전으로 멤버십 소멸 → 복귀.
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (context.mounted) Navigator.of(context).maybePop();
+              });
+              return const Scaffold(body: SizedBox.shrink());
+            }
+            return _GroupDetailBody(group: group);
+          },
+        );
   }
 }
 

@@ -290,8 +290,8 @@ class _UsageLogTile extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
-    final Group? group = ref.watch(groupByIdProvider(log.groupId));
-    final String groupName = group?.name ?? '그룹';
+    final String groupName =
+        ref.watch(groupByIdProvider(log.groupId)).value?.name ?? '그룹';
 
     return ListTile(
       leading: CircleAvatar(

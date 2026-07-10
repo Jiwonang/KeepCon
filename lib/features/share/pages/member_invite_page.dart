@@ -52,15 +52,31 @@ class _MemberInvitePageState extends ConsumerState<MemberInvitePage> {
 
   @override
   Widget build(BuildContext context) {
+    return ref.watch(groupByIdProvider(widget.groupId)).when(
+          // 세션/그룹 로딩 중엔 pop 하지 않고 대기(스피너).
+          loading: () => Scaffold(
+            appBar: AppBar(title: const Text('멤버 초대')),
+            body: const Center(child: CircularProgressIndicator()),
+          ),
+          error: (Object e, StackTrace _) => Scaffold(
+            appBar: AppBar(title: const Text('멤버 초대')),
+            body: const Center(child: Text('그룹을 불러오지 못했어요.')),
+          ),
+          data: (Group? g) {
+            if (g == null) {
+              // 로딩이 끝났는데도 그룹이 없다 = 나가기/삭제로 소멸 → 복귀.
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (context.mounted) Navigator.of(context).maybePop();
+              });
+              return const Scaffold(body: SizedBox.shrink());
+            }
+            return _buildContent(context, g);
+          },
+        );
+  }
+
+  Widget _buildContent(BuildContext context, Group g) {
     final ThemeData theme = Theme.of(context);
-    final Group? g = ref.watch(groupByIdProvider(widget.groupId));
-    if (g == null) {
-      // 그룹이 사라지면(나가기/삭제) 이전 화면으로 복귀.
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (context.mounted) Navigator.of(context).maybePop();
-      });
-      return const Scaffold(body: SizedBox.shrink());
-    }
     final String? uid = ref.watch(shareCurrentUserProvider).value?.id;
     final bool iAmOwner = uid != null && g.isOwnedBy(uid);
 

@@ -26,21 +26,37 @@ final shareCurrentUserProvider = StreamProvider<User?>((ref) {
   return ref.watch(authRepositoryProvider).watchCurrentUser();
 });
 
-/// 내가 멤버로 속한 그룹 목록. 미로그인이면 빈 목록.
-final myGroupsProvider = StreamProvider<List<Group>>((ref) {
-  final User? user = ref.watch(shareCurrentUserProvider).value;
-  if (user == null) return Stream<List<Group>>.value(const <Group>[]);
-  return ref.watch(shareRepositoryProvider).watchGroups(user.id);
+/// 특정 사용자의 그룹 스트림(내부용 — 확정된 userId로만 구독).
+final _groupsByUserProvider =
+    StreamProvider.family<List<Group>, String>((ref, userId) {
+  return ref.watch(shareRepositoryProvider).watchGroups(userId);
 });
 
-/// id로 내 그룹 단건 조회(없으면 null — 나가기/삭제/이전으로 멤버십이 사라진 경우 포함).
-final groupByIdProvider = Provider.family<Group?, String>((ref, groupId) {
-  final List<Group> groups =
-      ref.watch(myGroupsProvider).value ?? const <Group>[];
-  for (final Group g in groups) {
-    if (g.id == groupId) return g;
-  }
-  return null;
+/// 내가 멤버로 속한 그룹 목록.
+///
+/// 세션이 **로딩 중이면 로딩을 그대로 전파**하고(빈 목록으로 접지 않음), data(null)
+/// (미로그인)일 때만 빈 목록을 낸다. 소비자가 로딩과 "멤버십 사라짐"을 구분할 수 있게 한다.
+final myGroupsProvider = Provider<AsyncValue<List<Group>>>((ref) {
+  return ref.watch(shareCurrentUserProvider).when(
+        data: (User? user) => user == null
+            ? const AsyncData<List<Group>>(<Group>[])
+            : ref.watch(_groupsByUserProvider(user.id)),
+        loading: () => const AsyncLoading<List<Group>>(),
+        error: (Object e, StackTrace st) => AsyncError<List<Group>>(e, st),
+      );
+});
+
+/// id로 내 그룹 단건 조회. 로딩은 로딩으로 전파하고, data(null)은 "그룹 없음"
+/// (나가기/삭제/이전으로 멤버십이 사라진 경우 포함)을 뜻한다. 소비 페이지는 로딩과
+/// 데이터-null을 구분해 로딩 중엔 pop 하지 않는다.
+final groupByIdProvider =
+    Provider.family<AsyncValue<Group?>, String>((ref, groupId) {
+  return ref.watch(myGroupsProvider).whenData((List<Group> groups) {
+    for (final Group g in groups) {
+      if (g.id == groupId) return g;
+    }
+    return null;
+  });
 });
 
 /// 특정 그룹의 공유 기프티콘 스트림.
@@ -82,32 +98,63 @@ final sharedItemByIdProvider =
   return null;
 });
 
-/// 내가 속한 그룹들의 사용 이력(최신순).
-final usageLogsProvider = StreamProvider<List<UsageLog>>((ref) {
-  final User? user = ref.watch(shareCurrentUserProvider).value;
-  if (user == null) return Stream<List<UsageLog>>.value(const <UsageLog>[]);
-  return ref.watch(shareRepositoryProvider).watchUsageLogs(user.id);
+/// 특정 사용자의 사용 이력 스트림(내부용).
+final _usageLogsByUserProvider =
+    StreamProvider.family<List<UsageLog>, String>((ref, userId) {
+  return ref.watch(shareRepositoryProvider).watchUsageLogs(userId);
 });
 
-/// 내가 속한 그룹들의 알림(최신순).
-final notificationsProvider = StreamProvider<List<GroupNotification>>((ref) {
-  final User? user = ref.watch(shareCurrentUserProvider).value;
-  if (user == null) {
-    return Stream<List<GroupNotification>>.value(const <GroupNotification>[]);
-  }
-  return ref.watch(shareRepositoryProvider).watchNotifications(user.id);
+/// 내가 속한 그룹들의 사용 이력(최신순). 로딩은 로딩으로 전파, data(null)만 빈 목록.
+final usageLogsProvider = Provider<AsyncValue<List<UsageLog>>>((ref) {
+  return ref.watch(shareCurrentUserProvider).when(
+        data: (User? user) => user == null
+            ? const AsyncData<List<UsageLog>>(<UsageLog>[])
+            : ref.watch(_usageLogsByUserProvider(user.id)),
+        loading: () => const AsyncLoading<List<UsageLog>>(),
+        error: (Object e, StackTrace st) => AsyncError<List<UsageLog>>(e, st),
+      );
+});
+
+/// 특정 사용자의 알림 스트림(내부용).
+final _notificationsByUserProvider =
+    StreamProvider.family<List<GroupNotification>, String>((ref, userId) {
+  return ref.watch(shareRepositoryProvider).watchNotifications(userId);
+});
+
+/// 내가 속한 그룹들의 알림(최신순). 로딩은 로딩으로 전파, data(null)만 빈 목록.
+final notificationsProvider =
+    Provider<AsyncValue<List<GroupNotification>>>((ref) {
+  return ref.watch(shareCurrentUserProvider).when(
+        data: (User? user) => user == null
+            ? const AsyncData<List<GroupNotification>>(<GroupNotification>[])
+            : ref.watch(_notificationsByUserProvider(user.id)),
+        loading: () => const AsyncLoading<List<GroupNotification>>(),
+        error: (Object e, StackTrace st) =>
+            AsyncError<List<GroupNotification>>(e, st),
+      );
+});
+
+/// 특정 사용자의 원본 기프티콘 스트림(내부용).
+final _gifticonsByUserProvider =
+    StreamProvider.family<List<Gifticon>, String>((ref, userId) {
+  return ref.watch(gifticonRepositoryProvider).watchGifticons(userId);
 });
 
 /// 내 원본 기프티콘 목록(원본 [Gifticon]을 그대로 소비).
-final shareableGifticonsProvider = StreamProvider<List<Gifticon>>((ref) {
-  final User? user = ref.watch(shareCurrentUserProvider).value;
-  if (user == null) return Stream<List<Gifticon>>.value(const <Gifticon>[]);
-  return ref.watch(gifticonRepositoryProvider).watchGifticons(user.id);
+/// 로딩은 로딩으로 전파, data(null)(미로그인)만 빈 목록.
+final shareableGifticonsProvider = Provider<AsyncValue<List<Gifticon>>>((ref) {
+  return ref.watch(shareCurrentUserProvider).when(
+        data: (User? user) => user == null
+            ? const AsyncData<List<Gifticon>>(<Gifticon>[])
+            : ref.watch(_gifticonsByUserProvider(user.id)),
+        loading: () => const AsyncLoading<List<Gifticon>>(),
+        error: (Object e, StackTrace st) => AsyncError<List<Gifticon>>(e, st),
+      );
 });
 
 /// 공유 시트 후보 = 아직 **내 어느 그룹에도** 공유하지 않은 사용 가능한 내 기프티콘.
 ///
-/// [shareableGifticonsProvider](내 원본 기프티콘) 중 [ShareStatus.available]이고,
+/// [shareableGifticonsProvider](내 원본 기프티콘) 중 [GifticonStatus.available]이고,
 /// [allSharedProvider](내 전 그룹의 공유 항목) 집합의 [SharedGifticon.gifticonId]에 없는 것만
 /// 남긴다. 이미 다른 그룹에 공유된 기프티콘을 후보에서 아예 제외해 이중 공유(이중 사용)를
 /// 사전 차단하는 UX 방어선이다(저장소의 [StateError] 가드와 이중 방어).

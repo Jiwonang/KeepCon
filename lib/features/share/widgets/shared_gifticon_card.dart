@@ -90,7 +90,9 @@ class SharedGifticonCard extends StatelessWidget {
                           const SizedBox(width: 4),
                           Expanded(
                             child: Text(
-                              '${names.labelFor(item.sharedByUserId)}님이 공유',
+                              names.isMe(item.sharedByUserId)
+                                  ? '내가 공유'
+                                  : '${names.labelFor(item.sharedByUserId)}님이 공유',
                               style: theme.textTheme.bodySmall,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
@@ -101,7 +103,9 @@ class SharedGifticonCard extends StatelessWidget {
                       if (item.reservedByUserId != null) ...<Widget>[
                         const SizedBox(height: 6),
                         ReservedBadge(
-                            name: names.labelFor(item.reservedByUserId!)),
+                          name: names.labelFor(item.reservedByUserId!),
+                          isMe: names.isMe(item.reservedByUserId!),
+                        ),
                       ],
                     ],
                   ),

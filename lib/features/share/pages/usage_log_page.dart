@@ -61,7 +61,7 @@ class _LogRow extends ConsumerWidget {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
     final String groupName =
-        ref.watch(groupByIdProvider(log.groupId))?.name ?? '그룹';
+        ref.watch(groupByIdProvider(log.groupId)).value?.name ?? '그룹';
 
     return IntrinsicHeight(
       child: Row(
