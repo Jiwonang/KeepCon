@@ -1,15 +1,19 @@
 /// share 페이지 — 짧은 입력용 바텀시트 모음.
 ///
 /// 그룹 생성 / 그룹 참여 / 기프티콘 공유처럼 입력이 짧은 흐름은 전체 화면 push 대신
-/// [showModalBottomSheet]로 처리한다. 색/라운드는 전부 `Theme.of(context)`에서 온다.
+/// [showModalBottomSheet]로 처리한다. 상태는 계약 [ShareRepository]에 반영된다
+/// (SSOT [shareRepositoryProvider] 소비). 색/라운드는 전부 `Theme.of(context)`에서 온다.
 library;
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../data/korean_particle.dart';
-import '../data/share_models.dart';
-import '../data/share_store.dart';
+import '../../../shared/models/gifticon.dart';
+import '../../../shared/providers/repositories.dart';
+import '../../../shared/util/korean_particle.dart';
+import '../state/share_providers.dart';
 import 'share_common.dart';
+import 'share_format.dart';
 
 /// 바텀시트 공통 컨테이너 — 키보드 인셋·핸들·패딩을 통일한다.
 class _SheetScaffold extends StatelessWidget {
@@ -53,7 +57,7 @@ class _SheetScaffold extends StatelessWidget {
   }
 }
 
-/// 그룹 생성 바텀시트 — 그룹명 + 이모지 선택. 생성 시 [ShareStore]에 반영한다.
+/// 그룹 생성 바텀시트 — 그룹명 + 이모지 선택. 생성 시 [ShareRepository]에 반영한다.
 Future<void> showCreateGroupSheet(BuildContext context) {
   return showModalBottomSheet<void>(
     context: context,
@@ -63,14 +67,14 @@ Future<void> showCreateGroupSheet(BuildContext context) {
   );
 }
 
-class _CreateGroupSheet extends StatefulWidget {
+class _CreateGroupSheet extends ConsumerStatefulWidget {
   const _CreateGroupSheet();
 
   @override
-  State<_CreateGroupSheet> createState() => _CreateGroupSheetState();
+  ConsumerState<_CreateGroupSheet> createState() => _CreateGroupSheetState();
 }
 
-class _CreateGroupSheetState extends State<_CreateGroupSheet> {
+class _CreateGroupSheetState extends ConsumerState<_CreateGroupSheet> {
   static const List<String> _emojis = <String>[
     '🏠',
     '👥',
@@ -90,14 +94,24 @@ class _CreateGroupSheetState extends State<_CreateGroupSheet> {
     super.dispose();
   }
 
-  void _submit() {
+  Future<void> _submit() async {
     final String name = _nameCtrl.text.trim();
     if (name.isEmpty) return;
-    ShareStore.instance.createGroup(name: name, emoji: _emoji);
-    Navigator.of(context).pop();
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(content: Text('"$name" 그룹을 만들었어요.')));
+    final NavigatorState navigator = Navigator.of(context);
+    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
+    try {
+      await ref
+          .read(shareRepositoryProvider)
+          .createGroup(name: name, emoji: _emoji);
+      navigator.pop();
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text('"$name" 그룹을 만들었어요.')));
+    } on StateError {
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(const SnackBar(content: Text('지금은 그룹을 만들 수 없어요.')));
+    }
   }
 
   @override
@@ -154,7 +168,7 @@ class _CreateGroupSheetState extends State<_CreateGroupSheet> {
   }
 }
 
-/// 그룹 참여 바텀시트 — 초대코드 입력. 참여 시 [ShareStore]에 반영한다.
+/// 그룹 참여 바텀시트 — 초대코드 입력. 참여 시 [ShareRepository]에 반영한다.
 Future<void> showJoinGroupSheet(BuildContext context) {
   return showModalBottomSheet<void>(
     context: context,
@@ -163,14 +177,14 @@ Future<void> showJoinGroupSheet(BuildContext context) {
   );
 }
 
-class _JoinGroupSheet extends StatefulWidget {
+class _JoinGroupSheet extends ConsumerStatefulWidget {
   const _JoinGroupSheet();
 
   @override
-  State<_JoinGroupSheet> createState() => _JoinGroupSheetState();
+  ConsumerState<_JoinGroupSheet> createState() => _JoinGroupSheetState();
 }
 
-class _JoinGroupSheetState extends State<_JoinGroupSheet> {
+class _JoinGroupSheetState extends ConsumerState<_JoinGroupSheet> {
   final TextEditingController _codeCtrl = TextEditingController();
 
   @override
@@ -179,14 +193,22 @@ class _JoinGroupSheetState extends State<_JoinGroupSheet> {
     super.dispose();
   }
 
-  void _submit() {
+  Future<void> _submit() async {
     final String code = _codeCtrl.text.trim();
     if (code.isEmpty) return;
-    ShareStore.instance.joinGroup(code);
-    Navigator.of(context).pop();
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(const SnackBar(content: Text('그룹에 참여했어요.')));
+    final NavigatorState navigator = Navigator.of(context);
+    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
+    try {
+      await ref.read(shareRepositoryProvider).joinGroup(code);
+      navigator.pop();
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(const SnackBar(content: Text('그룹에 참여했어요.')));
+    } on StateError {
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(const SnackBar(content: Text('지금은 참여할 수 없어요.')));
+    }
   }
 
   @override
@@ -224,19 +246,22 @@ Future<void> showShareGifticonSheet(BuildContext context, String groupId) {
   );
 }
 
-class _ShareGifticonSheet extends StatelessWidget {
+class _ShareGifticonSheet extends ConsumerWidget {
   const _ShareGifticonSheet({required this.groupId});
 
   final String groupId;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final ThemeData theme = Theme.of(context);
-    final List<MyGifticon> mine = ShareStore.instance.myGifticons;
+
+    // 공유 후보 = 사용 가능하고 아직 내 어느 그룹에도 공유하지 않은 내 기프티콘.
+    // (이미 다른 그룹에 공유된 것도 제외 → 이중 공유/이중 사용 사전 차단.)
+    final List<Gifticon> candidates = ref.watch(unsharedGifticonsProvider);
 
     return _SheetScaffold(
       title: '기프티콘 공유',
-      child: mine.isEmpty
+      child: candidates.isEmpty
           ? Padding(
               padding: const EdgeInsets.symmetric(vertical: 24),
               child: Center(
@@ -249,7 +274,6 @@ class _ShareGifticonSheet extends StatelessWidget {
           : Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: <Widget>[
-                // ★ TODO(contract): 내 기프티콘 목록은 GifticonRepository에서 온다(현재 하드코딩).
                 Text('내 기프티콘에서 선택', style: theme.textTheme.bodySmall),
                 const SizedBox(height: 8),
                 ConstrainedBox(
@@ -258,28 +282,20 @@ class _ShareGifticonSheet extends StatelessWidget {
                   ),
                   child: ListView.separated(
                     shrinkWrap: true,
-                    itemCount: mine.length,
+                    itemCount: candidates.length,
                     separatorBuilder: (_, __) => const SizedBox(height: 8),
                     itemBuilder: (BuildContext ctx, int i) {
-                      final MyGifticon g = mine[i];
+                      final Gifticon g = candidates[i];
                       return Card(
                         child: ListTile(
                           leading: const EmojiAvatar(emoji: '🎁', size: 40),
-                          title: Text(g.product,
+                          title: Text(g.productName,
                               style: theme.textTheme.titleMedium),
-                          subtitle: Text('${g.brand} · ${g.expiryLabel}',
+                          subtitle: Text(
+                              '${g.brand} · ${formatExpiryLabel(g.expiryDate)}',
                               style: theme.textTheme.bodySmall),
                           trailing: const Icon(Icons.add_circle_outline),
-                          onTap: () {
-                            ShareStore.instance
-                                .shareGifticon(groupId: groupId, g: g);
-                            Navigator.of(context).pop();
-                            ScaffoldMessenger.of(context)
-                              ..hideCurrentSnackBar()
-                              ..showSnackBar(SnackBar(
-                                  content: Text(
-                                      '${g.product}${g.product.eulReul} 공유했어요.')));
-                          },
+                          onTap: () => _share(context, ref, g),
                         ),
                       );
                     },
@@ -288,5 +304,24 @@ class _ShareGifticonSheet extends StatelessWidget {
               ],
             ),
     );
+  }
+
+  Future<void> _share(BuildContext context, WidgetRef ref, Gifticon g) async {
+    final NavigatorState navigator = Navigator.of(context);
+    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
+    try {
+      await ref
+          .read(shareRepositoryProvider)
+          .shareGifticon(groupId: groupId, gifticon: g);
+      navigator.pop();
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(
+            content: Text('${g.productName}${g.productName.eulReul} 공유했어요.')));
+    } on StateError {
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(const SnackBar(content: Text('지금은 공유할 수 없어요.')));
+    }
   }
 }

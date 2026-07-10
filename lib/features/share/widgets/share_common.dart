@@ -5,7 +5,7 @@ library;
 
 import 'package:flutter/material.dart';
 
-import '../data/share_models.dart';
+import '../../../shared/models/share.dart';
 import 'share_tokens.dart';
 
 /// 이모지 아바타 원(darkSurface 강조면). 그룹/멤버 공용.
@@ -99,12 +99,15 @@ class ShareStatusBadge extends StatelessWidget {
   }
 }
 
-/// 찜(사용 예정) 뱃지 — "OO님 찜".
+/// 찜(사용 예정) 뱃지 — 본인은 "내가 찜", 타인은 "OO님 찜".
 class ReservedBadge extends StatelessWidget {
-  const ReservedBadge({super.key, required this.name});
+  const ReservedBadge({super.key, required this.name, this.isMe = false});
 
-  /// 찜한 사람 이름.
+  /// 찜한 사람 표시 이름(타인일 때 사용).
   final String name;
+
+  /// 찜한 주체가 현재 사용자(나)인지 — 참이면 "내가 찜"으로 표시(어색한 "나님 찜" 방지).
+  final bool isMe;
 
   @override
   Widget build(BuildContext context) {
@@ -121,7 +124,7 @@ class ReservedBadge extends StatelessWidget {
           Icon(Icons.bookmark, size: 12, color: scheme.secondary),
           const SizedBox(width: 3),
           Text(
-            '$name님 찜',
+            isMe ? '내가 찜' : '$name님 찜',
             style: TextStyle(
               color: scheme.secondary,
               fontSize: 11,

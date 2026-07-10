@@ -58,6 +58,8 @@ import '../repositories/auth_repository.dart';
 import '../repositories/gifticon_repository.dart';
 import '../repositories/impl/in_memory_auth_repository.dart';
 import '../repositories/impl/in_memory_gifticon_repository.dart';
+import '../repositories/impl/in_memory_share_repository.dart';
+import '../repositories/share_repository.dart';
 
 /// 현재 사용자 세션을 제공하는 [AuthRepository]. **SSOT provider.**
 ///
@@ -84,6 +86,32 @@ final Provider<AuthRepository> authRepositoryProvider =
 final Provider<GifticonRepository> gifticonRepositoryProvider =
     Provider<GifticonRepository>((ref) {
   final InMemoryGifticonRepository repo = InMemoryGifticonRepository();
+  ref.onDispose(repo.dispose);
+  return repo;
+});
+
+/// 그룹/공유 도메인을 제공하는 [ShareRepository]. **SSOT provider.**
+///
+/// share 페이지는 이 provider를 통해 그룹 관리·멤버·공유/취소·사용 동기화·알림을 소비한다.
+///
+/// ## 경계면 배선 (반드시 같은 인스턴스 공유)
+/// 이 provider는 [authRepositoryProvider]와 [gifticonRepositoryProvider]를 `watch`해
+/// **같은 세션·같은 기프티콘 저장소 인스턴스**를 주입받는다. 그래야
+/// - 행위자(멤버) 식별이 auth 세션과 일치하고(share ↔ auth),
+/// - [ShareRepository.markUsed]의 원본 상태 동기화가 main이 보는 것과 **동일한**
+///   [GifticonRepository]에 반영된다(share ↔ main).
+///
+/// 실제 앱 조립부에서 auth/gifticon provider를 override 하면, 이 provider는 자동으로
+/// 그 override된 인스턴스를 주입받는다(별도 override 불필요). 인스턴스가 갈라지면
+/// 공유 사용 동기화가 main에 반영되지 않으므로, 반드시 이 배선을 유지한다.
+final Provider<ShareRepository> shareRepositoryProvider =
+    Provider<ShareRepository>((ref) {
+  final AuthRepository auth = ref.watch(authRepositoryProvider);
+  final GifticonRepository gifticons = ref.watch(gifticonRepositoryProvider);
+  final InMemoryShareRepository repo = InMemoryShareRepository(
+    authRepository: auth,
+    gifticonRepository: gifticons,
+  );
   ref.onDispose(repo.dispose);
   return repo;
 });
