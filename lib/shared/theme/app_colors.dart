@@ -19,7 +19,7 @@ import 'package:flutter/material.dart';
 /// [AppColorsLight]/[AppColorsDark]에 둔다.
 abstract final class AppColorsCommon {
   /// 경고/만료 임박(빨강). **라이트/다크 공통 유지** — 정본 규약.
-  static const Color danger = Color(0xFFFF3B30);
+  static const Color danger = Color(0xFFEF4444);
 
   /// primary(brand) 위 텍스트/아이콘 (라이트·다크 공통 화이트).
   static const Color onPrimary = Color(0xFFFFFFFF);
@@ -42,11 +42,11 @@ abstract final class AppColorsLight {
   /// 보조 텍스트(라벨·날짜, 뮤트 그레이).
   static const Color muted = Color(0xFF9A9AA0);
 
-  /// primary(brand) — 민트그린. 정렬·시계·확인 pill·홈 아이콘·강조.
-  static const Color brand = Color(0xFF1FCB8B);
+  /// primary(brand) — KeepCon 그린. 정렬·시계·확인 pill·홈 아이콘·강조.
+  static const Color brand = Color(0xFF24BE72);
 
   /// 다크 서피스 — 알림 배너 배경·FAB(+)·아바타 원(라이트에서도 어두운 강조면).
-  static const Color darkSurface = Color(0xFF16161A);
+  static const Color darkSurface = Color(0xFF141414);
 
   /// 카드 배경(화이트 + 소프트 섀도는 테마의 elevation/shadowColor로).
   static const Color card = Color(0xFFFFFFFF);
@@ -72,8 +72,8 @@ abstract final class AppColorsDark {
   /// 보조 텍스트(뮤트 — 다크에서 대비 유지 위해 라이트와 동일 톤 사용).
   static const Color muted = Color(0xFF9A9AA0);
 
-  /// primary(brand) — 다크에서 살짝 밝은 민트그린.
-  static const Color brand = Color(0xFF22D89A);
+  /// primary(brand) — 다크에서 살짝 밝은 KeepCon 그린.
+  static const Color brand = Color(0xFF2AD98A);
 
   /// 다크 서피스 — 다크 모드에선 카드보다 더 어두운 강조면(FAB/배너/아바타).
   static const Color darkSurface = Color(0xFF0E0E12);
