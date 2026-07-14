@@ -19,7 +19,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../shared/routes.dart';
-import '../../shared/theme/app_colors.dart';
+import '../../shared/theme/theme_tokens.dart';
 import 'state/gifticon_form_state.dart';
 import 'widgets/gifticon_form.dart';
 import 'widgets/scan_tokens.dart';
@@ -125,22 +125,13 @@ class _ScanHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
-    // 아바타 원은 홈과 동일하게 darkSurface(어두운 강조면) 토큰을 소비 —
-    // scheme.onSurface는 다크 모드에서 밝은색이라 원이 뒤집힌다.
-    final Color darkSurface = theme.brightness == Brightness.dark
-        ? AppColorsDark.darkSurface
-        : AppColorsLight.darkSurface;
 
     return Row(
       children: [
         Expanded(
           child: Text(
             '기프티콘 추가',
-            style: theme.textTheme.headlineSmall?.copyWith(
-              fontSize: 26,
-              fontWeight: FontWeight.w900,
-              letterSpacing: -0.5,
-            ),
+            style: context.pageHeaderStyle,
           ),
         ),
         // 알림 벨 + 초록 뱃지 점.
@@ -174,13 +165,13 @@ class _ScanHeader extends StatelessWidget {
           height: 42,
           alignment: Alignment.center,
           decoration: BoxDecoration(
-            color: darkSurface,
+            color: context.darkSurface,
             shape: BoxShape.circle,
           ),
-          child: const Text(
+          child: Text(
             'K',
             style: TextStyle(
-              color: AppColorsCommon.onDark,
+              color: context.onDarkSurface,
               fontWeight: FontWeight.w700,
               fontSize: 18,
             ),
@@ -216,24 +207,13 @@ class _SourceCard extends StatelessWidget {
 
     return Material(
       color: scheme.surface,
-      borderRadius: BorderRadius.circular(18),
+      borderRadius: BorderRadius.circular(AppRadii.card),
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(AppRadii.card),
         child: Ink(
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 22),
-          decoration: BoxDecoration(
-            color: scheme.surface,
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: scheme.outline.withValues(alpha: 0.18)),
-            boxShadow: [
-              BoxShadow(
-                color: scheme.onSurface.withValues(alpha: 0.04),
-                blurRadius: 10,
-                offset: const Offset(0, 2),
-              ),
-            ],
-          ),
+          decoration: AppDecorations.softCard(scheme),
           child: Row(
             children: [
               // 액센트 아이콘 타일.
@@ -340,17 +320,12 @@ class _GroupSelectorState extends State<_GroupSelector> {
 
   @override
   Widget build(BuildContext context) {
-    final ThemeData theme = Theme.of(context);
-
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
           '저장할 그룹 선택',
-          style: theme.textTheme.titleLarge?.copyWith(
-            fontSize: 18,
-            fontWeight: FontWeight.w800,
-          ),
+          style: context.sectionTitleStyle,
         ),
         const SizedBox(height: 14),
         Row(
