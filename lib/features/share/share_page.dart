@@ -19,6 +19,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../shared/models/group.dart';
 import '../../shared/models/share.dart';
 import '../../shared/models/user.dart';
+import '../../shared/theme/theme_tokens.dart';
 import 'pages/group_detail_page.dart';
 import 'pages/group_notifications_page.dart';
 import 'pages/shared_gifticon_detail_page.dart';
@@ -154,19 +155,14 @@ class _ShareHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final ThemeData theme = Theme.of(context);
-    final ColorScheme scheme = theme.colorScheme;
+    final ColorScheme scheme = Theme.of(context).colorScheme;
 
     return Row(
       children: <Widget>[
         Expanded(
           child: Text(
             '공유',
-            style: theme.textTheme.headlineSmall?.copyWith(
-              fontSize: 26,
-              fontWeight: FontWeight.w900,
-              letterSpacing: -0.5,
-            ),
+            style: context.pageHeaderStyle,
           ),
         ),
         // 알림 벨 + 초록 뱃지 점 → 그룹 알림.
@@ -219,10 +215,7 @@ class _SectionHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     return Text(
       title,
-      style: Theme.of(context).textTheme.titleLarge?.copyWith(
-            fontSize: 18,
-            fontWeight: FontWeight.w800,
-          ),
+      style: context.sectionTitleStyle,
     );
   }
 }
@@ -270,23 +263,12 @@ class _GroupCard extends ConsumerWidget {
 
     return Material(
       color: scheme.surface,
-      borderRadius: BorderRadius.circular(18),
+      borderRadius: BorderRadius.circular(AppRadii.card),
       child: InkWell(
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(AppRadii.card),
         onTap: onTap,
         child: Ink(
-          decoration: BoxDecoration(
-            color: scheme.surface,
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: scheme.outline.withValues(alpha: 0.18)),
-            boxShadow: <BoxShadow>[
-              BoxShadow(
-                color: scheme.onSurface.withValues(alpha: 0.04),
-                blurRadius: 10,
-                offset: const Offset(0, 2),
-              ),
-            ],
-          ),
+          decoration: AppDecorations.softCard(scheme),
           child: Padding(
             padding: const EdgeInsets.all(16),
             child: Row(
