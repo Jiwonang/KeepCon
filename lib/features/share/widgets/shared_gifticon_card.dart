@@ -10,6 +10,7 @@ import 'package:flutter/material.dart';
 
 import '../../../shared/models/share.dart';
 import '../../../shared/theme/brand_palette.dart';
+import '../../../shared/theme/theme_tokens.dart';
 import '../state/share_providers.dart';
 import 'share_common.dart';
 
@@ -48,23 +49,12 @@ class SharedGifticonCard extends StatelessWidget {
 
     return Material(
       color: scheme.surface,
-      borderRadius: BorderRadius.circular(18),
+      borderRadius: BorderRadius.circular(AppRadii.card),
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(AppRadii.card),
         child: Ink(
-          decoration: BoxDecoration(
-            color: scheme.surface,
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: scheme.outline.withValues(alpha: 0.18)),
-            boxShadow: <BoxShadow>[
-              BoxShadow(
-                color: scheme.onSurface.withValues(alpha: 0.04),
-                blurRadius: 10,
-                offset: const Offset(0, 2),
-              ),
-            ],
-          ),
+          decoration: AppDecorations.softCard(scheme),
           child: Opacity(
             opacity: dimmed ? 0.55 : 1,
             child: Padding(
@@ -78,7 +68,7 @@ class SharedGifticonCard extends StatelessWidget {
                     alignment: Alignment.center,
                     decoration: BoxDecoration(
                       color: brand.background,
-                      borderRadius: BorderRadius.circular(14),
+                      borderRadius: BorderRadius.circular(AppRadii.tile),
                     ),
                     child: Text(
                       brand.label,

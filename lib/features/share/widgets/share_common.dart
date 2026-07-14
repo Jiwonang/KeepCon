@@ -1,12 +1,12 @@
 /// share 페이지 — 공통 UI 조각(뱃지·아바타 등).
 ///
-/// 색/라운드는 전부 `Theme.of(context)` + [ShareThemeTokens]에서 온다. 하드코딩 색 없음.
+/// 색/라운드는 전부 `Theme.of(context)` + [ThemeTokensX]에서 온다. 하드코딩 색 없음.
 library;
 
 import 'package:flutter/material.dart';
 
 import '../../../shared/models/share.dart';
-import 'share_tokens.dart';
+import '../../../shared/theme/theme_tokens.dart';
 
 /// 이모지 아바타 원(darkSurface 강조면). 그룹/멤버 공용.
 class EmojiAvatar extends StatelessWidget {
@@ -116,7 +116,7 @@ class ReservedBadge extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
         color: scheme.secondary.withValues(alpha: 0.14),
-        borderRadius: BorderRadius.circular(999),
+        borderRadius: BorderRadius.circular(AppRadii.pill),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
