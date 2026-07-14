@@ -10,8 +10,8 @@ library;
 import 'package:flutter/material.dart';
 
 import '../../../shared/models/gifticon.dart';
+import '../../../shared/theme/theme_tokens.dart';
 import 'format.dart';
-import 'main_tokens.dart';
 
 /// 만료 임박 기준(일). 이 일수 이하로 남으면 만료일 텍스트를 danger로.
 const int _expirySoonDays = 7;
@@ -157,7 +157,7 @@ class _DDayBadge extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
         color: context.darkSurface,
-        borderRadius: BorderRadius.circular(999),
+        borderRadius: BorderRadius.circular(AppRadii.pill),
       ),
       child: Text(
         formatDDay(daysLeft),
