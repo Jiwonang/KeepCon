@@ -7,6 +7,7 @@
 library;
 
 import 'package:flutter/material.dart';
+import '../../../shared/theme/theme_tokens.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -52,8 +53,7 @@ class _MemberInvitePageState extends ConsumerState<MemberInvitePage> {
 
   AppBar _navBar() => AppBar(
         centerTitle: true,
-        title: const Text('멤버 초대',
-            style: TextStyle(fontSize: 19, fontWeight: FontWeight.w800)),
+        title: Text('멤버 초대', style: context.navTitleStyle),
       );
 
   @override
@@ -95,11 +95,7 @@ class _MemberInvitePageState extends ConsumerState<MemberInvitePage> {
           children: <Widget>[
             Text(
               '"${g.name}" 그룹으로 초대',
-              style: theme.textTheme.headlineSmall?.copyWith(
-                fontSize: 23,
-                fontWeight: FontWeight.w900,
-                letterSpacing: -0.5,
-              ),
+              style: context.inviteTitleStyle,
             ),
             const SizedBox(height: 8),
             Text('아래 링크나 코드를 공유하세요.', style: theme.textTheme.bodyLarge),
@@ -123,10 +119,7 @@ class _MemberInvitePageState extends ConsumerState<MemberInvitePage> {
             // 초대코드 만료.
             Text(
               '초대코드 만료',
-              style: theme.textTheme.titleMedium?.copyWith(
-                fontSize: 17,
-                fontWeight: FontWeight.w800,
-              ),
+              style: context.itemTitleStyle,
             ),
             const SizedBox(height: 14),
             Row(
@@ -153,7 +146,7 @@ class _MemberInvitePageState extends ConsumerState<MemberInvitePage> {
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
               decoration: BoxDecoration(
                 color: theme.colorScheme.surfaceContainerHighest,
-                borderRadius: BorderRadius.circular(16),
+                borderRadius: BorderRadius.circular(AppRadii.panel),
               ),
               child: Row(
                 children: <Widget>[
@@ -163,10 +156,7 @@ class _MemberInvitePageState extends ConsumerState<MemberInvitePage> {
                       children: <Widget>[
                         Text(
                           '방장만 초대 가능',
-                          style: theme.textTheme.titleMedium?.copyWith(
-                            fontSize: 17,
-                            fontWeight: FontWeight.w800,
-                          ),
+                          style: context.itemTitleStyle,
                         ),
                         const SizedBox(height: 4),
                         Text(
@@ -202,7 +192,7 @@ class _MemberInvitePageState extends ConsumerState<MemberInvitePage> {
             label: const Text('초대 링크 공유'),
             style: ElevatedButton.styleFrom(
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(15),
+                borderRadius: BorderRadius.circular(AppRadii.button),
               ),
               padding: const EdgeInsets.symmetric(vertical: 17),
               textStyle:
@@ -236,15 +226,15 @@ class _CopyField extends StatelessWidget {
 
     return Material(
       color: scheme.surface,
-      borderRadius: BorderRadius.circular(16),
+      borderRadius: BorderRadius.circular(AppRadii.panel),
       child: InkWell(
         onTap: onCopy,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(AppRadii.panel),
         child: Ink(
           padding: const EdgeInsets.fromLTRB(18, 14, 10, 14),
           decoration: BoxDecoration(
             color: scheme.surface,
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(AppRadii.panel),
             border: Border.all(color: scheme.outline.withValues(alpha: 0.18)),
           ),
           child: Row(
@@ -258,11 +248,7 @@ class _CopyField extends StatelessWidget {
                     Text(
                       value,
                       style: emphasize
-                          ? theme.textTheme.titleLarge?.copyWith(
-                              fontSize: 24,
-                              fontWeight: FontWeight.w800,
-                              letterSpacing: 2,
-                            )
+                          ? context.inviteCodeStyle
                           : theme.textTheme.bodyLarge?.copyWith(
                               fontSize: 17,
                               fontWeight: FontWeight.w700,
@@ -307,10 +293,10 @@ class _ExpiryButton extends StatelessWidget {
 
     return Material(
       color: bg,
-      borderRadius: BorderRadius.circular(13),
+      borderRadius: BorderRadius.circular(AppRadii.action),
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(13),
+        borderRadius: BorderRadius.circular(AppRadii.action),
         child: Padding(
           padding: const EdgeInsets.symmetric(vertical: 14),
           child: Row(

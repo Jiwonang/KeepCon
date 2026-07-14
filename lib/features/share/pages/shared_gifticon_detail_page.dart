@@ -63,8 +63,7 @@ class _DetailBody extends ConsumerWidget {
     return Scaffold(
       appBar: AppBar(
         centerTitle: true,
-        title: const Text('공유 기프티콘',
-            style: TextStyle(fontSize: 19, fontWeight: FontWeight.w800)),
+        title: Text('공유 기프티콘', style: context.navTitleStyle),
       ),
       body: SafeArea(
         top: false,
@@ -89,11 +88,7 @@ class _DetailBody extends ConsumerWidget {
                       const SizedBox(height: 6),
                       Text(
                         item.productName,
-                        style: theme.textTheme.headlineSmall?.copyWith(
-                          fontSize: 28,
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: -0.5,
-                        ),
+                        style: context.heroProductStyle,
                       ),
                     ],
                   ),
@@ -184,7 +179,7 @@ class _DetailBody extends ConsumerWidget {
                   side:
                       BorderSide(color: scheme.outline.withValues(alpha: 0.6)),
                   shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14)),
+                      borderRadius: BorderRadius.circular(AppRadii.tile)),
                   padding: const EdgeInsets.symmetric(vertical: 15),
                   textStyle: const TextStyle(
                       fontSize: 16, fontWeight: FontWeight.w700),
@@ -197,7 +192,7 @@ class _DetailBody extends ConsumerWidget {
                 label: const Text('사용 완료'),
                 style: ElevatedButton.styleFrom(
                   shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14)),
+                      borderRadius: BorderRadius.circular(AppRadii.tile)),
                   padding: const EdgeInsets.symmetric(vertical: 16),
                   textStyle: const TextStyle(
                       fontSize: 17, fontWeight: FontWeight.w700),
@@ -289,7 +284,7 @@ class _BrandHero extends StatelessWidget {
     final ColorScheme scheme = Theme.of(context).colorScheme;
     const double height = 180;
     return ClipRRect(
-      borderRadius: BorderRadius.circular(22),
+      borderRadius: BorderRadius.circular(AppRadii.hero),
       child: SizedBox(
         height: height,
         child: Stack(
@@ -379,7 +374,7 @@ class _InfoBanner extends StatelessWidget {
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: theme.colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(AppRadii.tile),
       ),
       child: Row(
         children: <Widget>[

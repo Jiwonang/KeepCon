@@ -213,7 +213,7 @@ class _SearchRow extends StatelessWidget {
             alignment: Alignment.center,
             decoration: BoxDecoration(
               color: context.darkSurface,
-              borderRadius: BorderRadius.circular(16),
+              borderRadius: BorderRadius.circular(AppRadii.panel),
             ),
             child: Icon(Icons.tune, color: context.onDarkSurface),
           ),
@@ -248,7 +248,7 @@ class _ExpiryBanner extends StatelessWidget {
             alignment: Alignment.center,
             decoration: BoxDecoration(
               color: scheme.primary.withValues(alpha: 0.18),
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.circular(AppRadii.thumb),
             ),
             child: Icon(Icons.schedule, color: scheme.primary),
           ),
@@ -511,16 +511,14 @@ class _RichGifticonCard extends StatelessWidget {
                     const SizedBox(height: 2),
                     Text(
                       gifticon.productName,
-                      style: theme.textTheme.titleMedium
-                          ?.copyWith(fontWeight: FontWeight.w800, fontSize: 17),
+                      style: context.itemTitleStyle,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
                     const SizedBox(height: 2),
                     Text(
                       '${formatWon(gifticon.price)}원',
-                      style: theme.textTheme.bodyLarge
-                          ?.copyWith(fontWeight: FontWeight.w700, fontSize: 16),
+                      style: context.rowTitleStyle,
                     ),
                     const SizedBox(height: 10),
                     Row(
@@ -555,7 +553,7 @@ class _RichGifticonCard extends StatelessWidget {
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
                   color: brand.background.withValues(alpha: 0.10),
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(AppRadii.thumb),
                 ),
                 child: Icon(Icons.card_giftcard,
                     color: brand.background.withValues(alpha: 0.55), size: 24),
@@ -603,8 +601,8 @@ class _DDayBadge extends StatelessWidget {
     }
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-      decoration:
-          BoxDecoration(color: bg, borderRadius: BorderRadius.circular(9)),
+      decoration: BoxDecoration(
+          color: bg, borderRadius: BorderRadius.circular(AppRadii.dot)),
       child: Text(
         text,
         style: TextStyle(color: fg, fontWeight: FontWeight.w800, fontSize: 12),

@@ -6,6 +6,7 @@
 library;
 
 import 'package:flutter/material.dart';
+import '../../../shared/theme/theme_tokens.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../shared/models/gifticon.dart';
@@ -43,7 +44,7 @@ class _SheetScaffold extends StatelessWidget {
               decoration: BoxDecoration(
                 color:
                     theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.4),
-                borderRadius: BorderRadius.circular(999),
+                borderRadius: BorderRadius.circular(AppRadii.pill),
               ),
             ),
           ),

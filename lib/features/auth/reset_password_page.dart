@@ -10,6 +10,7 @@
 library;
 
 import 'package:flutter/material.dart';
+import '../../shared/theme/theme_tokens.dart';
 
 /// 비밀번호 재설정 화면. rough 스캐폴드.
 class ResetPasswordPage extends StatelessWidget {
@@ -31,11 +32,7 @@ class ResetPasswordPage extends StatelessWidget {
             children: <Widget>[
               Text(
                 '비밀번호 찾기',
-                style: theme.textTheme.headlineSmall?.copyWith(
-                  fontSize: 34,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: -0.5,
-                ),
+                style: context.resetTitleStyle,
               ),
               const SizedBox(height: 20),
               Text(
@@ -71,7 +68,7 @@ class ResetPasswordPage extends StatelessWidget {
                 },
                 style: ElevatedButton.styleFrom(
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(15),
+                    borderRadius: BorderRadius.circular(AppRadii.button),
                   ),
                   padding: const EdgeInsets.symmetric(vertical: 18),
                   textStyle: const TextStyle(

@@ -6,6 +6,7 @@
 library;
 
 import 'package:flutter/material.dart';
+import '../../../shared/theme/theme_tokens.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../shared/models/gifticon.dart';
@@ -154,7 +155,7 @@ class _LabeledDropdown<T> extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 10),
       decoration: BoxDecoration(
         border: Border.all(color: Theme.of(context).dividerColor),
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(AppRadii.sheet),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,

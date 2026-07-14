@@ -84,10 +84,7 @@ class MyPage extends ConsumerWidget {
                       children: <Widget>[
                         Text(
                           _name,
-                          style: theme.textTheme.titleMedium?.copyWith(
-                            fontSize: 19,
-                            fontWeight: FontWeight.w800,
-                          ),
+                          style: context.navTitleStyle,
                         ),
                         const SizedBox(height: 4),
                         Text(_email, style: theme.textTheme.bodySmall),
@@ -165,11 +162,8 @@ class MyPage extends ConsumerWidget {
                   Expanded(
                     child: Text(
                       '로그아웃',
-                      style: TextStyle(
-                        color: scheme.error,
-                        fontSize: 17,
-                        fontWeight: FontWeight.w800,
-                      ),
+                      style:
+                          context.itemTitleStyle?.copyWith(color: scheme.error),
                     ),
                   ),
                   Icon(Icons.chevron_right, color: scheme.onSurfaceVariant),

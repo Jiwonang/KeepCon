@@ -77,7 +77,7 @@ class _GroupDetailBody extends ConsumerWidget {
         centerTitle: true,
         title: Text(
           group.name,
-          style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800),
+          style: context.navTitleStyle,
         ),
         actions: <Widget>[
           if (canInvite)
@@ -105,10 +105,7 @@ class _GroupDetailBody extends ConsumerWidget {
                       children: <Widget>[
                         Text(
                           group.name,
-                          style: theme.textTheme.titleLarge?.copyWith(
-                            fontSize: 20,
-                            fontWeight: FontWeight.w800,
-                          ),
+                          style: context.cardTitleStyle,
                         ),
                         const SizedBox(height: 4),
                         Text(
@@ -446,10 +443,7 @@ class _MemberRow extends StatelessWidget {
           Expanded(
             child: Text(
               isMe ? '${member.displayName} (나)' : member.displayName,
-              style: theme.textTheme.titleMedium?.copyWith(
-                fontSize: 16,
-                fontWeight: FontWeight.w700,
-              ),
+              style: context.rowTitleStyle,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
@@ -460,7 +454,7 @@ class _MemberRow extends StatelessWidget {
               padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 5),
               decoration: BoxDecoration(
                 color: scheme.primary.withValues(alpha: 0.14),
-                borderRadius: BorderRadius.circular(9),
+                borderRadius: BorderRadius.circular(AppRadii.dot),
               ),
               child: Text(
                 '방장',
@@ -665,7 +659,8 @@ class _ActionButton extends StatelessWidget {
       style: OutlinedButton.styleFrom(
         foregroundColor: color,
         side: BorderSide(color: color.withValues(alpha: 0.5)),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(13)),
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(AppRadii.action)),
         padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
       ),
       child: Column(

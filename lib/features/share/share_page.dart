@@ -234,7 +234,7 @@ class _EmptyHint extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
       decoration: BoxDecoration(
         color: theme.colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(AppRadii.tile),
       ),
       child: Text(
         text,
@@ -280,7 +280,7 @@ class _GroupCard extends ConsumerWidget {
                   alignment: Alignment.center,
                   decoration: BoxDecoration(
                     color: scheme.surfaceContainerHighest,
-                    borderRadius: BorderRadius.circular(16),
+                    borderRadius: BorderRadius.circular(AppRadii.panel),
                   ),
                   child:
                       Text(group.emoji, style: const TextStyle(fontSize: 30)),
@@ -292,10 +292,7 @@ class _GroupCard extends ConsumerWidget {
                     children: <Widget>[
                       Text(
                         group.name,
-                        style: theme.textTheme.titleMedium?.copyWith(
-                          fontSize: 19,
-                          fontWeight: FontWeight.w800,
-                        ),
+                        style: context.navTitleStyle,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -328,7 +325,7 @@ class _GroupActionButtons extends StatelessWidget {
   Widget build(BuildContext context) {
     final ColorScheme scheme = Theme.of(context).colorScheme;
     final RoundedRectangleBorder shape = RoundedRectangleBorder(
-      borderRadius: BorderRadius.circular(14),
+      borderRadius: BorderRadius.circular(AppRadii.tile),
     );
     return Row(
       children: <Widget>[
