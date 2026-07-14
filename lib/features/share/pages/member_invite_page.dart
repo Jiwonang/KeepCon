@@ -1,4 +1,4 @@
-/// share 페이지 — 멤버 초대(전체 화면).
+/// share 페이지 — 멤버 초대(전체 화면, KeepCon 틀 재디자인).
 ///
 /// 초대 URL + 초대코드(각 복사 버튼), 만료시간 선택(프로토타입 UI), "방장만 초대"
 /// 권한 토글. 권한 토글은 [ShareRepository.setInviteOwnerOnly]로 그룹 정책에 반영되며
@@ -50,16 +50,22 @@ class _MemberInvitePageState extends ConsumerState<MemberInvitePage> {
     }
   }
 
+  AppBar _navBar() => AppBar(
+        centerTitle: true,
+        title: const Text('멤버 초대',
+            style: TextStyle(fontSize: 19, fontWeight: FontWeight.w800)),
+      );
+
   @override
   Widget build(BuildContext context) {
     return ref.watch(groupByIdProvider(widget.groupId)).when(
           // 세션/그룹 로딩 중엔 pop 하지 않고 대기(스피너).
           loading: () => Scaffold(
-            appBar: AppBar(title: const Text('멤버 초대')),
+            appBar: _navBar(),
             body: const Center(child: CircularProgressIndicator()),
           ),
           error: (Object e, StackTrace _) => Scaffold(
-            appBar: AppBar(title: const Text('멤버 초대')),
+            appBar: _navBar(),
             body: const Center(child: Text('그룹을 불러오지 못했어요.')),
           ),
           data: (Group? g) {
@@ -81,99 +87,253 @@ class _MemberInvitePageState extends ConsumerState<MemberInvitePage> {
     final bool iAmOwner = uid != null && g.isOwnedBy(uid);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('멤버 초대')),
+      appBar: _navBar(),
       body: SafeArea(
+        top: false,
         child: ListView(
-          padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+          padding: const EdgeInsets.fromLTRB(24, 16, 24, 24),
           children: <Widget>[
-            Text('"${g.name}" 그룹으로 초대', style: theme.textTheme.titleLarge),
-            const SizedBox(height: 4),
-            Text('아래 링크나 코드를 공유하세요.', style: theme.textTheme.bodySmall),
-            const SizedBox(height: 20),
-            _CopyField(label: '초대 링크', value: g.inviteUrl, onCopy: _copy),
-            const SizedBox(height: 12),
-            _CopyField(label: '초대코드', value: g.inviteCode, onCopy: _copy),
-            const SizedBox(height: 24),
-            Text('초대코드 만료', style: theme.textTheme.titleMedium),
-            const SizedBox(height: 10),
-            Wrap(
-              spacing: 8,
-              children: <Widget>[
-                for (final InviteExpiry e in InviteExpiry.values)
-                  ChoiceChip(
-                    label: Text(e.label),
-                    selected: _expiry == e,
-                    onSelected: (_) => setState(() => _expiry = e),
-                  ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Card(
-              child: SwitchListTile(
-                value: g.inviteOwnerOnly,
-                // 정책 변경은 방장만. 일반 멤버에게는 비활성(현재 정책만 표시).
-                onChanged: iAmOwner ? (bool v) => _setOwnerOnly(g.id, v) : null,
-                title: const Text('방장만 초대 가능'),
-                subtitle: Text(
-                  iAmOwner ? '켜면 방장 외 멤버는 초대할 수 없어요.' : '방장만 이 설정을 바꿀 수 있어요.',
-                  style: theme.textTheme.bodySmall,
-                ),
+            Text(
+              '"${g.name}" 그룹으로 초대',
+              style: theme.textTheme.headlineSmall?.copyWith(
+                fontSize: 23,
+                fontWeight: FontWeight.w900,
+                letterSpacing: -0.5,
               ),
             ),
-            const SizedBox(height: 24),
-            ElevatedButton.icon(
-              onPressed: () => _copy(g.inviteUrl, '초대 링크'),
-              icon: const Icon(Icons.share_outlined),
-              label: const Text('초대 링크 공유'),
+            const SizedBox(height: 8),
+            Text('아래 링크나 코드를 공유하세요.', style: theme.textTheme.bodyLarge),
+            const SizedBox(height: 28),
+
+            // 초대 링크 / 초대코드.
+            _CopyField(
+              label: '초대 링크',
+              value: g.inviteUrl,
+              onCopy: () => _copy(g.inviteUrl, '초대 링크'),
+            ),
+            const SizedBox(height: 16),
+            _CopyField(
+              label: '초대코드',
+              value: g.inviteCode,
+              emphasize: true,
+              onCopy: () => _copy(g.inviteCode, '초대코드'),
+            ),
+            const SizedBox(height: 32),
+
+            // 초대코드 만료.
+            Text(
+              '초대코드 만료',
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontSize: 17,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 14),
+            Row(
+              children: <Widget>[
+                for (int i = 0;
+                    i < InviteExpiry.values.length;
+                    i++) ...<Widget>[
+                  if (i > 0) const SizedBox(width: 10),
+                  Expanded(
+                    child: _ExpiryButton(
+                      label: InviteExpiry.values[i].label,
+                      selected: _expiry == InviteExpiry.values[i],
+                      onTap: () =>
+                          setState(() => _expiry = InviteExpiry.values[i]),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+            const SizedBox(height: 20),
+
+            // 방장만 초대 가능 토글.
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+              decoration: BoxDecoration(
+                color: theme.colorScheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Row(
+                children: <Widget>[
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        Text(
+                          '방장만 초대 가능',
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            fontSize: 17,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          iAmOwner
+                              ? '켜면 방장 외 멤버는 초대할 수 없어요.'
+                              : '방장만 이 설정을 바꿀 수 있어요.',
+                          style: theme.textTheme.bodySmall,
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 14),
+                  Switch(
+                    value: g.inviteOwnerOnly,
+                    // 정책 변경은 방장만. 일반 멤버에게는 비활성(현재 정책만 표시).
+                    onChanged:
+                        iAmOwner ? (bool v) => _setOwnerOnly(g.id, v) : null,
+                  ),
+                ],
+              ),
             ),
           ],
+        ),
+      ),
+      // 하단 고정 CTA — 초대 링크 공유(복사).
+      bottomNavigationBar: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(24, 8, 24, 16),
+          child: ElevatedButton.icon(
+            onPressed: () => _copy(g.inviteUrl, '초대 링크'),
+            icon: const Icon(Icons.ios_share, size: 20),
+            label: const Text('초대 링크 공유'),
+            style: ElevatedButton.styleFrom(
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(15),
+              ),
+              padding: const EdgeInsets.symmetric(vertical: 17),
+              textStyle:
+                  const TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
+            ),
+          ),
         ),
       ),
     );
   }
 }
 
-/// 라벨 + 값 + 복사 버튼 필드.
+/// 라벨 + 값 + 복사 버튼 필드(아웃라인). [emphasize]면 값이 코드처럼 크게(자간 포함).
 class _CopyField extends StatelessWidget {
   const _CopyField({
     required this.label,
     required this.value,
     required this.onCopy,
+    this.emphasize = false,
   });
 
   final String label;
   final String value;
-  final void Function(String value, String label) onCopy;
+  final VoidCallback onCopy;
+  final bool emphasize;
 
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
-        child: Row(
-          children: <Widget>[
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  Text(label, style: theme.textTheme.bodySmall),
-                  const SizedBox(height: 4),
-                  Text(
-                    value,
-                    style: theme.textTheme.bodyLarge,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
+    final ColorScheme scheme = theme.colorScheme;
+
+    return Material(
+      color: scheme.surface,
+      borderRadius: BorderRadius.circular(16),
+      child: InkWell(
+        onTap: onCopy,
+        borderRadius: BorderRadius.circular(16),
+        child: Ink(
+          padding: const EdgeInsets.fromLTRB(18, 14, 10, 14),
+          decoration: BoxDecoration(
+            color: scheme.surface,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: scheme.outline.withValues(alpha: 0.18)),
+          ),
+          child: Row(
+            children: <Widget>[
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(label, style: theme.textTheme.bodySmall),
+                    const SizedBox(height: 6),
+                    Text(
+                      value,
+                      style: emphasize
+                          ? theme.textTheme.titleLarge?.copyWith(
+                              fontSize: 24,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: 2,
+                            )
+                          : theme.textTheme.bodyLarge?.copyWith(
+                              fontSize: 17,
+                              fontWeight: FontWeight.w700,
+                            ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
               ),
-            ),
-            IconButton(
-              onPressed: () => onCopy(value, label),
-              icon: const Icon(Icons.copy_outlined),
-              tooltip: '복사',
-            ),
-          ],
+              IconButton(
+                onPressed: onCopy,
+                icon: const Icon(Icons.copy_outlined),
+                tooltip: '복사',
+                color: scheme.onSurfaceVariant,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 만료 선택 버튼 한 칸 — 선택 시 brand 채움+체크, 아니면 서피스.
+class _ExpiryButton extends StatelessWidget {
+  const _ExpiryButton({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme scheme = Theme.of(context).colorScheme;
+    final Color bg = selected ? scheme.primary : scheme.surfaceContainerHighest;
+    final Color fg = selected ? scheme.onPrimary : scheme.onSurfaceVariant;
+
+    return Material(
+      color: bg,
+      borderRadius: BorderRadius.circular(13),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(13),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 14),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: <Widget>[
+              if (selected) ...<Widget>[
+                Icon(Icons.check, size: 15, color: fg),
+                const SizedBox(width: 4),
+              ],
+              Flexible(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: fg,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
