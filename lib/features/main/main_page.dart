@@ -466,7 +466,12 @@ class _RichGifticonCard extends StatelessWidget {
     final ColorScheme scheme = theme.colorScheme;
     final BrandStyle brand = BrandPalette.of(gifticon.brand);
 
-    final int daysLeft = gifticon.expiryDate.difference(DateTime.now()).inDays;
+    // D-day는 날짜(자정) 기준으로 계산 — 시:분:초가 섞이면 하루 오차가 난다.
+    final DateTime nowDate = DateTime.now();
+    final DateTime today = DateTime(nowDate.year, nowDate.month, nowDate.day);
+    final DateTime expDate = DateTime(gifticon.expiryDate.year,
+        gifticon.expiryDate.month, gifticon.expiryDate.day);
+    final int daysLeft = expDate.difference(today).inDays;
     final bool used = gifticon.status == GifticonStatus.used;
     final bool expired =
         gifticon.status == GifticonStatus.expired || daysLeft < 0;

@@ -60,7 +60,7 @@ lib/
 ## 🚀 시작하기
 
 ### 사전 준비
-- [Flutter SDK](https://docs.flutter.dev/get-started/install) 3.22 이상 (Dart 3.4+)
+- [Flutter SDK](https://docs.flutter.dev/get-started/install) 3.27 이상 (Dart 3.6+) — `Color.withValues()` 등 3.27+ API 사용
 - 확인: `flutter doctor`
 
 ### 설치 & 실행
