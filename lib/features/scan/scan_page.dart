@@ -91,11 +91,13 @@ class ScanPage extends ConsumerWidget {
     // TODO(scan): image_picker/camera + 바코드·OCR 플러그인으로 이미지 획득 후
     //   prefillFromRecognition(...)로 인식 결과를 폼에 채운다. 인식 실패 필드는
     //   비워 두어 사용자가 수동 편집으로 폴백하도록 한다(현재 구조가 이미 폴백).
+    //   ⚠️ 이미지 획득을 await한 뒤 push하도록 바꾸면, await 경계 이후에
+    //   `if (!context.mounted) return;` 가드를 반드시 추가한다.
     if (source != ScanSource.manual) {
       _showPlaceholderNotice(context, source);
     }
 
-    if (!context.mounted) return;
+    // (여기까지 동기 경로라 mounted 가드 불필요 — await 경계가 없다.)
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => const _GifticonFormScreen(),
