@@ -1,6 +1,6 @@
-/// share 페이지 — 그룹 알림(전체 화면).
+/// share 페이지 — 그룹 알림(전체 화면, KeepCon 틀 재디자인).
 ///
-/// 등록/만료임박/사용완료 유형별 아이콘·문구를 목록으로 보여준다. 공유/사용완료가
+/// 등록/만료임박/사용완료 유형별 아이콘·문구를 카드 목록으로 보여준다. 공유/사용완료가
 /// 일어날 때마다 계약 [ShareRepository]에 알림이 쌓이고 이 화면이 [notificationsProvider]
 /// 구독으로 동기화된다. 상대 시각 포맷은 소비자(UI) 책임. 색 하드코딩 없음.
 library;
@@ -9,10 +9,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../shared/models/share.dart';
+import '../../../shared/theme/theme_tokens.dart';
 import '../state/share_providers.dart';
 import '../widgets/share_format.dart';
 
-/// 그룹 알림 화면. 공유 메인 앱바의 알림 아이콘에서 push 한다.
+/// 그룹 알림 화면. 공유 메인 헤더의 알림 아이콘에서 push 한다.
 class GroupNotificationsPage extends ConsumerWidget {
   const GroupNotificationsPage({super.key});
 
@@ -22,17 +23,22 @@ class GroupNotificationsPage extends ConsumerWidget {
         ref.watch(notificationsProvider).value ?? const <GroupNotification>[];
 
     return Scaffold(
-      appBar: AppBar(title: const Text('그룹 알림')),
+      appBar: AppBar(
+        centerTitle: true,
+        title: const Text('그룹 알림',
+            style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
+      ),
       body: SafeArea(
+        top: false,
         child: items.isEmpty
             ? Center(
                 child: Text('알림이 없어요.',
                     style: Theme.of(context).textTheme.bodySmall),
               )
             : ListView.separated(
-                padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+                padding: const EdgeInsets.fromLTRB(20, 18, 20, 24),
                 itemCount: items.length,
-                separatorBuilder: (_, __) => const SizedBox(height: 12),
+                separatorBuilder: (_, __) => const SizedBox(height: 16),
                 itemBuilder: (BuildContext context, int i) =>
                     _NotificationCard(item: items[i]),
               ),
@@ -41,7 +47,7 @@ class GroupNotificationsPage extends ConsumerWidget {
   }
 }
 
-/// 알림 카드 — 유형별 아이콘·색 + 제목/본문/시간.
+/// 알림 카드 — 유형별 원형 아이콘 + 제목/시간/본문 + 셰브론.
 class _NotificationCard extends StatelessWidget {
   const _NotificationCard({required this.item});
 
@@ -56,7 +62,7 @@ class _NotificationCard extends StatelessWidget {
     late final Color tint;
     switch (item.type) {
       case GroupNotificationType.registered:
-        icon = Icons.add_circle_outline;
+        icon = Icons.card_giftcard;
         tint = scheme.primary;
       case GroupNotificationType.expiringSoon:
         icon = Icons.schedule;
@@ -66,39 +72,57 @@ class _NotificationCard extends StatelessWidget {
         tint = scheme.onSurfaceVariant;
     }
 
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            CircleAvatar(
-              backgroundColor: tint.withValues(alpha: 0.16),
-              foregroundColor: tint,
-              child: Icon(icon, size: 20),
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: AppDecorations.softCard(scheme),
+      child: Row(
+        children: <Widget>[
+          // 유형별 원형 아이콘(연한 틴트 배경).
+          Container(
+            width: 54,
+            height: 54,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: tint.withValues(alpha: 0.15),
+              shape: BoxShape.circle,
             ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  Row(
-                    children: <Widget>[
-                      Expanded(
-                        child: Text(item.title,
-                            style: theme.textTheme.titleMedium),
+            child: Icon(icon, color: tint, size: 26),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Expanded(
+                      child: Text(
+                        item.title,
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w800,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
-                      Text(formatRelativeKo(item.createdAt),
-                          style: theme.textTheme.bodySmall),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  Text(item.message, style: theme.textTheme.bodyMedium),
-                ],
-              ),
+                    ),
+                    const SizedBox(width: 10),
+                    Text(formatRelativeKo(item.createdAt),
+                        style: theme.textTheme.bodySmall),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  item.message,
+                  style: theme.textTheme.bodyMedium?.copyWith(height: 1.45),
+                ),
+              ],
             ),
-          ],
-        ),
+          ),
+          const SizedBox(width: 10),
+          Icon(Icons.chevron_right, size: 20, color: scheme.onSurfaceVariant),
+        ],
       ),
     );
   }
