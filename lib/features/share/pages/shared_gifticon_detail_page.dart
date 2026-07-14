@@ -1,9 +1,9 @@
-/// share 페이지 — 공유 기프티콘 상세(전체 화면).
+/// share 페이지 — 공유 기프티콘 상세(전체 화면, KeepCon 틀 재디자인).
 ///
-/// 바코드/이미지 placeholder + 상태(잠김/찜/사용완료) + 액션(찜·사용완료·공유취소).
+/// 브랜드 히어로(쿠폰 배너) + 상태(잠김/찜/사용완료) + QR/바코드 + 액션(찜·사용완료·공유취소).
 /// 상태 변경은 계약 [ShareRepository]에 반영되고 목록/뱃지가 동기화된다. 사용 완료 시
 /// 원본 [Gifticon]도 `GifticonStatus.used`로 동기화되어 메인 목록에 반영된다(계약 경계면).
-/// 색 하드코딩 없음.
+/// 색 하드코딩 없음(공유 [BrandPalette]·테마 토큰 소비).
 library;
 
 import 'package:flutter/material.dart';
@@ -11,6 +11,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../shared/models/share.dart';
 import '../../../shared/providers/repositories.dart';
+import '../../../shared/theme/brand_palette.dart';
+import '../../../shared/theme/theme_tokens.dart';
 import '../../../shared/util/korean_particle.dart';
 import '../state/share_providers.dart';
 import '../widgets/share_common.dart';
@@ -28,8 +30,9 @@ class SharedGifticonDetailPage extends ConsumerWidget {
     // 항상 최신 항목을 조회. 공유취소 등으로 사라지면 안내를 표시한다.
     final SharedGifticon? item = ref.watch(sharedItemByIdProvider(itemId));
     if (item == null) {
-      return const Scaffold(
-        body: Center(child: Text('기프티콘을 찾을 수 없어요.')),
+      return Scaffold(
+        appBar: AppBar(centerTitle: true, title: const Text('공유 기프티콘')),
+        body: const Center(child: Text('기프티콘을 찾을 수 없어요.')),
       );
     }
     return _DetailBody(item: item);
@@ -48,6 +51,7 @@ class _DetailBody extends ConsumerWidget {
     final String? uid = ref.watch(shareCurrentUserProvider).value?.id;
     final MemberNames names = ref.watch(memberNamesProvider);
     final String actorId = uid ?? '';
+    final BrandStyle brand = BrandPalette.of(item.brand);
 
     final bool locked = item.isLockedFor(actorId);
     final bool reservedByMe = uid != null && item.reservedByUserId == uid;
@@ -57,72 +61,102 @@ class _DetailBody extends ConsumerWidget {
     final bool iShared = uid != null && item.sharedByUserId == uid;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('공유 기프티콘')),
+      appBar: AppBar(
+        centerTitle: true,
+        title: const Text('공유 기프티콘',
+            style: TextStyle(fontSize: 19, fontWeight: FontWeight.w800)),
+      ),
       body: SafeArea(
+        top: false,
         child: ListView(
-          padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+          padding: const EdgeInsets.fromLTRB(24, 14, 24, 28),
           children: <Widget>[
-            // 이미지 placeholder.
-            AspectRatio(
-              aspectRatio: 1.6,
-              child: Container(
-                decoration: BoxDecoration(
-                  color: scheme.surfaceContainerHighest,
-                  borderRadius: BorderRadius.circular(18),
-                ),
-                child: Icon(Icons.card_giftcard,
-                    size: 64, color: scheme.onSurfaceVariant),
-              ),
-            ),
-            const SizedBox(height: 16),
+            // 브랜드 히어로(쿠폰 배너).
+            _BrandHero(brand: brand, brandName: item.brand),
+            const SizedBox(height: 22),
+
+            // 브랜드·상품·상태.
             Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: <Widget>[
-                      Text(item.brand, style: theme.textTheme.bodySmall),
-                      const SizedBox(height: 2),
-                      Text(item.productName,
-                          style: theme.textTheme.headlineSmall),
+                      Text(item.brand,
+                          style: theme.textTheme.bodyLarge
+                              ?.copyWith(color: scheme.onSurfaceVariant)),
+                      const SizedBox(height: 6),
+                      Text(
+                        item.productName,
+                        style: theme.textTheme.headlineSmall?.copyWith(
+                          fontSize: 28,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: -0.5,
+                        ),
+                      ),
                     ],
                   ),
                 ),
-                ShareStatusBadge(status: item.status, locked: locked),
+                const SizedBox(width: 12),
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: ShareStatusBadge(status: item.status, locked: locked),
+                ),
               ],
             ),
-            const SizedBox(height: 8),
-            Text(
-                '${names.isMe(item.sharedByUserId) ? '내가' : '${names.labelFor(item.sharedByUserId)}님이'} 공유 · '
-                '유효기간 ${formatExpiryLabel(item.expiryDate)}',
-                style: theme.textTheme.bodySmall),
-            if (item.reservedByUserId != null) ...<Widget>[
-              const SizedBox(height: 10),
-              ReservedBadge(
-                name: names.labelFor(item.reservedByUserId!),
-                isMe: names.isMe(item.reservedByUserId!),
-              ),
-            ],
-            const SizedBox(height: 20),
+            const SizedBox(height: 14),
 
-            // 바코드 placeholder.
-            Card(
-              child: Padding(
-                padding:
-                    const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
-                child: Column(
-                  children: <Widget>[
-                    Icon(Icons.qr_code_2, size: 96, color: scheme.onSurface),
-                    const SizedBox(height: 8),
-                    Text(item.barcode ?? '바코드 정보 없음',
-                        style: theme.textTheme.bodyMedium),
-                  ],
+            // 공유자 · 유효기간.
+            Row(
+              children: <Widget>[
+                Icon(Icons.person_outline,
+                    size: 16, color: scheme.onSurfaceVariant),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    '${names.isMe(item.sharedByUserId) ? '내가' : '${names.labelFor(item.sharedByUserId)}님이'} 공유'
+                    '  ·  유효기간 ${formatExpiryLabel(item.expiryDate)}',
+                    style: theme.textTheme.bodyMedium
+                        ?.copyWith(color: scheme.onSurfaceVariant),
+                  ),
+                ),
+              ],
+            ),
+            if (item.reservedByUserId != null) ...<Widget>[
+              const SizedBox(height: 12),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: ReservedBadge(
+                  name: names.labelFor(item.reservedByUserId!),
+                  isMe: names.isMe(item.reservedByUserId!),
                 ),
               ),
-            ),
-            const SizedBox(height: 24),
+            ],
+            const SizedBox(height: 22),
 
-            // 잠김 안내.
+            // QR/바코드 카드.
+            Container(
+              padding: const EdgeInsets.symmetric(vertical: 24),
+              decoration: BoxDecoration(
+                color: scheme.surface,
+                borderRadius: BorderRadius.circular(AppRadii.card),
+                border:
+                    Border.all(color: scheme.outline.withValues(alpha: 0.18)),
+              ),
+              child: Column(
+                children: <Widget>[
+                  Icon(Icons.qr_code_2, size: 120, color: scheme.onSurface),
+                  const SizedBox(height: 16),
+                  Text(item.barcode ?? '바코드 정보 없음',
+                      style: theme.textTheme.bodyMedium
+                          ?.copyWith(color: scheme.onSurfaceVariant)),
+                ],
+              ),
+            ),
+            const SizedBox(height: 22),
+
+            // 잠김/사용완료 안내.
             if (locked)
               _InfoBanner(
                 icon: Icons.lock_outline,
@@ -145,16 +179,33 @@ class _DetailBody extends ConsumerWidget {
                 icon:
                     Icon(reservedByMe ? Icons.bookmark : Icons.bookmark_border),
                 label: Text(reservedByMe ? '찜 해제' : '찜하기 (사용 예정)'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: scheme.primary,
+                  side:
+                      BorderSide(color: scheme.outline.withValues(alpha: 0.6)),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14)),
+                  padding: const EdgeInsets.symmetric(vertical: 15),
+                  textStyle: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w700),
+                ),
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 12),
               ElevatedButton.icon(
                 onPressed: () => _markUsed(context, ref),
-                icon: const Icon(Icons.check),
+                icon: const Icon(Icons.check, size: 20),
                 label: const Text('사용 완료'),
+                style: ElevatedButton.styleFrom(
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14)),
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  textStyle: const TextStyle(
+                      fontSize: 17, fontWeight: FontWeight.w700),
+                ),
               ),
               // 공유 취소(회수)는 내가 공유한 항목만 가능.
               if (iShared) ...<Widget>[
-                const SizedBox(height: 10),
+                const SizedBox(height: 8),
                 TextButton.icon(
                   onPressed: () => _confirmCancel(context, ref),
                   style: TextButton.styleFrom(foregroundColor: scheme.error),
@@ -223,6 +274,93 @@ class _DetailBody extends ConsumerWidget {
         ..hideCurrentSnackBar()
         ..showSnackBar(const SnackBar(content: Text('지금은 회수할 수 없어요.')));
     }
+  }
+}
+
+/// 브랜드 히어로 — 브랜드 색 쿠폰 배너(좌우 노치 + 브랜드 로고 자리).
+class _BrandHero extends StatelessWidget {
+  const _BrandHero({required this.brand, required this.brandName});
+
+  final BrandStyle brand;
+  final String brandName;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme scheme = Theme.of(context).colorScheme;
+    const double height = 180;
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(22),
+      child: SizedBox(
+        height: height,
+        child: Stack(
+          children: <Widget>[
+            Positioned.fill(child: ColoredBox(color: brand.background)),
+            // 좌우 티켓 노치(배경색 원이 가장자리를 파고든다).
+            Positioned(
+              left: -11,
+              top: height / 2 - 11,
+              child: _Notch(color: scheme.surface),
+            ),
+            Positioned(
+              right: -11,
+              top: height / 2 - 11,
+              child: _Notch(color: scheme.surface),
+            ),
+            // 브랜드명(우상단).
+            Positioned(
+              top: 20,
+              right: 24,
+              child: Text(
+                brandName,
+                style: TextStyle(
+                  color: brand.foreground,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 0.5,
+                ),
+              ),
+            ),
+            // 중앙 로고 자리(밝은 원 + 브랜드 라벨).
+            Center(
+              child: Container(
+                width: 88,
+                height: 88,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: brand.foreground.withValues(alpha: 0.92),
+                  shape: BoxShape.circle,
+                ),
+                child: Text(
+                  brand.label,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: brand.background,
+                    fontSize: 24,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 티켓 노치(작은 원).
+class _Notch extends StatelessWidget {
+  const _Notch({required this.color});
+
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 22,
+      height: 22,
+      decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+    );
   }
 }
 
