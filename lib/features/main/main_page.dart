@@ -1,7 +1,8 @@
 /// main 페이지 — 나의 기프티콘 보관 현황 (KeepCon 틀 재디자인).
 ///
 /// 레이아웃(위→아래): 인사 헤더 → 검색바+필터 → 만료 알림 배너 →
-/// 요약 통계 3카드 → 섹션 헤더(전체 N개 / 정렬) → 기프티콘 2열 그리드.
+/// 요약 통계 3카드 → 섹션 헤더(전체 N개 / 정렬) → 기프티콘 세로 리치 카드 리스트
+/// (좌 브랜드 타일 + 정보 + 우 썸네일 + D-day 뱃지).
 ///
 /// 계약 소비:
 /// - AuthRepository.watchCurrentUser() → 현재 사용자([currentUserProvider]).
@@ -19,10 +20,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../shared/models/gifticon.dart';
 import '../../shared/models/user.dart';
+import '../../shared/theme/brand_palette.dart';
 import 'state/gifticon_list_providers.dart';
 import 'state/gifticon_stats.dart';
 import 'widgets/format.dart';
-import 'widgets/gifticon_card.dart';
 import 'widgets/gifticon_status_label.dart';
 import 'widgets/main_tokens.dart';
 import '../mypage/mypage_page.dart';
@@ -81,7 +82,7 @@ class _HomeBody extends ConsumerWidget {
         ),
         SliverPadding(
           padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
-          sliver: _GifticonGrid(gifticons: list),
+          sliver: _GifticonList(gifticons: list),
         ),
       ],
     );
@@ -110,7 +111,14 @@ class _GreetingHeader extends StatelessWidget {
             children: [
               Text('안녕하세요 👋', style: theme.textTheme.bodySmall),
               const SizedBox(height: 2),
-              Text('내 기프티콘', style: theme.textTheme.headlineSmall),
+              Text(
+                '우리집 기프티콘',
+                style: theme.textTheme.headlineSmall?.copyWith(
+                  fontSize: 26,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: -0.5,
+                ),
+              ),
             ],
           ),
         ),
@@ -424,11 +432,11 @@ class _SectionHeader extends StatelessWidget {
   }
 }
 
-// ─────────────────────── 6. 기프티콘 2열 그리드 ───────────────────────
+// ─────────────────────── 6. 기프티콘 세로 리치 카드 리스트 ───────────────────────
 
-class _GifticonGrid extends StatelessWidget {
+class _GifticonList extends StatelessWidget {
   final List<Gifticon> gifticons;
-  const _GifticonGrid({required this.gifticons});
+  const _GifticonList({required this.gifticons});
 
   @override
   Widget build(BuildContext context) {
@@ -439,16 +447,183 @@ class _GifticonGrid extends StatelessWidget {
         ),
       );
     }
-    return SliverGrid.builder(
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 2,
-        mainAxisSpacing: 16,
-        crossAxisSpacing: 16,
-        childAspectRatio: 0.66,
-      ),
+    return SliverList.separated(
       itemCount: gifticons.length,
-      itemBuilder: (context, i) =>
-          GifticonGridCard(gifticon: gifticons[i], onTap: () {}),
+      separatorBuilder: (_, __) => const SizedBox(height: 14),
+      itemBuilder: (context, i) => _RichGifticonCard(gifticon: gifticons[i]),
+    );
+  }
+}
+
+/// 기프티콘 한 장 — 좌 브랜드 타일 + 중앙 정보 + 우 썸네일 + 우상단 D-day 뱃지.
+class _RichGifticonCard extends StatelessWidget {
+  final Gifticon gifticon;
+  const _RichGifticonCard({required this.gifticon});
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+    final BrandStyle brand = BrandPalette.of(gifticon.brand);
+
+    // D-day는 날짜(자정) 기준으로 계산 — 시:분:초가 섞이면 하루 오차가 난다.
+    final DateTime nowDate = DateTime.now();
+    final DateTime today = DateTime(nowDate.year, nowDate.month, nowDate.day);
+    final DateTime expDate = DateTime(gifticon.expiryDate.year,
+        gifticon.expiryDate.month, gifticon.expiryDate.day);
+    final int daysLeft = expDate.difference(today).inDays;
+    final bool used = gifticon.status == GifticonStatus.used;
+    final bool expired =
+        gifticon.status == GifticonStatus.expired || daysLeft < 0;
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: scheme.surface,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: scheme.outline.withValues(alpha: 0.18)),
+        boxShadow: [
+          BoxShadow(
+            color: scheme.onSurface.withValues(alpha: 0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Stack(
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // 좌: 브랜드 로고 타일.
+              Container(
+                width: 64,
+                height: 84,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: brand.background,
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Text(
+                  brand.label,
+                  style: TextStyle(
+                    color: brand.foreground,
+                    fontWeight: FontWeight.w900,
+                    fontSize: 18,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 14),
+              // 중앙: 브랜드·상품·가격·만료.
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(gifticon.brand,
+                        style: theme.textTheme.bodySmall,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis),
+                    const SizedBox(height: 2),
+                    Text(
+                      gifticon.productName,
+                      style: theme.textTheme.titleMedium
+                          ?.copyWith(fontWeight: FontWeight.w800, fontSize: 17),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '${formatWon(gifticon.price)}원',
+                      style: theme.textTheme.bodyLarge
+                          ?.copyWith(fontWeight: FontWeight.w700, fontSize: 16),
+                    ),
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        Icon(Icons.schedule,
+                            size: 14,
+                            color:
+                                used ? scheme.onSurfaceVariant : scheme.error),
+                        const SizedBox(width: 4),
+                        Flexible(
+                          child: Text(
+                            '${formatDate(gifticon.expiryDate)} 만료',
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color:
+                                  used ? scheme.onSurfaceVariant : scheme.error,
+                              fontWeight: FontWeight.w500,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 10),
+              // 우: 기프티콘 썸네일(플레이스홀더 — 실제 이미지는 후속).
+              Container(
+                width: 56,
+                height: 68,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: brand.background.withValues(alpha: 0.10),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(Icons.card_giftcard,
+                    color: brand.background.withValues(alpha: 0.55), size: 24),
+              ),
+            ],
+          ),
+          // 우상단: D-day 뱃지.
+          Positioned(
+            top: 0,
+            right: 0,
+            child: _DDayBadge(used: used, expired: expired, daysLeft: daysLeft),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// D-day 뱃지(빨강 pill). 사용완료=회색 '완료', 만료=빨강 '만료'.
+class _DDayBadge extends StatelessWidget {
+  final bool used;
+  final bool expired;
+  final int daysLeft;
+  const _DDayBadge(
+      {required this.used, required this.expired, required this.daysLeft});
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme scheme = Theme.of(context).colorScheme;
+    final Color bg;
+    final Color fg;
+    final String text;
+    if (used) {
+      bg = scheme.onSurface.withValues(alpha: 0.08);
+      fg = scheme.onSurfaceVariant;
+      text = '완료';
+    } else if (expired) {
+      bg = scheme.error.withValues(alpha: 0.12);
+      fg = scheme.error;
+      text = '만료';
+    } else {
+      bg = scheme.error.withValues(alpha: 0.12);
+      fg = scheme.error;
+      text = formatDDay(daysLeft);
+    }
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration:
+          BoxDecoration(color: bg, borderRadius: BorderRadius.circular(9)),
+      child: Text(
+        text,
+        style: TextStyle(color: fg, fontWeight: FontWeight.w800, fontSize: 12),
+      ),
     );
   }
 }
