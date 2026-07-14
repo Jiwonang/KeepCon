@@ -17,6 +17,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../shared/providers/theme_mode_provider.dart';
+import '../../shared/theme/theme_tokens.dart';
 import '../auth/login_page.dart';
 
 /// 마이(설정) 화면. themeModeProvider 소비를 위해 [ConsumerWidget].
@@ -47,14 +48,7 @@ class MyPage extends ConsumerWidget {
             Row(
               children: <Widget>[
                 Expanded(
-                  child: Text(
-                    '마이',
-                    style: theme.textTheme.headlineSmall?.copyWith(
-                      fontSize: 26,
-                      fontWeight: FontWeight.w900,
-                      letterSpacing: -0.5,
-                    ),
-                  ),
+                  child: Text('마이', style: context.pageHeaderStyle),
                 ),
                 _BellIcon(),
               ],
@@ -254,7 +248,7 @@ class _CardShell extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ColorScheme scheme = Theme.of(context).colorScheme;
-    final BorderRadius radius = BorderRadius.circular(18);
+    final BorderRadius radius = BorderRadius.circular(AppRadii.card);
 
     return Material(
       color: scheme.surface,
@@ -263,18 +257,7 @@ class _CardShell extends StatelessWidget {
         onTap: onTap,
         borderRadius: radius,
         child: Ink(
-          decoration: BoxDecoration(
-            color: scheme.surface,
-            borderRadius: radius,
-            border: Border.all(color: scheme.outline.withValues(alpha: 0.18)),
-            boxShadow: <BoxShadow>[
-              BoxShadow(
-                color: scheme.onSurface.withValues(alpha: 0.04),
-                blurRadius: 10,
-                offset: const Offset(0, 2),
-              ),
-            ],
-          ),
+          decoration: AppDecorations.softCard(scheme),
           child: Padding(padding: padding, child: child),
         ),
       ),
