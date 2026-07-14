@@ -9,8 +9,8 @@
 /// - 행위자/멤버 식별 = [AuthRepository.currentUser]([shareCurrentUserProvider]).
 /// - 공유 후보(내 기프티콘)는 [GifticonRepository.watchGifticons]로 원본 [Gifticon]을 받는다.
 ///
-/// 색/폰트/라운드/그림자는 전부 `Theme.of(context)` + [ShareThemeTokens]에서 온다.
-/// 하드코딩 색 없음. 라이트/다크 양쪽 대응.
+/// 색/폰트/라운드/그림자는 전부 `Theme.of(context)`에서 오고, 공유 기프티콘 카드의
+/// 브랜드 타일은 공유 `BrandPalette`를 소비한다. 하드코딩 색 없음. 라이트/다크 양쪽 대응.
 library;
 
 import 'package:flutter/material.dart';
@@ -24,7 +24,6 @@ import 'pages/group_notifications_page.dart';
 import 'pages/shared_gifticon_detail_page.dart';
 import 'pages/usage_log_page.dart';
 import 'state/share_providers.dart';
-import 'widgets/share_common.dart';
 import 'widgets/share_format.dart';
 import 'widgets/share_sheets.dart';
 import 'widgets/shared_gifticon_card.dart';
@@ -53,26 +52,18 @@ class SharePage extends ConsumerWidget {
     final User? user = ref.watch(shareCurrentUserProvider).value;
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('공유'),
-        actions: <Widget>[
-          IconButton(
-            onPressed: () => _push(context, const GroupNotificationsPage()),
-            icon: const Icon(Icons.notifications_outlined),
-            tooltip: '그룹 알림',
-          ),
-          IconButton(
-            onPressed: () => showCreateGroupSheet(context),
-            icon: const Icon(Icons.group_add_outlined),
-            tooltip: '그룹 만들기',
-          ),
-          const SizedBox(width: 4),
-        ],
-      ),
       body: SafeArea(
         child: ListView(
-          padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+          padding: const EdgeInsets.fromLTRB(20, 6, 20, 24),
           children: <Widget>[
+            // ── 헤더(큰 타이틀 + 알림벨 + 그룹 추가) ──
+            _ShareHeader(
+              onNotifications: () =>
+                  _push(context, const GroupNotificationsPage()),
+              onCreate: () => showCreateGroupSheet(context),
+            ),
+            const SizedBox(height: 26),
+
             // ── 1. 내 그룹 ──
             const _SectionHeader(title: '내 그룹'),
             const SizedBox(height: 12),
@@ -152,9 +143,73 @@ class SharePage extends ConsumerWidget {
   }
 }
 
+// ─────────────────────────── 헤더 ───────────────────────────
+
+/// 상단 헤더 — 큰 타이틀 "공유" + 알림벨(초록 점) + 그룹 추가. 홈/스캔과 동일 톤.
+class _ShareHeader extends StatelessWidget {
+  const _ShareHeader({required this.onNotifications, required this.onCreate});
+
+  final VoidCallback onNotifications;
+  final VoidCallback onCreate;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+
+    return Row(
+      children: <Widget>[
+        Expanded(
+          child: Text(
+            '공유',
+            style: theme.textTheme.headlineSmall?.copyWith(
+              fontSize: 26,
+              fontWeight: FontWeight.w900,
+              letterSpacing: -0.5,
+            ),
+          ),
+        ),
+        // 알림 벨 + 초록 뱃지 점 → 그룹 알림.
+        SizedBox(
+          width: 44,
+          height: 44,
+          child: IconButton(
+            onPressed: onNotifications,
+            tooltip: '그룹 알림',
+            icon: Stack(
+              clipBehavior: Clip.none,
+              children: <Widget>[
+                Icon(Icons.notifications_none, color: scheme.onSurface),
+                Positioned(
+                  top: -1,
+                  right: -1,
+                  child: Container(
+                    width: 9,
+                    height: 9,
+                    decoration: BoxDecoration(
+                      color: scheme.primary,
+                      shape: BoxShape.circle,
+                      border: Border.all(color: scheme.surface, width: 1.5),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        IconButton(
+          onPressed: onCreate,
+          tooltip: '그룹 만들기',
+          icon: const Icon(Icons.person_add_alt_1_outlined),
+        ),
+      ],
+    );
+  }
+}
+
 // ─────────────────────────── 섹션 헤더 ───────────────────────────
 
-/// 섹션 제목(볼드) 헤더. main 페이지의 섹션 헤더 톤과 맞춘다.
+/// 섹션 제목(볼드) 헤더. 스캔의 섹션 헤더 톤(18·w800)과 맞춘다.
 class _SectionHeader extends StatelessWidget {
   const _SectionHeader({required this.title});
 
@@ -162,7 +217,13 @@ class _SectionHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Text(title, style: Theme.of(context).textTheme.titleLarge);
+    return Text(
+      title,
+      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+            fontSize: 18,
+            fontWeight: FontWeight.w800,
+          ),
+    );
   }
 }
 
@@ -207,31 +268,66 @@ class _GroupCard extends ConsumerWidget {
     final int sharedCount =
         ref.watch(sharedGifticonsProvider(group.id)).value?.length ?? 0;
 
-    return Card(
+    return Material(
+      color: scheme.surface,
+      borderRadius: BorderRadius.circular(18),
       child: InkWell(
         borderRadius: BorderRadius.circular(18),
         onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Row(
-            children: <Widget>[
-              EmojiAvatar(emoji: group.emoji),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: <Widget>[
-                    Text(group.name, style: theme.textTheme.titleMedium),
-                    const SizedBox(height: 4),
-                    Text(
-                      '멤버 ${group.memberCount}명 · 공유 $sharedCount개',
-                      style: theme.textTheme.bodySmall,
-                    ),
-                  ],
-                ),
+        child: Ink(
+          decoration: BoxDecoration(
+            color: scheme.surface,
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: scheme.outline.withValues(alpha: 0.18)),
+            boxShadow: <BoxShadow>[
+              BoxShadow(
+                color: scheme.onSurface.withValues(alpha: 0.04),
+                blurRadius: 10,
+                offset: const Offset(0, 2),
               ),
-              Icon(Icons.chevron_right, color: scheme.onSurfaceVariant),
             ],
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              children: <Widget>[
+                // 이모지 타일(연한 서피스 라운드 스퀘어).
+                Container(
+                  width: 58,
+                  height: 58,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: scheme.surfaceContainerHighest,
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child:
+                      Text(group.emoji, style: const TextStyle(fontSize: 30)),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Text(
+                        group.name,
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontSize: 19,
+                          fontWeight: FontWeight.w800,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        '멤버 ${group.memberCount}명 · 공유 $sharedCount개',
+                        style: theme.textTheme.bodySmall,
+                      ),
+                    ],
+                  ),
+                ),
+                Icon(Icons.chevron_right, color: scheme.onSurfaceVariant),
+              ],
+            ),
           ),
         ),
       ),
@@ -249,6 +345,9 @@ class _GroupActionButtons extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ColorScheme scheme = Theme.of(context).colorScheme;
+    final RoundedRectangleBorder shape = RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(14),
+    );
     return Row(
       children: <Widget>[
         Expanded(
@@ -256,6 +355,10 @@ class _GroupActionButtons extends StatelessWidget {
             onPressed: onCreate,
             icon: const Icon(Icons.add, size: 18),
             label: const Text('그룹 만들기'),
+            style: ElevatedButton.styleFrom(
+              shape: shape,
+              padding: const EdgeInsets.symmetric(vertical: 15),
+            ),
           ),
         ),
         const SizedBox(width: 12),
@@ -267,8 +370,8 @@ class _GroupActionButtons extends StatelessWidget {
             style: OutlinedButton.styleFrom(
               foregroundColor: scheme.onSurface,
               side: BorderSide(color: scheme.outline),
-              shape: const StadiumBorder(),
-              padding: const EdgeInsets.symmetric(vertical: 12),
+              shape: shape,
+              padding: const EdgeInsets.symmetric(vertical: 15),
             ),
           ),
         ),
