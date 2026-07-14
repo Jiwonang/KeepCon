@@ -76,7 +76,7 @@ class ShareStatusBadge extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
       decoration: BoxDecoration(
         color: fg.withValues(alpha: 0.14),
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(AppRadii.badge),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,

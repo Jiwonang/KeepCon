@@ -25,8 +25,7 @@ class GroupNotificationsPage extends ConsumerWidget {
     return Scaffold(
       appBar: AppBar(
         centerTitle: true,
-        title: const Text('그룹 알림',
-            style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
+        title: Text('그룹 알림', style: context.navTitleStyle),
       ),
       body: SafeArea(
         top: false,
@@ -99,10 +98,7 @@ class _NotificationCard extends StatelessWidget {
                     Expanded(
                       child: Text(
                         item.title,
-                        style: theme.textTheme.titleMedium?.copyWith(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w800,
-                        ),
+                        style: context.sectionTitleStyle,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),

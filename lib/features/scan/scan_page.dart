@@ -223,7 +223,7 @@ class _SourceCard extends StatelessWidget {
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
                   color: accent.withValues(alpha: ScanAccents.tileTintAlpha),
-                  borderRadius: BorderRadius.circular(15),
+                  borderRadius: BorderRadius.circular(AppRadii.button),
                 ),
                 child: Icon(icon, color: accent, size: 26),
               ),
@@ -234,10 +234,7 @@ class _SourceCard extends StatelessWidget {
                   children: [
                     Text(
                       title,
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        fontSize: 19,
-                        fontWeight: FontWeight.w800,
-                      ),
+                      style: context.navTitleStyle,
                     ),
                     const SizedBox(height: 4),
                     Text(subtitle, style: theme.textTheme.bodySmall),
@@ -270,7 +267,7 @@ class _AiBanner extends StatelessWidget {
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         color: scheme.primary.withValues(alpha: 0.10),
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(AppRadii.panel),
       ),
       child: Row(
         children: [
@@ -377,14 +374,14 @@ class _GroupTile extends StatelessWidget {
 
     return Material(
       color: Colors.transparent,
-      borderRadius: BorderRadius.circular(16),
+      borderRadius: BorderRadius.circular(AppRadii.panel),
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(AppRadii.panel),
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 10),
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(AppRadii.panel),
             border: Border.all(
               color: selected
                   ? scheme.primary

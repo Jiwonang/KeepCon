@@ -14,6 +14,7 @@
 library;
 
 import 'package:flutter/material.dart';
+import '../../shared/theme/theme_tokens.dart';
 
 /// 회원가입 화면. rough 스캐폴드.
 class SignupPage extends StatefulWidget {
@@ -39,8 +40,6 @@ class _SignupPageState extends State<SignupPage> {
 
   @override
   Widget build(BuildContext context) {
-    final ThemeData theme = Theme.of(context);
-
     return Scaffold(
       // 큰 타이틀은 본문 헤더로 두고, AppBar는 뒤로가기만 담당(투명).
       appBar: AppBar(toolbarHeight: 44),
@@ -53,11 +52,7 @@ class _SignupPageState extends State<SignupPage> {
             children: <Widget>[
               Text(
                 '회원가입',
-                style: theme.textTheme.headlineSmall?.copyWith(
-                  fontSize: 32,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: -0.5,
-                ),
+                style: context.signupTitleStyle,
               ),
               const SizedBox(height: 26),
 
@@ -122,7 +117,7 @@ class _SignupPageState extends State<SignupPage> {
                 onPressed: _demoSignup,
                 style: ElevatedButton.styleFrom(
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(15),
+                    borderRadius: BorderRadius.circular(AppRadii.button),
                   ),
                   padding: const EdgeInsets.symmetric(vertical: 17),
                   textStyle: const TextStyle(
@@ -175,7 +170,8 @@ class _GoogleButton extends StatelessWidget {
       style: OutlinedButton.styleFrom(
         foregroundColor: scheme.onSurface,
         side: BorderSide(color: scheme.outline.withValues(alpha: 0.6)),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(AppRadii.button)),
         padding: const EdgeInsets.symmetric(vertical: 16),
         textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
       ),

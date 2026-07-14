@@ -123,10 +123,10 @@ class _FilterChip extends StatelessWidget {
 
     return Material(
       color: bg,
-      borderRadius: BorderRadius.circular(22),
+      borderRadius: BorderRadius.circular(AppRadii.hero),
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(22),
+        borderRadius: BorderRadius.circular(AppRadii.hero),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 11),
           child: Center(
@@ -213,7 +213,7 @@ class _LogRow extends ConsumerWidget {
                     alignment: Alignment.center,
                     decoration: BoxDecoration(
                       color: brand.background,
-                      borderRadius: BorderRadius.circular(16),
+                      borderRadius: BorderRadius.circular(AppRadii.panel),
                     ),
                     child: Text(
                       brand.label,
@@ -232,9 +232,7 @@ class _LogRow extends ConsumerWidget {
                       children: <Widget>[
                         Text.rich(
                           TextSpan(
-                            style: theme.textTheme.titleMedium?.copyWith(
-                              fontSize: 17,
-                              fontWeight: FontWeight.w800,
+                            style: context.itemTitleStyle?.copyWith(
                               height: 1.35,
                             ),
                             children: <InlineSpan>[

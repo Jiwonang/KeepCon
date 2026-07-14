@@ -93,10 +93,7 @@ class SharedGifticonCard extends StatelessWidget {
                         const SizedBox(height: 2),
                         Text(
                           item.productName,
-                          style: theme.textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.w800,
-                            fontSize: 17,
-                          ),
+                          style: context.itemTitleStyle,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),

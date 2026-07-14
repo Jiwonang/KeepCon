@@ -13,6 +13,7 @@
 library;
 
 import 'package:flutter/material.dart';
+import '../../shared/theme/theme_tokens.dart';
 
 import '../../app/keepcon_shell.dart';
 import 'reset_password_page.dart';
@@ -68,11 +69,7 @@ class _LoginPageState extends State<LoginPage> {
                 Text(
                   'KeepCon',
                   textAlign: TextAlign.center,
-                  style: theme.textTheme.headlineSmall?.copyWith(
-                    fontSize: 38,
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: -1,
-                  ),
+                  style: context.logoTitleStyle,
                 ),
                 const SizedBox(height: 10),
                 Text(
@@ -124,7 +121,7 @@ class _LoginPageState extends State<LoginPage> {
                   onPressed: _demoSignIn,
                   style: ElevatedButton.styleFrom(
                     shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(15),
+                      borderRadius: BorderRadius.circular(AppRadii.button),
                     ),
                     padding: const EdgeInsets.symmetric(vertical: 17),
                     textStyle: const TextStyle(
@@ -176,7 +173,8 @@ class _GoogleButton extends StatelessWidget {
       style: OutlinedButton.styleFrom(
         foregroundColor: scheme.onSurface,
         side: BorderSide(color: scheme.outline.withValues(alpha: 0.6)),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(AppRadii.button)),
         padding: const EdgeInsets.symmetric(vertical: 16),
         textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
       ),
