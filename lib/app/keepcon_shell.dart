@@ -51,6 +51,9 @@ class _KeepConShellState extends State<KeepConShell> {
       bottomNavigationBar: BottomAppBar(
         shape: const CircularNotchedRectangle(),
         notchMargin: 8,
+        // 기본 내부 패딩(세로 12)을 제거 — 내비 아이템이 자체 패딩(세로 8)을 가져
+        // 좁은 높이에서 아이콘+라벨 컬럼이 2px 넘치던 것을 해소한다.
+        padding: EdgeInsets.zero,
         child: Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: <Widget>[

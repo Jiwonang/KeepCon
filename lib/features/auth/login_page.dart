@@ -1,45 +1,76 @@
-/// 로그인 페이지 — KeepCon 틀 재디자인 (rough 스캐폴드, 실제 인증 없음).
+/// 로그인 페이지 — 이메일/비밀번호 로그인.
 ///
-/// ⚠️ 자리표시: 화면 틀만 갖춘 rough 버전이다. 실제 인증/세션/자동 로그인 로직은
-/// 팀원(auth 담당)이 이 위에 [AuthRepository]/`currentUser` 계약을 붙여 구현한다.
-/// 여기서는 계약에 없는 공유 타입을 만들지 않고, 데이터는 화면 내부 로컬로만 둔다.
+/// [AuthRepository.signIn]으로 인증한다. 성공 시 세션이 바뀌어 `AuthGate`가 앱 셸로
+/// 전환하므로 이 화면은 직접 내비게이션하지 않는다(세션이 단일 진실). 실패는
+/// [AuthException] 메시지로 안내한다.
 ///
-/// 레이아웃(위→아래): 로고+타이틀 → Google 로그인 → 구분선 → 이메일/비밀번호 →
+/// 레이아웃(위→아래): 로고+타이틀 → Google 로그인(준비 중) → 구분선 → 이메일/비밀번호 →
 /// 로그인 버튼 → 회원가입·비밀번호 찾기 링크.
 ///
-/// 이동: 회원가입 → [SignupPage], 비밀번호 찾기 → [ResetPasswordPage],
-/// 로그인/Google → 데모로 [KeepConShell]로 진입(실제 인증은 후속 TODO).
-/// 색/폰트/라운드는 `Theme.of(context)` 소비. Google 브랜드색만 페이지 로컬 상수.
+/// 이동: 회원가입 → [SignupPage], 비밀번호 찾기 → [ResetPasswordPage].
+/// Google 로그인은 아직 미구현(안내만). 색/폰트/라운드는 `Theme.of(context)` 소비.
 library;
 
 import 'package:flutter/material.dart';
-import '../../shared/theme/theme_tokens.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../app/keepcon_shell.dart';
+import '../../shared/providers/repositories.dart';
+import '../../shared/repositories/auth_repository.dart';
+import '../../shared/theme/theme_tokens.dart';
+import 'auth_error_message.dart';
 import 'reset_password_page.dart';
 import 'signup_page.dart';
 
-/// 로그인 진입 화면. rough 스캐폴드.
-class LoginPage extends StatefulWidget {
+/// 로그인 진입 화면. [AuthRepository]로 이메일/비밀번호 로그인한다.
+class LoginPage extends ConsumerStatefulWidget {
   const LoginPage({super.key});
 
   @override
-  State<LoginPage> createState() => _LoginPageState();
+  ConsumerState<LoginPage> createState() => _LoginPageState();
 }
 
-class _LoginPageState extends State<LoginPage> {
+class _LoginPageState extends ConsumerState<LoginPage> {
+  final TextEditingController _emailCtrl = TextEditingController();
+  final TextEditingController _pwCtrl = TextEditingController();
   bool _obscure = true;
+  bool _loading = false;
 
-  /// 데모 로그인 — 실제 인증 없이 인증 스택을 제거하고 홈으로 진입한다.
-  ///
-  /// TODO(auth): AuthRepository.signIn(email, password) / Google OAuth 연동 →
-  ///   성공 시 세션 시작(currentUser 노출) 후 홈으로 이동.
-  void _demoSignIn() {
-    Navigator.of(context).pushAndRemoveUntil(
-      MaterialPageRoute<void>(builder: (_) => const KeepConShell()),
-      (route) => false,
-    );
+  @override
+  void dispose() {
+    _emailCtrl.dispose();
+    _pwCtrl.dispose();
+    super.dispose();
   }
+
+  /// 이메일/비밀번호로 로그인. 성공 시 세션이 바뀌어 `AuthGate`가 앱 셸로 전환하므로
+  /// 여기서 직접 내비게이션하지 않는다. 실패는 [AuthException] 메시지로 안내한다.
+  Future<void> _signIn() async {
+    if (_loading) return;
+    final String email = _emailCtrl.text.trim();
+    final String pw = _pwCtrl.text;
+    if (email.isEmpty || pw.isEmpty) {
+      _snack('이메일과 비밀번호를 입력해 주세요.');
+      return;
+    }
+    setState(() => _loading = true);
+    try {
+      await ref.read(authRepositoryProvider).signIn(email: email, password: pw);
+      // 성공 → AuthGate가 세션 변화를 받아 셸로 전환(별도 내비게이션 불필요).
+    } on AuthException catch (e) {
+      _snack(authErrorMessage(e));
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  void _snack(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(msg)));
+  }
+
+  void _notReady() => _snack('Google 로그인은 준비 중이에요. 이메일로 로그인해 주세요.');
 
   void _openSignup() => Navigator.of(context).push(
         MaterialPageRoute<void>(builder: (_) => const SignupPage()),
@@ -81,8 +112,8 @@ class _LoginPageState extends State<LoginPage> {
                 ),
                 const SizedBox(height: 48),
 
-                // ── Google 로그인 ──
-                _GoogleButton(onPressed: _demoSignIn),
+                // ── Google 로그인 (준비 중) ──
+                _GoogleButton(onPressed: _notReady),
                 const SizedBox(height: 30),
 
                 // ── 구분선 ──
@@ -90,9 +121,10 @@ class _LoginPageState extends State<LoginPage> {
                 const SizedBox(height: 22),
 
                 // ── 이메일 ──
-                const TextField(
+                TextField(
+                  controller: _emailCtrl,
                   keyboardType: TextInputType.emailAddress,
-                  decoration: InputDecoration(
+                  decoration: const InputDecoration(
                     hintText: '이메일',
                     prefixIcon: Icon(Icons.mail_outline),
                   ),
@@ -101,6 +133,7 @@ class _LoginPageState extends State<LoginPage> {
 
                 // ── 비밀번호(가시성 토글) ──
                 TextField(
+                  controller: _pwCtrl,
                   obscureText: _obscure,
                   decoration: InputDecoration(
                     hintText: '비밀번호',
@@ -118,7 +151,7 @@ class _LoginPageState extends State<LoginPage> {
 
                 // ── 로그인 버튼 ──
                 ElevatedButton(
-                  onPressed: _demoSignIn,
+                  onPressed: _loading ? null : _signIn,
                   style: ElevatedButton.styleFrom(
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(AppRadii.button),
@@ -129,7 +162,13 @@ class _LoginPageState extends State<LoginPage> {
                       fontWeight: FontWeight.w700,
                     ),
                   ),
-                  child: const Text('로그인'),
+                  child: _loading
+                      ? const SizedBox(
+                          height: 22,
+                          width: 22,
+                          child: CircularProgressIndicator(strokeWidth: 2.4),
+                        )
+                      : const Text('로그인'),
                 ),
                 const SizedBox(height: 24),
 
