@@ -14,6 +14,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'app/keepcon_shell.dart';
+import 'features/auth/login_page.dart';
 import 'shared/models/gifticon.dart';
 import 'shared/providers/repositories.dart';
 import 'shared/providers/theme_mode_provider.dart';
@@ -98,19 +99,26 @@ void main() {
 }
 
 /// KeepCon 루트 앱. 공유 테마(SSOT)를 쓰고, [themeModeProvider]로 라이트/다크를 전환한다.
+///
+/// 초기 화면은 [AuthRepository.currentUser]로 분기한다(로그인 상태면 [KeepConShell],
+/// 아니면 [LoginPage]) — 이후 로그인/로그아웃 전환은 각 페이지가 명시적으로
+/// Navigator로 처리하므로(로그인 성공 시 [KeepConShell]로 push, 로그아웃 시 [LoginPage]로
+/// push) 여기서는 최초 진입 화면만 결정하고 계속 반응형으로 감시하지 않는다(두 메커니즘이
+/// 동시에 네비게이션을 건드리면 경합이 생기므로 의도적으로 단순하게 유지).
 class KeepConApp extends ConsumerWidget {
   const KeepConApp({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final ThemeMode mode = ref.watch(themeModeProvider);
+    final bool signedIn = ref.read(authRepositoryProvider).currentUser != null;
     return MaterialApp(
       title: 'KeepCon',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.light,
       darkTheme: AppTheme.dark,
       themeMode: mode,
-      home: const KeepConShell(),
+      home: signedIn ? const KeepConShell() : const LoginPage(),
     );
   }
 }

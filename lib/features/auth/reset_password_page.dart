@@ -1,7 +1,7 @@
-/// 비밀번호 찾기 페이지 — KeepCon 틀 재디자인 (rough 스캐폴드, 실제 재설정 없음).
+/// 비밀번호 찾기 페이지 — 실제 재설정 요청 연동.
 ///
-/// ⚠️ 자리표시: 이메일 입력 + 안내문구 + 버튼만 갖춘 rough 버전.
-/// 재설정 링크 발송 로직은 팀원이 [AuthRepository]/`resetPassword` 계약으로 붙인다.
+/// [AuthRepository.sendPasswordReset]를 호출하고, 성공 시 안내 후 로그인 화면으로
+/// 복귀한다.
 ///
 /// 레이아웃(위→아래): 뒤로가기 + 타이틀 → 안내문구 → 이메일 → 재설정 링크 보내기.
 ///
@@ -10,11 +10,58 @@
 library;
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../shared/theme/theme_tokens.dart';
+import '../../shared/providers/repositories.dart';
+import '../../shared/repositories/auth_repository.dart';
 
-/// 비밀번호 재설정 화면. rough 스캐폴드.
-class ResetPasswordPage extends StatelessWidget {
+import 'auth_error_messages.dart';
+
+/// 비밀번호 재설정 화면.
+class ResetPasswordPage extends ConsumerStatefulWidget {
   const ResetPasswordPage({super.key});
+
+  @override
+  ConsumerState<ResetPasswordPage> createState() => _ResetPasswordPageState();
+}
+
+class _ResetPasswordPageState extends ConsumerState<ResetPasswordPage> {
+  final TextEditingController _emailController = TextEditingController();
+  bool _submitting = false;
+
+  @override
+  void dispose() {
+    _emailController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    final String email = _emailController.text.trim();
+    if (email.isEmpty) {
+      _showMessage('이메일을 입력해주세요.');
+      return;
+    }
+
+    setState(() => _submitting = true);
+    try {
+      await ref.read(authRepositoryProvider).sendPasswordReset(email: email);
+      if (!mounted) return;
+      _showMessage('재설정 링크를 보냈습니다. 메일함을 확인해주세요.');
+      Navigator.of(context).pop();
+    } on AuthException catch (e) {
+      _showMessage(authErrorMessage(e.code));
+    } catch (_) {
+      _showMessage('요청 중 오류가 발생했습니다.');
+    } finally {
+      if (mounted) setState(() => _submitting = false);
+    }
+  }
+
+  void _showMessage(String message) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -46,9 +93,11 @@ class ResetPasswordPage extends StatelessWidget {
               const SizedBox(height: 40),
 
               // ── 이메일 ──
-              const TextField(
+              TextField(
+                controller: _emailController,
                 keyboardType: TextInputType.emailAddress,
-                decoration: InputDecoration(
+                onSubmitted: (_) => _submit(),
+                decoration: const InputDecoration(
                   hintText: '이메일',
                   prefixIcon: Icon(Icons.mail_outline),
                 ),
@@ -57,15 +106,7 @@ class ResetPasswordPage extends StatelessWidget {
 
               // ── 재설정 링크 보내기 ──
               ElevatedButton(
-                onPressed: () {
-                  // TODO(auth): AuthRepository.resetPassword(email) 연동 →
-                  //   발송 성공 안내 후 로그인 화면으로 복귀.
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('재설정 링크 발송은 준비 중입니다.'),
-                    ),
-                  );
-                },
+                onPressed: _submitting ? null : _submit,
                 style: ElevatedButton.styleFrom(
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(AppRadii.button),
@@ -76,7 +117,13 @@ class ResetPasswordPage extends StatelessWidget {
                     fontWeight: FontWeight.w700,
                   ),
                 ),
-                child: const Text('재설정 링크 보내기'),
+                child: _submitting
+                    ? const SizedBox(
+                        width: 22,
+                        height: 22,
+                        child: CircularProgressIndicator(strokeWidth: 2.4),
+                      )
+                    : const Text('재설정 링크 보내기'),
               ),
             ],
           ),

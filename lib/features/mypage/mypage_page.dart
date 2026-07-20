@@ -1,9 +1,10 @@
-/// 마이(설정) 페이지 — KeepCon 틀 재디자인 (rough 스캐폴드).
+/// 마이(설정) 페이지 — currentUser 연동 + 실제 로그아웃.
 ///
-/// ⚠️ 자리표시: 프로필/설정 화면 틀만 갖춘 rough 버전이다. 프로필 데이터는 하드코딩이며,
-/// 실제 조회/수정/로그아웃 로직은 팀원이 [AuthRepository]/`currentUser` 계약으로 붙인다.
+/// 프로필(이름/이메일)은 [AuthRepository.currentUser]를 반영한다(하드코딩 제거).
+/// 로그아웃은 [AuthRepository.signOut] 호출 후 이전 스택을 모두 제거하고
+/// [LoginPage]로 이동한다.
 ///
-/// 다크 모드 스위치만 **실제 동작**한다 — 공유 계약 [themeModeProvider]를 소비:
+/// 다크 모드 스위치도 **실제 동작**한다 — 공유 계약 [themeModeProvider]를 소비:
 /// - 현재값: `ref.watch(themeModeProvider)` (== [ThemeMode.dark] 여부)
 /// - 토글  : `ref.read(themeModeProvider.notifier).setDark(bool)`
 /// 페이지 내부에 ThemeMode 상태를 재선언하지 않는다(설정 SSOT와 갈라짐 방지).
@@ -16,18 +17,22 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../shared/models/user.dart';
+import '../../shared/providers/repositories.dart';
 import '../../shared/providers/theme_mode_provider.dart';
 import '../../shared/theme/theme_tokens.dart';
 import '../auth/login_page.dart';
 
-/// 마이(설정) 화면. themeModeProvider 소비를 위해 [ConsumerWidget].
+/// 마이 페이지 전용 currentUser 관찰 provider. `main`의 `currentUserProvider`,
+/// `share`의 `shareCurrentUserProvider`와 동일 패턴(각 feature가 SSOT
+/// [authRepositoryProvider]를 얇게 wrap) — SSOT provider 자체를 재선언하지 않는다.
+final StreamProvider<User?> mypageCurrentUserProvider = StreamProvider<User?>(
+  (ref) => ref.watch(authRepositoryProvider).watchCurrentUser(),
+);
+
+/// 마이(설정) 화면. themeModeProvider/currentUser 소비를 위해 [ConsumerWidget].
 class MyPage extends ConsumerWidget {
   const MyPage({super.key});
-
-  // 프로필 하드코딩 값 (rough — 실제 currentUser는 후속 연동).
-  static const String _name = 'KeepCon Tester';
-  static const String _email = 'tester@keepcon.app';
-  static const String _initial = 'K';
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -35,6 +40,12 @@ class MyPage extends ConsumerWidget {
     final ColorScheme scheme = theme.colorScheme;
     final ThemeMode mode = ref.watch(themeModeProvider);
     final bool isDark = mode == ThemeMode.dark;
+    final User? user = ref.watch(mypageCurrentUserProvider).valueOrNull;
+    final String displayName = user?.displayName ?? '로그인 필요';
+    final String displayEmail = user?.email ?? '';
+    final String initial = displayName.trim().isNotEmpty
+        ? displayName.trim()[0].toUpperCase()
+        : '?';
 
     return Scaffold(
       // 큰 타이틀은 본문 헤더로 두고, AppBar는 뒤로가기만 담당(투명).
@@ -69,7 +80,7 @@ class MyPage extends ConsumerWidget {
                       shape: BoxShape.circle,
                     ),
                     child: Text(
-                      _initial,
+                      initial,
                       style: TextStyle(
                         color: scheme.onPrimary,
                         fontWeight: FontWeight.w700,
@@ -83,11 +94,11 @@ class MyPage extends ConsumerWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: <Widget>[
                         Text(
-                          _name,
+                          displayName,
                           style: context.navTitleStyle,
                         ),
                         const SizedBox(height: 4),
-                        Text(_email, style: theme.textTheme.bodySmall),
+                        Text(displayEmail, style: theme.textTheme.bodySmall),
                       ],
                     ),
                   ),
@@ -148,13 +159,7 @@ class MyPage extends ConsumerWidget {
 
             // ── 로그아웃 카드 ──
             _CardShell(
-              onTap: () {
-                // TODO(auth): AuthRepository.signOut() 연동 후 세션 종료 →
-                //   로그인 화면으로 대체 이동(현재는 rough push).
-                Navigator.of(context).push(
-                  MaterialPageRoute<void>(builder: (_) => const LoginPage()),
-                );
-              },
+              onTap: () => _signOut(context, ref),
               child: Row(
                 children: <Widget>[
                   Icon(Icons.logout, color: scheme.error, size: 24),
@@ -179,6 +184,17 @@ class MyPage extends ConsumerWidget {
   void _placeholder(BuildContext context, String label) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('$label 은(는) 준비 중입니다.')),
+    );
+  }
+
+  /// [AuthRepository.signOut] 연동 — 세션 종료 후 이전 스택을 모두 제거하고
+  /// [LoginPage]로 이동한다.
+  Future<void> _signOut(BuildContext context, WidgetRef ref) async {
+    await ref.read(authRepositoryProvider).signOut();
+    if (!context.mounted) return;
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute<void>(builder: (_) => const LoginPage()),
+      (route) => false,
     );
   }
 }

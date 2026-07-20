@@ -1,9 +1,9 @@
-/// 회원가입 페이지 — KeepCon 틀 재디자인 (rough 스캐폴드, 실제 가입 없음).
+/// 회원가입 페이지 — 이메일/비밀번호 실제 가입 연동.
 ///
-/// ⚠️ 자리표시: 닉네임·이메일·비밀번호·비밀번호확인 입력과 버튼만 갖춘 rough 버전.
-/// 유효성 검증/가입 로직은 팀원이 [AuthRepository]/`signUp` 계약으로 붙인다.
+/// 닉네임/이메일/비밀번호 유효성 검증 후 [AuthRepository.signUp]을 호출한다. 성공 시
+/// (계약상) 자동 로그인 상태가 되므로 [KeepConShell]로 진입한다.
 ///
-/// 레이아웃(위→아래): 뒤로가기 + 타이틀 → Google 가입 → 구분선 →
+/// 레이아웃(위→아래): 뒤로가기 + 타이틀 → Google 가입(준비 중) → 구분선 →
 /// 닉네임/이메일/비밀번호/비밀번호 확인 → 가입하기.
 ///
 /// route: [LoginPage]에서 Navigator.push로 진입(뒤로가기로 복귀).
@@ -14,28 +14,85 @@
 library;
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../shared/theme/theme_tokens.dart';
+import '../../shared/providers/repositories.dart';
+import '../../shared/repositories/auth_repository.dart';
 
-/// 회원가입 화면. rough 스캐폴드.
-class SignupPage extends StatefulWidget {
+import '../../app/keepcon_shell.dart';
+import 'auth_error_messages.dart';
+
+/// 회원가입 화면.
+class SignupPage extends ConsumerStatefulWidget {
   const SignupPage({super.key});
 
   @override
-  State<SignupPage> createState() => _SignupPageState();
+  ConsumerState<SignupPage> createState() => _SignupPageState();
 }
 
-class _SignupPageState extends State<SignupPage> {
+class _SignupPageState extends ConsumerState<SignupPage> {
+  final TextEditingController _nicknameController = TextEditingController();
+  final TextEditingController _emailController = TextEditingController();
+  final TextEditingController _pwController = TextEditingController();
+  final TextEditingController _pwConfirmController = TextEditingController();
   bool _obscurePw = true;
   bool _obscurePwConfirm = true;
+  bool _submitting = false;
 
-  /// 데모 가입 — 실제 가입/검증 없이 이전(로그인) 화면으로 복귀한다.
-  ///
-  /// TODO(auth): 유효성 검증 후 AuthRepository.signUp(...) / Google OAuth 연동 →
-  ///   성공 시 세션 시작하거나 로그인 화면으로 복귀.
-  void _demoSignup() {
-    if (Navigator.of(context).canPop()) {
-      Navigator.of(context).pop();
+  @override
+  void dispose() {
+    _nicknameController.dispose();
+    _emailController.dispose();
+    _pwController.dispose();
+    _pwConfirmController.dispose();
+    super.dispose();
+  }
+
+  /// 유효성 검증 후 [AuthRepository.signUp] 연동.
+  Future<void> _submit() async {
+    final String nickname = _nicknameController.text.trim();
+    final String email = _emailController.text.trim();
+    final String pw = _pwController.text;
+    final String pwConfirm = _pwConfirmController.text;
+
+    if (nickname.isEmpty || email.isEmpty || pw.isEmpty) {
+      _showMessage('닉네임·이메일·비밀번호를 모두 입력해주세요.');
+      return;
     }
+    if (!email.contains('@') || !email.contains('.')) {
+      _showMessage('이메일 형식이 올바르지 않습니다.');
+      return;
+    }
+    if (pw != pwConfirm) {
+      _showMessage('비밀번호가 일치하지 않습니다.');
+      return;
+    }
+
+    setState(() => _submitting = true);
+    try {
+      await ref.read(authRepositoryProvider).signUp(
+            email: email,
+            password: pw,
+            displayName: nickname,
+          );
+      if (!mounted) return;
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute<void>(builder: (_) => const KeepConShell()),
+        (route) => false,
+      );
+    } on AuthException catch (e) {
+      _showMessage(authErrorMessage(e.code));
+    } catch (_) {
+      _showMessage('회원가입 중 오류가 발생했습니다.');
+    } finally {
+      if (mounted) setState(() => _submitting = false);
+    }
+  }
+
+  void _showMessage(String message) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override
@@ -56,8 +113,11 @@ class _SignupPageState extends State<SignupPage> {
               ),
               const SizedBox(height: 26),
 
-              // ── Google 가입 ──
-              _GoogleButton(label: 'Google로 가입하기', onPressed: _demoSignup),
+              // ── Google 가입(준비 중) ──
+              _GoogleButton(
+                label: 'Google로 가입하기',
+                onPressed: () => _showMessage('Google 가입은 준비 중입니다.'),
+              ),
               const SizedBox(height: 26),
 
               // ── 구분선 ──
@@ -65,8 +125,9 @@ class _SignupPageState extends State<SignupPage> {
               const SizedBox(height: 24),
 
               // ── 닉네임 ──
-              const TextField(
-                decoration: InputDecoration(
+              TextField(
+                controller: _nicknameController,
+                decoration: const InputDecoration(
                   hintText: '닉네임',
                   prefixIcon: Icon(Icons.person_outline),
                 ),
@@ -74,9 +135,10 @@ class _SignupPageState extends State<SignupPage> {
               const SizedBox(height: 14),
 
               // ── 이메일 ──
-              const TextField(
+              TextField(
+                controller: _emailController,
                 keyboardType: TextInputType.emailAddress,
-                decoration: InputDecoration(
+                decoration: const InputDecoration(
                   hintText: '이메일',
                   prefixIcon: Icon(Icons.mail_outline),
                 ),
@@ -85,9 +147,10 @@ class _SignupPageState extends State<SignupPage> {
 
               // ── 비밀번호(가시성 토글) ──
               TextField(
+                controller: _pwController,
                 obscureText: _obscurePw,
                 decoration: InputDecoration(
-                  hintText: '비밀번호',
+                  hintText: '비밀번호 (6자 이상)',
                   prefixIcon: const Icon(Icons.lock_outline),
                   suffixIcon: _VisibilityToggle(
                     obscured: _obscurePw,
@@ -99,7 +162,9 @@ class _SignupPageState extends State<SignupPage> {
 
               // ── 비밀번호 확인(가시성 토글) ──
               TextField(
+                controller: _pwConfirmController,
                 obscureText: _obscurePwConfirm,
+                onSubmitted: (_) => _submit(),
                 decoration: InputDecoration(
                   hintText: '비밀번호 확인',
                   prefixIcon: const Icon(Icons.lock_outline),
@@ -114,7 +179,7 @@ class _SignupPageState extends State<SignupPage> {
 
               // ── 가입하기 ──
               ElevatedButton(
-                onPressed: _demoSignup,
+                onPressed: _submitting ? null : _submit,
                 style: ElevatedButton.styleFrom(
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(AppRadii.button),
@@ -125,7 +190,13 @@ class _SignupPageState extends State<SignupPage> {
                     fontWeight: FontWeight.w700,
                   ),
                 ),
-                child: const Text('가입하기'),
+                child: _submitting
+                    ? const SizedBox(
+                        width: 22,
+                        height: 22,
+                        child: CircularProgressIndicator(strokeWidth: 2.4),
+                      )
+                    : const Text('가입하기'),
               ),
             ],
           ),
