@@ -2,29 +2,103 @@ rules_version = '2';
 
 // KeepCon Firestore 보안 규칙.
 //
-// 이 슬라이스(인증)에서 실제 쓰이는 컬렉션은 `users/{uid}`뿐이다. 그 문서는
-// **본인만** 읽고 쓸 수 있게 하고, 나머지 컬렉션(gifticons·groups·sharedGifticons·
-// usageLogs·notifications)은 데이터 모델 확정 시 열 때까지 **기본 차단**한다
-// (allow-all-signed-in 같은 위험한 임시 규칙을 커밋하지 않는다).
+// 접근 원칙:
+// - users: 본인 프로필만.
+// - gifticons: 소유자(ownerId)만.
+// - groups: 멤버만 읽기 / 방장만 삭제 / 생성·합류·관리는 아래 규칙대로.
+// - sharedGifticons·usageLogs·notifications: 소속 그룹 멤버만.
+// - shareLocks: 내부 잠금 메커니즘(민감 데이터 없음) — 로그인 사용자면 관리.
+// - 그 외: 기본 차단.
 //
-// TODO(다음 슬라이스): gifticons(소유자)·groups(멤버)·sharedGifticons(그룹 멤버)·
-//   usageLogs·notifications 규칙 추가.
+// ⚠️ 방어 수준(defense-in-depth): 세밀한 행위 가드(방장만 소유권 이전, 공유자만 취소,
+//    상태 전이 등)는 앱의 트랜잭션 로직이 담당하고, 이 규칙은 **멤버십/소유권 수준**의
+//    접근 통제를 제공한다. 규칙만으로 모든 트랜잭션 가드를 복제하지는 않는다.
 //
-// 배포: Firebase 콘솔에서 프로젝트 생성 후 `firebase deploy --only firestore:rules`
-//   (또는 콘솔 > Firestore > 규칙 탭에 붙여넣기).
+// 배포: `firebase deploy --only firestore:rules,firestore:indexes`
+//   (또는 콘솔 > Firestore > 규칙 탭).
 service cloud.firestore {
   match /databases/{database}/documents {
-    // 로그인한 사용자인지.
     function isSignedIn() {
       return request.auth != null;
     }
 
-    // 본인 프로필만 접근 가능.
-    match /users/{userId} {
-      allow read, write: if isSignedIn() && request.auth.uid == userId;
+    function uid() {
+      return request.auth.uid;
     }
 
-    // 그 외 모든 문서는 기본 차단(아직 규칙 미정의). 다음 슬라이스에서 컬렉션별로 연다.
+    // 그룹 멤버십 판정 — 상위 group 문서의 memberIds를 참조(문서 존재 확인 포함).
+    function isGroupMember(groupId) {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/groups/$(groupId))
+        && uid() in get(/databases/$(database)/documents/groups/$(groupId)).data.memberIds;
+    }
+
+    // 사용자 프로필 — 본인만.
+    match /users/{userId} {
+      allow read, write: if isSignedIn() && uid() == userId;
+    }
+
+    // 개인 기프티콘 — 소유자만.
+    match /gifticons/{id} {
+      allow read, update, delete:
+        if isSignedIn() && resource.data.ownerId == uid();
+      allow create:
+        if isSignedIn() && request.resource.data.ownerId == uid();
+    }
+
+    // 그룹.
+    match /groups/{groupId} {
+      allow read: if isSignedIn() && uid() in resource.data.memberIds;
+
+      // 생성: 만드는 사람이 방장(ownerId==본인)이고 멤버에 포함돼야 한다.
+      allow create: if isSignedIn()
+        && request.resource.data.ownerId == uid()
+        && uid() in request.resource.data.memberIds;
+
+      // 삭제: 방장만.
+      allow delete: if isSignedIn() && resource.data.ownerId == uid();
+
+      // 변경: 기존 멤버의 관리 작업, 또는 초대코드 합류(비멤버가 자신만 추가하고
+      //       기존 멤버를 제거하지 않을 때).
+      allow update: if isSignedIn() && (
+        uid() in resource.data.memberIds
+        || (
+          !(uid() in resource.data.memberIds)
+          && uid() in request.resource.data.memberIds
+          && request.resource.data.memberIds.hasAll(resource.data.memberIds)
+        )
+      );
+    }
+
+    // 공유 기프티콘 — 소속 그룹 멤버.
+    match /sharedGifticons/{id} {
+      allow read, update, delete:
+        if isSignedIn() && isGroupMember(resource.data.groupId);
+      allow create:
+        if isSignedIn() && isGroupMember(request.resource.data.groupId);
+    }
+
+    // 사용 이력 — 멤버 읽기/생성, 불변(수정·삭제 금지).
+    match /usageLogs/{id} {
+      allow read: if isSignedIn() && isGroupMember(resource.data.groupId);
+      allow create: if isSignedIn() && isGroupMember(request.resource.data.groupId);
+      allow update, delete: if false;
+    }
+
+    // 그룹 알림 — 멤버 읽기/생성, 불변.
+    match /notifications/{id} {
+      allow read: if isSignedIn() && isGroupMember(resource.data.groupId);
+      allow create: if isSignedIn() && isGroupMember(request.resource.data.groupId);
+      allow update, delete: if false;
+    }
+
+    // 공유 잠금(내부 메커니즘) — 민감 데이터 없음. 그룹 삭제 후 정리(cascade)도
+    // 허용해야 하므로 로그인 사용자 수준으로 둔다.
+    match /shareLocks/{gifticonId} {
+      allow read, write: if isSignedIn();
+    }
+
+    // 그 외 모든 문서 기본 차단.
     match /{document=**} {
       allow read, write: if false;
     }

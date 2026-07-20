@@ -444,15 +444,24 @@ class FirebaseShareRepository implements ShareRepository {
   }
 
   Future<void> _syncOriginalUsed(String gifticonId) async {
-    final Gifticon? original = await _gifticons.getGifticonById(gifticonId);
-    if (original == null) return;
-    if (!GifticonStatusTransition.isAllowed(
-      original.status,
-      GifticonStatus.used,
-    )) {
+    // best-effort 동기화. 보안 규칙상 원본 기프티콘은 **소유자만** 접근 가능하므로,
+    // 사용한 행위자가 소유자가 아니면(다른 멤버가 공유분을 사용) 읽기/쓰기가
+    // PERMISSION_DENIED로 막힌다 — 그 경우 조용히 건너뛴다(공유분 사용완료 자체는 유효).
+    // (교차-멤버 원본 동기화는 추후 Cloud Function 트리거로 처리 예정.)
+    try {
+      final Gifticon? original = await _gifticons.getGifticonById(gifticonId);
+      if (original == null) return;
+      if (!GifticonStatusTransition.isAllowed(
+        original.status,
+        GifticonStatus.used,
+      )) {
+        return;
+      }
+      await _gifticons.updateStatus(gifticonId, GifticonStatus.used);
+    } on Object {
+      // 권한/네트워크 등 실패는 무시(동기화는 best-effort 계약).
       return;
     }
-    await _gifticons.updateStatus(gifticonId, GifticonStatus.used);
   }
 
   /// 그룹 삭제/정리 시, 그 그룹의 공유 항목과 잠금 문서를 정리한다(best-effort, 트랜잭션 밖).
@@ -602,6 +611,9 @@ class FirebaseShareRepository implements ShareRepository {
         // 조회용 역정규화 — watchGroups의 array-contains 대상.
         'memberIds':
             g.members.map((GroupMember m) => m.userId).toList(growable: false),
+        // 소유자 역정규화 — 보안 규칙이 방장 판정에 쓴다(members 배열 순회는 규칙에서 어려움).
+        // 모든 그룹 write가 _groupToDoc을 거치므로 멤버 변경 시 자동으로 동기화된다.
+        'ownerId': g.owner.userId,
       };
 
   /// 문서 → [Group]. **비멤버/멤버0/방장≠1** 등 [Group] 불변식을 못 만족하는 손상
