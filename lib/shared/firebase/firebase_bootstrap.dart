@@ -48,6 +48,7 @@ import '../../firebase_options.dart';
 import '../providers/repositories.dart';
 import '../repositories/impl/firebase/firebase_auth_repository.dart';
 import '../repositories/impl/firebase/firebase_gifticon_repository.dart';
+import '../repositories/impl/firebase/firebase_share_repository.dart';
 
 /// Firebase를 초기화하고, Repository provider를 Firebase 구현으로 교체하는
 /// [Override] 목록을 만든다.
@@ -73,13 +74,19 @@ Future<List<Override>> initFirebaseAndBuildOverrides() async {
 ///  Firebase 호출 시점에 예외가 난다.)
 ///
 /// gifticonRepository는 scan·main·share가 **같은 단일 인스턴스**를 공유하도록
-/// 하나만 생성해 주입한다(계약 SSOT 규칙 — 인스턴스 분기 방지).
+/// 하나만 생성해 주입한다(계약 SSOT 규칙 — 인스턴스 분기 방지). share는 그 auth·
+/// gifticon 인스턴스를 그대로 주입받아, 사용 완료 시 원본 동기화가 같은 저장소에 반영된다.
 List<Override> firebaseProviderOverrides() {
   final FirebaseAuthRepository authRepo = FirebaseAuthRepository();
   final FirebaseGifticonRepository gifticonRepo = FirebaseGifticonRepository();
+  final FirebaseShareRepository shareRepo = FirebaseShareRepository(
+    authRepository: authRepo,
+    gifticonRepository: gifticonRepo,
+  );
 
   return <Override>[
     authRepositoryProvider.overrideWithValue(authRepo),
     gifticonRepositoryProvider.overrideWithValue(gifticonRepo),
+    shareRepositoryProvider.overrideWithValue(shareRepo),
   ];
 }
