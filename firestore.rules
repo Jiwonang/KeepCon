@@ -1,0 +1,32 @@
+rules_version = '2';
+
+// KeepCon Firestore 보안 규칙.
+//
+// 이 슬라이스(인증)에서 실제 쓰이는 컬렉션은 `users/{uid}`뿐이다. 그 문서는
+// **본인만** 읽고 쓸 수 있게 하고, 나머지 컬렉션(gifticons·groups·sharedGifticons·
+// usageLogs·notifications)은 데이터 모델 확정 시 열 때까지 **기본 차단**한다
+// (allow-all-signed-in 같은 위험한 임시 규칙을 커밋하지 않는다).
+//
+// TODO(다음 슬라이스): gifticons(소유자)·groups(멤버)·sharedGifticons(그룹 멤버)·
+//   usageLogs·notifications 규칙 추가.
+//
+// 배포: Firebase 콘솔에서 프로젝트 생성 후 `firebase deploy --only firestore:rules`
+//   (또는 콘솔 > Firestore > 규칙 탭에 붙여넣기).
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 로그인한 사용자인지.
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // 본인 프로필만 접근 가능.
+    match /users/{userId} {
+      allow read, write: if isSignedIn() && request.auth.uid == userId;
+    }
+
+    // 그 외 모든 문서는 기본 차단(아직 규칙 미정의). 다음 슬라이스에서 컬렉션별로 연다.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
