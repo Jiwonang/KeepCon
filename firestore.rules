@@ -66,6 +66,10 @@ service cloud.firestore {
           !(uid() in resource.data.memberIds)
           && uid() in request.resource.data.memberIds
           && request.resource.data.memberIds.hasAll(resource.data.memberIds)
+          // 합류 시 멤버 목록만 바꿀 수 있다 — ownerId·name·inviteCode 등 메타데이터
+          // 변조(방장 권한 탈취 등)를 차단한다.
+          && request.resource.data.diff(resource.data)
+              .affectedKeys().hasOnly(['members', 'memberIds'])
         )
       );
     }

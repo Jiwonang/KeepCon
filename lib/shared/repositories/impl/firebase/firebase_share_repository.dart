@@ -458,8 +458,9 @@ class FirebaseShareRepository implements ShareRepository {
         return;
       }
       await _gifticons.updateStatus(gifticonId, GifticonStatus.used);
-    } on Object {
-      // 권한/네트워크 등 실패는 무시(동기화는 best-effort 계약).
+    } on Exception {
+      // 권한(FirebaseException)·네트워크 등 예상된 런타임 실패만 무시(best-effort 계약).
+      // Error(프로그래밍 버그)는 삼키지 않고 전파한다.
       return;
     }
   }
