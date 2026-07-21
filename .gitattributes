@@ -2,6 +2,11 @@
 # 리눅스 CI에서 `bash\r` 오류 없이 실행되도록 강제한다.
 *.sh text eol=lf
 
+# 배치 스크립트는 반대로 항상 CRLF — cmd는 LF만 있는 파일에서 `goto`/라벨 해석이
+# 불안정하다. 기여자의 autocrlf 설정과 무관하게 체크아웃 시 CRLF가 되도록 강제한다.
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
 # 기본: 텍스트는 git이 줄바꿈을 정규화(저장은 LF)
 * text=auto
 

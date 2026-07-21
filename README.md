@@ -76,7 +76,7 @@ flutter pub get
 flutter run -d chrome
 
 # ② 에뮬레이터 모드 — 터미널 2개
-bash tool/emulators.sh                                          # 터미널 A (cmd/PowerShell은 가이드 참고)
+bash tool/emulators.sh                                          # 터미널 A (cmd·PowerShell은 tool\emulators.cmd)
 flutter run -d chrome --dart-define=USE_FIREBASE_EMULATOR=true   # 터미널 B
 
 # 모바일로 실행하려면 플랫폼 폴더 생성 후
@@ -84,7 +84,7 @@ flutter create . --platforms=android,ios
 flutter run
 ```
 
-> ⚠️ `.sh` 스크립트는 **Git Bash 기준**입니다. Windows의 cmd·PowerShell에서 `bash`를 치면 Git Bash가 아니라 WSL이 실행되어 실패합니다 — [로컬 실행 가이드 3번](docs/GETTING_STARTED.md#3--어떤-터미널을-쓸지-windows-사용자-필독) 참고.
+> 💡 Windows에서는 cmd·PowerShell용 `.cmd` 버전을 함께 제공합니다(`tool\emulators.cmd`, `tool\seed_emulator.cmd`). cmd·PowerShell에서 `bash`는 Git Bash가 아니라 WSL로 잡혀 실패하기 때문입니다 — [로컬 실행 가이드 3번](docs/GETTING_STARTED.md#3-터미널은-편한-걸-쓰세요) 참고.
 
 ---
 
@@ -254,7 +254,7 @@ flutter run --dart-define=USE_FIREBASE_EMULATOR=true
 만료임박·여유·만료를 섞어 둬서 D-day 뱃지와 정렬·필터를 바로 확인할 수 있습니다. 유효기간은 **시드를 만든 시점 기준 상대 날짜**라, 시간이 지나 날짜가 어긋나면 `tool/seed_emulator.sh`를 다시 돌려 갱신하세요.
 
 - 에뮬레이터를 **끄면 그동안 만든 데이터는 사라지고**, 다시 켜면 위 시드 상태로 돌아갑니다. 의도된 동작입니다 — 각자 만든 임시 데이터가 커밋된 시드를 오염시키지 않게 자동 내보내기를 켜지 않았습니다.
-- 시드 자체를 바꾸려면(계정 추가 등) 에뮬레이터가 떠 있는 상태에서 `bash tool/seed_emulator.sh`를 실행하고 `emulator-seed/`를 커밋하세요.
+- 시드 자체를 바꾸려면(계정 추가 등) 에뮬레이터가 떠 있는 상태에서 `bash tool/seed_emulator.sh`(cmd·PowerShell은 `tool\seed_emulator.cmd`)를 실행하고 `emulator-seed/`를 커밋하세요.
 - ⚠️ 이 비밀번호는 공개 저장소에 그대로 적힌 **테스트 전용 값**입니다. 에뮬레이터는 실제 Google 백엔드와 연결되지 않으므로 노출 위험이 없지만, **실제 계정에는 절대 재사용하지 마세요.**
 
 - 프로젝트 id `demo-keepcon`의 **`demo-` 접두사**는 "에뮬레이터 전용"이라는 Firebase 규약입니다 — 실제 Google 백엔드로 나가는 요청이 차단되므로, `lib/shared/firebase/demo_firebase_options.dart`의 더미 키는 노출될 비밀이 아닙니다.

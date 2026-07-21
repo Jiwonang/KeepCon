@@ -70,23 +70,31 @@ flutter pub get
 
 ---
 
-## 3. ⚠️ 어떤 터미널을 쓸지 (Windows 사용자 필독)
+## 3. 터미널은 편한 걸 쓰세요
 
-이 프로젝트의 스크립트(`.sh` 파일)는 **Git Bash에서 실행하는 것을 전제**합니다.
+cmd · PowerShell · Git Bash 중 **아무거나 써도 됩니다.** 확장자만 다른 같은 스크립트를 준비해뒀습니다.
 
-**cmd나 PowerShell에서 `bash`를 치면 Git Bash가 아니라 WSL이 실행되고, 대부분 이렇게 실패합니다:**
+| 쓰는 셸 | 실행할 파일 |
+|---------|------------|
+| cmd · PowerShell | `tool\emulators.cmd` |
+| Git Bash · macOS · Linux | `tool/emulators.sh` |
+
+하는 일은 완전히 같습니다. 4-B에 셸별 명령이 나란히 적혀 있으니 자기 것만 골라 쓰면 됩니다.
+
+<details>
+<summary>왜 파일이 두 개인지 (안 궁금하면 넘어가세요)</summary>
+
+cmd·PowerShell에서 `bash tool/emulators.sh`를 치면 Git Bash가 아니라 **WSL**이 실행되어 이렇게 실패합니다:
 
 ```
 WSL (10 - Relay) ERROR: execvpe(/bin/bash) failed: No such file or directory
 ```
 
-그래서 셋 중 하나를 고르세요:
+`bash`라는 이름이 PATH에서 `C:\Windows\System32\bash.exe`(WSL 런처)로 잡히고, Git Bash가 있는 `C:\Program Files\Git\bin`은 PATH에 없기 때문입니다. cmd냐 PowerShell이냐는 상관없이 똑같이 실패합니다.
 
-- **(권장) Git Bash 쓰기** — 프로젝트 폴더에서 우클릭 → *Open Git Bash here*. 이 문서의 명령을 그대로 복사해 쓸 수 있습니다.
-- **cmd/PowerShell을 쓰되 명령을 바꾸기** — 아래 4-B에 셸별 명령을 따로 적어뒀습니다.
-- VS Code를 쓴다면 터미널 기본 셸을 Git Bash로 바꿔두면 편합니다.
+"Git Bash를 쓰세요"라고 안내만 할 수도 있었지만, **쓰는 셸에서 그냥 되는 편이** 낫다고 봐서 `.cmd` 버전을 함께 뒀습니다.
 
-macOS·Linux는 기본 터미널을 그냥 쓰면 됩니다.
+</details>
 
 ---
 
@@ -108,21 +116,21 @@ flutter run -d chrome
 
 #### 터미널 A — 가짜 Firebase 서버
 
-셸에 따라 명령이 다릅니다. **프로젝트 폴더(KeepCon)에서** 실행하세요.
-
-```bash
-# Git Bash / macOS / Linux
-bash tool/emulators.sh
-```
+**프로젝트 폴더(KeepCon)에서** 자기 셸에 맞는 줄을 실행하세요.
 
 ```
 :: cmd
-firebase emulators:start --project demo-keepcon --import=emulator-seed
+tool\emulators.cmd
 ```
 
 ```powershell
 # PowerShell
-firebase emulators:start --project demo-keepcon --import=emulator-seed
+.\tool\emulators.cmd
+```
+
+```bash
+# Git Bash / macOS / Linux
+bash tool/emulators.sh
 ```
 
 아래 화면이 나오면 성공입니다. **이 터미널은 그대로 두세요** (닫으면 서버가 꺼집니다):
@@ -192,7 +200,7 @@ flutter run --dart-define=USE_FIREBASE_EMULATOR=true
 
 | 증상 | 원인과 해결 |
 |------|------------|
-| `bash: command not found` 또는 `WSL ... execvpe(/bin/bash) failed` | cmd/PowerShell에서 `.sh`를 실행한 것. 3번 항목대로 Git Bash를 쓰거나, 4-B의 cmd용 명령을 쓰세요. |
+| `bash: command not found` 또는 `WSL ... execvpe(/bin/bash) failed` | cmd/PowerShell에서 `.sh`를 실행한 것. 같은 폴더의 **`.cmd` 버전**을 쓰세요 (`tool\emulators.cmd`). 3번 항목 참고. |
 | `Port 8080 is not open` / `Could not start Emulator UI, port taken` | 에뮬레이터가 이미 떠 있거나 다른 프로그램이 그 포트를 씀. 기존 터미널에서 `Ctrl+C`로 끄고 다시 시도하세요. 그래도 안 되면 PC를 재시작하는 게 빠릅니다. |
 | 에뮬레이터가 뜨다 마는데 Java 얘기가 나옴 | Java 미설치. 1번 항목 참고. |
 | 로그인 화면에서 계정이 안 먹음 | 시드가 안 올라온 것. 터미널 A 로그에 `Importing accounts from ...` 이 있는지 보세요. 없다면 **프로젝트 폴더가 아닌 곳**에서 실행했을 가능성이 큽니다. |
