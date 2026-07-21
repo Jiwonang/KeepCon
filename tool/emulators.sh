@@ -18,6 +18,12 @@
 # 즉 이 스크립트에서 만든 데이터는 종료 시 사라지는 것이 정상이다.
 set -uo pipefail
 
+# 시드 경로가 저장소 루트 기준 상대경로라, 실행 위치에 따라 결과가 달라진다.
+# 예: `cd tool && bash emulators.sh` 하면 emulator-seed/를 못 찾아 **시드 없이 빈 상태로**
+# 조용히 시작한다 — 팀원은 "시드가 안 되네"로 오해하게 된다.
+# 어디서 실행하든 같게 동작하도록 스크립트 위치 기준으로 저장소 루트로 이동한다.
+cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
+
 PROJECT="${FIRESTORE_PROJECT:-demo-keepcon}"
 SEED_DIR="${SEED_DIR:-emulator-seed}"
 
