@@ -38,6 +38,13 @@ SEED_PASSWORD='test1234'
 # 프로필 문서의 createdAt 고정값 — 시드를 다시 만들어도 diff가 안 나게 한다.
 SEED_CREATED_AT='2026-01-01T00:00:00Z'
 
+# 시드 그룹. 문서 id·초대코드를 **고정**해 팀원 전원이 같은 값을 공유하게 한다
+# (앱의 createGroup은 문서 id 해시로 코드를 만들지만, 시드는 재현 가능해야 한다).
+SEED_GROUP_ID='seed-group-family'
+SEED_GROUP_INVITE_CODE='482913'
+# GroupMember.avatarEmoji 기본값 — FirebaseShareRepository._defaultAvatar와 같은 값.
+SEED_AVATAR='🙂'
+
 # ⚠️ 한글이 든 요청 본문은 **반드시 파일로** 넘긴다(`-d @파일`).
 #    Windows의 네이티브 curl에 한글을 인자로 직접 주면(`-d '{"displayName":"방장"}'`)
 #    프로세스 경계에서 재인코딩되어 U+FFFD로 깨진다 — bash 안에서는 멀쩡한데 curl에
@@ -48,6 +55,7 @@ trap 'rm -f "${PAYLOAD}"' EXIT
 
 # 계정을 만들고 표시 이름을 설정한 뒤, users/{uid} 프로필 문서까지 쓴다.
 # 앱의 FirebaseAuthRepository.signUp이 하는 일과 같은 결과를 만든다.
+# 성공 시 호출부가 쓰도록 SEED_UID / SEED_TOKEN에 결과를 남긴다.
 # $1 = email, $2 = displayName
 seed_account() {
   local email="$1" name="$2"
@@ -82,7 +90,40 @@ seed_account() {
     return 1
   fi
 
+  SEED_UID="${uid}"
+  SEED_TOKEN="${token}"
   echo "  ✓ ${name} <${email}> uid=${uid}"
+}
+
+# 방장·파티원이 함께 속한 그룹 문서를 만든다.
+# 앱의 FirebaseShareRepository._groupToDoc이 쓰는 것과 **같은 스키마**여야 한다:
+#   members(맵 배열) + memberIds(조회용 역정규화) + ownerId(보안 규칙 방장 판정용).
+# 셋 중 하나라도 빠지면 목록 조회나 규칙 판정이 조용히 어긋난다.
+# $1 = 방장 uid, $2 = 방장 토큰, $3 = 방장 이름, $4 = 파티원 uid, $5 = 파티원 이름
+seed_group() {
+  local owner_uid="$1" owner_token="$2" owner_name="$3"
+  local member_uid="$4" member_name="$5"
+  local code
+
+  printf '{"fields":{"name":{"stringValue":"%s"},"emoji":{"stringValue":"%s"},"inviteCode":{"stringValue":"%s"},"inviteOwnerOnly":{"booleanValue":false},"members":{"arrayValue":{"values":[{"mapValue":{"fields":{"userId":{"stringValue":"%s"},"displayName":{"stringValue":"%s"},"avatarEmoji":{"stringValue":"%s"},"role":{"stringValue":"owner"}}}},{"mapValue":{"fields":{"userId":{"stringValue":"%s"},"displayName":{"stringValue":"%s"},"avatarEmoji":{"stringValue":"%s"},"role":{"stringValue":"member"}}}}]}},"memberIds":{"arrayValue":{"values":[{"stringValue":"%s"},{"stringValue":"%s"}]}},"ownerId":{"stringValue":"%s"}}}' \
+    '우리 가족' '👪' "${SEED_GROUP_INVITE_CODE}" \
+    "${owner_uid}" "${owner_name}" "${SEED_AVATAR}" \
+    "${member_uid}" "${member_name}" "${SEED_AVATAR}" \
+    "${owner_uid}" "${member_uid}" \
+    "${owner_uid}" >"${PAYLOAD}"
+
+  # 방장 토큰으로 쓴다 — 보안 규칙의 그룹 생성 조건(ownerId==본인 && 본인이 멤버)을
+  # 실제로 통과하는지 여기서 같이 검증된다.
+  code=$(curl -s -o /dev/null -w '%{http_code}' -X PATCH \
+    "${DOCS}/groups/${SEED_GROUP_ID}" \
+    -H "Authorization: Bearer ${owner_token}" -H 'Content-Type: application/json' \
+    -d @"${PAYLOAD}")
+  if [[ "${code}" != "200" ]]; then
+    echo "  ✗ 그룹 생성 실패 (HTTP ${code})"
+    return 1
+  fi
+
+  echo "  ✓ 그룹 '우리 가족' id=${SEED_GROUP_ID} 초대코드=${SEED_GROUP_INVITE_CODE}"
 }
 
 echo "에뮬레이터 시드 생성 (project=${PROJECT})"
@@ -105,7 +146,13 @@ fi
 
 echo "계정 생성 중…"
 seed_account 'owner@keepcon.test' '방장' || exit 1
+OWNER_UID="${SEED_UID}"
+OWNER_TOKEN="${SEED_TOKEN}"
 seed_account 'member@keepcon.test' '파티원' || exit 1
+MEMBER_UID="${SEED_UID}"
+
+echo "그룹 생성 중…"
+seed_group "${OWNER_UID}" "${OWNER_TOKEN}" '방장' "${MEMBER_UID}" '파티원' || exit 1
 
 echo "내보내는 중 → ${SEED_DIR}/"
 rm -rf "${SEED_DIR}"
@@ -115,6 +162,7 @@ if ! firebase emulators:export "${SEED_DIR}" --project "${PROJECT}" --force; the
 fi
 
 echo
-echo "완료. ${SEED_DIR}/ 를 커밋하면 팀원 전원이 같은 계정으로 시작합니다."
+echo "완료. ${SEED_DIR}/ 를 커밋하면 팀원 전원이 같은 계정·같은 그룹으로 시작합니다."
 echo "  방장   owner@keepcon.test  / ${SEED_PASSWORD}"
 echo "  파티원 member@keepcon.test / ${SEED_PASSWORD}"
+echo "  그룹   '우리 가족' (초대코드 ${SEED_GROUP_INVITE_CODE}) — 방장·파티원 모두 소속"
