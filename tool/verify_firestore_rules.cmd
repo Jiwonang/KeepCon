@@ -17,32 +17,7 @@ setlocal
 
 cd /d "%~dp0.." || exit /b 1
 
-set "GIT_BASH="
-
-rem Preferred: derive Git Bash from git.exe on PATH.
-rem   C:\...\Git\cmd\git.exe  ->  C:\...\Git\bin\bash.exe
-for /f "delims=" %%I in ('where git 2^>nul') do (
-  if not defined GIT_BASH (
-    for %%A in ("%%~dpI.") do (
-      for %%B in ("%%~dpA.") do (
-        if exist "%%~fB\bin\bash.exe" set "GIT_BASH=%%~fB\bin\bash.exe"
-      )
-    )
-  )
-)
-
-rem Fallbacks for common install locations.
-if not defined GIT_BASH if exist "%ProgramFiles%\Git\bin\bash.exe" set "GIT_BASH=%ProgramFiles%\Git\bin\bash.exe"
-if not defined GIT_BASH if exist "%ProgramFiles(x86)%\Git\bin\bash.exe" set "GIT_BASH=%ProgramFiles(x86)%\Git\bin\bash.exe"
-if not defined GIT_BASH if exist "%LOCALAPPDATA%\Programs\Git\bin\bash.exe" set "GIT_BASH=%LOCALAPPDATA%\Programs\Git\bin\bash.exe"
-
-if not defined GIT_BASH (
-  echo [KeepCon] ERROR: Git Bash not found.
-  echo [KeepCon] This script needs it to run tool/verify_firestore_rules.sh.
-  echo [KeepCon] Install Git for Windows: https://git-scm.com/downloads
-  echo [KeepCon] See docs/GETTING_STARTED.md
-  exit /b 1
-)
+call "%~dp0_find_git_bash.cmd" || exit /b 1
 
 echo [KeepCon] Using Git Bash: %GIT_BASH%
 "%GIT_BASH%" tool/verify_firestore_rules.sh

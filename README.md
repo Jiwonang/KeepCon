@@ -322,8 +322,12 @@ gh api -X POST repos/Jiwonang/KeepCon/rulesets --input ruleset.json
 `firestore.rules`는 배포 전까지 실행되지 않는 문서일 뿐이라, 에뮬레이터에 실제로 태워서 확인합니다:
 
 ```bash
-# 에뮬레이터가 떠 있는 상태에서
+# 에뮬레이터가 떠 있는 상태에서 — bash
 bash tool/verify_firestore_rules.sh
+```
+```
+:: cmd·PowerShell
+tool\verify_firestore_rules.cmd
 ```
 
 실제 사용자 두 명을 Auth 에뮬레이터에 만들고 그 토큰으로 Firestore에 요청해, 남의 기프티콘 조회·`ownerId` 위조·비멤버의 그룹 조회가 **실제로 차단되는지** 확인합니다.
