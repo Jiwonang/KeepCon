@@ -5,7 +5,9 @@
 # 기본: 텍스트는 git이 줄바꿈을 정규화(저장은 LF)
 * text=auto
 
-# Firestore 에뮬레이터 export는 **바이너리**다. `* text=auto`의 자동 감지에 맡기면
-# 내용에 따라 텍스트로 오판돼 줄바꿈이 정규화될 수 있고, 그러면 clone한 팀원의
-# `--import`가 조용히 깨진다(파일은 있는데 데이터가 안 올라옴). 명시적으로 고정한다.
-emulator-seed/firestore_export/** binary
+# 에뮬레이터 시드는 **바이트 그대로** 보존한다. `* text=auto`의 자동 감지에 맡기면
+# 파일에 따라 텍스트로 오판돼 줄바꿈이 정규화되고(Windows에서 CRLF), clone한 팀원의
+# `--import`가 조용히 깨질 수 있다(파일은 있는데 데이터가 안 올라옴).
+# 사람이 손으로 고치는 파일이 아니라 `tool/seed_emulator.sh`가 생성하는 산출물이므로,
+# 줄바꿈 정규화의 이득은 없고 손상 위험만 있다.
+emulator-seed/** binary
