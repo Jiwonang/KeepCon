@@ -7,11 +7,11 @@
       "runtimeArgs": [
         "-m",
         "http.server",
-        "8080",
+        "8090",
         "--directory",
         "build/web"
       ],
-      "port": 8080
+      "port": 8090
     },
     {
       "name": "keepcon-web-debug",
@@ -26,6 +26,21 @@
         "8081"
       ],
       "port": 8081
+    },
+    {
+      "name": "keepcon-emulator",
+      "runtimeExecutable": "flutter",
+      "runtimeArgs": [
+        "run",
+        "-d",
+        "web-server",
+        "--web-hostname",
+        "localhost",
+        "--web-port",
+        "8082",
+        "--dart-define=USE_FIREBASE_EMULATOR=true"
+      ],
+      "port": 8082
     }
   ]
 }
