@@ -56,6 +56,9 @@ key.properties
 **/service-account*.json
 **/secrets*.json
 
+# `flutter run` 콘솔에서 s 키로 찍는 스크린샷 산출물 — 저장소 루트에 쌓인다.
+flutter_*.png
+
 # Firebase 에뮬레이터 아티팩트/캐시 (커밋 불필요)
 *-debug.log
 .firebase/
