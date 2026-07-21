@@ -23,7 +23,7 @@
 
 - **Flutter** (Dart, Material 3) — 크로스플랫폼
 - **Riverpod** (`flutter_riverpod`) — 상태 관리 (프로젝트 전역 표준)
-- **Firebase** (`firebase_auth`, `cloud_firestore`) — 백엔드 데이터 계층 *(스캐폴딩 완료, 설정 시 활성화)*
+- **Firebase** (`firebase_auth`, `cloud_firestore`) — 백엔드 데이터 계층 *(구현 완료. 로컬 에뮬레이터로 계정 없이 실행 가능 — [Firebase 연동](#-firebase-연동-백엔드-활성화))*
 - 기본 실행은 **in-memory mock** 저장소 — 백엔드 설정 없이 바로 실행/개발 가능
 
 ---
@@ -33,7 +33,7 @@
 ```
 lib/
 ├── main.dart                      # 앱 조립부(ProviderScope·테마·시드)
-├── firebase_options.dart          # flutterfire configure가 생성 (현재 placeholder)
+├── firebase_options.dart          # 실제 프로젝트 옵션 — flutterfire configure가 생성 (현재 placeholder)
 ├── app/
 │   └── keepcon_shell.dart         # 하단 내비 셸 (홈 / + / 공유)
 ├── shared/                        # ⭐ 공유 계약 (SSOT) — 모든 페이지가 참조 · CODEOWNERS 보호
@@ -43,7 +43,7 @@ lib/
 │   ├── providers/                 # repositories(DI), theme_mode_provider
 │   ├── theme/                     # app_colors, app_theme (라이트/다크 ThemeData)
 │   ├── util/                      # korean_particle(조사 유틸) 등 도메인 무관 범용 유틸
-│   ├── firebase/                  # firebase_bootstrap (초기화·override 전환)
+│   ├── firebase/                  # firebase_bootstrap (초기화·에뮬레이터 연결·override), demo_firebase_options(에뮬레이터 전용)
 │   └── routes.dart                # named route 상수
 └── features/                      # 페이지별 담당 영역 (공유 타입 재정의 금지 — SSOT guard가 차단)
     ├── auth/                      # 로그인·회원가입·비밀번호 찾기
@@ -195,7 +195,51 @@ gh api -X POST repos/Jiwonang/KeepCon/rulesets --input ruleset.json
 
 ## 🔥 Firebase 연동 (백엔드 활성화)
 
-현재는 in-memory mock이 기본입니다. 실제 Firebase 백엔드로 전환하려면:
+백엔드는 **실행 시점에** dart-define으로 고릅니다. 인터페이스(`AuthRepository`/`GifticonRepository`/`ShareRepository`)는 그대로 두고 구현만 갈아끼우는 구조라, 어느 경로든 **페이지 코드는 한 줄도 바뀌지 않습니다.**
+
+| 경로 | 실행 | 언제 쓰나 |
+|------|------|-----------|
+| in-memory 데모 | `flutter run` | 화면·UI 작업. 시드 데이터로 즉시 시연 |
+| **Firebase 에뮬레이터** | `flutter run --dart-define=USE_FIREBASE_EMULATOR=true` | **평소 개발·팀 병렬 작업(권장)** |
+| 실제 Firebase 프로젝트 | `flutter run --dart-define=USE_FIREBASE=true` | 실기기 시연·베타 배포 |
+
+### 왜 팀 작업에는 에뮬레이터인가
+
+실제 프로젝트 하나를 팀이 같이 쓰면 문제가 생깁니다. Firestore에는 브랜치가 없어서 **서로의 데이터를 밟고**(A가 테스트로 지운 그룹을 B가 쓰는 중), `flutterfire configure`를 각자 돌리면 `lib/firebase_options.dart`가 갈라져 계속 충돌하며, CI에서는 자격 증명이 없어 아예 못 씁니다.
+
+에뮬레이터는 **각자 로컬에 격리**되고 재시작하면 리셋되며, **계정도 결제도 필요 없습니다**. `git pull` 하면 팀 전원이 똑같이 동작합니다.
+
+### 에뮬레이터로 실행하기
+
+```bash
+# 터미널 A — 에뮬레이터 (Java 11+ 필요, Firebase CLI: npm i -g firebase-tools)
+firebase emulators:start --project demo-keepcon
+#   Emulator UI: http://localhost:4000  (Auth 9099 · Firestore 8080)
+
+# 터미널 B — 앱
+flutter run --dart-define=USE_FIREBASE_EMULATOR=true
+```
+
+콘솔에 `KeepCon: Firebase 에뮬레이터 연결됨 …`이 찍히면 연결된 것입니다. 회원가입한 계정과 저장된 문서는 Emulator UI에서 바로 확인할 수 있습니다.
+
+- 프로젝트 id `demo-keepcon`의 **`demo-` 접두사**는 "에뮬레이터 전용"이라는 Firebase 규약입니다 — 실제 Google 백엔드로 나가는 요청이 차단되므로, `lib/shared/firebase/demo_firebase_options.dart`의 더미 키는 노출될 비밀이 아닙니다.
+- Android 실기기/에뮬레이터는 호스트를 `10.0.2.2`로 자동 전환합니다(`resolveEmulatorHost()`).
+- ⚠️ Firestore 에뮬레이터가 **8080 포트**를 씁니다. 로컬 웹 서버를 띄울 때 이 포트를 피하세요.
+
+### 보안 규칙 검증
+
+`firestore.rules`는 배포 전까지 실행되지 않는 문서일 뿐이라, 에뮬레이터에 실제로 태워서 확인합니다:
+
+```bash
+# 에뮬레이터가 떠 있는 상태에서
+bash tool/verify_firestore_rules.sh
+```
+
+실제 사용자 두 명을 Auth 에뮬레이터에 만들고 그 토큰으로 Firestore에 요청해, 남의 기프티콘 조회·`ownerId` 위조·비멤버의 그룹 조회가 **실제로 차단되는지** 확인합니다.
+
+### 실제 Firebase 프로젝트 연결 (시연·배포용)
+
+> 팀에서 **한 명만** 아래를 수행하고 `lib/firebase_options.dart`를 커밋하세요. 각자 돌리면 파일이 갈라집니다.
 
 1. [Firebase 콘솔](https://console.firebase.google.com)에서 프로젝트 생성
 2. FlutterFire 설정 — `lib/firebase_options.dart`가 실제 값으로 생성됩니다:
@@ -203,10 +247,9 @@ gh api -X POST repos/Jiwonang/KeepCon/rulesets --input ruleset.json
    dart pub global activate flutterfire_cli
    flutterfire configure
    ```
-3. 콘솔에서 **Authentication** · **Cloud Firestore** 활성화
-4. 앱 조립부(`lib/main.dart`)에서 `firebase_bootstrap`의 override를 `ProviderScope`에 주입
-
-> 인터페이스(`AuthRepository`/`GifticonRepository`)는 그대로 두고 구현만 교체하는 구조라, 페이지 코드 변경 없이 백엔드가 전환됩니다.
+3. 콘솔에서 **Authentication**(이메일/비밀번호) · **Cloud Firestore** 활성화
+4. 규칙·인덱스 배포: `firebase deploy --only firestore:rules,firestore:indexes`
+5. `flutter run --dart-define=USE_FIREBASE=true`
 
 > ⚠️ **비밀정보 커밋 금지:** 서비스 계정 키(`*-firebase-adminsdk-*.json`), 서명 키스토어(`*.jks`·`key.properties`), `.env`·토큰은 **절대 커밋하지 않습니다**([`.gitignore`](.gitignore)로 관리 + GitHub **Secret scanning/Push protection**으로 강제). 릴리스 전 `/security-review`. — 참고로 클라이언트용 `firebase_options.dart`·`google-services.json`의 API 키는 "비밀"이 아니라 프로젝트 식별자입니다(백엔드는 Firebase 보안 규칙·App Check로 보호). 진짜 비밀은 admin SDK 키·키스토어·토큰입니다.
 

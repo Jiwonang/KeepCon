@@ -4,11 +4,16 @@
 /// (lib/shared/providers/repositories.dart 상단 문서)을 따른다.
 ///
 /// ## 백엔드 선택 (실행 시 결정)
-/// - 기본: **in-memory 데모** — 시드 기프티콘(user-1 소유)으로 즉시 목록/통계 시연.
-///   기본 세션이 로그인된 상태라 [AuthGate]가 바로 앱 셸을 보여준다.
-/// - `--dart-define=USE_FIREBASE=true`: **Firebase 백엔드**로 실행
+/// - 기본(플래그 없음): **in-memory 데모** — 시드 기프티콘(user-1 소유)으로 즉시
+///   목록/통계 시연. 기본 세션이 로그인된 상태라 [AuthGate]가 바로 앱 셸을 보여준다.
+/// - `--dart-define=USE_FIREBASE_EMULATOR=true`: **Firebase + 로컬 에뮬레이터**
+///   (권장 개발 경로). 별도 터미널에서 `firebase emulators:start`가 떠 있어야 한다.
+///   실제 Firebase 프로젝트도 계정도 필요 없다.
+/// - `--dart-define=USE_FIREBASE=true`: **실제 Firebase 프로젝트**로 실행
 ///   (`flutterfire configure` 선행 필요 — 없으면 초기화에서 예외).
-///   이 경우 세션이 비어 있어 [AuthGate]가 로그인 화면부터 시작한다.
+///
+/// 두 Firebase 경로 모두 세션이 비어 있어 [AuthGate]가 로그인 화면부터 시작한다.
+/// 경로 선택 근거(왜 팀 작업에는 에뮬레이터인가)는 `shared/firebase/firebase_bootstrap.dart` 참조.
 ///
 /// ## 화면 진입
 /// `home`은 [AuthGate] — 세션 유무에 따라 로그인/앱 셸을 라우팅한다.
@@ -26,14 +31,20 @@ import 'shared/providers/theme_mode_provider.dart';
 import 'shared/repositories/impl/in_memory_gifticon_repository.dart';
 import 'shared/theme/app_theme.dart';
 
-/// `--dart-define=USE_FIREBASE=true`면 Firebase, 아니면 in-memory 데모.
+/// `--dart-define=USE_FIREBASE=true` → 실제 Firebase 프로젝트.
 const bool _useFirebase = bool.fromEnvironment('USE_FIREBASE');
+
+/// `--dart-define=USE_FIREBASE_EMULATOR=true` → Firebase + 로컬 에뮬레이터.
+///
+/// 에뮬레이터 경로는 Firebase 백엔드를 쓰는 것이므로 [_useFirebase]를 **함의한다**
+/// (플래그 두 개를 같이 넘길 필요 없음).
+const bool _useEmulator = bool.fromEnvironment('USE_FIREBASE_EMULATOR');
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  final List<Override> overrides = _useFirebase
-      ? await initFirebaseAndBuildOverrides() // Firebase (flutterfire configure 선행)
+  final List<Override> overrides = (_useFirebase || _useEmulator)
+      ? await initFirebaseAndBuildOverrides(useEmulator: _useEmulator)
       : _inMemoryOverrides(); // 기본: in-memory 데모
 
   runApp(ProviderScope(overrides: overrides, child: const KeepConApp()));
