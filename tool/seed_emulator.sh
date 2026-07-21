@@ -21,6 +21,10 @@
 # 절대 재사용하지 마라(에뮬레이터는 실제 Google 백엔드와 연결되지 않는다).
 set -uo pipefail
 
+# 내보내기 경로(emulator-seed/)와 임시 페이로드 파일이 모두 상대경로라, 실행 위치에 따라
+# 엉뚱한 곳에 쓰인다. 어디서 실행하든 같게 동작하도록 저장소 루트로 이동한다.
+cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
+
 PROJECT="${FIRESTORE_PROJECT:-demo-keepcon}"
 AUTH_HOST="${AUTH_EMULATOR_HOST:-localhost:9099}"
 FS_HOST="${FIRESTORE_EMULATOR_HOST:-localhost:8080}"
