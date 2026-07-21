@@ -66,25 +66,86 @@ lib/
 - 확인: `flutter doctor`
 - *(에뮬레이터로 띄울 경우 추가)* Node.js 20+ (`npm i -g firebase-tools`), Java 11+
 
-### 설치 & 실행
+### 설치 (처음 한 번만)
 ```bash
 git clone https://github.com/Jiwonang/KeepCon.git
 cd KeepCon
 flutter pub get
+```
 
-# ① 데모 모드 — 백엔드 없이 즉시 실행 (in-memory 시드 데이터, 로그인된 상태로 시작)
+---
+
+### 실행 방법
+
+실행은 **두 단계**입니다. 백엔드(에뮬레이터)를 띄우고, 앱을 띄웁니다.
+
+- **① 에뮬레이터 기동** — 쓰는 셸에 따라 명령이 다릅니다 → [bash](#-bash로-실행-git-bash--macos--linux) · [cmd](#-cmd로-실행-windows)
+- **② 앱 실행** — 어느 셸에서든 똑같습니다 → [flutter](#-flutter로-앱-실행-공통)
+
+> 백엔드 없이 화면만 볼 거면 ①을 건너뛰고 [flutter](#-flutter로-앱-실행-공통)의 **데모 모드**로 바로 가세요.
+
+---
+
+#### 🐧 bash로 실행 (Git Bash · macOS · Linux)
+
+```bash
+# 터미널 A — Firebase 에뮬레이터 (커밋된 시드 계정이 들어간 상태로 시작)
+bash tool/emulators.sh
+
+# 시드 계정을 바꿀 때만 (에뮬레이터가 떠 있는 상태에서)
+bash tool/seed_emulator.sh
+
+# 보안 규칙 검증
+bash tool/verify_firestore_rules.sh
+```
+
+`All emulators ready!` 가 뜨면 **이 터미널은 그대로 두고**, 새 터미널에서 [flutter](#-flutter로-앱-실행-공통)로 앱을 띄웁니다.
+
+---
+
+#### 🪟 cmd로 실행 (Windows)
+
+cmd·PowerShell에서 `bash`는 Git Bash가 아니라 **WSL**로 잡혀 실패합니다. 확장자만 다른 `.cmd` 버전을 쓰세요.
+
+```
+:: 터미널 A — Firebase 에뮬레이터
+tool\emulators.cmd
+
+:: 시드 계정을 바꿀 때만 (에뮬레이터가 떠 있는 상태에서)
+tool\seed_emulator.cmd
+
+:: 보안 규칙 검증
+tool\verify_firestore_rules.cmd
+```
+
+PowerShell에서는 앞에 `.\`를 붙입니다 — `.\tool\emulators.cmd`
+
+> `.sh` 를 그대로 쓰고 싶으면 Git Bash 터미널을 여세요(폴더 우클릭 → *Open Git Bash here*). 자세한 배경은 [로컬 실행 가이드 3번](docs/GETTING_STARTED.md#3-터미널은-편한-걸-쓰세요).
+
+---
+
+#### 💙 flutter로 앱 실행 (공통)
+
+셸과 무관하게 동일합니다.
+
+```bash
+# 데모 모드 — 백엔드 없이 즉시 실행 (in-memory 시드, 로그인된 상태로 시작)
 flutter run -d chrome
 
-# ② 에뮬레이터 모드 — 터미널 2개
-bash tool/emulators.sh                                          # 터미널 A (cmd·PowerShell은 tool\emulators.cmd)
-flutter run -d chrome --dart-define=USE_FIREBASE_EMULATOR=true   # 터미널 B
+# 에뮬레이터 모드 — 위에서 에뮬레이터를 띄운 뒤, 새 터미널에서
+flutter run -d chrome --dart-define=USE_FIREBASE_EMULATOR=true
+
+# 실제 Firebase 프로젝트 (flutterfire configure 선행 — 아직 미구성)
+flutter run -d chrome --dart-define=USE_FIREBASE=true
 
 # 모바일로 실행하려면 플랫폼 폴더 생성 후
 flutter create . --platforms=android,ios
 flutter run
 ```
 
-> 💡 Windows에서는 cmd·PowerShell용 `.cmd` 버전을 함께 제공합니다(`tool\emulators.cmd`, `tool\seed_emulator.cmd`). cmd·PowerShell에서 `bash`는 Git Bash가 아니라 WSL로 잡혀 실패하기 때문입니다 — [로컬 실행 가이드 3번](docs/GETTING_STARTED.md#3-터미널은-편한-걸-쓰세요) 참고.
+에뮬레이터 모드로 뜨면 콘솔에 `KeepCon: Firebase 에뮬레이터 연결됨 …` 이 찍히고, 로그인 화면이 나옵니다. 계정은 아래 [공용 테스트 계정](#공용-테스트-계정-clone하면-바로-로그인) 참고.
+
+> ⚠️ `--dart-define` 은 컴파일 시점에 적용됩니다. 실행 중 `r`(핫 리로드)로는 안 바뀌니, 모드를 바꾸려면 `Ctrl+C` 후 다시 실행하세요.
 
 ---
 
@@ -218,20 +279,19 @@ gh api -X POST repos/Jiwonang/KeepCon/rulesets --input ruleset.json
 
 ### 에뮬레이터로 실행하기
 
-```bash
-# 터미널 A — 에뮬레이터 (Java 11+ 필요, Firebase CLI: npm i -g firebase-tools)
-bash tool/emulators.sh
-#   Emulator UI: http://localhost:4000  (Auth 9099 · Firestore 8080)
+실행 명령은 **[시작하기 › 실행 방법](#실행-방법)** 에 셸별로 정리돼 있습니다(bash · cmd · flutter). 여기서는 알아둘 점만 적습니다.
 
-# 터미널 B — 앱
-flutter run --dart-define=USE_FIREBASE_EMULATOR=true
-```
-
-콘솔에 `KeepCon: Firebase 에뮬레이터 연결됨 …`이 찍히면 연결된 것입니다. 회원가입한 계정과 저장된 문서는 Emulator UI에서 바로 확인할 수 있습니다.
+- 준비물: **Java 11+** (Firestore 에뮬레이터가 Java로 동작), **Firebase CLI** (`npm i -g firebase-tools`)
+- 포트: Auth `9099` · Firestore `8080` · **Emulator UI `http://localhost:4000`**
+- 앱 콘솔에 `KeepCon: Firebase 에뮬레이터 연결됨 …` 이 찍히면 연결된 것입니다.
+- 저장된 계정·문서는 Emulator UI에서 눈으로 확인할 수 있고, 앱에서 만든 데이터가 즉시 반영됩니다.
+- Android 실기기/에뮬레이터는 접속 호스트를 `10.0.2.2`로 자동 전환합니다(`resolveEmulatorHost()`).
+- 프로젝트 id `demo-keepcon`의 **`demo-` 접두사**는 "에뮬레이터 전용"이라는 Firebase 규약입니다 — 실제 Google 백엔드로 나가는 요청이 차단되므로, `lib/shared/firebase/demo_firebase_options.dart`의 더미 키는 노출될 비밀이 아닙니다.
+- ⚠️ Firestore가 **8080 포트**를 씁니다. 로컬 웹 서버를 띄울 때 이 포트를 피하세요.
 
 ### 공용 테스트 계정 (clone하면 바로 로그인)
 
-`tool/emulators.sh`로 띄우면 [`emulator-seed/`](emulator-seed)에 커밋된 계정과 그룹이 **이미 들어 있는 상태**로 시작합니다. 각자 회원가입할 필요가 없고, 팀원 전원이 **같은 uid**를 쓰므로 방장/파티원 권한 시나리오를 그대로 공유할 수 있습니다.
+에뮬레이터를 띄우면([bash](#-bash로-실행-git-bash--macos--linux) · [cmd](#-cmd로-실행-windows)) [`emulator-seed/`](emulator-seed)에 커밋된 계정과 그룹이 **이미 들어 있는 상태**로 시작합니다. 각자 회원가입할 필요가 없고, 팀원 전원이 **같은 uid**를 쓰므로 방장/파티원 권한 시나리오를 그대로 공유할 수 있습니다.
 
 | 역할 | 이메일 | 비밀번호 |
 |------|--------|----------|
@@ -251,15 +311,11 @@ flutter run --dart-define=USE_FIREBASE_EMULATOR=true
 | CU 도시락 교환권 | 방장 | **만료됨** | — |
 | 배스킨라빈스 파인트 아이스크림 | 파티원 | 사용 가능 | ✅ |
 
-만료임박·여유·만료를 섞어 둬서 D-day 뱃지와 정렬·필터를 바로 확인할 수 있습니다. 유효기간은 **시드를 만든 시점 기준 상대 날짜**라, 시간이 지나 날짜가 어긋나면 `tool/seed_emulator.sh`를 다시 돌려 갱신하세요.
+만료임박·여유·만료를 섞어 둬서 D-day 뱃지와 정렬·필터를 바로 확인할 수 있습니다. 유효기간은 **시드를 만든 시점 기준 상대 날짜**라, 시간이 지나 날짜가 어긋나면 시드 재생성 스크립트를 다시 돌려 갱신하세요(아래 참고).
 
 - 에뮬레이터를 **끄면 그동안 만든 데이터는 사라지고**, 다시 켜면 위 시드 상태로 돌아갑니다. 의도된 동작입니다 — 각자 만든 임시 데이터가 커밋된 시드를 오염시키지 않게 자동 내보내기를 켜지 않았습니다.
 - 시드 자체를 바꾸려면(계정 추가 등) 에뮬레이터가 떠 있는 상태에서 `bash tool/seed_emulator.sh`(cmd·PowerShell은 `tool\seed_emulator.cmd`)를 실행하고 `emulator-seed/`를 커밋하세요.
 - ⚠️ 이 비밀번호는 공개 저장소에 그대로 적힌 **테스트 전용 값**입니다. 에뮬레이터는 실제 Google 백엔드와 연결되지 않으므로 노출 위험이 없지만, **실제 계정에는 절대 재사용하지 마세요.**
-
-- 프로젝트 id `demo-keepcon`의 **`demo-` 접두사**는 "에뮬레이터 전용"이라는 Firebase 규약입니다 — 실제 Google 백엔드로 나가는 요청이 차단되므로, `lib/shared/firebase/demo_firebase_options.dart`의 더미 키는 노출될 비밀이 아닙니다.
-- Android 실기기/에뮬레이터는 호스트를 `10.0.2.2`로 자동 전환합니다(`resolveEmulatorHost()`).
-- ⚠️ Firestore 에뮬레이터가 **8080 포트**를 씁니다. 로컬 웹 서버를 띄울 때 이 포트를 피하세요.
 
 ### 보안 규칙 검증
 
