@@ -213,7 +213,7 @@ gh api -X POST repos/Jiwonang/KeepCon/rulesets --input ruleset.json
 
 ```bash
 # 터미널 A — 에뮬레이터 (Java 11+ 필요, Firebase CLI: npm i -g firebase-tools)
-firebase emulators:start --project demo-keepcon
+bash tool/emulators.sh
 #   Emulator UI: http://localhost:4000  (Auth 9099 · Firestore 8080)
 
 # 터미널 B — 앱
@@ -221,6 +221,25 @@ flutter run --dart-define=USE_FIREBASE_EMULATOR=true
 ```
 
 콘솔에 `KeepCon: Firebase 에뮬레이터 연결됨 …`이 찍히면 연결된 것입니다. 회원가입한 계정과 저장된 문서는 Emulator UI에서 바로 확인할 수 있습니다.
+
+### 공용 테스트 계정 (clone하면 바로 로그인)
+
+`tool/emulators.sh`로 띄우면 [`emulator-seed/`](emulator-seed)에 커밋된 계정과 그룹이 **이미 들어 있는 상태**로 시작합니다. 각자 회원가입할 필요가 없고, 팀원 전원이 **같은 uid**를 쓰므로 방장/파티원 권한 시나리오를 그대로 공유할 수 있습니다.
+
+| 역할 | 이메일 | 비밀번호 |
+|------|--------|----------|
+| 방장 | `owner@keepcon.test` | `test1234` |
+| 파티원 | `member@keepcon.test` | `test1234` |
+
+두 계정이 함께 속한 그룹도 들어 있습니다 — 로그인하자마자 공유 화면에서 바로 확인됩니다.
+
+| 그룹 | 문서 id | 초대코드 | 멤버 |
+|------|---------|----------|------|
+| 우리 가족 👪 | `seed-group-family` | `482913` | 방장(owner) · 파티원(member) |
+
+- 에뮬레이터를 **끄면 그동안 만든 데이터는 사라지고**, 다시 켜면 위 시드 상태로 돌아갑니다. 의도된 동작입니다 — 각자 만든 임시 데이터가 커밋된 시드를 오염시키지 않게 자동 내보내기를 켜지 않았습니다.
+- 시드 자체를 바꾸려면(계정 추가 등) 에뮬레이터가 떠 있는 상태에서 `bash tool/seed_emulator.sh`를 실행하고 `emulator-seed/`를 커밋하세요.
+- ⚠️ 이 비밀번호는 공개 저장소에 그대로 적힌 **테스트 전용 값**입니다. 에뮬레이터는 실제 Google 백엔드와 연결되지 않으므로 노출 위험이 없지만, **실제 계정에는 절대 재사용하지 마세요.**
 
 - 프로젝트 id `demo-keepcon`의 **`demo-` 접두사**는 "에뮬레이터 전용"이라는 Firebase 규약입니다 — 실제 Google 백엔드로 나가는 요청이 차단되므로, `lib/shared/firebase/demo_firebase_options.dart`의 더미 키는 노출될 비밀이 아닙니다.
 - Android 실기기/에뮬레이터는 호스트를 `10.0.2.2`로 자동 전환합니다(`resolveEmulatorHost()`).
