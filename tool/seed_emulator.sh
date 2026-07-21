@@ -76,8 +76,13 @@ seed_account() {
   # accounts:update 응답에는 새 idToken이 없다 — 아래 Firestore 요청은 signUp에서 받은
   # 토큰을 계속 써야 한다(응답에서 다시 뽑으면 빈 값이 되어 500이 난다).
   printf '{"idToken":"%s","displayName":"%s"}' "${token}" "${name}" >"${PAYLOAD}"
-  curl -s -o /dev/null -X POST "${IDP}/accounts:update?key=demo-api-key" \
-    -H 'Content-Type: application/json' -d @"${PAYLOAD}"
+  code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+    "${IDP}/accounts:update?key=demo-api-key" \
+    -H 'Content-Type: application/json' -d @"${PAYLOAD}")
+  if [[ "${code}" != "200" ]]; then
+    echo "  ✗ ${email} 표시 이름 설정 실패 (HTTP ${code})"
+    return 1
+  fi
 
   # 프로필 문서 — 본인 토큰으로 쓴다(보안 규칙 users/{uid} 경로를 실제로 통과).
   printf '{"fields":{"email":{"stringValue":"%s"},"displayName":{"stringValue":"%s"},"createdAt":{"timestampValue":"%s"}}}' \
@@ -150,9 +155,80 @@ OWNER_UID="${SEED_UID}"
 OWNER_TOKEN="${SEED_TOKEN}"
 seed_account 'member@keepcon.test' '파티원' || exit 1
 MEMBER_UID="${SEED_UID}"
+MEMBER_TOKEN="${SEED_TOKEN}"
 
 echo "그룹 생성 중…"
 seed_group "${OWNER_UID}" "${OWNER_TOKEN}" '방장' "${MEMBER_UID}" '파티원' || exit 1
+
+# 내보내기 **전에** 저장된 내용을 다시 읽어 대조한다.
+#
+# 왜 필요한가: 이 스크립트가 실제로 겪은 실패 두 건이 모두 "HTTP 200인데 데이터가
+# 틀린" 형태였다 — 한글이 U+FFFD로 깨진 채 저장된 적, 삭제가 안 먹어 예전 시드가
+# 섞인 채 export된 적. 상태 코드만 보면 둘 다 통과한다. 값을 되읽어 대조해야 잡힌다.
+#
+# 비교는 bash 내장 패턴 매칭(`[[ == *…* ]]`)으로 한다. grep 같은 네이티브 바이너리에
+# 한글을 인자로 넘기면 위에 적은 그 인코딩 문제를 그대로 다시 밟는다.
+verify_seed() {
+  local ok=0
+
+  # $1 = 설명, $2 = 응답 본문, $3 = 들어 있어야 할 문자열
+  expect_contains() {
+    if [[ "$2" == *"$3"* ]]; then
+      echo "  ✓ $1"
+    else
+      echo "  ✗ $1 — '$3' 를 찾지 못했습니다."
+      ok=1
+    fi
+  }
+
+  local res
+  # Auth 프로필(표시 이름)이 온전한지.
+  printf '{"idToken":"%s"}' "${OWNER_TOKEN}" >"${PAYLOAD}"
+  res=$(curl -s -X POST "${IDP}/accounts:lookup?key=demo-api-key" \
+    -H 'Content-Type: application/json' -d @"${PAYLOAD}")
+  expect_contains 'Auth 표시 이름(방장)' "${res}" '방장'
+
+  # Firestore 프로필 문서.
+  res=$(curl -s -X GET "${DOCS}/users/${OWNER_UID}" \
+    -H "Authorization: Bearer ${OWNER_TOKEN}")
+  expect_contains 'users 프로필(방장)' "${res}" '방장'
+
+  # 그룹 문서 — 이름·양쪽 멤버·역할·역정규화 필드가 모두 있어야 한다.
+  res=$(curl -s -X GET "${DOCS}/groups/${SEED_GROUP_ID}" \
+    -H "Authorization: Bearer ${OWNER_TOKEN}")
+  # Firestore REST 응답은 들여쓴 JSON이라 `"role":{"stringValue":...}` 같은 압축 패턴이
+  # 그대로는 안 맞는다. 구조 검사용으로 공백·줄바꿈을 지운 사본을 따로 만든다.
+  # (tr에는 ASCII만 인자로 주고 데이터는 stdin으로 흘리므로 인코딩 문제가 없다.)
+  local compact
+  compact=$(tr -d ' \n\r' <<<"${res}")
+  expect_contains '그룹 이름'           "${res}"     '우리 가족'
+  expect_contains '그룹 멤버(방장)'     "${res}"     "${OWNER_UID}"
+  expect_contains '그룹 멤버(파티원)'   "${res}"     "${MEMBER_UID}"
+  expect_contains '방장 역할(owner)'    "${compact}" '"role":{"stringValue":"owner"}'
+  expect_contains '파티원 역할(member)' "${compact}" '"role":{"stringValue":"member"}'
+  # 역정규화 필드 — 빠지면 목록 조회·규칙 판정이 조용히 어긋난다.
+  expect_contains 'memberIds 역정규화'  "${compact}" '"memberIds":{"arrayValue"'
+  expect_contains 'ownerId 역정규화'    "${compact}" "\"ownerId\":{\"stringValue\":\"${OWNER_UID}\"}"
+
+  # 파티원도 그룹을 읽을 수 있어야 한다(멤버십 규칙).
+  local code
+  code=$(curl -s -o /dev/null -w '%{http_code}' -X GET \
+    "${DOCS}/groups/${SEED_GROUP_ID}" -H "Authorization: Bearer ${MEMBER_TOKEN}")
+  if [[ "${code}" == "200" ]]; then
+    echo "  ✓ 파티원의 그룹 접근(멤버십 규칙)"
+  else
+    echo "  ✗ 파티원이 그룹을 읽지 못합니다 (HTTP ${code})"
+    ok=1
+  fi
+
+  return "${ok}"
+}
+
+echo "저장 내용 검증 중…"
+if ! verify_seed; then
+  echo "✗ 검증 실패. 깨진 데이터를 export하지 않도록 중단합니다."
+  exit 1
+fi
 
 echo "내보내는 중 → ${SEED_DIR}/"
 rm -rf "${SEED_DIR}"
