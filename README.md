@@ -59,9 +59,12 @@ lib/
 
 ## 🚀 시작하기
 
+> 🔰 **처음이신가요?** 설치부터 로그인까지 순서대로 안내하는 **[로컬 실행 가이드](docs/GETTING_STARTED.md)** 를 보세요. 아래는 이미 환경이 갖춰진 분을 위한 요약입니다.
+
 ### 사전 준비
 - [Flutter SDK](https://docs.flutter.dev/get-started/install) 3.27 이상 (Dart 3.6+) — `Color.withValues()` 등 3.27+ API 사용
 - 확인: `flutter doctor`
+- *(에뮬레이터로 띄울 경우 추가)* Node.js 20+ (`npm i -g firebase-tools`), Java 11+
 
 ### 설치 & 실행
 ```bash
@@ -69,15 +72,19 @@ git clone https://github.com/Jiwonang/KeepCon.git
 cd KeepCon
 flutter pub get
 
-# 웹으로 실행 (web 플랫폼은 이미 설정됨)
+# ① 데모 모드 — 백엔드 없이 즉시 실행 (in-memory 시드 데이터, 로그인된 상태로 시작)
 flutter run -d chrome
+
+# ② 에뮬레이터 모드 — 터미널 2개
+bash tool/emulators.sh                                          # 터미널 A (cmd/PowerShell은 가이드 참고)
+flutter run -d chrome --dart-define=USE_FIREBASE_EMULATOR=true   # 터미널 B
 
 # 모바일로 실행하려면 플랫폼 폴더 생성 후
 flutter create . --platforms=android,ios
 flutter run
 ```
 
-> 별도 백엔드 설정 없이 in-memory mock 데이터(시드 기프티콘)로 즉시 실행됩니다.
+> ⚠️ `.sh` 스크립트는 **Git Bash 기준**입니다. Windows의 cmd·PowerShell에서 `bash`를 치면 Git Bash가 아니라 WSL이 실행되어 실패합니다 — [로컬 실행 가이드 3번](docs/GETTING_STARTED.md#3--어떤-터미널을-쓸지-windows-사용자-필독) 참고.
 
 ---
 
