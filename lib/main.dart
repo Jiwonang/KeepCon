@@ -1,30 +1,47 @@
-/// KeepCon 앱 진입점 (검증/데모 조립부).
+/// KeepCon 앱 진입점 (조립부).
 ///
-/// 이 파일은 페이지가 아니라 **앱 조립부**다. contract/orchestrator 소유 영역으로,
-/// 공유 계약의 조립 규칙(lib/shared/providers/repositories.dart 상단 문서)을 따른다:
-/// - 단일 [ProviderScope]에서 scan·main·share가 **같은** [GifticonRepository] 인스턴스를 공유.
-/// - auth는 mock([InMemoryAuthRepository])이 기본 `user-1`로 로그인된 상태를 제공.
-/// - 테마는 공유 SSOT([AppTheme])를 사용하고, 라이트/다크 전환은 [themeModeProvider]가 관리
-///   (기본 라이트, 설정에서 토글).
+/// 이 파일은 페이지가 아니라 **앱 조립부**다. 공유 계약의 조립 규칙
+/// (lib/shared/providers/repositories.dart 상단 문서)을 따른다.
 ///
-/// 데모 편의를 위해 시드 기프티콘 몇 개를 넣어, 실행 즉시 목록/정렬/통계를 확인할 수 있게 한다.
+/// ## 백엔드 선택 (실행 시 결정)
+/// - 기본: **in-memory 데모** — 시드 기프티콘(user-1 소유)으로 즉시 목록/통계 시연.
+///   기본 세션이 로그인된 상태라 [AuthGate]가 바로 앱 셸을 보여준다.
+/// - `--dart-define=USE_FIREBASE=true`: **Firebase 백엔드**로 실행
+///   (`flutterfire configure` 선행 필요 — 없으면 초기화에서 예외).
+///   이 경우 세션이 비어 있어 [AuthGate]가 로그인 화면부터 시작한다.
+///
+/// ## 화면 진입
+/// `home`은 [AuthGate] — 세션 유무에 따라 로그인/앱 셸을 라우팅한다.
+/// 로그인·회원가입·로그아웃은 세션만 바꾸면 게이트가 화면을 전환한다.
 library;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import 'app/keepcon_shell.dart';
+import 'app/auth_gate.dart';
+import 'shared/firebase/firebase_bootstrap.dart';
 import 'shared/models/gifticon.dart';
 import 'shared/providers/repositories.dart';
 import 'shared/providers/theme_mode_provider.dart';
 import 'shared/repositories/impl/in_memory_gifticon_repository.dart';
 import 'shared/theme/app_theme.dart';
 
-void main() {
-  final DateTime now = DateTime.now();
+/// `--dart-define=USE_FIREBASE=true`면 Firebase, 아니면 in-memory 데모.
+const bool _useFirebase = bool.fromEnvironment('USE_FIREBASE');
 
-  // 데모 시드 — user-1 소유. 브랜드/카테고리/만료일/상태/가격을 다양하게 두어
-  // 홈의 통계·정렬·카드(가격/D-day)를 바로 시연한다.
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  final List<Override> overrides = _useFirebase
+      ? await initFirebaseAndBuildOverrides() // Firebase (flutterfire configure 선행)
+      : _inMemoryOverrides(); // 기본: in-memory 데모
+
+  runApp(ProviderScope(overrides: overrides, child: const KeepConApp()));
+}
+
+/// in-memory 데모 조립 — 시드 기프티콘(user-1 소유)으로 홈의 통계·정렬·카드를 바로 시연.
+List<Override> _inMemoryOverrides() {
+  final DateTime now = DateTime.now();
   final InMemoryGifticonRepository sharedGifticonRepo =
       InMemoryGifticonRepository(seed: <Gifticon>[
     Gifticon(
@@ -85,16 +102,11 @@ void main() {
     ),
   ]);
 
-  runApp(
-    ProviderScope(
-      // 계약 조립 규칙: gifticonRepository는 앱 전체가 하나의 인스턴스를 공유하도록 주입.
-      // auth는 기본 mock(user-1 로그인) 사용.
-      overrides: <Override>[
-        gifticonRepositoryProvider.overrideWithValue(sharedGifticonRepo),
-      ],
-      child: const KeepConApp(),
-    ),
-  );
+  // 계약 조립 규칙: gifticonRepository는 앱 전체가 하나의 인스턴스를 공유하도록 주입.
+  // auth는 기본 mock(user-1 로그인) 사용.
+  return <Override>[
+    gifticonRepositoryProvider.overrideWithValue(sharedGifticonRepo),
+  ];
 }
 
 /// KeepCon 루트 앱. 공유 테마(SSOT)를 쓰고, [themeModeProvider]로 라이트/다크를 전환한다.
@@ -110,7 +122,7 @@ class KeepConApp extends ConsumerWidget {
       theme: AppTheme.light,
       darkTheme: AppTheme.dark,
       themeMode: mode,
-      home: const KeepConShell(),
+      home: const AuthGate(),
     );
   }
 }

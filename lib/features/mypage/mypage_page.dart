@@ -1,7 +1,8 @@
 /// 마이(설정) 페이지 — KeepCon 틀 재디자인 (rough 스캐폴드).
 ///
-/// ⚠️ 자리표시: 프로필/설정 화면 틀만 갖춘 rough 버전이다. 프로필 데이터는 하드코딩이며,
-/// 실제 조회/수정/로그아웃 로직은 팀원이 [AuthRepository]/`currentUser` 계약으로 붙인다.
+/// 프로필(이름·이메일·이니셜)은 [AuthRepository.currentUser]에서 표시하고, 로그아웃은
+/// [AuthRepository.signOut]으로 세션을 종료해 `AuthGate`가 로그인 화면으로 전환한다.
+/// 프로필 편집·알림·계정 관리 등 상세 항목은 자리표시(준비 중).
 ///
 /// 다크 모드 스위치만 **실제 동작**한다 — 공유 계약 [themeModeProvider]를 소비:
 /// - 현재값: `ref.watch(themeModeProvider)` (== [ThemeMode.dark] 여부)
@@ -16,18 +17,14 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../shared/models/user.dart';
+import '../../shared/providers/repositories.dart';
 import '../../shared/providers/theme_mode_provider.dart';
 import '../../shared/theme/theme_tokens.dart';
-import '../auth/login_page.dart';
 
 /// 마이(설정) 화면. themeModeProvider 소비를 위해 [ConsumerWidget].
 class MyPage extends ConsumerWidget {
   const MyPage({super.key});
-
-  // 프로필 하드코딩 값 (rough — 실제 currentUser는 후속 연동).
-  static const String _name = 'KeepCon Tester';
-  static const String _email = 'tester@keepcon.app';
-  static const String _initial = 'K';
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -35,6 +32,14 @@ class MyPage extends ConsumerWidget {
     final ColorScheme scheme = theme.colorScheme;
     final ThemeMode mode = ref.watch(themeModeProvider);
     final bool isDark = mode == ThemeMode.dark;
+
+    // 현재 세션 사용자에서 프로필을 표시(로그인 상태에서만 진입).
+    final User? user = ref.watch(authRepositoryProvider).currentUser;
+    final String name =
+        (user?.displayName.isNotEmpty ?? false) ? user!.displayName : 'KeepCon';
+    final String email = user?.email ?? '';
+    final String initial =
+        name.isNotEmpty ? name.characters.first.toUpperCase() : 'K';
 
     return Scaffold(
       // 큰 타이틀은 본문 헤더로 두고, AppBar는 뒤로가기만 담당(투명).
@@ -69,7 +74,7 @@ class MyPage extends ConsumerWidget {
                       shape: BoxShape.circle,
                     ),
                     child: Text(
-                      _initial,
+                      initial,
                       style: TextStyle(
                         color: scheme.onPrimary,
                         fontWeight: FontWeight.w700,
@@ -83,11 +88,11 @@ class MyPage extends ConsumerWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: <Widget>[
                         Text(
-                          _name,
+                          name,
                           style: context.navTitleStyle,
                         ),
                         const SizedBox(height: 4),
-                        Text(_email, style: theme.textTheme.bodySmall),
+                        Text(email, style: theme.textTheme.bodySmall),
                       ],
                     ),
                   ),
@@ -148,12 +153,12 @@ class MyPage extends ConsumerWidget {
 
             // ── 로그아웃 카드 ──
             _CardShell(
-              onTap: () {
-                // TODO(auth): AuthRepository.signOut() 연동 후 세션 종료 →
-                //   로그인 화면으로 대체 이동(현재는 rough push).
-                Navigator.of(context).push(
-                  MaterialPageRoute<void>(builder: (_) => const LoginPage()),
-                );
+              onTap: () async {
+                // 세션 종료 → AuthGate가 로그인 화면으로 전환. 위에 쌓인 화면(마이 등)을
+                // 정리해 홈(게이트)으로 돌려보낸다. (context 교차 방지: navigator 선캡처.)
+                final NavigatorState navigator = Navigator.of(context);
+                await ref.read(authRepositoryProvider).signOut();
+                navigator.popUntil((Route<dynamic> r) => r.isFirst);
               },
               child: Row(
                 children: <Widget>[
