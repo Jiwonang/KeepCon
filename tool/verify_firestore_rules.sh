@@ -86,11 +86,13 @@ AUTH_A=(-H "Authorization: Bearer ${TOKEN_A}")
 AUTH_B=(-H "Authorization: Bearer ${TOKEN_B}")
 JSON=(-H 'Content-Type: application/json')
 
-gifticon_doc() { # $1 = ownerId
+# Firestore REST 형식의 기프티콘 문서를 만든다. $1 = ownerId(이 값이 규칙 판정 대상).
+gifticon_doc() {
   printf '{"fields":{"ownerId":{"stringValue":"%s"},"brand":{"stringValue":"스타벅스"},"productName":{"stringValue":"아메리카노"},"price":{"integerValue":"4500"},"category":{"stringValue":"카페"},"status":{"stringValue":"available"}}}' "$1"
 }
 
-group_doc() { # $1 = ownerId, $2 = memberId
+# Firestore REST 형식의 그룹 문서를 만든다. $1 = ownerId(방장), $2 = memberIds에 넣을 멤버.
+group_doc() {
   printf '{"fields":{"ownerId":{"stringValue":"%s"},"name":{"stringValue":"가족"},"memberIds":{"arrayValue":{"values":[{"stringValue":"%s"}]}}}}' "$1" "$2"
 }
 

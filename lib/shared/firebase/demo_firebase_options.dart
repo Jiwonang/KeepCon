@@ -31,6 +31,7 @@ import 'package:flutter/foundation.dart'
 /// 실제 프로젝트 옵션은 `lib/firebase_options.dart`의 `DefaultFirebaseOptions`가
 /// 담당한다 — 이 클래스와 혼동하지 마라.
 class DemoFirebaseOptions {
+  /// 인스턴스화 금지 — 이 클래스는 정적 옵션 모음이다.
   const DemoFirebaseOptions._();
 
   /// 에뮬레이터가 사용하는 데모 프로젝트 id. `.firebaserc`의 `default`와 일치해야 한다.
@@ -56,6 +57,7 @@ class DemoFirebaseOptions {
     }
   }
 
+  /// 웹·데스크톱용 데모 옵션. `authDomain`은 에뮬레이터가 로컬에서 응답하므로 `localhost`.
   static const FirebaseOptions _web = FirebaseOptions(
     apiKey: 'demo-api-key',
     appId: '1:000000000000:web:0000000000000000000000',
@@ -65,6 +67,8 @@ class DemoFirebaseOptions {
     storageBucket: '$projectId.appspot.com',
   );
 
+  /// Android용 데모 옵션. 호스트 PC 접근은 `10.0.2.2`로 나가며, 그 판정은
+  /// `firebase_bootstrap.dart`의 `resolveEmulatorHost()`가 한다.
   static const FirebaseOptions _android = FirebaseOptions(
     apiKey: 'demo-api-key',
     appId: '1:000000000000:android:0000000000000000000000',
@@ -73,6 +77,7 @@ class DemoFirebaseOptions {
     storageBucket: '$projectId.appspot.com',
   );
 
+  /// iOS·macOS용 데모 옵션. `iosBundleId`는 네이티브 SDK가 형식을 보므로 채워 둔다.
   static const FirebaseOptions _apple = FirebaseOptions(
     apiKey: 'demo-api-key',
     appId: '1:000000000000:ios:0000000000000000000000',
