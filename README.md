@@ -349,7 +349,7 @@ flutter run --dart-define=USE_FIREBASE=true
 | 배포된 규칙·인덱스 | [`firestore.rules`](firestore.rules) · [`firestore.indexes.json`](firestore.indexes.json) |
 
 > ⚠️ **Firestore 에디션은 반드시 Standard입니다.** Enterprise는 MongoDB 호환 API용이라 `cloud_firestore` SDK도 `request.auth.uid` 기반 보안 규칙도 동작하지 않습니다. 콘솔에서 DB를 새로 만들 일이 있으면 Standard/Native를 고르세요.
-
+>
 > ⚠️ **리전은 변경할 수 없습니다.** `asia-northeast3`는 생성 시점에 확정됐습니다. 바꾸려면 프로젝트를 새로 만들어야 합니다.
 
 **여전히 팀 개발의 기본은 에뮬레이터입니다.** 실제 프로젝트는 시연·배포 확인용으로만 쓰세요 — 위 [왜 팀 작업에는 에뮬레이터인가](#왜-팀-작업에는-에뮬레이터인가)의 이유(데이터 밟기·브랜치 없음)는 연결된 뒤에도 그대로입니다. 실제 프로젝트에는 시드가 없어 **첫 실행 시 회원가입부터** 해야 합니다.

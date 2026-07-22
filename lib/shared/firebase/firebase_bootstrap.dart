@@ -15,7 +15,7 @@
 /// | 경로 | 언제 | 옵션 출처 | 선행 준비 |
 /// |------|------|-----------|-----------|
 /// | **에뮬레이터**(권장, 기본 개발) | 일상 개발·테스트·팀 병렬 작업 | [DemoFirebaseOptions] (`demo-keepcon`) | `firebase emulators:start` 만 |
-/// | **실제 프로젝트** | 실기기 시연·베타 배포 | [DefaultFirebaseOptions] (`lib/firebase_options.dart`) | 콘솔 프로젝트 생성 + `flutterfire configure` |
+/// | **실제 프로젝트** | 실기기 시연·베타 배포 | [DefaultFirebaseOptions] (`lib/firebase_options.dart`) | 없음 — `keepcon-ab660`으로 구성 완료 |
 ///
 /// **팀 작업에는 에뮬레이터를 기본으로 쓴다.** 실제 프로젝트 하나를 여럿이 공유하면
 /// Firestore에는 브랜치가 없어 서로의 데이터를 밟고(A가 지운 그룹을 B가 쓰는 중),
@@ -30,7 +30,7 @@
 /// # 2) 앱 (터미널 B)
 /// flutter run -d chrome --dart-define=USE_FIREBASE_EMULATOR=true
 ///
-/// # 실제 프로젝트 (flutterfire configure 선행)
+/// # 실제 프로젝트 (keepcon-ab660 — 추가 설정 불필요)
 /// flutter run -d chrome --dart-define=USE_FIREBASE=true
 ///
 /// # 기본(플래그 없음) = in-memory 데모
@@ -66,8 +66,9 @@ bool _emulatorConnected = false;
 ///
 /// - [useEmulator]가 `true`면 [DemoFirebaseOptions]로 초기화한 뒤 Auth/Firestore를
 ///   로컬 에뮬레이터에 연결한다. 실제 Firebase 프로젝트도 계정도 필요 없다.
-/// - `false`면 [DefaultFirebaseOptions]를 쓴다 — `flutterfire configure`가 선행되지
-///   않았으면 [UnimplementedError]가 난다(의도된 안내성 실패).
+/// - `false`면 [DefaultFirebaseOptions]를 쓴다 — 실제 프로젝트 `keepcon-ab660`에
+///   연결된다. **web만 구성돼 있어** 다른 플랫폼에서는 [UnsupportedError]가 난다
+///   (`android`/`ios` 폴더를 만들었다면 `flutterfire configure`를 다시 돌려야 한다).
 ///
 /// [emulatorHost]를 주면 에뮬레이터 호스트를 직접 지정한다(기본값은 플랫폼별 자동 판정 —
 /// [resolveEmulatorHost] 참조).
