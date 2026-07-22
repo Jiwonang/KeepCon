@@ -15,5 +15,17 @@
       "port": 4000
     },
     "singleProjectMode": true
+  },
+  "flutter": {
+    "platforms": {
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "keepcon-ab660",
+          "configurations": {
+            "web": "1:1084555870987:web:61a280ceaa34bc6c25980e"
+          }
+        }
+      }
+    }
   }
 }

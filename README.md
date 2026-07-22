@@ -33,7 +33,7 @@
 ```
 lib/
 ├── main.dart                      # 앱 조립부(ProviderScope·테마·시드)
-├── firebase_options.dart          # 실제 프로젝트 옵션 — flutterfire configure가 생성 (현재 placeholder)
+├── firebase_options.dart          # 실제 프로젝트(keepcon-ab660) 옵션 — flutterfire configure 생성물. 손으로 고치지 말 것
 ├── app/
 │   └── keepcon_shell.dart         # 하단 내비 셸 (홈 / + / 공유)
 ├── shared/                        # ⭐ 공유 계약 (SSOT) — 모든 페이지가 참조 · CODEOWNERS 보호
@@ -135,7 +135,7 @@ flutter run -d chrome
 # 에뮬레이터 모드 — 위에서 에뮬레이터를 띄운 뒤, 새 터미널에서
 flutter run -d chrome --dart-define=USE_FIREBASE_EMULATOR=true
 
-# 실제 Firebase 프로젝트 (flutterfire configure 선행 — 아직 미구성)
+# 실제 Firebase 프로젝트 (keepcon-ab660 — 이미 연결됨, 추가 설정 불필요)
 flutter run -d chrome --dart-define=USE_FIREBASE=true
 
 # 모바일로 실행하려면 플랫폼 폴더 생성 후
@@ -288,6 +288,7 @@ gh api -X POST repos/Jiwonang/KeepCon/rulesets --input ruleset.json
 - Android 실기기/에뮬레이터는 접속 호스트를 `10.0.2.2`로 자동 전환합니다(`resolveEmulatorHost()`).
 - 프로젝트 id `demo-keepcon`의 **`demo-` 접두사**는 "에뮬레이터 전용"이라는 Firebase 규약입니다 — 실제 Google 백엔드로 나가는 요청이 차단되므로, `lib/shared/firebase/demo_firebase_options.dart`의 더미 키는 노출될 비밀이 아닙니다.
 - ⚠️ Firestore가 **8080 포트**를 씁니다. 로컬 웹 서버를 띄울 때 이 포트를 피하세요.
+- ⚠️ **맨손으로 `firebase emulators:start`를 치지 마세요.** [`.firebaserc`](.firebaserc)의 `default`는 실제 프로젝트(`keepcon-ab660`)라, 프로젝트를 지정하지 않으면 에뮬레이터가 실제 프로젝트 id로 뜹니다(로컬이라 실제 데이터가 손상되지는 않지만 시드 import가 어긋납니다). `tool/emulators.sh`·`tool\emulators.cmd`는 `--project demo-keepcon`을 명시하므로 안전합니다 — **항상 이 스크립트로 띄우세요.** 직접 치겠다면 `firebase emulators:start -P emulator`.
 
 ### 공용 테스트 계정 (clone하면 바로 로그인)
 
@@ -332,19 +333,45 @@ tool\verify_firestore_rules.cmd
 
 실제 사용자 두 명을 Auth 에뮬레이터에 만들고 그 토큰으로 Firestore에 요청해, 남의 기프티콘 조회·`ownerId` 위조·비멤버의 그룹 조회가 **실제로 차단되는지** 확인합니다.
 
-### 실제 Firebase 프로젝트 연결 (시연·배포용)
+### 실제 Firebase 프로젝트 연결 (시연·배포용) — ✅ 연결 완료
 
-> 팀에서 **한 명만** 아래를 수행하고 `lib/firebase_options.dart`를 커밋하세요. 각자 돌리면 파일이 갈라집니다.
+**이미 연결돼 있습니다. 아래 설정을 다시 할 필요가 없습니다** — `lib/firebase_options.dart`가 실제 값으로 커밋돼 있으므로, clone 후 바로 실행하면 됩니다:
+
+```bash
+flutter run --dart-define=USE_FIREBASE=true
+```
+
+| 항목 | 값 |
+|------|-----|
+| 프로젝트 id | `keepcon-ab660` ([콘솔](https://console.firebase.google.com/project/keepcon-ab660/overview)) |
+| Firestore | `(default)` · **Standard** 에디션 · **Native** 모드 · `asia-northeast3`(서울) |
+| 구성된 플랫폼 | web (`android`/`ios` 디렉토리가 생기면 재구성 필요) |
+| 배포된 규칙·인덱스 | [`firestore.rules`](firestore.rules) · [`firestore.indexes.json`](firestore.indexes.json) |
+
+> ⚠️ **Firestore 에디션은 반드시 Standard입니다.** Enterprise는 MongoDB 호환 API용이라 `cloud_firestore` SDK도 `request.auth.uid` 기반 보안 규칙도 동작하지 않습니다. 콘솔에서 DB를 새로 만들 일이 있으면 Standard/Native를 고르세요.
+
+> ⚠️ **리전은 변경할 수 없습니다.** `asia-northeast3`는 생성 시점에 확정됐습니다. 바꾸려면 프로젝트를 새로 만들어야 합니다.
+
+**여전히 팀 개발의 기본은 에뮬레이터입니다.** 실제 프로젝트는 시연·배포 확인용으로만 쓰세요 — 위 [왜 팀 작업에는 에뮬레이터인가](#왜-팀-작업에는-에뮬레이터인가)의 이유(데이터 밟기·브랜치 없음)는 연결된 뒤에도 그대로입니다. 실제 프로젝트에는 시드가 없어 **첫 실행 시 회원가입부터** 해야 합니다.
+
+<details>
+<summary>규칙을 고쳤을 때 / 프로젝트를 새로 연결할 때</summary>
+
+규칙·인덱스를 수정했다면 배포해야 반영됩니다(로컬 파일 수정만으로는 실제 프로젝트에 적용되지 않습니다):
+
+```bash
+firebase deploy --only firestore:rules,firestore:indexes
+```
+
+전혀 다른 프로젝트로 갈아끼우려면 — 팀에서 **한 명만** 수행하고 `lib/firebase_options.dart`를 커밋하세요(각자 돌리면 파일이 갈라집니다):
 
 1. [Firebase 콘솔](https://console.firebase.google.com)에서 프로젝트 생성
-2. FlutterFire 설정 — `lib/firebase_options.dart`가 실제 값으로 생성됩니다:
-   ```bash
-   dart pub global activate flutterfire_cli
-   flutterfire configure
-   ```
-3. 콘솔에서 **Authentication**(이메일/비밀번호) · **Cloud Firestore** 활성화
-4. 규칙·인덱스 배포: `firebase deploy --only firestore:rules,firestore:indexes`
-5. `flutter run --dart-define=USE_FIREBASE=true`
+2. `dart pub global activate flutterfire_cli` 후 `flutterfire configure --platforms=web`
+3. 콘솔에서 **Authentication**(이메일/비밀번호) · **Cloud Firestore**(Standard·Native) 활성화
+4. `firebase deploy --only firestore:rules,firestore:indexes`
+5. [`.firebaserc`](.firebaserc)의 `default`를 새 프로젝트 id로 교체
+
+</details>
 
 > ⚠️ **비밀정보 커밋 금지:** 서비스 계정 키(`*-firebase-adminsdk-*.json`), 서명 키스토어(`*.jks`·`key.properties`), `.env`·토큰은 **절대 커밋하지 않습니다**([`.gitignore`](.gitignore)로 관리 + GitHub **Secret scanning/Push protection**으로 강제). 릴리스 전 `/security-review`. — 참고로 클라이언트용 `firebase_options.dart`·`google-services.json`의 API 키는 "비밀"이 아니라 프로젝트 식별자입니다(백엔드는 Firebase 보안 규칙·App Check로 보호). 진짜 비밀은 admin SDK 키·키스토어·토큰입니다.
 
