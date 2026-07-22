@@ -126,24 +126,43 @@ PowerShell에서는 앞에 `.\`를 붙입니다 — `.\tool\emulators.cmd`
 
 #### 💙 flutter로 앱 실행 (공통)
 
-셸과 무관하게 동일합니다.
+셸과 무관하게 동일합니다. **어떤 플래그를 붙이느냐에 따라 데이터가 어디에 저장되는지가 달라집니다.**
+
+| 명령 | 데이터가 어디에 | 껐다 켜면 | 사전 준비 | 로그인 |
+|------|----------------|-----------|-----------|--------|
+| `flutter run -d chrome` | **앱 메모리** (Firebase 미접속) | **사라짐** | 없음 | 이미 로그인된 상태로 시작 |
+| `… --dart-define=USE_FIREBASE_EMULATOR=true` | **내 PC**의 가짜 Firebase | 시드 상태로 리셋 | **별도 터미널에서 에뮬레이터를 띄워둬야 함** | 커밋된 [공용 계정](#공용-테스트-계정-clone하면-바로-로그인) |
+| `… --dart-define=USE_FIREBASE=true` | **dev 서버** `keepcon-dev` — **팀 공유** | 남아 있음 | 없음 (인터넷 필요) | 각자 회원가입 |
+| `… --dart-define=USE_FIREBASE_PROD=true` | 실서비스 `keepcon-ab660` | 남아 있음 | 없음 (인터넷 필요) | 각자 회원가입 |
 
 ```bash
-# 데모 모드 — 백엔드 없이 즉시 실행 (in-memory 시드, 로그인된 상태로 시작)
+# 데모 — 백엔드 없이 즉시 실행. 화면·UI 작업용
 flutter run -d chrome
 
-# 에뮬레이터 모드 — 위에서 에뮬레이터를 띄운 뒤, 새 터미널에서
+# 에뮬레이터 — 터미널 A에서 tool/emulators.sh 를 먼저 띄운 뒤, 새 터미널에서
 flutter run -d chrome --dart-define=USE_FIREBASE_EMULATOR=true
 
-# 실제 Firebase 프로젝트 (keepcon-ab660 — 이미 연결됨, 추가 설정 불필요)
+# dev 서버 — 팀원과 같은 그룹에 들어가는 공유 시나리오 테스트
 flutter run -d chrome --dart-define=USE_FIREBASE=true
+
+# 실서비스 — 시연·배포 확인 전용
+flutter run -d chrome --dart-define=USE_FIREBASE_PROD=true
 
 # 모바일로 실행하려면 플랫폼 폴더 생성 후
 flutter create . --platforms=android,ios
 flutter run
 ```
 
-에뮬레이터 모드로 뜨면 콘솔에 `KeepCon: Firebase 에뮬레이터 연결됨 …` 이 찍히고, 로그인 화면이 나옵니다. 계정은 아래 [공용 테스트 계정](#공용-테스트-계정-clone하면-바로-로그인) 참고.
+> ⚠️ **플래그를 깜빡해도 앱은 멀쩡히 뜹니다.** 플래그 없이 실행하면 데모 모드로 시작하는데, 로그인도 돼 있고 기프티콘 목록도 보여서 겉보기엔 정상입니다. 그래서 **"왜 팀원이 만든 그룹이 안 보이지?"** 로 한참 헤매기 쉽습니다. 팀 작업 중이라면 아래 콘솔 출력부터 확인하세요.
+
+**어디에 붙었는지는 콘솔에 찍힙니다** — 헤매기 전에 여기부터 보세요:
+
+| 콘솔 출력 | 붙은 곳 |
+|-----------|---------|
+| (Firebase 관련 줄 없음) | 데모 모드 — **팀 공유 안 됨** |
+| `KeepCon: Firebase 에뮬레이터 연결됨 …` | 내 PC 에뮬레이터 — **팀 공유 안 됨** |
+| `KeepCon: Firebase 연결됨 (dev — keepcon-dev)` | dev 서버 ✅ |
+| `KeepCon: Firebase 연결됨 (prod — keepcon-ab660)` | **실서비스** — 의도한 게 아니면 즉시 중단 |
 
 > ⚠️ `--dart-define` 은 컴파일 시점에 적용됩니다. 실행 중 `r`(핫 리로드)로는 안 바뀌니, 모드를 바꾸려면 `Ctrl+C` 후 다시 실행하세요.
 
