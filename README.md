@@ -30,7 +30,7 @@
 
 ## 📁 프로젝트 구조
 
-```
+```text
 lib/
 ├── main.dart                      # 앱 조립부(ProviderScope·테마·시드)
 ├── firebase_options.dart          # 실제 프로젝트(keepcon-ab660) 옵션 — flutterfire configure 생성물. 손으로 고치지 말 것
@@ -107,7 +107,7 @@ bash tool/verify_firestore_rules.sh
 
 cmd·PowerShell에서 `bash`는 Git Bash가 아니라 **WSL**로 잡혀 실패합니다. 확장자만 다른 `.cmd` 버전을 쓰세요.
 
-```
+```bat
 :: 터미널 A — Firebase 에뮬레이터
 tool\emulators.cmd
 
@@ -352,7 +352,7 @@ flutter run -d chrome --dart-define=USE_FIREBASE=true
 # 에뮬레이터가 떠 있는 상태에서 — bash
 bash tool/verify_firestore_rules.sh
 ```
-```
+```bat
 :: cmd·PowerShell
 tool\verify_firestore_rules.cmd
 ```
@@ -388,7 +388,7 @@ bash tool/deploy_rules.sh          # dev 에만 (기본)
 bash tool/deploy_rules.sh prod     # 실서비스. 'prod' 를 입력해야 진행
 bash tool/deploy_rules.sh all      # dev 먼저, 성공하면 prod
 ```
-```
+```bat
 :: cmd·PowerShell
 tool\deploy_rules.cmd all
 ```
