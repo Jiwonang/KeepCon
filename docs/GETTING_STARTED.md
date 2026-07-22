@@ -15,7 +15,7 @@ KeepCon을 처음 받는 사람을 위한 문서입니다. **Flutter도 Firebase
 | 껐다 켜면 | **사라짐** | 시드 상태로 리셋 | **남아 있음** |
 | 팀원과 공유되나 | ❌ | ❌ (내 PC에만 있음) | ✅ **같은 그룹에 들어갈 수 있음** |
 | 로그인 | 이미 된 상태로 시작 | 커밋된 공용 계정 | **각자 회원가입** |
-| 준비물 | Flutter만 | Flutter + Node.js + Java | Flutter + 인터넷 |
+| 준비물 (셋 다 Chrome 필요) | Flutter만 | Flutter + Node.js + Java | Flutter + 인터넷 |
 | 터미널 | 1개 | 2개 | 1개 |
 | 언제 쓰나 | 화면(UI) 작업 | **파괴적 테스트**(그룹 삭제 등)·규칙 검증·오프라인 | **팀원과 함께 하는 공유 시나리오** |
 
@@ -24,9 +24,9 @@ KeepCon을 처음 받는 사람을 위한 문서입니다. **Flutter도 Firebase
 **팀원과 같이 테스트할 때는 C입니다.** A와 B는 데이터가 내 PC 밖으로 나가지 않아서, 팀원이 만든 그룹이 보이지 않습니다.
 
 > ⚠️ **C에서는 그룹 삭제 같은 파괴적 테스트를 하지 마세요.** 데이터가 팀 공유라 **남이 쓰던 것도 같이 사라집니다.** 그런 테스트는 B에서 하세요 — B는 내 PC에만 있어서 뭘 지우든 남에게 영향이 없고, 껐다 켜면 원래대로 돌아옵니다.
-
+>
 > 💡 **플래그를 깜빡하면 A로 뜹니다.** 그런데 A도 화면이 멀쩡히 뜨고 로그인도 돼 있어서, "왜 팀원 그룹이 안 보이지?" 하고 헤매기 쉽습니다. C로 띄웠는지는 콘솔에 `KeepCon: Firebase 연결됨 (dev — keepcon-dev)` 가 찍히는지로 확인하세요.
-
+>
 > 시연·배포 확인용 실서비스 서버(`keepcon-ab660`)는 플래그가 또 다릅니다(`--dart-define=USE_FIREBASE_PROD=true`). 평소에 쓸 일은 없습니다. 자세한 건 [README의 Firebase 연동](../README.md#-firebase-연동-백엔드-활성화) 참고.
 
 ---
@@ -99,7 +99,7 @@ cmd · PowerShell · Git Bash 중 **아무거나 써도 됩니다.** 확장자�
 
 cmd·PowerShell에서 `bash tool/emulators.sh`를 치면 Git Bash가 아니라 **WSL**이 실행되어 이렇게 실패합니다:
 
-```
+```text
 WSL (10 - Relay) ERROR: execvpe(/bin/bash) failed: No such file or directory
 ```
 
@@ -131,7 +131,7 @@ flutter run -d chrome
 
 **프로젝트 폴더(KeepCon)에서** 자기 셸에 맞는 줄을 실행하세요.
 
-```
+```bat
 :: cmd
 tool\emulators.cmd
 ```
@@ -148,7 +148,7 @@ bash tool/emulators.sh
 
 아래 화면이 나오면 성공입니다. **이 터미널은 그대로 두세요** (닫으면 서버가 꺼집니다):
 
-```
+```text
 ✔  All emulators ready! It is now safe to connect your app.
    View Emulator UI at http://127.0.0.1:4000/
 ```
@@ -174,15 +174,42 @@ flutter run -d chrome --dart-define=USE_FIREBASE_EMULATOR=true
 
 > 이 비밀번호는 테스트 전용입니다. 가짜 서버라 유출 위험은 없지만, **실제 계정에는 절대 쓰지 마세요.**
 
+### 4-C. 팀 개발 서버 (터미널 1개)
+
+팀원과 **같은 그룹에 들어가서** 공유 기능을 테스트할 때 씁니다. 서버를 띄울 필요가 없어 터미널 하나면 됩니다.
+
+```bash
+flutter run -d chrome --dart-define=USE_FIREBASE=true
+```
+
+로그인 화면이 뜨면 **회원가입부터 하세요.** 4-B의 공용 계정(`owner@keepcon.test` 등)은 에뮬레이터 전용이라 여기서는 안 됩니다. 이메일은 아무거나 써도 되지만, 팀원끼리 누가 누군지 알아볼 수 있게 정하면 편합니다.
+
+**팀원과 같이 테스트하는 순서:**
+
+1. 둘 다 위 명령으로 앱을 띄우고 각자 회원가입
+2. 한 명이 공유 탭에서 **그룹 생성** → 초대코드를 팀원에게 전달
+3. 다른 한 명이 그 코드로 **그룹 참여**
+4. 한 명이 기프티콘을 그룹에 공유 → **상대 화면에 뜨는지 확인**
+5. 상대가 사용 처리 → **원래 주인에게 알림·사용이력이 반영되는지 확인**
+
+> ⚠️ **그룹 삭제·공유 취소 같은 파괴적 테스트는 여기서 하지 마세요.** 데이터가 팀 공유라 남이 쓰던 것도 함께 사라집니다. 그런 건 4-B(에뮬레이터)에서 하세요.
+>
+> 🧹 데이터가 지저분해지면 밀어버릴 수 있습니다 — `bash tool/reset_dev.sh` (cmd·PowerShell은 `tool\reset_dev.cmd`). Firestore 데이터만 지우고 **계정은 남으므로** 다시 회원가입할 필요는 없습니다.
+
 ---
 
 ## 5. 잘 됐는지 확인하는 법
 
-**터미널 B의 로그**에 이 줄이 있으면 에뮬레이터에 제대로 붙은 것입니다:
+**앱을 띄운 터미널의 로그**를 보면 어디에 붙었는지 알 수 있습니다:
 
-```
-KeepCon: Firebase 에뮬레이터 연결됨 (localhost — auth:9099, firestore:8080)
-```
+| 로그 | 붙은 곳 |
+|------|---------|
+| (Firebase 관련 줄 없음) | 데모 모드(4-A) — 팀원과 공유 안 됨 |
+| `KeepCon: Firebase 에뮬레이터 연결됨 (localhost — auth:9099, firestore:8080)` | 에뮬레이터(4-B) — 내 PC에만 있음 |
+| `KeepCon: Firebase 연결됨 (dev — keepcon-dev)` | 팀 개발 서버(4-C) ✅ |
+| `KeepCon: Firebase 연결됨 (prod — keepcon-ab660)` | **실서비스** — 의도한 게 아니면 즉시 끄세요 |
+
+**"왜 팀원이 만든 그룹이 안 보이지?"** 싶을 때 여기부터 확인하세요. 플래그를 빠뜨리면 데모 모드로 뜨는데, 화면이 멀쩡히 나오고 로그인도 돼 있어서 알아채기 어렵습니다.
 
 **http://localhost:4000** 을 브라우저로 열면 저장된 계정과 데이터를 눈으로 볼 수 있습니다. 앱에서 뭔가 만들면 여기에 바로 나타납니다.
 

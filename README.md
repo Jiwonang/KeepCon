@@ -77,12 +77,14 @@ flutter pub get
 
 ### 실행 방법
 
-실행은 **두 단계**입니다. 백엔드(에뮬레이터)를 띄우고, 앱을 띄웁니다.
+**터미널을 두 개 써야 하는 건 에뮬레이터 모드뿐입니다.** 나머지는 앱만 띄우면 됩니다.
 
-- **① 에뮬레이터 기동** — 쓰는 셸에 따라 명령이 다릅니다 → [bash](#-bash로-실행-git-bash--macos--linux) · [cmd](#-cmd로-실행-windows)
-- **② 앱 실행** — 어느 셸에서든 똑같습니다 → [flutter](#-flutter로-앱-실행-공통)
+| 모드 | 단계 |
+|------|------|
+| 데모 · **dev 서버** · 실서비스 | **앱 실행 한 번** → [flutter](#-flutter로-앱-실행-공통) |
+| 에뮬레이터 | **① 에뮬레이터 기동**(쓰는 셸에 따라 다름 → [bash](#-bash로-실행-git-bash--macos--linux) · [cmd](#-cmd로-실행-windows)) → **② 앱 실행** |
 
-> 백엔드 없이 화면만 볼 거면 ①을 건너뛰고 [flutter](#-flutter로-앱-실행-공통)의 **데모 모드**로 바로 가세요.
+어느 모드가 어떤 데이터를 쓰는지는 [flutter로 앱 실행](#-flutter로-앱-실행-공통)의 표를 보세요.
 
 ---
 
@@ -148,11 +150,14 @@ flutter run -d chrome --dart-define=USE_FIREBASE=true
 # 실서비스 — 시연·배포 확인 전용
 flutter run -d chrome --dart-define=USE_FIREBASE_PROD=true
 
-# 모바일로 실행하려면 플랫폼 폴더 생성 후
+# 모바일로 실행하려면 플랫폼 폴더 생성 후 — 플래그는 위와 동일하게 붙인다.
+# (플래그를 빼면 여기서도 데모 모드로 뜬다)
 flutter create . --platforms=android,ios
-flutter run
+flutter run --dart-define=USE_FIREBASE=true
 ```
 
+> 모바일에서 dev·실서비스에 붙으려면 **`flutterfire configure`를 다시 돌려야 합니다.** 현재 두 프로젝트 모두 web만 구성돼 있어, android/ios에서는 초기화가 `UnsupportedError`로 실패합니다. 에뮬레이터 모드는 그대로 동작합니다.
+>
 > ⚠️ **플래그를 깜빡해도 앱은 멀쩡히 뜹니다.** 플래그 없이 실행하면 데모 모드로 시작하는데, 로그인도 돼 있고 기프티콘 목록도 보여서 겉보기엔 정상입니다. 그래서 **"왜 팀원이 만든 그룹이 안 보이지?"** 로 한참 헤매기 쉽습니다. 팀 작업 중이라면 아래 콘솔 출력부터 확인하세요.
 
 **어디에 붙었는지는 콘솔에 찍힙니다** — 헤매기 전에 여기부터 보세요:
