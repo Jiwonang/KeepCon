@@ -18,9 +18,15 @@ KeepCon을 처음 받는 사람을 위한 문서입니다. **Flutter도 Firebase
 
 **화면만 만질 거면 A로 충분합니다.** A가 훨씬 간단하니, 처음이라면 A를 먼저 성공시키고 B로 넘어가세요.
 
-> **평소 개발에는 실제 Firebase 서버를 쓰지 마세요.** 연결은 돼 있지만(`keepcon-ab660`), 팀이 각자 개발하는 동안은 각자 PC의 에뮬레이터를 쓰는 게 맞습니다 — 실제 서버는 하나뿐이라 서로의 데이터를 밟습니다. 이유는 [README의 Firebase 연동](../README.md#-firebase-연동-백엔드-활성화) 참고.
+> **모드가 하나 더 있습니다 — C. 팀 개발 서버(`keepcon-dev`).** 팀원끼리 **같은 그룹에 들어가서** 공유 시나리오를 테스트할 때 씁니다. 에뮬레이터는 각자 PC에 격리돼 있어 이게 불가능합니다.
 >
-> 시연·배포 확인 등으로 실제 서버에 붙어야 할 때만 `flutter run -d chrome --dart-define=USE_FIREBASE=true` 를 쓰세요. 추가 설정은 필요 없지만 **시드가 없어 회원가입부터** 해야 합니다.
+> ```bash
+> flutter run -d chrome --dart-define=USE_FIREBASE=true
+> ```
+>
+> 준비물은 Flutter뿐이고(Java·Node 불필요), 추가 설정도 없습니다. 다만 **시드가 없어 각자 회원가입**부터 해야 하고, **그룹 삭제 같은 파괴적 테스트는 하면 안 됩니다**(남의 데이터도 같이 날아갑니다 — 그건 B에서 하세요). 자세한 건 [README의 Firebase 연동](../README.md#-firebase-연동-백엔드-활성화) 참고.
+>
+> 시연·배포 확인용 실서비스 서버는 플래그가 다릅니다(`--dart-define=USE_FIREBASE_PROD=true`). 평소에 쓸 일은 없습니다.
 
 ---
 

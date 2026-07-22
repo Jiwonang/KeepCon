@@ -9,9 +9,14 @@
 /// - `--dart-define=USE_FIREBASE_EMULATOR=true`: **Firebase + 로컬 에뮬레이터**
 ///   (권장 개발 경로). 별도 터미널에서 `firebase emulators:start`가 떠 있어야 한다.
 ///   실제 Firebase 프로젝트도 계정도 필요 없다.
-/// - `--dart-define=USE_FIREBASE=true`: **실제 Firebase 프로젝트**(`keepcon-ab660`)로
-///   실행. 추가 설정은 필요 없지만 시드가 없어 회원가입부터 해야 한다. web만 구성돼
-///   있어 다른 플랫폼에서는 초기화가 [UnsupportedError]로 실패한다.
+/// - `--dart-define=USE_FIREBASE=true`: **팀 개발 프로젝트**(`keepcon-dev`)로 실행.
+///   팀원끼리 같은 그룹에 들어가 공유 시나리오를 검증할 때 쓴다.
+/// - `--dart-define=USE_FIREBASE_PROD=true`: **실서비스 프로젝트**(`keepcon-ab660`).
+///   시연·배포 확인 전용이며, 플래그를 분리한 이유는 오타 한 번으로 실서비스 데이터를
+///   건드리지 않게 하기 위해서다.
+///
+/// 실제 백엔드(dev·prod)는 web만 구성돼 있어 다른 플랫폼에서는 초기화가
+/// [UnsupportedError]로 실패한다. 어느 쪽도 시드가 없어 회원가입부터 해야 한다.
 ///
 /// 두 Firebase 경로 모두 세션이 비어 있어 [AuthGate]가 로그인 화면부터 시작한다.
 /// 경로 선택 근거(왜 팀 작업에는 에뮬레이터인가)는 `shared/firebase/firebase_bootstrap.dart` 참조.
@@ -32,8 +37,11 @@ import 'shared/providers/theme_mode_provider.dart';
 import 'shared/repositories/impl/in_memory_gifticon_repository.dart';
 import 'shared/theme/app_theme.dart';
 
-/// `--dart-define=USE_FIREBASE=true` → 실제 Firebase 프로젝트.
+/// `--dart-define=USE_FIREBASE=true` → 팀 개발 프로젝트(`keepcon-dev`).
 const bool _useFirebase = bool.fromEnvironment('USE_FIREBASE');
+
+/// `--dart-define=USE_FIREBASE_PROD=true` → 실서비스 프로젝트(`keepcon-ab660`).
+const bool _useProd = bool.fromEnvironment('USE_FIREBASE_PROD');
 
 /// `--dart-define=USE_FIREBASE_EMULATOR=true` → Firebase + 로컬 에뮬레이터.
 ///
@@ -41,12 +49,24 @@ const bool _useFirebase = bool.fromEnvironment('USE_FIREBASE');
 /// (플래그 두 개를 같이 넘길 필요 없음).
 const bool _useEmulator = bool.fromEnvironment('USE_FIREBASE_EMULATOR');
 
+/// 플래그 조합에서 백엔드를 결정한다. 플래그가 하나도 없으면 `null`(= in-memory 데모).
+///
+/// 우선순위는 **안전한 쪽이 이긴다** — 여러 플래그를 같이 넘긴 실수 상황에서
+/// 실서비스가 선택되는 일이 없도록 emulator > dev > prod 순으로 판정한다.
+FirebaseTarget? _resolveTarget() {
+  if (_useEmulator) return FirebaseTarget.emulator;
+  if (_useFirebase) return FirebaseTarget.dev;
+  if (_useProd) return FirebaseTarget.prod;
+  return null;
+}
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  final List<Override> overrides = (_useFirebase || _useEmulator)
-      ? await initFirebaseAndBuildOverrides(useEmulator: _useEmulator)
-      : _inMemoryOverrides(); // 기본: in-memory 데모
+  final FirebaseTarget? target = _resolveTarget();
+  final List<Override> overrides = target == null
+      ? _inMemoryOverrides() // 기본: in-memory 데모
+      : await initFirebaseAndBuildOverrides(target: target);
 
   runApp(ProviderScope(overrides: overrides, child: const KeepConApp()));
 }

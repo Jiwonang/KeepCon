@@ -268,14 +268,39 @@ gh api -X POST repos/Jiwonang/KeepCon/rulesets --input ruleset.json
 | 경로 | 실행 | 언제 쓰나 |
 |------|------|-----------|
 | in-memory 데모 | `flutter run` | 화면·UI 작업. 시드 데이터로 즉시 시연 |
-| **Firebase 에뮬레이터** | `flutter run --dart-define=USE_FIREBASE_EMULATOR=true` | **평소 개발·팀 병렬 작업(권장)** |
-| 실제 Firebase 프로젝트 | `flutter run --dart-define=USE_FIREBASE=true` | 실기기 시연·베타 배포 |
+| Firebase 에뮬레이터 | `flutter run --dart-define=USE_FIREBASE_EMULATOR=true` | 혼자 하는 작업, **파괴적 테스트**, 보안 규칙 검증 |
+| **dev 프로젝트** (`keepcon-dev`) | `flutter run --dart-define=USE_FIREBASE=true` | **팀 개발 기본** — 여럿이 같은 그룹에 들어가는 공유 시나리오 |
+| 실서비스 (`keepcon-ab660`) | `flutter run --dart-define=USE_FIREBASE_PROD=true` | 시연·배포 확인 **전용** |
 
-### 왜 팀 작업에는 에뮬레이터인가
+### 에뮬레이터와 dev 프로젝트는 대체재가 아닙니다
 
-실제 프로젝트 하나를 팀이 같이 쓰면 문제가 생깁니다. Firestore에는 브랜치가 없어서 **서로의 데이터를 밟고**(A가 테스트로 지운 그룹을 B가 쓰는 중), `flutterfire configure`를 각자 돌리면 `lib/firebase_options.dart`가 갈라져 계속 충돌하며, CI에서는 자격 증명이 없어 아예 못 씁니다.
+둘 다 필요하고, 쓰는 목적이 다릅니다.
 
-에뮬레이터는 **각자 로컬에 격리**되고 재시작하면 리셋되며, **계정도 결제도 필요 없습니다**. `git pull` 하면 팀 전원이 똑같이 동작합니다.
+**dev 프로젝트가 필요한 이유 — 에뮬레이터로는 팀원과 같은 그룹에 들어갈 수 없습니다.** 에뮬레이터는 각자 PC에 격리돼 있어서, KeepCon의 핵심인 그룹 공유(A가 공유 → B에게 보임 → B가 사용 → A에게 알림)를 **진짜 두 사람으로** 검증할 방법이 없습니다. 한 PC에서 계정 두 개로 번갈아 로그인하는 흉내만 낼 수 있습니다. 공유 백엔드가 있어야 하고, 그게 `keepcon-dev`입니다.
+
+**에뮬레이터가 여전히 필요한 이유 — 실서버에는 롤백이 없습니다.** Firestore에는 브랜치도 되돌리기도 없어서, dev에서 "그룹 삭제"를 테스트하면 남이 쓰던 데이터도 같이 사라집니다. 그래서 **파괴적 테스트와 보안 규칙 검증은 에뮬레이터에서** 합니다(`tool/verify_firestore_rules.sh`도 에뮬레이터 전용입니다). 인터넷이 없거나 할당량을 아끼고 싶을 때도 에뮬레이터입니다.
+
+| | 에뮬레이터 | dev 프로젝트 |
+|---|---|---|
+| 팀원과 같은 그룹 | ❌ 불가 | ✅ |
+| 파괴적 테스트 | ✅ 자유 | ⚠️ 남의 데이터도 날아감 |
+| 리셋 | 재시작하면 자동 | `tool/reset_dev.sh` 수동 |
+| 시드 계정 | ✅ 커밋돼 있음 | ❌ 각자 회원가입 |
+| 오프라인 | ✅ | ❌ |
+
+**왜 dev와 실서비스를 나눴나.** 하나로 쓰면 시연 직전에 테스트 쓰레기를 손으로 치워야 하고, 실수로 지운 게 시연 데이터일 수 있습니다. dev는 언제든 통째로 밀어도 되니 그 부담이 사라집니다. 플래그도 `USE_FIREBASE`(dev)와 `USE_FIREBASE_PROD`(실서비스)로 분리해서, 오타 한 번에 실서비스가 열리지 않게 했습니다. 여러 플래그를 같이 넘기면 **안전한 쪽(에뮬레이터 > dev > 실서비스)이 이깁니다**.
+
+### dev 프로젝트로 팀 개발하기
+
+```bash
+flutter run -d chrome --dart-define=USE_FIREBASE=true
+```
+
+- **시드가 없습니다.** 각자 회원가입부터 해야 합니다(에뮬레이터의 `owner@keepcon.test` 같은 공용 계정이 없습니다). 그룹 공유를 테스트하려면 한 명이 그룹을 만들고 초대코드를 팀에 공유하세요.
+- **데이터가 지저분해지면 밀어버리세요.** `bash tool/reset_dev.sh` (cmd·PowerShell은 `tool\reset_dev.cmd`). Firestore 데이터만 지우고 **Auth 계정은 남기므로** 다시 회원가입할 필요는 없습니다. 실서비스 프로젝트에는 동작하지 않도록 스크립트에 하드코딩돼 있습니다.
+- **파괴적 테스트는 여기서 하지 마세요.** 그룹 삭제·공유 취소처럼 남의 작업을 날릴 수 있는 건 에뮬레이터에서 확인하고 오세요.
+- 앱 콘솔에 `KeepCon: Firebase 연결됨 (dev — keepcon-dev)` 가 찍힙니다. **`prod`라고 찍히면 즉시 중단하세요.**
+- 요금제는 **Spark(무료)** 입니다. 할당량을 넘기면 청구서 대신 그날 요청이 멈추므로 비용 사고는 나지 않지만, 리스너 루프 버그가 있으면 팀 전체가 하루 막힙니다.
 
 ### 에뮬레이터로 실행하기
 
@@ -288,7 +313,8 @@ gh api -X POST repos/Jiwonang/KeepCon/rulesets --input ruleset.json
 - Android 실기기/에뮬레이터는 접속 호스트를 `10.0.2.2`로 자동 전환합니다(`resolveEmulatorHost()`).
 - 프로젝트 id `demo-keepcon`의 **`demo-` 접두사**는 "에뮬레이터 전용"이라는 Firebase 규약입니다 — 실제 Google 백엔드로 나가는 요청이 차단되므로, `lib/shared/firebase/demo_firebase_options.dart`의 더미 키는 노출될 비밀이 아닙니다.
 - ⚠️ Firestore가 **8080 포트**를 씁니다. 로컬 웹 서버를 띄울 때 이 포트를 피하세요.
-- ⚠️ **맨손으로 `firebase emulators:start`를 치지 마세요.** [`.firebaserc`](.firebaserc)의 `default`는 실제 프로젝트(`keepcon-ab660`)라, 프로젝트를 지정하지 않으면 에뮬레이터가 실제 프로젝트 id로 뜹니다(로컬이라 실제 데이터가 손상되지는 않지만 시드 import가 어긋납니다). `tool/emulators.sh`·`tool\emulators.cmd`는 `--project demo-keepcon`을 명시하므로 안전합니다 — **항상 이 스크립트로 띄우세요.** 직접 치겠다면 `firebase emulators:start -P emulator`.
+- ⚠️ **맨손으로 `firebase emulators:start`를 치지 마세요.** [`.firebaserc`](.firebaserc)의 `default`는 `keepcon-dev`라, 프로젝트를 지정하지 않으면 에뮬레이터가 그 id로 뜹니다(로컬이라 실제 데이터가 손상되지는 않지만 시드 import가 어긋납니다). `tool/emulators.sh`·`tool\emulators.cmd`는 `--project demo-keepcon`을 명시하므로 안전합니다 — **항상 이 스크립트로 띄우세요.** 직접 치겠다면 `firebase emulators:start -P emulator`.
+- ℹ️ `.firebaserc`의 `default`를 실서비스가 아니라 **`keepcon-dev`로 둔 것은 의도적입니다** — 맨손 `firebase deploy`가 실서비스로 나가지 않게 하기 위해서입니다. 실서비스에 배포할 때는 `-P prod`(또는 `--project keepcon-ab660`)를 반드시 명시하세요.
 
 ### 공용 테스트 계정 (clone하면 바로 로그인)
 
@@ -333,43 +359,60 @@ tool\verify_firestore_rules.cmd
 
 실제 사용자 두 명을 Auth 에뮬레이터에 만들고 그 토큰으로 Firestore에 요청해, 남의 기프티콘 조회·`ownerId` 위조·비멤버의 그룹 조회가 **실제로 차단되는지** 확인합니다.
 
-### 실제 Firebase 프로젝트 연결 (시연·배포용) — ✅ 연결 완료
+### 연결된 Firebase 프로젝트 — ✅ 둘 다 구성 완료
 
-**이미 연결돼 있습니다. 아래 설정을 다시 할 필요가 없습니다** — `lib/firebase_options.dart`가 실제 값으로 커밋돼 있으므로, clone 후 바로 실행하면 됩니다:
+**추가 설정이 필요 없습니다.** 두 옵션 파일이 실제 값으로 커밋돼 있으므로 clone 후 바로 실행하면 됩니다.
 
-```bash
-flutter run --dart-define=USE_FIREBASE=true
-```
+| | **dev** (팀 개발) | **실서비스** (시연·배포) |
+|---|---|---|
+| 프로젝트 id | `keepcon-dev` ([콘솔](https://console.firebase.google.com/project/keepcon-dev/overview)) | `keepcon-ab660` ([콘솔](https://console.firebase.google.com/project/keepcon-ab660/overview)) |
+| 실행 플래그 | `--dart-define=USE_FIREBASE=true` | `--dart-define=USE_FIREBASE_PROD=true` |
+| 옵션 파일 | [`lib/firebase_options_dev.dart`](lib/firebase_options_dev.dart) | [`lib/firebase_options.dart`](lib/firebase_options.dart) |
+| 데이터 | 팀 공유. 언제든 밀어도 됨 | 실서비스. 함부로 건드리지 말 것 |
+| 리셋 | `tool/reset_dev.sh` | 없음 (의도적) |
 
-| 항목 | 값 |
-|------|-----|
-| 프로젝트 id | `keepcon-ab660` ([콘솔](https://console.firebase.google.com/project/keepcon-ab660/overview)) |
-| Firestore | `(default)` · **Standard** 에디션 · **Native** 모드 · `asia-northeast3`(서울) |
-| 구성된 플랫폼 | web (`android`/`ios` 디렉토리가 생기면 재구성 필요) |
-| 배포된 규칙·인덱스 | [`firestore.rules`](firestore.rules) · [`firestore.indexes.json`](firestore.indexes.json) |
+두 프로젝트 모두 Firestore `(default)` · **Standard** 에디션 · **Native** 모드 · `asia-northeast3`(서울)이고, [`firestore.rules`](firestore.rules) · [`firestore.indexes.json`](firestore.indexes.json)이 배포돼 있습니다. 구성된 플랫폼은 **web만** 입니다(`android`/`ios` 디렉토리가 생기면 두 프로젝트 모두 재구성 필요).
 
 > ⚠️ **Firestore 에디션은 반드시 Standard입니다.** Enterprise는 MongoDB 호환 API용이라 `cloud_firestore` SDK도 `request.auth.uid` 기반 보안 규칙도 동작하지 않습니다. 콘솔에서 DB를 새로 만들 일이 있으면 Standard/Native를 고르세요.
 >
 > ⚠️ **리전은 변경할 수 없습니다.** `asia-northeast3`는 생성 시점에 확정됐습니다. 바꾸려면 프로젝트를 새로 만들어야 합니다.
+>
+> ⚠️ **두 옵션 파일의 클래스명이 `DefaultFirebaseOptions`로 같습니다.** `flutterfire configure` 생성물이라 그렇습니다. 생성물을 손으로 고치면 재생성 때 날아가므로, [`firebase_bootstrap.dart`](lib/shared/firebase/firebase_bootstrap.dart)에서 prefix import(`as dev_options` / `as prod_options`)로 구분합니다.
 
-**여전히 팀 개발의 기본은 에뮬레이터입니다.** 실제 프로젝트는 시연·배포 확인용으로만 쓰세요 — 위 [왜 팀 작업에는 에뮬레이터인가](#왜-팀-작업에는-에뮬레이터인가)의 이유(데이터 밟기·브랜치 없음)는 연결된 뒤에도 그대로입니다. 실제 프로젝트에는 시드가 없어 **첫 실행 시 회원가입부터** 해야 합니다.
+### 규칙을 고쳤을 때 — 배포
 
-<details>
-<summary>규칙을 고쳤을 때 / 프로젝트를 새로 연결할 때</summary>
-
-규칙·인덱스를 수정했다면 배포해야 반영됩니다(로컬 파일 수정만으로는 실제 프로젝트에 적용되지 않습니다):
+`firestore.rules`·`firestore.indexes.json`은 **파일을 고쳐도 배포해야 실제 프로젝트에 반영됩니다.** 그리고 프로젝트가 둘이라 **양쪽 모두**에 배포해야 합니다 — 한쪽만 하면 "dev에선 되는데 실서비스에선 막힘"이 생기고, 원인이 코드가 아니라 배포 누락이라 찾는 데 오래 걸립니다. 사람 기억에 맡기지 말고 스크립트를 쓰세요:
 
 ```bash
-firebase deploy --only firestore:rules,firestore:indexes
+bash tool/deploy_rules.sh          # dev 에만 (기본)
+bash tool/deploy_rules.sh prod     # 실서비스. 'prod' 를 입력해야 진행
+bash tool/deploy_rules.sh all      # dev 먼저, 성공하면 prod
+```
+```
+:: cmd·PowerShell
+tool\deploy_rules.cmd all
 ```
 
-전혀 다른 프로젝트로 갈아끼우려면 — 팀에서 **한 명만** 수행하고 `lib/firebase_options.dart`를 커밋하세요(각자 돌리면 파일이 갈라집니다):
+- `all`은 **dev에 먼저** 배포하고 실패하면 prod로 넘어가지 않습니다. 규칙 오류가 실서비스보다 dev에서 먼저 드러나게 하려는 순서입니다.
+- 실서비스 배포는 확인 프롬프트가 있습니다. **잘못된 규칙은 실사용자를 즉시 차단**하기 때문입니다.
+- **에뮬레이터는 배포 대상이 아닙니다** — `firebase.json`을 통해 `firestore.rules`를 파일에서 직접 읽습니다. 규칙 변경을 반영하려면 에뮬레이터를 재시작하세요.
+- 배포 전에 규칙이 의도대로 막는지는 `bash tool/verify_firestore_rules.sh`로 에뮬레이터에서 확인하세요.
 
-1. [Firebase 콘솔](https://console.firebase.google.com)에서 프로젝트 생성
-2. `dart pub global activate flutterfire_cli` 후 `flutterfire configure --platforms=web`
-3. 콘솔에서 **Authentication**(이메일/비밀번호) · **Cloud Firestore**(Standard·Native) 활성화
-4. `firebase deploy --only firestore:rules,firestore:indexes`
-5. [`.firebaserc`](.firebaserc)의 `default`를 새 프로젝트 id로 교체
+<details>
+<summary>프로젝트를 새로 만들거나 갈아끼울 때</summary>
+
+팀에서 **한 명만** 수행하고 생성된 옵션 파일을 커밋하세요(각자 돌리면 파일이 갈라집니다):
+
+1. `firebase projects:create <프로젝트-id> --display-name "..."`
+2. `dart pub global activate flutterfire_cli` 후 — dev면 `--out`으로 파일을 나눕니다:
+   ```bash
+   flutterfire configure --project=<id> --platforms=web --out=lib/firebase_options_dev.dart
+   ```
+3. 콘솔에서 **Cloud Firestore**(Standard·Native·`asia-northeast3`) · **Authentication**(이메일/비밀번호) 활성화
+   — Firestore는 콘솔에서 한 번 열어야 API가 켜지고, 그 뒤에는 CLI로도 만들 수 있습니다:
+   `firebase firestore:databases:create "(default)" --location=asia-northeast3 --project <id>`
+4. `firebase deploy --only firestore:rules,firestore:indexes --project <id>`
+5. [`.firebaserc`](.firebaserc)에 별칭 추가, [`firebase_bootstrap.dart`](lib/shared/firebase/firebase_bootstrap.dart)의 `FirebaseTarget`에 항목 추가
 
 </details>
 
