@@ -1,5 +1,6 @@
 {
   "projects": {
-    "default": "demo-keepcon"
+    "default": "keepcon-ab660",
+    "emulator": "demo-keepcon"
   }
 }

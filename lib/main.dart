@@ -9,8 +9,9 @@
 /// - `--dart-define=USE_FIREBASE_EMULATOR=true`: **Firebase + 로컬 에뮬레이터**
 ///   (권장 개발 경로). 별도 터미널에서 `firebase emulators:start`가 떠 있어야 한다.
 ///   실제 Firebase 프로젝트도 계정도 필요 없다.
-/// - `--dart-define=USE_FIREBASE=true`: **실제 Firebase 프로젝트**로 실행
-///   (`flutterfire configure` 선행 필요 — 없으면 초기화에서 예외).
+/// - `--dart-define=USE_FIREBASE=true`: **실제 Firebase 프로젝트**(`keepcon-ab660`)로
+///   실행. 추가 설정은 필요 없지만 시드가 없어 회원가입부터 해야 한다. web만 구성돼
+///   있어 다른 플랫폼에서는 초기화가 [UnsupportedError]로 실패한다.
 ///
 /// 두 Firebase 경로 모두 세션이 비어 있어 [AuthGate]가 로그인 화면부터 시작한다.
 /// 경로 선택 근거(왜 팀 작업에는 에뮬레이터인가)는 `shared/firebase/firebase_bootstrap.dart` 참조.

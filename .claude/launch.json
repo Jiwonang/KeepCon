@@ -41,6 +41,21 @@
         "--dart-define=USE_FIREBASE_EMULATOR=true"
       ],
       "port": 8082
+    },
+    {
+      "name": "keepcon-firebase",
+      "runtimeExecutable": "flutter",
+      "runtimeArgs": [
+        "run",
+        "-d",
+        "web-server",
+        "--web-hostname",
+        "localhost",
+        "--web-port",
+        "8083",
+        "--dart-define=USE_FIREBASE=true"
+      ],
+      "port": 8083
     }
   ]
 }
