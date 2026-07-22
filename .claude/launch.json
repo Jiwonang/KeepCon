@@ -43,7 +43,7 @@
       "port": 8082
     },
     {
-      "name": "keepcon-firebase",
+      "name": "keepcon-dev",
       "runtimeExecutable": "flutter",
       "runtimeArgs": [
         "run",
@@ -56,6 +56,21 @@
         "--dart-define=USE_FIREBASE=true"
       ],
       "port": 8083
+    },
+    {
+      "name": "keepcon-prod",
+      "runtimeExecutable": "flutter",
+      "runtimeArgs": [
+        "run",
+        "-d",
+        "web-server",
+        "--web-hostname",
+        "localhost",
+        "--web-port",
+        "8084",
+        "--dart-define=USE_FIREBASE_PROD=true"
+      ],
+      "port": 8084
     }
   ]
 }

@@ -18,8 +18,8 @@
 ///
 /// ---
 /// ## 소비 지점
-/// [firebase_bootstrap.dart]의 `initFirebaseAndBuildOverrides(useEmulator: true)`
-/// 경로에서만 사용한다. 앱 코드가 직접 참조하지 않는다.
+/// [firebase_bootstrap.dart]의 `FirebaseTarget.emulator` 경로에서만 사용한다.
+/// 앱 코드가 직접 참조하지 않는다.
 library;
 
 import 'package:firebase_core/firebase_core.dart' show FirebaseOptions;
