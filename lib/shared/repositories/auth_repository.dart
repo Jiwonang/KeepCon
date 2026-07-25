@@ -104,4 +104,28 @@ abstract class AuthRepository {
   /// 계정 존재 여부를 노출하지 않기 위해, 미가입 이메일이어도 예외 없이 성공
   /// 처리할 수 있다(구현체 재량). 형식 오류 등은 [AuthException]을 던진다.
   Future<void> sendPasswordReset({required String email});
+
+  /// 현재 사용자의 표시 이름을 변경한다.
+  ///
+  /// 성공 시 갱신된 [User]를 반환하고, [watchCurrentUser]가 갱신된 사용자를
+  /// 방출하며, 영속 프로필 저장소에도 반영한다(계약: 프로필 저장 포함).
+  ///
+  /// [User.displayName] **빈 문자열 금지** 계약: 구현체는 트림 후 비면
+  /// [AuthException]([AuthErrorCode.unknown])을 던진다 — 호출부(페이지)가
+  /// 입력 검증으로 미리 막는 것을 권장한다.
+  /// 미로그인 상태 호출도 [AuthException]([AuthErrorCode.unknown])이다.
+  Future<User> updateDisplayName({required String displayName});
+
+  /// 현재 계정을 삭제한다 — **비밀번호 재확인 필수**.
+  ///
+  /// 보안 민감 작업이므로 [password] 재확인을 계약으로 강제한다:
+  /// - 비밀번호 불일치 → [AuthException]([AuthErrorCode.invalidCredential])
+  /// - 미로그인 상태 호출 → [AuthException]([AuthErrorCode.unknown])
+  ///
+  /// (Firebase 등 실제 백엔드의 "오래된 세션은 민감 작업 거부"(recent-login 요구)
+  /// 정책도 이 재인증 단계로 함께 충족된다.)
+  ///
+  /// 성공 시 계정과 영속 프로필이 삭제되고 로그아웃 상태가 되며,
+  /// [watchCurrentUser]가 `null`을 방출한다.
+  Future<void> deleteAccount({required String password});
 }
