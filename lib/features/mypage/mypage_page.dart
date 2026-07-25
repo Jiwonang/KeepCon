@@ -8,7 +8,8 @@
 /// - 프로필 편집(프로필 카드 탭): [AuthRepository.updateDisplayName]으로 표시 이름 변경
 /// - 계정 관리: [AuthRepository.deleteAccount] — 비밀번호 재확인 후 계정 삭제
 /// - 다크 모드 토글, 로그아웃
-/// 알림 설정·사용 이력·설정 항목은 자리표시(준비 중).
+/// - 사용 이력: share의 [UsageLogPage]로 이동(공유 페이지 '전체 보기'와 동일 화면)
+/// 알림 설정·설정 항목은 자리표시(준비 중).
 ///
 /// 다크 모드 스위치는 공유 계약 [themeModeProvider]를 소비한다:
 /// - 현재값: `ref.watch(themeModeProvider)` (== [ThemeMode.dark] 여부)
@@ -29,6 +30,7 @@ import '../../shared/providers/theme_mode_provider.dart';
 import '../../shared/repositories/auth_repository.dart';
 import '../../shared/theme/theme_tokens.dart';
 import '../auth/auth_error_message.dart';
+import '../share/pages/usage_log_page.dart';
 
 /// 마이페이지용 현재 사용자 스트림. SSOT [authRepositoryProvider]를 구독한다.
 /// (main의 `currentUserProvider`, share의 `shareCurrentUserProvider`와 동일 패턴 —
@@ -156,8 +158,12 @@ class MyPage extends ConsumerWidget {
                   _SettingsRow(
                     icon: Icons.history,
                     title: '사용 이력',
-                    // TODO(mypage): 공유 사용 이력(UsageLogPage) 연동 검토.
-                    onTap: () => _placeholder(context, '사용 이력'),
+                    // share 소유 화면 재사용 — 공유 페이지 '전체 보기'와 동일 진입.
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => const UsageLogPage(),
+                      ),
+                    ),
                   ),
                   const _RowDivider(),
                   _SettingsRow(
