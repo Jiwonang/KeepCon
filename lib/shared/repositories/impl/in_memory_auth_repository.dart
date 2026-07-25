@@ -112,6 +112,44 @@ class InMemoryAuthRepository implements AuthRepository {
     // 계정 존재 노출 방지 계약과 일치).
   }
 
+  @override
+  Future<User> updateDisplayName({required String displayName}) async {
+    final User? current = _currentUser;
+    if (current == null) {
+      throw const AuthException(AuthErrorCode.unknown, 'not signed in');
+    }
+    final String name = displayName.trim();
+    if (name.isEmpty) {
+      // 빈 문자열 금지 계약 — 호출부 검증을 뚫고 와도 여기서 차단한다.
+      throw const AuthException(AuthErrorCode.unknown, 'empty displayName');
+    }
+    final User updated = current.copyWith(displayName: name);
+    final String key = _key(current.email);
+    final _Account? acc = _accounts[key];
+    if (acc != null) {
+      // 계정 저장소에도 반영(로그아웃 후 재로그인 시 새 이름 유지 — 영속 계약).
+      _accounts[key] = _Account(password: acc.password, user: updated);
+    }
+    _setCurrent(updated);
+    return updated;
+  }
+
+  @override
+  Future<void> deleteAccount({required String password}) async {
+    final User? current = _currentUser;
+    if (current == null) {
+      throw const AuthException(AuthErrorCode.unknown, 'not signed in');
+    }
+    final String key = _key(current.email);
+    final _Account? acc = _accounts[key];
+    if (acc == null || acc.password != password) {
+      // 비밀번호 재확인 실패 — signIn과 동일하게 invalidCredential로 통일.
+      throw const AuthException(AuthErrorCode.invalidCredential);
+    }
+    _accounts.remove(key);
+    _setCurrent(null);
+  }
+
   /// 리소스 정리. 앱 종료/테스트 teardown 시 호출.
   void dispose() {
     _controller.close();

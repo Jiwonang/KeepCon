@@ -125,4 +125,109 @@ void main() {
       expect(emitted.last, isNull); // 로그아웃
     });
   });
+
+  group('updateDisplayName', () {
+    test('성공 시 갱신된 User를 반환하고 currentUser에 반영된다', () async {
+      await repo.signUp(
+          email: 'a@b.com', password: 'secret1', displayName: '옛이름');
+      final User updated = await repo.updateDisplayName(displayName: '새이름');
+      expect(updated.displayName, '새이름');
+      expect(repo.currentUser?.displayName, '새이름');
+      expect(updated.email, 'a@b.com'); // 다른 필드는 불변.
+    });
+
+    test('watchCurrentUser가 갱신된 사용자를 방출한다', () async {
+      await repo.signUp(
+          email: 'a@b.com', password: 'secret1', displayName: '옛이름');
+      final List<User?> emitted = <User?>[];
+      final sub = repo.watchCurrentUser().listen(emitted.add);
+      await pumpEventQueue();
+
+      await repo.updateDisplayName(displayName: '새이름');
+      await pumpEventQueue();
+      await sub.cancel();
+
+      expect(emitted.last?.displayName, '새이름');
+    });
+
+    test('재로그인해도 새 이름이 유지된다(계정 저장소 반영)', () async {
+      await repo.signUp(
+          email: 'a@b.com', password: 'secret1', displayName: '옛이름');
+      await repo.updateDisplayName(displayName: '새이름');
+      await repo.signOut();
+      final User again =
+          await repo.signIn(email: 'a@b.com', password: 'secret1');
+      expect(again.displayName, '새이름');
+    });
+
+    test('트림 후 빈 문자열이면 unknown 예외(빈 문자열 금지 계약)', () async {
+      await repo.signUp(
+          email: 'a@b.com', password: 'secret1', displayName: 'A');
+      expect(
+        () => repo.updateDisplayName(displayName: '   '),
+        throwsA(isA<AuthException>()
+            .having((e) => e.code, 'code', AuthErrorCode.unknown)),
+      );
+    });
+
+    test('미로그인 상태면 unknown 예외', () async {
+      expect(
+        () => repo.updateDisplayName(displayName: '이름'),
+        throwsA(isA<AuthException>()
+            .having((e) => e.code, 'code', AuthErrorCode.unknown)),
+      );
+    });
+  });
+
+  group('deleteAccount', () {
+    test('성공 시 로그아웃 상태가 되고 같은 자격으로 재로그인 불가', () async {
+      await repo.signUp(
+          email: 'a@b.com', password: 'secret1', displayName: 'A');
+      await repo.deleteAccount(password: 'secret1');
+      expect(repo.currentUser, isNull);
+      expect(
+        () => repo.signIn(email: 'a@b.com', password: 'secret1'),
+        throwsA(isA<AuthException>()
+            .having((e) => e.code, 'code', AuthErrorCode.invalidCredential)),
+      );
+    });
+
+    test('watchCurrentUser가 null을 방출한다', () async {
+      await repo.signUp(
+          email: 'a@b.com', password: 'secret1', displayName: 'A');
+      final List<User?> emitted = <User?>[];
+      final sub = repo.watchCurrentUser().listen(emitted.add);
+      await pumpEventQueue();
+
+      await repo.deleteAccount(password: 'secret1');
+      await pumpEventQueue();
+      await sub.cancel();
+
+      expect(emitted.last, isNull);
+    });
+
+    test('비밀번호가 틀리면 invalidCredential — 계정과 세션은 유지', () async {
+      await repo.signUp(
+          email: 'a@b.com', password: 'secret1', displayName: 'A');
+      await expectLater(
+        () => repo.deleteAccount(password: 'wrong'),
+        throwsA(isA<AuthException>()
+            .having((e) => e.code, 'code', AuthErrorCode.invalidCredential)),
+      );
+      expect(repo.currentUser, isNotNull); // 세션 유지.
+      // 계정도 그대로 — 올바른 비밀번호로 여전히 로그인 가능.
+      await repo.signOut();
+      final User again =
+          await repo.signIn(email: 'a@b.com', password: 'secret1');
+      expect(again.email, 'a@b.com');
+    });
+
+    test('미로그인 상태면 unknown 예외', () async {
+      expect(
+        () => repo.deleteAccount(password: 'x'),
+        throwsA(isA<AuthException>()
+            .having((e) => e.code, 'code', AuthErrorCode.unknown)),
+      );
+    });
+  });
 }

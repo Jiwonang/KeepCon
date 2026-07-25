@@ -38,7 +38,9 @@ class FirebaseAuthRepository implements AuthRepository {
   User? get currentUser => _mapUser(_auth.currentUser);
 
   @override
-  Stream<User?> watchCurrentUser() => _auth.authStateChanges().map(_mapUser);
+  Stream<User?> watchCurrentUser() => _auth.userChanges().map(_mapUser);
+  // ↑ authStateChanges()가 아니라 userChanges(): 로그인/로그아웃뿐 아니라
+  //   updateDisplayName 등 프로필 갱신도 방출해야 계약(갱신된 사용자 방출)을 지킨다.
 
   @override
   Future<User> signUp({
@@ -124,6 +126,74 @@ class FirebaseAuthRepository implements AuthRepository {
       // 미가입 이메일은 조용히 성공 처리(계정 존재 노출 방지 계약).
       if (e.code == 'user-not-found') return;
       throw _mapException(e);
+    }
+  }
+
+  @override
+  Future<User> updateDisplayName({required String displayName}) async {
+    final fb.User? raw = _auth.currentUser;
+    if (raw == null) {
+      throw const AuthException(AuthErrorCode.unknown, 'not signed in');
+    }
+    final String name = displayName.trim();
+    if (name.isEmpty) {
+      // 빈 문자열 금지 계약 — 호출부 검증을 뚫고 와도 여기서 차단한다.
+      throw const AuthException(AuthErrorCode.unknown, 'empty displayName');
+    }
+    try {
+      await raw.updateDisplayName(name);
+      // 로컬 캐시를 갱신해 currentUser 동기 접근점에도 즉시 반영한다.
+      await raw.reload();
+
+      // 영속 프로필(users/{uid})에도 반영(계약: 프로필 저장 포함).
+      await _users.doc(raw.uid).set(
+        <String, dynamic>{'displayName': name},
+        SetOptions(merge: true),
+      );
+
+      final User? updated = _mapUser(_auth.currentUser);
+      if (updated == null) {
+        throw const AuthException(
+            AuthErrorCode.unknown, 'no user after update');
+      }
+      return updated;
+    } on fb.FirebaseAuthException catch (e) {
+      throw _mapException(e);
+    } on AuthException {
+      rethrow;
+    } on Object catch (e) {
+      // Firestore 프로필 반영 등 비-Auth 실패도 도메인 예외로 통일한다.
+      throw AuthException(
+          AuthErrorCode.unknown, 'updateDisplayName failed: $e');
+    }
+  }
+
+  @override
+  Future<void> deleteAccount({required String password}) async {
+    final fb.User? raw = _auth.currentUser;
+    final String? email = raw?.email;
+    if (raw == null || email == null) {
+      throw const AuthException(AuthErrorCode.unknown, 'not signed in');
+    }
+    try {
+      // 계약: 비밀번호 재확인. 불일치는 _mapException이 invalidCredential로
+      // 매핑한다. 재인증으로 세션이 갱신되므로 firebase의 requires-recent-login
+      // 거부도 함께 예방된다.
+      await raw.reauthenticateWithCredential(
+        fb.EmailAuthProvider.credential(email: email, password: password),
+      );
+
+      // 프로필 문서를 계정보다 먼저 삭제한다 — 계정 삭제 후에는 토큰이 무효라
+      // firestore.rules(본인만 write)상 users/{uid}에 접근할 수 없다.
+      await _users.doc(raw.uid).delete();
+
+      // 계정 삭제. 완료 시 세션이 종료되고 userChanges()가 null을 방출한다.
+      await raw.delete();
+    } on fb.FirebaseAuthException catch (e) {
+      throw _mapException(e);
+    } on Object catch (e) {
+      // Firestore 문서 삭제 등 비-Auth 실패도 도메인 예외로 통일한다.
+      throw AuthException(AuthErrorCode.unknown, 'deleteAccount failed: $e');
     }
   }
 
