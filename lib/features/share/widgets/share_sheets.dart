@@ -10,6 +10,7 @@ import '../../../shared/theme/theme_tokens.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../shared/models/gifticon.dart';
+import '../../../shared/models/group.dart';
 import '../../../shared/providers/repositories.dart';
 import '../../../shared/util/korean_particle.dart';
 import '../state/share_providers.dart';
@@ -88,6 +89,7 @@ class _CreateGroupSheetState extends ConsumerState<_CreateGroupSheet> {
   ];
   final TextEditingController _nameCtrl = TextEditingController();
   String _emoji = _emojis.first;
+  int _maxMembers = Group.defaultMaxMembers;
 
   @override
   void dispose() {
@@ -103,7 +105,7 @@ class _CreateGroupSheetState extends ConsumerState<_CreateGroupSheet> {
     try {
       await ref
           .read(shareRepositoryProvider)
-          .createGroup(name: name, emoji: _emoji);
+          .createGroup(name: name, emoji: _emoji, maxMembers: _maxMembers);
       navigator.pop();
       messenger
         ..hideCurrentSnackBar()
@@ -161,6 +163,20 @@ class _CreateGroupSheetState extends ConsumerState<_CreateGroupSheet> {
             decoration: const InputDecoration(hintText: '예) 우리 가족'),
             onSubmitted: (_) => _submit(),
           ),
+          const SizedBox(height: 16),
+          Text('최대 인원 (방장 포함)', style: theme.textTheme.bodySmall),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            children: <Widget>[
+              for (final int cap in Group.memberCapPresets)
+                ChoiceChip(
+                  label: Text('$cap명'),
+                  selected: _maxMembers == cap,
+                  onSelected: (_) => setState(() => _maxMembers = cap),
+                ),
+            ],
+          ),
           const SizedBox(height: 20),
           ElevatedButton(onPressed: _submit, child: const Text('만들기')),
         ],
@@ -208,7 +224,9 @@ class _JoinGroupSheetState extends ConsumerState<_JoinGroupSheet> {
     } on StateError {
       messenger
         ..hideCurrentSnackBar()
-        ..showSnackBar(const SnackBar(content: Text('지금은 참여할 수 없어요.')));
+        ..showSnackBar(const SnackBar(
+          content: Text('참여할 수 없어요. 코드가 틀렸거나 만료됐거나 정원이 찼을 수 있어요.'),
+        ));
     }
   }
 

@@ -135,6 +135,7 @@ class InMemoryShareRepository implements ShareRepository {
   Future<Group> createGroup({
     required String name,
     required String emoji,
+    int maxMembers = Group.defaultMaxMembers,
   }) async {
     final User me = _requireUser();
     final Group g = Group(
@@ -142,6 +143,7 @@ class InMemoryShareRepository implements ShareRepository {
       name: name,
       emoji: emoji,
       inviteCode: _randomCode(),
+      maxMembers: maxMembers,
       members: <GroupMember>[
         GroupMember(
           userId: me.id,
@@ -170,6 +172,9 @@ class InMemoryShareRepository implements ShareRepository {
       if (g.isMember(me.id)) return g; // 이미 멤버면 no-op.
       if (g.isInviteExpired(DateTime.now())) {
         throw StateError('Invite code expired: $inviteCode');
+      }
+      if (g.isFull) {
+        throw StateError('Group is full: ${g.id}');
       }
       final Group updated = g.copyWith(
         members: <GroupMember>[

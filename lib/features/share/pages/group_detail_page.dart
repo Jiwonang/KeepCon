@@ -109,7 +109,8 @@ class _GroupDetailBody extends ConsumerWidget {
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          '방장 ${group.owner.displayName} · 멤버 ${group.memberCount}명',
+                          '방장 ${group.owner.displayName} · 멤버 '
+                          '${group.memberCount}/${group.maxMembers}명',
                           style: theme.textTheme.bodySmall,
                         ),
                       ],
@@ -122,7 +123,11 @@ class _GroupDetailBody extends ConsumerWidget {
             const SizedBox(height: 24),
 
             // ── 멤버 목록 ──
-            Text('멤버 ${group.memberCount}명', style: context.sectionTitleStyle),
+            Text(
+              '멤버 ${group.memberCount}/${group.maxMembers}명'
+              '${group.isFull ? ' · 정원 마감' : ''}',
+              style: context.sectionTitleStyle,
+            ),
             const SizedBox(height: 12),
             _CardShell(
               padding: EdgeInsets.zero,

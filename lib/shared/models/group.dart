@@ -137,12 +137,20 @@ class Group {
     required this.inviteCode,
     this.inviteOwnerOnly = false,
     this.inviteExpiresAt,
+    this.maxMembers = defaultMaxMembers,
   })  : assert(members.isNotEmpty, 'Group must have at least one member'),
         assert(
           _ownerCount(members) == 1,
           'Group must have exactly one owner (single-owner policy)',
         ),
+        assert(maxMembers >= 1, 'maxMembers must be at least 1'),
         members = List<GroupMember>.unmodifiable(members);
+
+  /// 그룹 인원 상한 기본값. 생성 시 별도 지정이 없거나 레거시 문서에 값이 없을 때 쓴다.
+  static const int defaultMaxMembers = 10;
+
+  /// 그룹 생성 시 고를 수 있는 인원 상한 프리셋(오름차순). 기본값([defaultMaxMembers])을 포함한다.
+  static const List<int> memberCapPresets = <int>[4, 6, 10, 20];
 
   /// 그룹 식별자. **non-nullable.**
   final String id;
@@ -173,8 +181,23 @@ class Group {
   /// `ShareRepository.joinGroup`이 [StateError]로 참여를 거부한다([isInviteExpired] 참조).
   final DateTime? inviteExpiresAt;
 
+  /// 그룹 인원 상한(방장 포함). 기본 [defaultMaxMembers]. 생성 시 방장이 정한다.
+  ///
+  /// `joinGroup`은 [isFull]이면 참여를 거부한다([StateError]). 이 값보다 멤버가 많아지는
+  /// 전이는 만들어지지 않는다(참여 가드가 유일한 증가 경로).
+  final int maxMembers;
+
   /// 초대 URL(초대코드 기반 조립).
   String get inviteUrl => 'https://keepcon.app/invite/$inviteCode';
+
+  /// 정원이 찼는지(멤버 수 ≥ [maxMembers]). 참여 가능 여부 판정의 단일 진입점.
+  bool get isFull => memberCount >= maxMembers;
+
+  /// 남은 자리 수(0 이상). 표시용.
+  int get remainingSlots {
+    final int left = maxMembers - memberCount;
+    return left < 0 ? 0 : left;
+  }
 
   /// [now] 기준으로 초대코드가 만료되었는지.
   ///
@@ -229,6 +252,7 @@ class Group {
     String? inviteCode,
     bool? inviteOwnerOnly,
     Object? inviteExpiresAt = _unset,
+    int? maxMembers,
   }) {
     return Group(
       id: id ?? this.id,
@@ -240,6 +264,7 @@ class Group {
       inviteExpiresAt: identical(inviteExpiresAt, _unset)
           ? this.inviteExpiresAt
           : inviteExpiresAt as DateTime?,
+      maxMembers: maxMembers ?? this.maxMembers,
     );
   }
 
@@ -254,7 +279,8 @@ class Group {
           _memberListEquals(members, other.members) &&
           inviteCode == other.inviteCode &&
           inviteOwnerOnly == other.inviteOwnerOnly &&
-          inviteExpiresAt == other.inviteExpiresAt;
+          inviteExpiresAt == other.inviteExpiresAt &&
+          maxMembers == other.maxMembers;
 
   @override
   int get hashCode => Object.hash(
@@ -265,11 +291,13 @@ class Group {
         inviteCode,
         inviteOwnerOnly,
         inviteExpiresAt,
+        maxMembers,
       );
 
   @override
   String toString() => 'Group(id: $id, name: $name, memberCount: $memberCount, '
-      'inviteOwnerOnly: $inviteOwnerOnly, inviteExpiresAt: $inviteExpiresAt)';
+      'maxMembers: $maxMembers, inviteOwnerOnly: $inviteOwnerOnly, '
+      'inviteExpiresAt: $inviteExpiresAt)';
 }
 
 /// [Group.copyWith]가 "미지정"을 "명시적 null"과 구분하기 위한 센티널.
