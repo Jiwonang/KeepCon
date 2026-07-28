@@ -160,6 +160,34 @@ class InMemoryShareRepository implements ShareRepository {
   @override
   Future<Group> joinGroup(String inviteCode) async {
     final User me = _requireUser();
+
+    // 저장된 그룹을 초대코드로 먼저 조회한다(계약 준수 — Firebase 구현과 동일하게
+    // 만료·멤버십을 검증). 실제 그룹이 있으면 그 그룹에 합류한다.
+    final int existing =
+        _groups.indexWhere((Group g) => g.inviteCode == inviteCode);
+    if (existing >= 0) {
+      final Group g = _groups[existing];
+      if (g.isMember(me.id)) return g; // 이미 멤버면 no-op.
+      if (g.isInviteExpired(DateTime.now())) {
+        throw StateError('Invite code expired: $inviteCode');
+      }
+      final Group updated = g.copyWith(
+        members: <GroupMember>[
+          ...g.members,
+          GroupMember(
+            userId: me.id,
+            displayName: me.displayName,
+            avatarEmoji: _defaultAvatar,
+            role: MemberRole.member,
+          ),
+        ],
+      );
+      _groups[existing] = updated;
+      _emit();
+      return updated;
+    }
+
+    // 미발견 코드는 데모용으로 가짜 그룹을 만들어 합류를 시연한다(in-memory 한정 스텁).
     final Group g = Group(
       id: _nextId('g'),
       name: '초대받은 그룹',

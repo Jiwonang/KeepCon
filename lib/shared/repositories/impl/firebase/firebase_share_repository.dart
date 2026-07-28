@@ -676,7 +676,7 @@ class FirebaseShareRepository implements ShareRepository {
       emoji: data['emoji'] as String? ?? '🎁',
       inviteCode: data['inviteCode'] as String? ?? '',
       inviteOwnerOnly: data['inviteOwnerOnly'] as bool? ?? false,
-      inviteExpiresAt: _toDateOrNull(data['inviteExpiresAt']),
+      inviteExpiresAt: _inviteExpiresAtFrom(data['inviteExpiresAt']),
       members: members,
     );
   }
@@ -763,11 +763,16 @@ class FirebaseShareRepository implements ShareRepository {
     return DateTime.fromMillisecondsSinceEpoch(0);
   }
 
-  /// [_toDate]의 nullable 변형 — 값이 없거나 타입이 아니면 `null`(만료 없음).
-  DateTime? _toDateOrNull(Object? value) {
+  /// 초대코드 만료 시각을 문서 값에서 해석한다.
+  ///
+  /// **오직 `null`(미설정)만 "만료 없음"으로 허용**한다. 값이 있는데 [Timestamp]/[DateTime]이
+  /// 아닌 손상 문서는 만료 검사를 우회하지 않도록 **fail-closed** — 이미 만료된 것(epoch)으로
+  /// 취급해 참여를 거부한다.
+  DateTime? _inviteExpiresAtFrom(Object? value) {
+    if (value == null) return null;
     if (value is Timestamp) return value.toDate();
     if (value is DateTime) return value;
-    return null;
+    return DateTime.fromMillisecondsSinceEpoch(0);
   }
 
   MemberRole _roleFromName(String? name) =>

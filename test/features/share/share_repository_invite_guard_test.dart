@@ -196,4 +196,20 @@ void main() {
       );
     });
   });
+
+  group('joinGroup 코드 조회 (P1)', () {
+    test('저장된 그룹 코드로 참여 — 이미 멤버면 해당 그룹을 반환(가짜 그룹 생성 안 함)', () async {
+      // 시드 가족 그룹(코드 482913)에 나는 이미 방장. 코드 조회가 우선하므로 그 그룹을 그대로 반환.
+      final Group joined = await repo.joinGroup('482913');
+      expect(joined.id, 'g_family');
+      expect(joined.isMember(me), isTrue);
+    });
+
+    test('미발견 코드는 데모용 가짜 그룹으로 합류(in-memory 스텁)', () async {
+      final Group joined = await repo.joinGroup('999999');
+      expect(joined.id, isNot('g_family'));
+      expect(joined.inviteCode, '999999');
+      expect(joined.isMember(me), isTrue);
+    });
+  });
 }

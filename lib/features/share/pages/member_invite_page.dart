@@ -88,9 +88,19 @@ class _MemberInvitePageState extends ConsumerState<MemberInvitePage> {
               : '초대코드 만료를 ${expiry.label}(으)로 설정했어요.'),
         ));
     } on StateError {
+      // 설정이 실제로 바뀌지 않았으므로 하이라이트도 되돌린다.
+      if (mounted) setState(() => _pendingSelection = null);
       messenger
         ..hideCurrentSnackBar()
         ..showSnackBar(const SnackBar(content: Text('방장만 이 설정을 바꿀 수 있어요.')));
+    } catch (_) {
+      // 네트워크 등 기타 오류도 실패를 알리고 선택 상태를 복구한다.
+      if (mounted) setState(() => _pendingSelection = null);
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(content: Text('만료 설정을 변경하지 못했어요. 다시 시도해 주세요.')),
+        );
     } finally {
       if (mounted) setState(() => _applyingExpiry = false);
     }
