@@ -109,6 +109,7 @@ class FirebaseShareRepository implements ShareRepository {
   Future<Group> createGroup({
     required String name,
     required String emoji,
+    int maxMembers = Group.defaultMaxMembers,
   }) async {
     final User me = _requireUser();
     final DocumentReference<Map<String, dynamic>> ref = _groups.doc();
@@ -117,6 +118,7 @@ class FirebaseShareRepository implements ShareRepository {
       name: name,
       emoji: emoji,
       inviteCode: _randomCode(),
+      maxMembers: maxMembers,
       members: <GroupMember>[
         GroupMember(
           userId: me.id,
@@ -149,6 +151,10 @@ class FirebaseShareRepository implements ShareRepository {
       // 만료된 초대코드는 참여 거부(가드는 트랜잭션 안에서 최신 문서 기준으로 판정).
       if (g.isInviteExpired(DateTime.now())) {
         throw StateError('Invite code expired: $inviteCode');
+      }
+      // 정원 초과 참여 거부(트랜잭션 안에서 최신 멤버 수 기준으로 판정).
+      if (g.isFull) {
+        throw StateError('Group is full: ${ref.id}');
       }
       final List<GroupMember> next = <GroupMember>[
         ...g.members,
@@ -635,6 +641,7 @@ class FirebaseShareRepository implements ShareRepository {
         'inviteExpiresAt': g.inviteExpiresAt == null
             ? null
             : Timestamp.fromDate(g.inviteExpiresAt!),
+        'maxMembers': g.maxMembers,
         'members': g.members
             .map((GroupMember m) => <String, dynamic>{
                   'userId': m.userId,
@@ -670,6 +677,11 @@ class FirebaseShareRepository implements ShareRepository {
     final int owners =
         members.where((GroupMember m) => m.role == MemberRole.owner).length;
     if (members.isEmpty || owners != 1) return null;
+    // 레거시 문서엔 maxMembers가 없어 기본값을 쓰고, 손상 값(현재 멤버 수보다 작음)은
+    // 현재 멤버 수로 끌어올려 불변식(>=1, >=memberCount)을 지킨다.
+    final int rawMax =
+        (data['maxMembers'] as num?)?.toInt() ?? Group.defaultMaxMembers;
+    final int maxMembers = rawMax < members.length ? members.length : rawMax;
     return Group(
       id: doc.id,
       name: data['name'] as String? ?? '',
@@ -677,6 +689,7 @@ class FirebaseShareRepository implements ShareRepository {
       inviteCode: data['inviteCode'] as String? ?? '',
       inviteOwnerOnly: data['inviteOwnerOnly'] as bool? ?? false,
       inviteExpiresAt: _inviteExpiresAtFrom(data['inviteExpiresAt']),
+      maxMembers: maxMembers,
       members: members,
     );
   }
