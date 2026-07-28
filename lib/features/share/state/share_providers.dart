@@ -20,11 +20,20 @@ import '../../../shared/models/group.dart';
 import '../../../shared/models/share.dart';
 import '../../../shared/models/user.dart';
 import '../../../shared/providers/repositories.dart';
+import '../../../shared/util/invite_link.dart';
 
 /// 현재 로그인 사용자(행위자). SSOT [authRepositoryProvider]를 구독한다.
 final shareCurrentUserProvider = StreamProvider<User?>((ref) {
   return ref.watch(authRepositoryProvider).watchCurrentUser();
 });
+
+/// 딥링크로 진입한 대기 중 초대코드(1회성).
+///
+/// 앱 시작 시 진입 URL([Uri.base])에서 시드된다([pendingInviteCodeFromPlatform]).
+/// 셸이 로그인 후 이 코드를 소비해 참여 시트를 열고 `null`로 비운다(재진입 시 재실행 방지).
+/// 테스트/조립부에서 override로 주입할 수 있다.
+final pendingInviteCodeProvider =
+    StateProvider<String?>((ref) => pendingInviteCodeFromPlatform());
 
 /// 특정 사용자의 그룹 스트림(내부용 — 확정된 userId로만 구독).
 final _groupsByUserProvider =
