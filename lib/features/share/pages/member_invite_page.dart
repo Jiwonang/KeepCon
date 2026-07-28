@@ -15,6 +15,7 @@ import '../../../shared/models/group.dart';
 import '../../../shared/providers/repositories.dart';
 import '../../../shared/util/korean_particle.dart';
 import '../state/share_providers.dart';
+import '../widgets/share_format.dart';
 
 /// 멤버 초대 화면. 그룹 상세에서 push 한다.
 class MemberInvitePage extends ConsumerStatefulWidget {
@@ -28,7 +29,22 @@ class MemberInvitePage extends ConsumerStatefulWidget {
 }
 
 class _MemberInvitePageState extends ConsumerState<MemberInvitePage> {
-  InviteExpiry _expiry = InviteExpiry.oneDay;
+  /// 만료 설정 요청 진행 중 여부(중복 탭 방지).
+  bool _applyingExpiry = false;
+
+  /// 마지막으로 탭한 만료 선택지(버튼 하이라이트용 로컬 상태).
+  ///
+  /// 계약의 [Group.inviteExpiresAt]는 절대 시각이라 유한 만료를 특정 버킷으로 되돌릴 수
+  /// 없으므로, 방금 적용한 선택지를 즉시 강조하기 위한 표시 전용 값이다(진실은 "현재:" 텍스트).
+  InviteExpiry? _pendingSelection;
+
+  /// 버튼 하이라이트 대상. 방금 탭한 값이 있으면 그것을, 없고 만료가 없으면(무제한)
+  /// [InviteExpiry.never]를, 유한 만료면 `null`(강조 없음)을 반환한다.
+  InviteExpiry? _selectedExpiryFor(Group g) {
+    if (_pendingSelection != null) return _pendingSelection;
+    if (g.inviteExpiresAt == null) return InviteExpiry.never;
+    return null;
+  }
 
   void _copy(String value, String label) {
     Clipboard.setData(ClipboardData(text: value));
@@ -48,6 +64,35 @@ class _MemberInvitePageState extends ConsumerState<MemberInvitePage> {
       messenger
         ..hideCurrentSnackBar()
         ..showSnackBar(const SnackBar(content: Text('방장만 이 설정을 바꿀 수 있어요.')));
+    }
+  }
+
+  /// 초대코드 만료 기간을 계약에 반영한다(방장 전용). 성공/거부를 스낵바로 알린다.
+  Future<void> _setExpiry(String groupId, InviteExpiry expiry) async {
+    if (_applyingExpiry) return;
+    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
+    setState(() {
+      _applyingExpiry = true;
+      _pendingSelection = expiry; // 즉시 하이라이트.
+    });
+    try {
+      await ref.read(shareRepositoryProvider).setInviteExpiry(
+            groupId: groupId,
+            expiry: expiry,
+          );
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(
+          content: Text(expiry == InviteExpiry.never
+              ? '초대코드 만료를 해제했어요.'
+              : '초대코드 만료를 ${expiry.label}(으)로 설정했어요.'),
+        ));
+    } on StateError {
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(const SnackBar(content: Text('방장만 이 설정을 바꿀 수 있어요.')));
+    } finally {
+      if (mounted) setState(() => _applyingExpiry = false);
     }
   }
 
@@ -117,9 +162,24 @@ class _MemberInvitePageState extends ConsumerState<MemberInvitePage> {
             const SizedBox(height: 32),
 
             // 초대코드 만료.
+            Row(
+              children: <Widget>[
+                Text('초대코드 만료', style: context.itemTitleStyle),
+                const Spacer(),
+                Text(
+                  g.inviteExpiresAt == null
+                      ? '현재: 무제한'
+                      : '현재: ${formatInviteExpiry(g.inviteExpiresAt!)}',
+                  style: theme.textTheme.bodySmall,
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
             Text(
-              '초대코드 만료',
-              style: context.itemTitleStyle,
+              iAmOwner
+                  ? '선택한 기간이 지나면 이 코드로 참여할 수 없어요.'
+                  : '방장만 만료 기간을 바꿀 수 있어요.',
+              style: theme.textTheme.bodySmall,
             ),
             const SizedBox(height: 14),
             Row(
@@ -131,9 +191,11 @@ class _MemberInvitePageState extends ConsumerState<MemberInvitePage> {
                   Expanded(
                     child: _ExpiryButton(
                       label: InviteExpiry.values[i].label,
-                      selected: _expiry == InviteExpiry.values[i],
-                      onTap: () =>
-                          setState(() => _expiry = InviteExpiry.values[i]),
+                      selected: _selectedExpiryFor(g) == InviteExpiry.values[i],
+                      // 방장만 변경 가능. 적용 중엔 중복 탭 방지로 비활성.
+                      onTap: (iAmOwner && !_applyingExpiry)
+                          ? () => _setExpiry(g.id, InviteExpiry.values[i])
+                          : null,
                     ),
                   ),
                 ],
@@ -274,6 +336,8 @@ class _CopyField extends StatelessWidget {
 }
 
 /// 만료 선택 버튼 한 칸 — 선택 시 brand 채움+체크, 아니면 서피스.
+///
+/// [onTap]이 `null`이면 비활성(방장 아님/적용 중) — 흐리게 표시하고 탭을 막는다.
 class _ExpiryButton extends StatelessWidget {
   const _ExpiryButton({
     required this.label,
@@ -283,42 +347,46 @@ class _ExpiryButton extends StatelessWidget {
 
   final String label;
   final bool selected;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
     final ColorScheme scheme = Theme.of(context).colorScheme;
+    final bool enabled = onTap != null;
     final Color bg = selected ? scheme.primary : scheme.surfaceContainerHighest;
     final Color fg = selected ? scheme.onPrimary : scheme.onSurfaceVariant;
 
-    return Material(
-      color: bg,
-      borderRadius: BorderRadius.circular(AppRadii.action),
-      child: InkWell(
-        onTap: onTap,
+    return Opacity(
+      opacity: enabled || selected ? 1 : 0.5,
+      child: Material(
+        color: bg,
         borderRadius: BorderRadius.circular(AppRadii.action),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 14),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: <Widget>[
-              if (selected) ...<Widget>[
-                Icon(Icons.check, size: 15, color: fg),
-                const SizedBox(width: 4),
-              ],
-              Flexible(
-                child: Text(
-                  label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: fg,
-                    fontSize: 15,
-                    fontWeight: FontWeight.w700,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(AppRadii.action),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 14),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: <Widget>[
+                if (selected) ...<Widget>[
+                  Icon(Icons.check, size: 15, color: fg),
+                  const SizedBox(width: 4),
+                ],
+                Flexible(
+                  child: Text(
+                    label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: fg,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),

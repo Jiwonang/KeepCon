@@ -262,6 +262,26 @@ class InMemoryShareRepository implements ShareRepository {
     return updated;
   }
 
+  @override
+  Future<Group> setInviteExpiry({
+    required String groupId,
+    required InviteExpiry expiry,
+  }) async {
+    final User me = _requireUser();
+    final Group g = _requireGroup(groupId);
+    if (!g.isOwnedBy(me.id)) {
+      throw StateError('Only the owner can change invite expiry: $groupId');
+    }
+    // 만료 시각은 설정 시점 기준으로 계산한다(never면 만료 없음 = null).
+    final Duration? d = expiry.duration;
+    final Group updated = g.copyWith(
+      inviteExpiresAt: d == null ? null : DateTime.now().add(d),
+    );
+    _groups[_groupIndex(groupId)] = updated;
+    _emit();
+    return updated;
+  }
+
   void _removeGroup(String groupId) {
     _groups.removeWhere((Group g) => g.id == groupId);
     _sharedByGroup.remove(groupId);

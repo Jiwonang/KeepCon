@@ -11,6 +11,12 @@ String _two(int v) => v.toString().padLeft(2, '0');
 String formatExpiryLabel(DateTime d) =>
     '~${d.year}.${_two(d.month)}.${_two(d.day)}';
 
+/// 초대코드 만료 시각을 "YYYY.MM.DD HH:mm"로. 예: "2026.07.29 15:30".
+/// 초대 만료는 시(hour) 단위 옵션(1시간)이 있어 날짜만으로는 부족하므로 시각까지 표시한다.
+String formatInviteExpiry(DateTime d) =>
+    '${d.year}.${_two(d.month)}.${_two(d.day)} '
+    '${_two(d.hour)}:${_two(d.minute)}';
+
 /// [when]을 기준 시각([now], 기본 현재)에 대한 상대 라벨로. 예: "방금", "3일 전".
 String formatRelativeKo(DateTime when, {DateTime? now}) {
   final DateTime base = now ?? DateTime.now();
