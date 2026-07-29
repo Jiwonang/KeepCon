@@ -33,6 +33,7 @@
 /// - id/registeredAt은 Repository 발급에 위임(빈 id/생성시각 채워 전달)한다.
 library;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../shared/models/gifticon.dart';
@@ -97,8 +98,7 @@ class ScanSubmitIdle extends ScanSubmitState {
 ///
 /// UI에서는 이 상태일 때 저장 버튼을 비활성화하거나
 /// 로딩 인디케이터를 표시할 수 있다.
-class ScanSubmitInProgress
-    extends ScanSubmitState {
+class ScanSubmitInProgress extends ScanSubmitState {
   const ScanSubmitInProgress();
 }
 
@@ -109,8 +109,7 @@ class ScanSubmitInProgress
 ///
 /// Repository가 id/registeredAt 등을 발급한다면
 /// 그 결과가 [saved]에 들어온다.
-class ScanSubmitSuccess
-    extends ScanSubmitState {
+class ScanSubmitSuccess extends ScanSubmitState {
   const ScanSubmitSuccess(this.saved);
 
   final Gifticon saved;
@@ -121,8 +120,7 @@ class ScanSubmitSuccess
 /// 검증 실패 또는 Repository 저장 중 오류가 발생한 경우 사용한다.
 ///
 /// [message]는 사용자에게 표시할 오류 메시지다.
-class ScanSubmitFailure
-    extends ScanSubmitState {
+class ScanSubmitFailure extends ScanSubmitState {
   const ScanSubmitFailure(this.message);
 
   final String message;
@@ -223,15 +221,12 @@ class GifticonFormState {
     return GifticonFormState(
       source: source ?? this.source,
       brand: brand ?? this.brand,
-      productName:
-          productName ?? this.productName,
+      productName: productName ?? this.productName,
       price: price ?? this.price,
       barcode: barcode ?? this.barcode,
       category: category ?? this.category,
-      expiryDate:
-          expiryDate ?? this.expiryDate,
-      imagePath:
-          imagePath ?? this.imagePath,
+      expiryDate: expiryDate ?? this.expiryDate,
+      imagePath: imagePath ?? this.imagePath,
       submit: submit ?? this.submit,
     );
   }
@@ -251,8 +246,7 @@ class GifticonFormState {
   /// 0은 정상적인 값으로 취급한다.
   int? get parsedPrice {
     // 사용자가 입력한 콤마와 앞뒤 공백을 제거한다.
-    final String digits =
-        price.replaceAll(',', '').trim();
+    final String digits = price.replaceAll(',', '').trim();
 
     // 빈 문자열이면 숫자로 변환할 수 없으므로 null.
     if (digits.isEmpty) {
@@ -330,12 +324,24 @@ class GifticonFormState {
 ///
 /// 실제 저장 책임은 Repository에 있고,
 /// 이 컨트롤러는 "폼 데이터 → Gifticon 변환"을 담당한다.
-class GifticonFormController
-    extends StateNotifier<GifticonFormState> {
-  GifticonFormController(this._ref)
-      : super(const GifticonFormState());
+class GifticonFormController extends StateNotifier<GifticonFormState> {
+  GifticonFormController(this._ref) : super(const GifticonFormState());
 
   final Ref _ref;
+
+  /// 폼 세션 번호.
+  ///
+  /// [startWith]/[reset]이 호출될 때마다 증가한다.
+  ///
+  /// 컨트롤러가 앱 수명 동안 살아 있기 때문에,
+  /// 비동기 작업([submit] 등)이 끝났을 때
+  /// "그 사이 폼이 다른 세션으로 바뀌지 않았는지"를
+  /// 이 번호로 확인한다.
+  ///
+  /// 예: 저장이 느린 상태에서 사용자가 폼을 떠나
+  /// 새 폼을 시작하면, 뒤늦게 완료된 이전 저장 결과가
+  /// 새 폼 상태를 덮어쓰지 못하게 막는다.
+  int _session = 0;
 
   /// 입력 경로를 지정하고 폼을 초기화한다.
   ///
@@ -353,9 +359,29 @@ class GifticonFormController
   /// 현재 카메라는 플러그인 미연동 상태이므로
   /// 이후 직접 입력으로 폴백할 수 있다.
   void startWith(ScanSource source) {
+    // 새 폼 세션 시작 — 진행 중이던 이전 세션의
+    // 비동기 결과(submit 등)는 무효화된다.
+    _session++;
+
     state = GifticonFormState(
       source: source,
     );
+  }
+
+  /// 폼 상태를 초기 상태로 비운다.
+  ///
+  /// 추가 흐름이 끝났을 때(폼 화면이 닫혔을 때) 호출한다.
+  ///
+  /// provider가 autoDispose가 아니므로,
+  /// 여기서 비워 주어야 바코드/이미지 경로 등 민감한 값이
+  /// 앱 수명 동안 전역 상태에 잔존하지 않는다.
+  ///
+  /// 세션 번호도 증가하므로, 아직 완료되지 않은 이전
+  /// [submit]의 결과가 새 폼 상태를 덮어쓰지 못한다.
+  void reset() {
+    _session++;
+
+    state = const GifticonFormState();
   }
 
   /// 인식(OCR/바코드) 결과로 폼을 프리필한다.
@@ -398,6 +424,29 @@ class GifticonFormController
       expiryDate: expiryDate,
       imagePath: imagePath,
     );
+
+    // ─────────────────────────────────────────
+    // 디버깅용: 프리필 직후의 폼 상태 확인
+    // ─────────────────────────────────────────
+    //
+    // 인식 결과가 Riverpod 상태에 실제로 반영되었는지
+    // 로그로 확인할 수 있다.
+    //
+    // 주의: debugPrint는 release 빌드에서도 실행되므로
+    // (컴파일 아웃되지 않음) 바코드처럼 민감한 값이
+    // 프로덕션 기기 로그에 남지 않도록 반드시
+    // kDebugMode로 가드한다.
+    if (kDebugMode) {
+      debugPrint('===== GifticonForm 상태 변경 =====');
+      debugPrint('source = ${state.source}');
+      debugPrint('brand = ${state.brand}');
+      debugPrint('productName = ${state.productName}');
+      debugPrint('price = ${state.price}');
+      debugPrint('barcode = ${state.barcode}');
+      debugPrint('category = ${state.category}');
+      debugPrint('expiryDate = ${state.expiryDate}');
+      debugPrint('imagePath = ${state.imagePath}');
+    }
   }
 
   // ─────────────────────────────────────────
@@ -497,8 +546,7 @@ class GifticonFormController
     // ─────────────────────────────────────────
     //
     // Gifticon.ownerId에 현재 로그인한 사용자 id가 필요하다.
-    final currentUser =
-        _ref.read(authRepositoryProvider).currentUser;
+    final currentUser = _ref.read(authRepositoryProvider).currentUser;
 
     if (currentUser == null) {
       state = state.copyWith(
@@ -520,24 +568,28 @@ class GifticonFormController
       submit: const ScanSubmitInProgress(),
     );
 
+    // 이 제출이 속한 폼 세션을 기억해 둔다.
+    //
+    // 아래 addGifticon await 중에 사용자가 폼을 떠나
+    // 새 흐름을 시작하면(startWith/reset으로 세션이 바뀌면),
+    // 이 제출의 결과는 새 폼 상태에 반영하지 않고 버린다.
+    final int session = _session;
+
     // ─────────────────────────────────────────
     // 4단계: 폼 원시 입력 → 계약 Gifticon 변환
     // ─────────────────────────────────────────
 
     // category가 비어 있으면 계약 기본값 "기타"를 사용한다.
-    final String category =
-        state.category.trim().isEmpty
-            ? kDefaultCategory
-            : state.category.trim();
+    final String category = state.category.trim().isEmpty
+        ? kDefaultCategory
+        : state.category.trim();
 
     // barcode는 nullable 필드다.
     //
     // 사용자가 입력하지 않은 경우
     // 빈 문자열 대신 null로 저장한다.
     final String? barcode =
-        state.barcode.trim().isEmpty
-            ? null
-            : state.barcode.trim();
+        state.barcode.trim().isEmpty ? null : state.barcode.trim();
 
     final Gifticon draft = Gifticon(
       // Repository가 id를 발급하는 구조이므로
@@ -551,8 +603,7 @@ class GifticonFormController
       brand: state.brand.trim(),
 
       // 사용자가 입력한 상품명.
-      productName:
-          state.productName.trim(),
+      productName: state.productName.trim(),
 
       // validate()에서 non-null 및 >= 0을 보장했기 때문에
       // 여기서는 !를 사용할 수 있다.
@@ -589,9 +640,16 @@ class GifticonFormController
       // Repository에 Gifticon을 전달하고
       // 실제 저장은 Repository가 담당한다.
       final Gifticon saved =
-          await _ref
-              .read(gifticonRepositoryProvider)
-              .addGifticon(draft);
+          await _ref.read(gifticonRepositoryProvider).addGifticon(draft);
+
+      // 저장 중에 폼 세션이 바뀌었으면(사용자가 폼을 떠나
+      // 새 흐름을 시작했으면) 결과를 상태에 반영하지 않는다.
+      //
+      // 반영하면 사용자가 제출한 적 없는 새 폼에
+      // 이전 제출의 성공/실패가 표시된다.
+      if (!mounted || session != _session) {
+        return saved;
+      }
 
       // ─────────────────────────────────────────
       // 6단계: 저장 성공
@@ -604,6 +662,12 @@ class GifticonFormController
 
       return saved;
     } catch (e) {
+      // 성공 경로와 마찬가지로, 세션이 바뀐 뒤 도착한
+      // 실패 결과는 새 폼 상태에 반영하지 않는다.
+      if (!mounted || session != _session) {
+        return null;
+      }
+
       // ─────────────────────────────────────────
       // 7단계: 저장 실패
       // ─────────────────────────────────────────
@@ -623,15 +687,32 @@ class GifticonFormController
 
 /// 폼 컨트롤러 provider.
 ///
-/// autoDispose를 사용하기 때문에
-/// 폼 화면이 완전히 종료되고 더 이상 참조되지 않으면
-/// 컨트롤러와 폼 상태가 정리된다.
+/// 주의: autoDispose를 사용하지 않는다.
 ///
-/// 따라서 새로운 기프티콘 추가 화면에 다시 진입하면
-/// 이전 입력값이 남지 않고 새로운 폼으로 시작한다.
+/// ScanPage의 인식 흐름은
+///
+/// startWith()
+/// → (await 이미지 선택/OCR — 이 동안 listener가 없음)
+/// → prefillFromRecognition()
+/// → Navigator.push(폼 화면)
+///
+/// 처럼 "폼 화면이 열리기 전에" 상태를 채운다.
+///
+/// autoDispose였을 때는 listener가 아직 없는 이 구간에서
+/// provider가 자동 폐기되어, 프리필한 인식 결과가
+/// 폼 화면이 열리기 전에 사라지는 버그가 있었다.
+/// (폼 화면의 첫 build보다 dispose가 먼저 실행됨)
+///
+/// 새 폼의 초기화는 autoDispose 대신 두 가지 장치가 보장한다.
+///
+/// 1. 모든 진입 경로가 반드시 [GifticonFormController.startWith]를
+///    먼저 호출한다(흐름 시작 시 초기화).
+/// 2. ScanPage가 흐름 종료 시(폼이 닫히면)
+///    [GifticonFormController.reset]을 호출해 상태를 비운다
+///    (바코드 등 민감한 값이 앱 수명 동안 잔존하지 않도록).
+///
+/// 따라서 재진입 시에도 이전 입력값이 남지 않는다.
 final gifticonFormControllerProvider =
-    StateNotifierProvider.autoDispose<
-        GifticonFormController,
-        GifticonFormState>(
+    StateNotifierProvider<GifticonFormController, GifticonFormState>(
   (ref) => GifticonFormController(ref),
 );

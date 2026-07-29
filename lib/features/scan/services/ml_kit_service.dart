@@ -5,8 +5,13 @@ import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart
 /// OCR 텍스트와 바코드 정보를 추출하는 서비스.
 class MlKitService {
   MlKitService()
+      // 기프티콘 텍스트는 대부분 한국어이므로 korean 스크립트를 사용한다.
+      //
+      // latin 스크립트는 "스타벅스", "유효기간" 같은 한글을 인식하지 못해
+      // OCR 결과가 비어 나오는 원인이 된다.
+      // (korean 인식기는 한글과 라틴 문자를 모두 인식한다)
       : _textRecognizer = TextRecognizer(
-          script: TextRecognitionScript.latin,
+          script: TextRecognitionScript.korean,
         ),
         _barcodeScanner = BarcodeScanner();
 

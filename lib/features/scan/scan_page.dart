@@ -26,6 +26,7 @@ library;
 
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_mlkit_barcode_scanning/google_mlkit_barcode_scanning.dart';
@@ -51,7 +52,7 @@ import 'widgets/scan_tokens.dart';
 /// 사용자가 최종적으로 확인/수정한 뒤 저장한다.
 ///
 /// 직접 입력은 빈 폼으로 바로 [GifticonForm]을 연다.
-class ScanPage extends ConsumerWidget {
+class ScanPage extends ConsumerStatefulWidget {
   const ScanPage({super.key});
 
   /// route 등록용 상수.
@@ -61,7 +62,27 @@ class ScanPage extends ConsumerWidget {
   static const String routeName = AppRoutes.scan;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<ScanPage> createState() => _ScanPageState();
+}
+
+/// [ScanPage]의 State.
+///
+/// 추가 흐름 진행 여부([_busy])를 보관하기 위해
+/// ConsumerStatefulWidget을 사용한다.
+class _ScanPageState extends ConsumerState<ScanPage> {
+  /// 현재 추가 흐름(이미지 선택/인식/폼)이 진행 중인지 여부.
+  ///
+  /// 다음 문제를 막는다.
+  ///
+  /// - 카드 연타 → pickImage 중복 호출
+  ///   (image_picker의 PlatformException: already_active)
+  /// - 카드 연타 → 폼 화면 중복 push
+  /// - 인식 진행 중 다른 입력 경로 시작
+  ///   → 늦게 도착한 인식 결과가 엉뚱한 폼에 주입되는 문제
+  bool _busy = false;
+
+  @override
+  Widget build(BuildContext context) {
     return Scaffold(
       // 큰 제목은 본문 헤더에서 직접 보여준다.
       // AppBar는 화면 상단의 뒤로가기 역할만 담당한다.
@@ -97,11 +118,7 @@ class ScanPage extends ConsumerWidget {
                 accent: Theme.of(context).colorScheme.primary,
                 title: '카메라로 스캔',
                 subtitle: '바코드 또는 QR 코드를 스캔해요',
-                onTap: () => _openForm(
-                  context,
-                  ref,
-                  ScanSource.camera,
-                ),
+                onTap: () => _openForm(ScanSource.camera),
               ),
 
               const SizedBox(height: 16),
@@ -122,11 +139,7 @@ class ScanPage extends ConsumerWidget {
                 accent: ScanAccents.gallery,
                 title: '갤러리에서 불러오기',
                 subtitle: '저장된 이미지에서 불러와요',
-                onTap: () => _openForm(
-                  context,
-                  ref,
-                  ScanSource.gallery,
-                ),
+                onTap: () => _openForm(ScanSource.gallery),
               ),
 
               const SizedBox(height: 16),
@@ -142,11 +155,7 @@ class ScanPage extends ConsumerWidget {
                 accent: ScanAccents.manual,
                 title: '직접 입력',
                 subtitle: '코드 번호를 직접 입력해요',
-                onTap: () => _openForm(
-                  context,
-                  ref,
-                  ScanSource.manual,
-                ),
+                onTap: () => _openForm(ScanSource.manual),
               ),
 
               const SizedBox(height: 16),
@@ -179,225 +188,14 @@ class ScanPage extends ConsumerWidget {
   /// - manual → 바로 빈 폼 화면으로 이동
   /// - gallery → 이미지 선택 → OCR/바코드 인식 → 폼 프리필
   /// - camera → 현재는 준비 중 안내
-  Future<void> _openForm(
-    BuildContext context,
-    WidgetRef ref,
-    ScanSource source,
-  ) async {
-    // 사용자가 선택한 입력 경로를 폼 상태에 기록하고
-    // 이전에 입력되어 있던 폼 상태를 초기화한다.
-    //
-    // 예:
-    // ScanSource.gallery를 선택하면
-    // 이후 폼 상태의 source도 gallery가 된다.
-    ref
-        .read(gifticonFormControllerProvider.notifier)
-        .startWith(source);
-
-    // ─────────────────────────────────────────
-    // 직접 입력
-    // ─────────────────────────────────────────
-    //
-    // 직접 입력은 인식할 데이터가 없기 때문에
-    // 초기화된 폼을 바로 열면 된다.
-    if (source == ScanSource.manual) {
-      if (!context.mounted) return;
-
-      await Navigator.of(context).push(
-        MaterialPageRoute<void>(
-          builder: (_) => const _GifticonFormScreen(),
-        ),
-      );
-
-      return;
-    }
-
-    // ─────────────────────────────────────────
-    // 갤러리 이미지 선택
-    // ─────────────────────────────────────────
-    //
-    // 현재 세 경로 중 실제 인식 기능이 연결된 경로다.
-    if (source == ScanSource.gallery) {
-      final ImagePicker picker = ImagePicker();
-
-      // 시스템 갤러리를 열어 이미지를 선택한다.
-      final XFile? pickedFile = await picker.pickImage(
-        source: ImageSource.gallery,
-      );
-
-      // 사용자가 갤러리에서 선택을 취소하면
-      // 아무 작업도 하지 않고 현재 화면에 그대로 머문다.
-      if (pickedFile == null) {
-        return;
-      }
-
-      if (!context.mounted) return;
-
-      try {
-        // ─────────────────────────────────────────
-        // 1단계: XFile → File
-        // ─────────────────────────────────────────
-        //
-        // image_picker가 반환하는 XFile을
-        // Dart의 File 객체로 변환한다.
-        final File imageFile = File(pickedFile.path);
-
-        // ─────────────────────────────────────────
-        // 2단계: File → ML Kit InputImage
-        // ─────────────────────────────────────────
-        //
-        // Google ML Kit이 이미지를 분석할 수 있도록
-        // InputImage 형태로 변환한다.
-        final InputImage inputImage = InputImage.fromFile(
-          imageFile,
-        );
-
-        // ─────────────────────────────────────────
-        // 3단계: ML Kit 서비스 생성
-        // ─────────────────────────────────────────
-        //
-        // OCR과 바코드 인식을 담당하는 서비스다.
-        final MlKitService mlKitService = MlKitService();
-
-        try {
-          // ─────────────────────────────────────────
-          // 4단계: OCR + 바코드 인식
-          // ─────────────────────────────────────────
-          //
-          // 하나의 이미지에서
-          //
-          // - OCR 텍스트
-          // - 바코드 값
-          //
-          // 을 동시에 추출한다.
-          final MlKitScanResult result =
-              await mlKitService.scan(inputImage);
-
-          // ─────────────────────────────────────────
-          // 5단계: OCR 텍스트 → 기프티콘 데이터 변환
-          // ─────────────────────────────────────────
-          //
-          // ML Kit이 반환하는 OCR 결과는 단순 문자열이다.
-          //
-          // 예:
-          // "스타벅스
-          // 아이스 카페 아메리카노 T
-          // 4,500원
-          // 2026.12.31"
-          //
-          // GifticonOcrParser는 이 텍스트를 분석해
-          // 브랜드 / 상품명 / 금액 / 유효기간 등의 데이터로 분리한다.
-          const GifticonOcrParser parser = GifticonOcrParser();
-
-          final GifticonOcrResult ocrResult =
-              parser.parse(result.text);
-
-          // ─────────────────────────────────────────
-          // OCR Parser 결과 확인
-          // ─────────────────────────────────────────
-          //
-          // 개발 중 인식 결과를 확인하기 위한 로그다.
-          debugPrint('===== OCR Parser 결과 확인 =====');
-          debugPrint('brand = ${ocrResult.brand}');
-          debugPrint('productName = ${ocrResult.productName}');
-          debugPrint('price = ${ocrResult.price}');
-          debugPrint('expiryDate = ${ocrResult.expiryDate}');
-          debugPrint('barcode = ${result.firstBarcodeValue}');
-          debugPrint('imagePath = ${pickedFile.path}');
-
-          // ─────────────────────────────────────────
-          // 6단계: 인식 결과를 폼 상태에 저장
-          // ─────────────────────────────────────────
-          //
-          // 여기서 중요한 점은
-          //
-          // OCR 결과를 Gifticon으로 바로 저장하지 않는다는 것이다.
-          //
-          // 먼저 GifticonFormController의 상태에 넣고,
-          // 사용자가 폼 화면에서 결과를 확인/수정할 수 있도록 한다.
-          //
-          // 따라서 인식이 일부 실패해도
-          // 사용자가 직접 수정하여 저장할 수 있다.
-          ref
-              .read(
-                gifticonFormControllerProvider.notifier,
-              )
-              .prefillFromRecognition(
-                brand: ocrResult.brand,
-                productName: ocrResult.productName,
-                price: ocrResult.price,
-                barcode: result.firstBarcodeValue,
-                expiryDate: ocrResult.expiryDate,
-                imagePath: pickedFile.path,
-              );
-
-          // ─────────────────────────────────────────
-          // 디버깅용: ML Kit OCR 원본
-          // ─────────────────────────────────────────
-          //
-          // Parser에 전달되기 전 원본 OCR 문자열을 확인한다.
-          debugPrint('===== ML Kit OCR 원본 =====');
-          debugPrint(result.text);
-
-          // ─────────────────────────────────────────
-          // 디버깅용: OCR 파싱 결과
-          // ─────────────────────────────────────────
-          debugPrint('===== OCR 파싱 결과 =====');
-          debugPrint('브랜드명: ${ocrResult.brand}');
-          debugPrint('상품명: ${ocrResult.productName}');
-          debugPrint('금액: ${ocrResult.price}');
-          debugPrint('유효기간: ${ocrResult.expiryDate}');
-
-          // ─────────────────────────────────────────
-          // 디버깅용: 바코드 결과
-          // ─────────────────────────────────────────
-          debugPrint('===== ML Kit 바코드 =====');
-          debugPrint(
-            result.firstBarcodeValue ?? '바코드 없음',
-          );
-
-          // 화면이 아직 살아있는지 확인한다.
-          //
-          // 비동기 OCR 작업 중 사용자가 화면을 떠났을 경우
-          // context를 사용하면 문제가 발생할 수 있으므로 확인한다.
-          if (!context.mounted) return;
-
-          // ─────────────────────────────────────────
-          // 7단계: 인식 결과 확인 폼으로 이동
-          // ─────────────────────────────────────────
-          //
-          // 앞에서 prefillFromRecognition()으로 상태를 채웠기 때문에
-          // GifticonForm 화면이 열리면 입력창에 OCR 결과가 표시된다.
-          await Navigator.of(context).push(
-            MaterialPageRoute<void>(
-              builder: (_) => const _GifticonFormScreen(),
-            ),
-          );
-        } finally {
-          // ML Kit이 사용하는 리소스를 반드시 정리한다.
-          //
-          // 성공/실패 여부와 관계없이 한 번만 dispose한다.
-          //
-          // 따라서 scan() 내부나 catch 블록에서 dispose()를
-          // 다시 호출하지 않는다.
-          await mlKitService.dispose();
-        }
-      } catch (e) {
-        // 이미지 선택 이후 OCR/바코드 인식 과정에서
-        // 예외가 발생한 경우 사용자에게 알려준다.
-        if (!context.mounted) return;
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              '이미지 인식 중 오류가 발생했습니다: $e',
-            ),
-          ),
-        );
-      }
-
-      return;
-    }
+  ///
+  /// 흐름이 끝나면(폼이 닫히거나 취소/오류가 나면)
+  /// [GifticonFormController.reset]으로 전역 폼 상태를 비워
+  /// 다음 진입에 잔존값이 남지 않게 한다.
+  Future<void> _openForm(ScanSource source) async {
+    // 이미 다른 추가 흐름이 진행 중이면 무시한다.
+    // (연타/중복 진입 방지 — [_busy] 문서 참조)
+    if (_busy) return;
 
     // ─────────────────────────────────────────
     // 카메라
@@ -413,24 +211,234 @@ class ScanPage extends ConsumerWidget {
     // → 필요하면 OCR 처리
     // → prefillFromRecognition()
     // → GifticonForm 이동
-    _showPlaceholderNotice(
-      context,
-      source,
-    );
+    //
+    // 아직 폼을 열지 않으므로 폼 상태도 건드리지 않는다.
+    // (여기서 startWith를 먼저 호출하면 폼을 열지 않은 채
+    //  source=camera 상태가 전역 상태에 남는다)
+    if (source == ScanSource.camera) {
+      _showPlaceholderNotice(source);
+      return;
+    }
+
+    _busy = true;
+
+    final GifticonFormController controller =
+        ref.read(gifticonFormControllerProvider.notifier);
+
+    try {
+      // 사용자가 선택한 입력 경로를 폼 상태에 기록하고
+      // 이전에 입력되어 있던 폼 상태를 초기화한다.
+      //
+      // 예:
+      // ScanSource.gallery를 선택하면
+      // 이후 폼 상태의 source도 gallery가 된다.
+      controller.startWith(source);
+
+      // ─────────────────────────────────────────
+      // 직접 입력
+      // ─────────────────────────────────────────
+      //
+      // 직접 입력은 인식할 데이터가 없기 때문에
+      // 초기화된 폼을 바로 열면 된다.
+      if (source == ScanSource.manual) {
+        if (!mounted) return;
+
+        await Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) => const _GifticonFormScreen(),
+          ),
+        );
+
+        return;
+      }
+
+      // ─────────────────────────────────────────
+      // 갤러리 이미지 선택
+      // ─────────────────────────────────────────
+      //
+      // 현재 세 경로 중 실제 인식 기능이 연결된 경로다.
+      //
+      // pickImage부터 try 안에 두어, 갤러리 연타 시
+      // image_picker가 던지는 PlatformException(already_active)도
+      // 아래 catch에서 스낵바로 처리되게 한다.
+      final ImagePicker picker = ImagePicker();
+
+      // 시스템 갤러리를 열어 이미지를 선택한다.
+      final XFile? pickedFile = await picker.pickImage(
+        source: ImageSource.gallery,
+      );
+
+      // 사용자가 갤러리에서 선택을 취소하면
+      // 아무 작업도 하지 않고 현재 화면에 그대로 머문다.
+      // (finally에서 폼 상태를 비운다)
+      if (pickedFile == null) return;
+
+      if (!mounted) return;
+
+      // ─────────────────────────────────────────
+      // 1단계: XFile → File
+      // ─────────────────────────────────────────
+      //
+      // image_picker가 반환하는 XFile을
+      // Dart의 File 객체로 변환한다.
+      final File imageFile = File(pickedFile.path);
+
+      // ─────────────────────────────────────────
+      // 2단계: File → ML Kit InputImage
+      // ─────────────────────────────────────────
+      //
+      // Google ML Kit이 이미지를 분석할 수 있도록
+      // InputImage 형태로 변환한다.
+      final InputImage inputImage = InputImage.fromFile(
+        imageFile,
+      );
+
+      // ─────────────────────────────────────────
+      // 3단계: ML Kit 서비스 생성
+      // ─────────────────────────────────────────
+      //
+      // OCR과 바코드 인식을 담당하는 서비스다.
+      final MlKitService mlKitService = MlKitService();
+
+      // ─────────────────────────────────────────
+      // 4단계: OCR + 바코드 인식
+      // ─────────────────────────────────────────
+      //
+      // 하나의 이미지에서
+      //
+      // - OCR 텍스트
+      // - 바코드 값
+      //
+      // 을 동시에 추출한다.
+      //
+      // ML Kit이 사용하는 네이티브 리소스는 인식이 끝나면
+      // 즉시 정리한다. (이전에는 폼 화면이 닫힐 때까지
+      // 리소스를 붙잡고 있었다 — 이후 단계는 서비스를 쓰지 않는다)
+      final MlKitScanResult result;
+      try {
+        result = await mlKitService.scan(inputImage);
+      } finally {
+        await mlKitService.dispose();
+      }
+
+      // ─────────────────────────────────────────
+      // 5단계: OCR 텍스트 → 기프티콘 데이터 변환
+      // ─────────────────────────────────────────
+      //
+      // ML Kit이 반환하는 OCR 결과는 단순 문자열이다.
+      //
+      // 예:
+      // "스타벅스
+      // 아이스 카페 아메리카노 T
+      // 4,500원
+      // 2026.12.31"
+      //
+      // GifticonOcrParser는 이 텍스트를 분석해
+      // 브랜드 / 상품명 / 금액 / 유효기간 등의 데이터로 분리한다.
+      const GifticonOcrParser parser = GifticonOcrParser();
+
+      final GifticonOcrResult ocrResult = parser.parse(result.text);
+
+      // ─────────────────────────────────────────
+      // 디버깅용 로그 (debug 빌드에서만)
+      // ─────────────────────────────────────────
+      //
+      // 바코드는 금전적 가치가 있는 값이므로
+      // release 빌드의 기기 로그에 남지 않도록
+      // 반드시 kDebugMode로 가드한다.
+      //
+      // (프리필 직후의 폼 상태는 prefillFromRecognition 내부에서
+      //  '===== GifticonForm 상태 변경 ====='으로 로깅된다)
+      if (kDebugMode) {
+        // Parser에 전달되기 전 원본 OCR 문자열.
+        debugPrint('===== ML Kit OCR 원본 =====');
+        debugPrint(result.text);
+
+        // Parser가 분리해 낸 값.
+        debugPrint('===== OCR 파싱 결과 =====');
+        debugPrint('브랜드명: ${ocrResult.brand}');
+        debugPrint('상품명: ${ocrResult.productName}');
+        debugPrint('금액: ${ocrResult.price}');
+        debugPrint('유효기간: ${ocrResult.expiryDate}');
+
+        // 바코드 인식 결과.
+        debugPrint('===== ML Kit 바코드 =====');
+        debugPrint(result.firstBarcodeValue ?? '바코드 없음');
+      }
+
+      // ─────────────────────────────────────────
+      // 6단계: 인식 결과를 폼 상태에 저장
+      // ─────────────────────────────────────────
+      //
+      // 여기서 중요한 점은
+      //
+      // OCR 결과를 Gifticon으로 바로 저장하지 않는다는 것이다.
+      //
+      // 먼저 GifticonFormController의 상태에 넣고,
+      // 사용자가 폼 화면에서 결과를 확인/수정할 수 있도록 한다.
+      //
+      // 따라서 인식이 일부 실패해도
+      // 사용자가 직접 수정하여 저장할 수 있다.
+      controller.prefillFromRecognition(
+        brand: ocrResult.brand,
+        productName: ocrResult.productName,
+        price: ocrResult.price,
+        barcode: result.firstBarcodeValue,
+        expiryDate: ocrResult.expiryDate,
+        imagePath: pickedFile.path,
+      );
+
+      // 화면이 아직 살아있는지 확인한다.
+      //
+      // 비동기 OCR 작업 중 사용자가 화면을 떠났을 경우
+      // context를 사용하면 문제가 발생할 수 있으므로 확인한다.
+      if (!mounted) return;
+
+      // ─────────────────────────────────────────
+      // 7단계: 인식 결과 확인 폼으로 이동
+      // ─────────────────────────────────────────
+      //
+      // 앞에서 prefillFromRecognition()으로 상태를 채웠기 때문에
+      // GifticonForm 화면이 열리면 입력창에 OCR 결과가 표시된다.
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => const _GifticonFormScreen(),
+        ),
+      );
+    } catch (e) {
+      // 이미지 선택/OCR/바코드 인식 과정에서
+      // 예외가 발생한 경우 사용자에게 알려준다.
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '이미지 인식 중 오류가 발생했습니다: $e',
+          ),
+        ),
+      );
+    } finally {
+      // 흐름 종료(폼 닫힘/취소/오류): 전역 폼 상태를 비운다.
+      //
+      // provider가 autoDispose가 아니므로 여기서 비우지 않으면
+      // 바코드/이미지 경로 등이 앱 수명 동안 잔존한다.
+      //
+      // reset()은 세션 번호도 증가시켜, 아직 완료되지 않은
+      // 이전 제출(submit)이 새 폼 상태를 덮어쓰지 못하게 한다.
+      controller.reset();
+
+      _busy = false;
+    }
   }
 
   /// 아직 구현되지 않은 입력 경로에 대한 임시 안내 메시지.
-  void _showPlaceholderNotice(
-    BuildContext context,
-    ScanSource source,
-  ) {
-    final String name =
-        source == ScanSource.camera ? '카메라' : '갤러리';
+  void _showPlaceholderNotice(ScanSource source) {
+    final String name = source == ScanSource.camera ? '카메라' : '갤러리';
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
-          '$name 인식은 준비 중입니다. 아래 폼에서 직접 입력/수정하세요.',
+          '$name 인식은 준비 중입니다. 직접 입력을 이용해 주세요.',
         ),
       ),
     );
@@ -604,8 +612,7 @@ class _SourceCard extends StatelessWidget {
               // 제목과 설명 영역.
               Expanded(
                 child: Column(
-                  crossAxisAlignment:
-                      CrossAxisAlignment.start,
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
                       title,
@@ -625,8 +632,7 @@ class _SourceCard extends StatelessWidget {
               // 카드를 누르면 다음 단계로 이동한다는 시각적 표시.
               Icon(
                 Icons.chevron_right,
-                color: scheme.onSurfaceVariant
-                    .withValues(alpha: 0.7),
+                color: scheme.onSurfaceVariant.withValues(alpha: 0.7),
               ),
             ],
           ),
@@ -669,9 +675,7 @@ class _AiBanner extends StatelessWidget {
             color: scheme.primary,
             size: 28,
           ),
-
           const SizedBox(width: 16),
-
           Expanded(
             child: Text(
               '이미지에서 브랜드와 만료일을\n자동으로 정리해요',
@@ -682,13 +686,10 @@ class _AiBanner extends StatelessWidget {
               ),
             ),
           ),
-
           const SizedBox(width: 8),
-
           Icon(
             Icons.chevron_right,
-            color: scheme.onSurfaceVariant
-                .withValues(alpha: 0.7),
+            color: scheme.onSurfaceVariant.withValues(alpha: 0.7),
           ),
         ],
       ),
@@ -722,12 +723,10 @@ class _GroupSelector extends StatefulWidget {
   const _GroupSelector();
 
   @override
-  State<_GroupSelector> createState() =>
-      _GroupSelectorState();
+  State<_GroupSelector> createState() => _GroupSelectorState();
 }
 
-class _GroupSelectorState
-    extends State<_GroupSelector> {
+class _GroupSelectorState extends State<_GroupSelector> {
   // 현재 선택된 그룹의 index.
   //
   // TODO(scan):
@@ -736,8 +735,7 @@ class _GroupSelectorState
   int _selected = 0;
 
   // 현재는 테스트용 정적 그룹 목록이다.
-  static const List<_GroupTileData> _groups =
-      <_GroupTileData>[
+  static const List<_GroupTileData> _groups = <_GroupTileData>[
     _GroupTileData(
       icon: Icons.account_balance_wallet_outlined,
       label: '내 지갑',
@@ -755,24 +753,17 @@ class _GroupSelectorState
   @override
   Widget build(BuildContext context) {
     return Column(
-      crossAxisAlignment:
-          CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
           '저장할 그룹 선택',
           style: context.sectionTitleStyle,
         ),
-
         const SizedBox(height: 14),
-
         Row(
           children: [
-            for (int i = 0;
-                i < _groups.length;
-                i++) ...[
-              if (i > 0)
-                const SizedBox(width: 12),
-
+            for (int i = 0; i < _groups.length; i++) ...[
+              if (i > 0) const SizedBox(width: 12),
               Expanded(
                 child: _GroupTile(
                   data: _groups[i],
@@ -830,9 +821,7 @@ class _GroupTile extends StatelessWidget {
     final ColorScheme scheme = theme.colorScheme;
 
     // 선택된 타일은 primary 색상을 사용한다.
-    final Color fg = selected
-        ? scheme.primary
-        : scheme.onSurface;
+    final Color fg = selected ? scheme.primary : scheme.onSurface;
 
     return Material(
       color: Colors.transparent,
@@ -856,8 +845,7 @@ class _GroupTile extends StatelessWidget {
             border: Border.all(
               color: selected
                   ? scheme.primary
-                  : scheme.outline
-                      .withValues(alpha: 0.25),
+                  : scheme.outline.withValues(alpha: 0.25),
               width: selected ? 2 : 1,
             ),
           ),
@@ -882,15 +870,12 @@ class _GroupTile extends StatelessWidget {
                         ),
                 ),
               ),
-
               const SizedBox(height: 12),
-
               Text(
                 data.label,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style:
-                    theme.textTheme.bodyMedium?.copyWith(
+                style: theme.textTheme.bodyMedium?.copyWith(
                   fontSize: 15,
                   fontWeight: FontWeight.w700,
                   color: fg,
@@ -936,12 +921,9 @@ class _GifticonFormScreen extends ConsumerWidget {
     );
 
     final title = switch (source) {
-      ScanSource.camera =>
-        '카메라 스캔 결과 확인',
-      ScanSource.gallery =>
-        '갤러리 인식 결과 확인',
-      ScanSource.manual =>
-        '기프티콘 직접 입력',
+      ScanSource.camera => '카메라 스캔 결과 확인',
+      ScanSource.gallery => '갤러리 인식 결과 확인',
+      ScanSource.manual => '기프티콘 직접 입력',
     };
 
     return Scaffold(
