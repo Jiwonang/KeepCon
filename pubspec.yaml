@@ -11,14 +11,19 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  # 프로젝트 전역 표준 상태관리(오케스트레이터 지정).
+
+  # 프로젝트 전역 표준 상태관리
   flutter_riverpod: ^2.5.1
-  # Firebase 데이터 계층(선택적 백엔드). 기본 실행은 in-memory 유지 —
-  # 이 패키지들은 lib/shared/repositories/impl/firebase/ 구현체가 사용하며,
-  # 부트스트랩으로 명시적으로 전환하기 전에는 초기화되지 않는다.
+
+  # Firebase 데이터 계층
   firebase_core: ^3.6.0
   firebase_auth: ^5.3.1
   cloud_firestore: ^5.4.4
+
+  # ML Kit 및 이미지 피커
+  google_mlkit_text_recognition: ^0.14.0
+  google_mlkit_barcode_scanning: ^0.13.0
+  image_picker: ^1.1.2
 
 dev_dependencies:
   flutter_test:
