@@ -91,4 +91,125 @@ void main() {
       );
     });
   });
+
+  group('InviteExpiry.duration (enum)', () {
+    test('각 선택지의 유효 기간', () {
+      expect(InviteExpiry.oneHour.duration, const Duration(hours: 1));
+      expect(InviteExpiry.oneDay.duration, const Duration(days: 1));
+      expect(InviteExpiry.sevenDays.duration, const Duration(days: 7));
+      expect(InviteExpiry.never.duration, isNull);
+    });
+  });
+
+  group('Group.isInviteExpired (모델 predicate)', () {
+    Group groupWithExpiry(DateTime? expiresAt) => Group(
+          id: 'g',
+          name: 'g',
+          emoji: '🎁',
+          inviteCode: '000000',
+          inviteExpiresAt: expiresAt,
+          members: const <GroupMember>[
+            GroupMember(
+              userId: 'user-1',
+              displayName: '나',
+              avatarEmoji: '🙂',
+              role: MemberRole.owner,
+            ),
+          ],
+        );
+
+    final DateTime now = DateTime(2026, 7, 28, 12);
+
+    test('만료 없음(null)이면 항상 유효', () {
+      expect(groupWithExpiry(null).isInviteExpired(now), isFalse);
+    });
+
+    test('만료 시각이 지났으면 만료', () {
+      expect(
+        groupWithExpiry(now.subtract(const Duration(minutes: 1)))
+            .isInviteExpired(now),
+        isTrue,
+      );
+    });
+
+    test('만료 시각이 아직이면 유효', () {
+      expect(
+        groupWithExpiry(now.add(const Duration(hours: 1))).isInviteExpired(now),
+        isFalse,
+      );
+    });
+  });
+
+  group('ShareRepository.setInviteExpiry 가드', () {
+    test('방장은 유한 만료 설정 가능 — inviteExpiresAt이 미래로 반영', () async {
+      final Group mine = await repo.createGroup(name: '만료 그룹', emoji: '⏰');
+      expect(mine.inviteExpiresAt, isNull); // 생성 직후엔 무제한.
+
+      final DateTime before = DateTime.now();
+      final Group updated = await repo.setInviteExpiry(
+          groupId: mine.id, expiry: InviteExpiry.oneHour);
+      final DateTime after = DateTime.now();
+
+      expect(updated.inviteExpiresAt, isNotNull);
+      // 설정 시점 + 1시간 근방(호출 사이 경과분 slack 허용).
+      expect(
+        updated.inviteExpiresAt!
+                .isAfter(before.add(const Duration(hours: 1))) ||
+            updated.inviteExpiresAt!
+                .isAtSameMomentAs(before.add(const Duration(hours: 1))),
+        isTrue,
+      );
+      expect(
+        updated.inviteExpiresAt!
+            .isBefore(after.add(const Duration(hours: 1, seconds: 5))),
+        isTrue,
+      );
+      expect((await repo.getGroupById(mine.id))!.inviteExpiresAt,
+          updated.inviteExpiresAt);
+    });
+
+    test('방장이 never로 설정하면 만료 해제(null)', () async {
+      final Group mine = await repo.createGroup(name: '해제 그룹', emoji: '♾️');
+      await repo.setInviteExpiry(groupId: mine.id, expiry: InviteExpiry.oneDay);
+      expect((await repo.getGroupById(mine.id))!.inviteExpiresAt, isNotNull);
+
+      await repo.setInviteExpiry(groupId: mine.id, expiry: InviteExpiry.never);
+      expect((await repo.getGroupById(mine.id))!.inviteExpiresAt, isNull);
+    });
+
+    test('일반 멤버는 만료 변경 거부(StateError), 값 유지', () async {
+      final Group joined = await repo.joinGroup('333333');
+      expect(joined.isOwnedBy(me), isFalse);
+      final DateTime? before = joined.inviteExpiresAt;
+      await expectLater(
+        repo.setInviteExpiry(groupId: joined.id, expiry: InviteExpiry.oneHour),
+        throwsStateError,
+      );
+      expect((await repo.getGroupById(joined.id))!.inviteExpiresAt, before);
+    });
+
+    test('없는 그룹은 StateError', () async {
+      await expectLater(
+        repo.setInviteExpiry(
+            groupId: 'no_such_group', expiry: InviteExpiry.oneHour),
+        throwsStateError,
+      );
+    });
+  });
+
+  group('joinGroup 코드 조회 (P1)', () {
+    test('저장된 그룹 코드로 참여 — 이미 멤버면 해당 그룹을 반환(가짜 그룹 생성 안 함)', () async {
+      // 시드 가족 그룹(코드 482913)에 나는 이미 방장. 코드 조회가 우선하므로 그 그룹을 그대로 반환.
+      final Group joined = await repo.joinGroup('482913');
+      expect(joined.id, 'g_family');
+      expect(joined.isMember(me), isTrue);
+    });
+
+    test('미발견 코드는 데모용 가짜 그룹으로 합류(in-memory 스텁)', () async {
+      final Group joined = await repo.joinGroup('999999');
+      expect(joined.id, isNot('g_family'));
+      expect(joined.inviteCode, '999999');
+      expect(joined.isMember(me), isTrue);
+    });
+  });
 }

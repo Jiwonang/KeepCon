@@ -45,10 +45,20 @@ abstract class ShareRepository {
   // ── 그룹 관리 (행위자 = currentUser) ─────────────────────────────────
   /// 새 그룹을 생성한다. 행위자가 방장([MemberRole.owner])이 된다.
   ///
+  /// [maxMembers]는 그룹 인원 상한(방장 포함, 기본 [Group.defaultMaxMembers], 최소 1).
   /// 세션에 현재 사용자가 없으면 [StateError].
-  Future<Group> createGroup({required String name, required String emoji});
+  Future<Group> createGroup({
+    required String name,
+    required String emoji,
+    int maxMembers,
+  });
 
   /// 초대코드로 그룹에 참여한다. 행위자가 멤버([MemberRole.member])로 합류한다.
+  ///
+  /// 가드: 초대코드에 해당하는 그룹이 없으면 [StateError]. 그룹의
+  /// [Group.inviteExpiresAt]가 지났으면([Group.isInviteExpired]) [StateError]로 거부한다.
+  /// 정원이 찼으면([Group.isFull]) [StateError]로 거부한다.
+  /// 이미 멤버면 no-op으로 현재 그룹을 반환한다(정원/만료 가드보다 우선).
   Future<Group> joinGroup(String inviteCode);
 
   /// 그룹에서 나간다.
@@ -79,6 +89,16 @@ abstract class ShareRepository {
   Future<Group> setInviteOwnerOnly({
     required String groupId,
     required bool ownerOnly,
+  });
+
+  /// 초대코드 만료 기간을 설정한다. 만료 시각은 `설정 시점 + [InviteExpiry.duration]`으로
+  /// 계산해 [Group.inviteExpiresAt]에 반영한다([InviteExpiry.never]면 만료 없음(`null`)).
+  ///
+  /// 가드: 방장 본인만 만료를 바꿀 수 있다(초대 정책과 동일 규약). 위반/그룹 없음이면 [StateError].
+  /// 성공 시 갱신된 그룹을 반환한다.
+  Future<Group> setInviteExpiry({
+    required String groupId,
+    required InviteExpiry expiry,
   });
 
   // ── 공유 기프티콘 ────────────────────────────────────────────────────

@@ -9,20 +9,23 @@
 library;
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../features/main/main_page.dart';
 import '../features/scan/scan_page.dart';
 import '../features/share/share_page.dart';
+import '../features/share/state/share_providers.dart';
+import '../features/share/widgets/share_sheets.dart';
 
 /// 하단 내비게이션 셸. 앱의 홈으로 사용한다.
-class KeepConShell extends StatefulWidget {
+class KeepConShell extends ConsumerStatefulWidget {
   const KeepConShell({super.key});
 
   @override
-  State<KeepConShell> createState() => _KeepConShellState();
+  ConsumerState<KeepConShell> createState() => _KeepConShellState();
 }
 
-class _KeepConShellState extends State<KeepConShell> {
+class _KeepConShellState extends ConsumerState<KeepConShell> {
   // 탭: 홈(0) · 공유(1). 스캔(추가)은 탭이 아니라 중앙 +로 push한다.
   int _index = 0;
 
@@ -30,6 +33,23 @@ class _KeepConShellState extends State<KeepConShell> {
     MainPage(),
     SharePage(),
   ];
+
+  @override
+  void initState() {
+    super.initState();
+    // 로그인 후 셸이 뜨는 시점에 딥링크 초대코드가 있으면 참여 흐름을 연다.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _handlePendingInvite());
+  }
+
+  /// 딥링크로 진입한 초대코드가 있으면 공유 탭으로 전환하고 참여 시트를 미리 채워 연다.
+  /// 1회성 — 소비 즉시 provider를 비워 재진입 시 중복 실행을 막는다.
+  void _handlePendingInvite() {
+    final String? code = ref.read(pendingInviteCodeProvider);
+    if (code == null || !mounted) return;
+    ref.read(pendingInviteCodeProvider.notifier).state = null;
+    setState(() => _index = 1); // 공유 탭.
+    showJoinGroupSheet(context, initialCode: code);
+  }
 
   Future<void> _openAdd() async {
     // 중앙 + = 기프티콘 추가. 스캔 플로우를 전체화면으로 push한다.

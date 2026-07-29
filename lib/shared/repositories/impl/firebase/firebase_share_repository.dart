@@ -109,6 +109,7 @@ class FirebaseShareRepository implements ShareRepository {
   Future<Group> createGroup({
     required String name,
     required String emoji,
+    int maxMembers = Group.defaultMaxMembers,
   }) async {
     final User me = _requireUser();
     final DocumentReference<Map<String, dynamic>> ref = _groups.doc();
@@ -117,6 +118,7 @@ class FirebaseShareRepository implements ShareRepository {
       name: name,
       emoji: emoji,
       inviteCode: _randomCode(),
+      maxMembers: maxMembers,
       members: <GroupMember>[
         GroupMember(
           userId: me.id,
@@ -146,6 +148,14 @@ class FirebaseShareRepository implements ShareRepository {
       if (!doc.exists) throw StateError('Group disappeared: ${ref.id}');
       final Group g = _groupFromDoc(doc);
       if (g.isMember(me.id)) return g; // 이미 멤버면 no-op.
+      // 만료된 초대코드는 참여 거부(가드는 트랜잭션 안에서 최신 문서 기준으로 판정).
+      if (g.isInviteExpired(DateTime.now())) {
+        throw StateError('Invite code expired: $inviteCode');
+      }
+      // 정원 초과 참여 거부(트랜잭션 안에서 최신 멤버 수 기준으로 판정).
+      if (g.isFull) {
+        throw StateError('Group is full: ${ref.id}');
+      }
       final List<GroupMember> next = <GroupMember>[
         ...g.members,
         GroupMember(
@@ -260,6 +270,33 @@ class FirebaseShareRepository implements ShareRepository {
       }
       final Group updated = g.copyWith(inviteOwnerOnly: ownerOnly);
       tx.update(ref, <String, dynamic>{'inviteOwnerOnly': ownerOnly});
+      return updated;
+    });
+  }
+
+  @override
+  Future<Group> setInviteExpiry({
+    required String groupId,
+    required InviteExpiry expiry,
+  }) async {
+    final User me = _requireUser();
+    final DocumentReference<Map<String, dynamic>> ref = _groups.doc(groupId);
+    // 만료 시각은 설정 시점 기준으로 계산한다(never면 만료 없음 = null).
+    final Duration? d = expiry.duration;
+    final DateTime? expiresAt = d == null ? null : DateTime.now().add(d);
+
+    return _db.runTransaction<Group>((Transaction tx) async {
+      final DocumentSnapshot<Map<String, dynamic>> doc = await tx.get(ref);
+      if (!doc.exists) throw StateError('Group not found: $groupId');
+      final Group g = _groupFromDoc(doc);
+      if (!g.isOwnedBy(me.id)) {
+        throw StateError('Only the owner can change invite expiry: $groupId');
+      }
+      final Group updated = g.copyWith(inviteExpiresAt: expiresAt);
+      tx.update(ref, <String, dynamic>{
+        'inviteExpiresAt':
+            expiresAt == null ? null : Timestamp.fromDate(expiresAt),
+      });
       return updated;
     });
   }
@@ -601,6 +638,10 @@ class FirebaseShareRepository implements ShareRepository {
         'emoji': g.emoji,
         'inviteCode': g.inviteCode,
         'inviteOwnerOnly': g.inviteOwnerOnly,
+        'inviteExpiresAt': g.inviteExpiresAt == null
+            ? null
+            : Timestamp.fromDate(g.inviteExpiresAt!),
+        'maxMembers': g.maxMembers,
         'members': g.members
             .map((GroupMember m) => <String, dynamic>{
                   'userId': m.userId,
@@ -636,12 +677,19 @@ class FirebaseShareRepository implements ShareRepository {
     final int owners =
         members.where((GroupMember m) => m.role == MemberRole.owner).length;
     if (members.isEmpty || owners != 1) return null;
+    // 레거시 문서엔 maxMembers가 없어 기본값을 쓰고, 손상 값(현재 멤버 수보다 작음)은
+    // 현재 멤버 수로 끌어올려 불변식(>=1, >=memberCount)을 지킨다.
+    final int rawMax =
+        (data['maxMembers'] as num?)?.toInt() ?? Group.defaultMaxMembers;
+    final int maxMembers = rawMax < members.length ? members.length : rawMax;
     return Group(
       id: doc.id,
       name: data['name'] as String? ?? '',
       emoji: data['emoji'] as String? ?? '🎁',
       inviteCode: data['inviteCode'] as String? ?? '',
       inviteOwnerOnly: data['inviteOwnerOnly'] as bool? ?? false,
+      inviteExpiresAt: _inviteExpiresAtFrom(data['inviteExpiresAt']),
+      maxMembers: maxMembers,
       members: members,
     );
   }
@@ -723,6 +771,18 @@ class FirebaseShareRepository implements ShareRepository {
   }
 
   DateTime _toDate(Object? value) {
+    if (value is Timestamp) return value.toDate();
+    if (value is DateTime) return value;
+    return DateTime.fromMillisecondsSinceEpoch(0);
+  }
+
+  /// 초대코드 만료 시각을 문서 값에서 해석한다.
+  ///
+  /// **오직 `null`(미설정)만 "만료 없음"으로 허용**한다. 값이 있는데 [Timestamp]/[DateTime]이
+  /// 아닌 손상 문서는 만료 검사를 우회하지 않도록 **fail-closed** — 이미 만료된 것(epoch)으로
+  /// 취급해 참여를 거부한다.
+  DateTime? _inviteExpiresAtFrom(Object? value) {
+    if (value == null) return null;
     if (value is Timestamp) return value.toDate();
     if (value is DateTime) return value;
     return DateTime.fromMillisecondsSinceEpoch(0);

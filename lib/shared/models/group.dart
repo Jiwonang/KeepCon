@@ -21,26 +21,32 @@ enum MemberRole {
   member,
 }
 
-/// 초대코드 만료 시간 선택지(UI 표시용).
+/// 초대코드 만료 시간 선택지.
 ///
 /// 초대 링크/코드의 유효 기간 선택지를 enum으로 못박아 매직 스트링을 방지한다.
+/// [duration]으로 실제 만료 시각을 계산한다(`ShareRepository.setInviteExpiry`가 소비).
 enum InviteExpiry {
   /// 1시간.
-  oneHour('1시간'),
+  oneHour('1시간', Duration(hours: 1)),
 
   /// 1일.
-  oneDay('1일'),
+  oneDay('1일', Duration(days: 1)),
 
   /// 7일.
-  sevenDays('7일'),
+  sevenDays('7일', Duration(days: 7)),
 
-  /// 무제한.
-  never('무제한');
+  /// 무제한 — 만료 없음.
+  never('무제한', null);
 
-  const InviteExpiry(this.label);
+  const InviteExpiry(this.label, this.duration);
 
   /// 선택지 표시 라벨.
   final String label;
+
+  /// 이 선택지의 유효 기간. `null`이면 만료 없음([never]).
+  ///
+  /// 만료 시각은 `설정 시점 + duration`으로 계산한다(구현체 책임).
+  final Duration? duration;
 }
 
 /// 그룹 멤버 한 명.
@@ -130,12 +136,21 @@ class Group {
     required List<GroupMember> members,
     required this.inviteCode,
     this.inviteOwnerOnly = false,
+    this.inviteExpiresAt,
+    this.maxMembers = defaultMaxMembers,
   })  : assert(members.isNotEmpty, 'Group must have at least one member'),
         assert(
           _ownerCount(members) == 1,
           'Group must have exactly one owner (single-owner policy)',
         ),
+        assert(maxMembers >= 1, 'maxMembers must be at least 1'),
         members = List<GroupMember>.unmodifiable(members);
+
+  /// 그룹 인원 상한 기본값. 생성 시 별도 지정이 없거나 레거시 문서에 값이 없을 때 쓴다.
+  static const int defaultMaxMembers = 10;
+
+  /// 그룹 생성 시 고를 수 있는 인원 상한 프리셋(오름차순). 기본값([defaultMaxMembers])을 포함한다.
+  static const List<int> memberCapPresets = <int>[4, 6, 10, 20];
 
   /// 그룹 식별자. **non-nullable.**
   final String id;
@@ -160,8 +175,36 @@ class Group {
   /// 정책 변경은 방장만 가능하며 `ShareRepository.setInviteOwnerOnly`로만 바꾼다.
   final bool inviteOwnerOnly;
 
+  /// 초대코드 만료 시각. `null`이면 만료 없음([InviteExpiry.never] 또는 미설정).
+  ///
+  /// 방장이 `ShareRepository.setInviteExpiry`로 설정하며, 이 시각을 지나면
+  /// `ShareRepository.joinGroup`이 [StateError]로 참여를 거부한다([isInviteExpired] 참조).
+  final DateTime? inviteExpiresAt;
+
+  /// 그룹 인원 상한(방장 포함). 기본 [defaultMaxMembers]. 생성 시 방장이 정한다.
+  ///
+  /// `joinGroup`은 [isFull]이면 참여를 거부한다([StateError]). 이 값보다 멤버가 많아지는
+  /// 전이는 만들어지지 않는다(참여 가드가 유일한 증가 경로).
+  final int maxMembers;
+
   /// 초대 URL(초대코드 기반 조립).
   String get inviteUrl => 'https://keepcon.app/invite/$inviteCode';
+
+  /// 정원이 찼는지(멤버 수 ≥ [maxMembers]). 참여 가능 여부 판정의 단일 진입점.
+  bool get isFull => memberCount >= maxMembers;
+
+  /// 남은 자리 수(0 이상). 표시용.
+  int get remainingSlots {
+    final int left = maxMembers - memberCount;
+    return left < 0 ? 0 : left;
+  }
+
+  /// [now] 기준으로 초대코드가 만료되었는지.
+  ///
+  /// [inviteExpiresAt]가 `null`(무제한)이면 항상 `false`. 만료 판정의 단일 진입점이며,
+  /// UI 게이팅(참여 버튼 노출)과 구현체 가드가 모두 이 predicate를 소비한다(로직 drift 방지).
+  bool isInviteExpired(DateTime now) =>
+      inviteExpiresAt != null && !now.isBefore(inviteExpiresAt!);
 
   /// 멤버 수.
   int get memberCount => members.length;
@@ -197,6 +240,10 @@ class Group {
   }
 
   /// 일부 필드만 교체한 새 인스턴스를 반환한다.
+  ///
+  /// [inviteExpiresAt]는 nullable이라 "미지정"과 "명시적 null(무제한)"을 구분해야 하므로
+  /// 센티널([_unset])을 기본값으로 둔다 — 인자를 생략하면 기존 값을 유지하고,
+  /// `null`을 명시하면 만료 없음으로 되돌린다.
   Group copyWith({
     String? id,
     String? name,
@@ -204,6 +251,8 @@ class Group {
     List<GroupMember>? members,
     String? inviteCode,
     bool? inviteOwnerOnly,
+    Object? inviteExpiresAt = _unset,
+    int? maxMembers,
   }) {
     return Group(
       id: id ?? this.id,
@@ -212,6 +261,10 @@ class Group {
       members: members ?? this.members,
       inviteCode: inviteCode ?? this.inviteCode,
       inviteOwnerOnly: inviteOwnerOnly ?? this.inviteOwnerOnly,
+      inviteExpiresAt: identical(inviteExpiresAt, _unset)
+          ? this.inviteExpiresAt
+          : inviteExpiresAt as DateTime?,
+      maxMembers: maxMembers ?? this.maxMembers,
     );
   }
 
@@ -225,7 +278,9 @@ class Group {
           emoji == other.emoji &&
           _memberListEquals(members, other.members) &&
           inviteCode == other.inviteCode &&
-          inviteOwnerOnly == other.inviteOwnerOnly;
+          inviteOwnerOnly == other.inviteOwnerOnly &&
+          inviteExpiresAt == other.inviteExpiresAt &&
+          maxMembers == other.maxMembers;
 
   @override
   int get hashCode => Object.hash(
@@ -235,12 +290,18 @@ class Group {
         Object.hashAll(members),
         inviteCode,
         inviteOwnerOnly,
+        inviteExpiresAt,
+        maxMembers,
       );
 
   @override
   String toString() => 'Group(id: $id, name: $name, memberCount: $memberCount, '
-      'inviteOwnerOnly: $inviteOwnerOnly)';
+      'maxMembers: $maxMembers, inviteOwnerOnly: $inviteOwnerOnly, '
+      'inviteExpiresAt: $inviteExpiresAt)';
 }
+
+/// [Group.copyWith]가 "미지정"을 "명시적 null"과 구분하기 위한 센티널.
+const Object _unset = Object();
 
 /// 멤버 목록의 방장([MemberRole.owner]) 수. [Group] 생성자 불변식 검증에 사용한다.
 int _ownerCount(List<GroupMember> members) =>
