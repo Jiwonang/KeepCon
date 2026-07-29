@@ -63,7 +63,11 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
 
   switch (message) {
     case WM_FONTCHANGE:
-      flutter_controller_->engine()->ReloadSystemFonts();
+      // OnCreate 실패 또는 OnDestroy 이후에도 WM_FONTCHANGE가
+      // 도착할 수 있으므로 널 검사 후 접근한다.
+      if (flutter_controller_ && flutter_controller_->engine()) {
+        flutter_controller_->engine()->ReloadSystemFonts();
+      }
       break;
   }
 

@@ -72,25 +72,46 @@ class GifticonOcrParser {
     return null;
   }
 
+  /// 금액으로 인정하는 패턴.
+  ///
+  /// 다음 세 가지 형태만 금액으로 본다.
+  ///
+  /// - ₩4,500 / ₩4500  (통화 기호)
+  /// - 4,500원 / 4500원 (원 단위)
+  /// - 4,500            (천 단위 콤마)
+  ///
+  /// 단위 표기가 전혀 없는 순수 숫자(예: "4500")는
+  /// 날짜의 연도("2026")나 바코드 조각과 구분할 수 없어
+  /// 금액으로 보지 않는다.
+  ///
+  /// [_extractPrice]와 [_isPriceLine]이 같은 패턴을 공유해
+  /// "금액 추출"과 "금액 줄 제외" 판정이 어긋나지 않게 한다.
+  static final RegExp _pricePattern = RegExp(
+    r'₩[ \t]*(\d{1,3}(?:,\d{3})+|\d+)'
+    r'|(\d{1,3}(?:,\d{3})+|\d+)[ \t]*원'
+    r'|(\d{1,3}(?:,\d{3})+)',
+  );
+
   /// 금액 추출.
   ///
   /// 예:
-  /// 4,500원
-  /// 4500원
-  /// ₩4,500
-  /// 4500
+  /// 4,500원 → "4500"
+  /// 4500원  → "4500"
+  /// ₩4,500  → "4500"
+  /// 4,500   → "4500"
+  ///
+  /// 단위 없는 "4500"은 오인식 방지를 위해 추출하지 않는다.
+  /// ([_pricePattern] 문서 참조)
   String? _extractPrice(String text) {
-    final RegExp pricePattern = RegExp(
-      r'(?:₩\s*)?(\d{1,3}(?:,\d{3})+|\d{3,6})\s*원?',
-    );
-
-    final Match? match = pricePattern.firstMatch(text);
+    final Match? match = _pricePattern.firstMatch(text);
 
     if (match == null) {
       return null;
     }
 
-    final String value = match.group(1)!.replaceAll(',', '');
+    // 세 alternation 중 매치된 그룹에서 숫자를 꺼낸다.
+    final String value = (match.group(1) ?? match.group(2) ?? match.group(3))!
+        .replaceAll(',', '');
 
     return value;
   }
@@ -157,9 +178,10 @@ class GifticonOcrParser {
   }
 
   bool _isPriceLine(String line) {
-    return RegExp(
-      r'(?:₩\s*)?\d{1,3}(?:,\d{3})+\s*원?',
-    ).hasMatch(line);
+    // 금액 추출([_extractPrice])과 동일한 패턴을 사용해
+    // "4500원"처럼 콤마 없는 금액 줄도 브랜드/상품명 후보에서
+    // 제외되도록 한다.
+    return _pricePattern.hasMatch(line);
   }
 
   bool _containsDate(String line) {

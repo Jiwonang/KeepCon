@@ -315,14 +315,15 @@ class _GifticonFormState extends ConsumerState<GifticonForm> {
         //
         // ML Kit이 바코드를 인식하면 자동으로 채워진다.
         // 인식되지 않은 경우 사용자가 직접 입력할 수도 있다.
+        //
+        // 숫자 제한(digitsOnly)을 두지 않는다:
+        // QR/CODE128 등은 URL·영문이 포함된 rawValue를 반환할 수 있어,
+        // 숫자만 허용하면 사용자가 값을 수정하는 순간
+        // 비숫자 문자가 전부 사라져 값이 손상된다.
         _labeledField(
           label: '바코드',
           hint: '바코드 번호가 자동으로 입력됩니다.',
           controller: _barcodeController,
-          keyboardType: TextInputType.number,
-          inputFormatters: [
-            FilteringTextInputFormatter.digitsOnly,
-          ],
           onChanged: controller.setBarcode,
         ),
 

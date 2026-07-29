@@ -45,9 +45,16 @@ class MlKitService {
   }
 
   /// 리소스를 정리한다.
+  ///
+  /// 첫 번째 close()가 실패해도 두 번째 리소스는
+  /// 반드시 해제되도록 try/finally로 감싼다.
+  /// (반복 스캔 시 네이티브 리소스 누수 방지)
   Future<void> dispose() async {
-    await _textRecognizer.close();
-    await _barcodeScanner.close();
+    try {
+      await _textRecognizer.close();
+    } finally {
+      await _barcodeScanner.close();
+    }
   }
 }
 
