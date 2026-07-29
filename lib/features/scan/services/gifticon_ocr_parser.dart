@@ -146,9 +146,7 @@ class GifticonOcrParser {
       final DateTime date = DateTime(year, month, day);
 
       // 잘못된 날짜가 자동 보정되는 것을 방지한다.
-      if (date.year != year ||
-          date.month != month ||
-          date.day != day) {
+      if (date.year != year || date.month != month || date.day != day) {
         return null;
       }
 

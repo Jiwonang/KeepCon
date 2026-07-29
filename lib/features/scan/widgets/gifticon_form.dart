@@ -43,17 +43,14 @@ import '../state/gifticon_form_state.dart';
 ///
 /// 따라서 OCR 결과를 비동기로 받은 현재 구조에서는
 /// TextEditingController 방식이 적합하다.
-class GifticonForm
-    extends ConsumerStatefulWidget {
+class GifticonForm extends ConsumerStatefulWidget {
   const GifticonForm({super.key});
 
   @override
-  ConsumerState<GifticonForm> createState() =>
-      _GifticonFormState();
+  ConsumerState<GifticonForm> createState() => _GifticonFormState();
 }
 
-class _GifticonFormState
-    extends ConsumerState<GifticonForm> {
+class _GifticonFormState extends ConsumerState<GifticonForm> {
   // ─────────────────────────────────────────
   // TextEditingController
   // ─────────────────────────────────────────
@@ -63,20 +60,15 @@ class _GifticonFormState
   // OCR 결과가 나중에 들어왔을 때
   // controller.text를 변경해 화면에 반영할 수 있다.
 
-  late final TextEditingController
-      _brandController;
+  late final TextEditingController _brandController;
 
-  late final TextEditingController
-      _productNameController;
+  late final TextEditingController _productNameController;
 
-  late final TextEditingController
-      _priceController;
+  late final TextEditingController _priceController;
 
-  late final TextEditingController
-      _categoryController;
+  late final TextEditingController _categoryController;
 
-  late final TextEditingController
-      _barcodeController;
+  late final TextEditingController _barcodeController;
 
   @override
   void initState() {
@@ -94,28 +86,23 @@ class _GifticonFormState
       gifticonFormControllerProvider,
     );
 
-    _brandController =
-        TextEditingController(
+    _brandController = TextEditingController(
       text: form.brand,
     );
 
-    _productNameController =
-        TextEditingController(
+    _productNameController = TextEditingController(
       text: form.productName,
     );
 
-    _priceController =
-        TextEditingController(
+    _priceController = TextEditingController(
       text: form.price,
     );
 
-    _categoryController =
-        TextEditingController(
+    _categoryController = TextEditingController(
       text: form.category,
     );
 
-    _barcodeController =
-        TextEditingController(
+    _barcodeController = TextEditingController(
       text: form.barcode,
     );
 
@@ -189,13 +176,11 @@ class _GifticonFormState
     }
 
     // 새로운 텍스트를 입력창에 반영한다.
-    controller.value =
-        controller.value.copyWith(
+    controller.value = controller.value.copyWith(
       text: value,
 
       // 값이 변경된 뒤 커서를 텍스트 마지막으로 이동한다.
-      selection:
-          TextSelection.collapsed(
+      selection: TextSelection.collapsed(
         offset: value.length,
       ),
 
@@ -256,19 +241,13 @@ class _GifticonFormState
           ),
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
-            color: Theme.of(context)
-                .colorScheme
-                .primary
-                .withValues(alpha: 0.08),
-            borderRadius:
-                BorderRadius.circular(12),
+            color:
+                Theme.of(context).colorScheme.primary.withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(12),
           ),
           child: Text(
             '* 표시된 항목은 필수 입력 항목입니다.',
-            style: Theme.of(context)
-                .textTheme
-                .bodyMedium
-                ?.copyWith(
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                   fontWeight: FontWeight.w600,
                 ),
           ),
@@ -294,10 +273,8 @@ class _GifticonFormState
         _labeledField(
           label: '상품명 *',
           hint: '예: 아메리카노 T',
-          controller:
-              _productNameController,
-          onChanged:
-              controller.setProductName,
+          controller: _productNameController,
+          onChanged: controller.setProductName,
         ),
 
         // ─────────────────────────────────────────
@@ -312,11 +289,9 @@ class _GifticonFormState
           label: '금액(원) *',
           hint: '예: 4500 (무료/사은품은 0)',
           controller: _priceController,
-          keyboardType:
-              TextInputType.number,
+          keyboardType: TextInputType.number,
           inputFormatters: [
-            FilteringTextInputFormatter
-                .digitsOnly,
+            FilteringTextInputFormatter.digitsOnly,
           ],
           onChanged: controller.setPrice,
         ),
@@ -329,12 +304,9 @@ class _GifticonFormState
         // submit()에서 빈 값이면 "기타"로 자동 보정한다.
         _labeledField(
           label: '카테고리',
-          hint:
-              '미입력 시 "$kDefaultCategory"로 저장',
-          controller:
-              _categoryController,
-          onChanged:
-              controller.setCategory,
+          hint: '미입력 시 "$kDefaultCategory"로 저장',
+          controller: _categoryController,
+          onChanged: controller.setCategory,
         ),
 
         // ─────────────────────────────────────────
@@ -345,18 +317,13 @@ class _GifticonFormState
         // 인식되지 않은 경우 사용자가 직접 입력할 수도 있다.
         _labeledField(
           label: '바코드',
-          hint:
-              '바코드 번호가 자동으로 입력됩니다.',
-          controller:
-              _barcodeController,
-          keyboardType:
-              TextInputType.number,
+          hint: '바코드 번호가 자동으로 입력됩니다.',
+          controller: _barcodeController,
+          keyboardType: TextInputType.number,
           inputFormatters: [
-            FilteringTextInputFormatter
-                .digitsOnly,
+            FilteringTextInputFormatter.digitsOnly,
           ],
-          onChanged:
-              controller.setBarcode,
+          onChanged: controller.setBarcode,
         ),
 
         const SizedBox(height: 8),
@@ -371,8 +338,7 @@ class _GifticonFormState
         // expiryDate에 저장된다.
         _ExpiryDateField(
           value: form.expiryDate,
-          onPicked:
-              controller.setExpiryDate,
+          onPicked: controller.setExpiryDate,
         ),
 
         const SizedBox(height: 24),
@@ -382,17 +348,13 @@ class _GifticonFormState
         // ─────────────────────────────────────────
         //
         // submit 상태가 Failure인 경우에만 표시한다.
-        if (form.submit
-            is ScanSubmitFailure)
+        if (form.submit is ScanSubmitFailure)
           Padding(
-            padding:
-                const EdgeInsets.only(
+            padding: const EdgeInsets.only(
               bottom: 12,
             ),
             child: Text(
-              (form.submit
-                      as ScanSubmitFailure)
-                  .message,
+              (form.submit as ScanSubmitFailure).message,
               style: const TextStyle(
                 color: Colors.red,
               ),
@@ -415,50 +377,40 @@ class _GifticonFormState
           // 저장 중에는 버튼을 비활성화한다.
           //
           // 중복 저장 요청을 방지하기 위한 처리다.
-          onPressed:
-              form.submit
-                      is ScanSubmitInProgress
-                  ? null
-                  : () async {
-                      // Controller에서 검증 및 저장을 수행한다.
-                      final saved =
-                          await controller
-                              .submit();
+          onPressed: form.submit is ScanSubmitInProgress
+              ? null
+              : () async {
+                  // Controller에서 검증 및 저장을 수행한다.
+                  final saved = await controller.submit();
 
-                      // 저장 성공 시 saved가 반환된다.
-                      if (saved != null &&
-                          context.mounted) {
-                        // 사용자에게 저장 성공 메시지를 표시한다.
-                        ScaffoldMessenger
-                                .of(context)
-                            .showSnackBar(
-                          SnackBar(
-                            content: Text(
-                              '저장됨: '
-                              '${saved.brand} '
-                              '${saved.productName}',
-                            ),
-                          ),
-                        );
+                  // 저장 성공 시 saved가 반환된다.
+                  if (saved != null && context.mounted) {
+                    // 사용자에게 저장 성공 메시지를 표시한다.
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(
+                          '저장됨: '
+                          '${saved.brand} '
+                          '${saved.productName}',
+                        ),
+                      ),
+                    );
 
-                        // 저장 완료 후 폼 화면을 닫는다.
-                        //
-                        // maybePop(saved)를 사용하면
-                        // 이전 화면에서 저장된 Gifticon을
-                        // 결과값으로 받을 수도 있다.
-                        Navigator.of(context)
-                            .maybePop(saved);
-                      }
-                    },
+                    // 저장 완료 후 폼 화면을 닫는다.
+                    //
+                    // maybePop(saved)를 사용하면
+                    // 이전 화면에서 저장된 Gifticon을
+                    // 결과값으로 받을 수도 있다.
+                    Navigator.of(context).maybePop(saved);
+                  }
+                },
 
           // 저장 중에는 로딩 인디케이터를 표시한다.
-          child: form.submit
-                  is ScanSubmitInProgress
+          child: form.submit is ScanSubmitInProgress
               ? const SizedBox(
                   height: 18,
                   width: 18,
-                  child:
-                      CircularProgressIndicator(
+                  child: CircularProgressIndicator(
                     strokeWidth: 2,
                   ),
                 )
@@ -499,11 +451,9 @@ class _GifticonFormState
     required String label,
     required String hint,
     required TextEditingController controller,
-    required ValueChanged<String>
-        onChanged,
+    required ValueChanged<String> onChanged,
     TextInputType? keyboardType,
-    List<TextInputFormatter>?
-        inputFormatters,
+    List<TextInputFormatter>? inputFormatters,
   }) {
     return Padding(
       padding: const EdgeInsets.only(
@@ -517,14 +467,12 @@ class _GifticonFormState
         keyboardType: keyboardType,
 
         // 숫자만 입력 허용 등의 입력 제한.
-        inputFormatters:
-            inputFormatters,
+        inputFormatters: inputFormatters,
 
         decoration: InputDecoration(
           labelText: label,
           hintText: hint,
-          border:
-              const OutlineInputBorder(),
+          border: const OutlineInputBorder(),
         ),
 
         // 사용자가 입력할 때마다
@@ -550,8 +498,7 @@ class _GifticonFormState
 /// GifticonFormState.expiryDate
 ///
 /// 로 저장된다.
-class _ExpiryDateField
-    extends StatelessWidget {
+class _ExpiryDateField extends StatelessWidget {
   const _ExpiryDateField({
     required this.value,
     required this.onPicked,
@@ -561,8 +508,7 @@ class _ExpiryDateField
   final DateTime? value;
 
   /// 날짜를 선택했을 때 호출할 콜백.
-  final ValueChanged<DateTime>
-      onPicked;
+  final ValueChanged<DateTime> onPicked;
 
   @override
   Widget build(BuildContext context) {
@@ -592,21 +538,17 @@ class _ExpiryDateField
         // 해당 날짜를 DatePicker의 초기 날짜로 사용한다.
         //
         // 아직 선택하지 않았다면 오늘 날짜를 사용한다.
-        final picked =
-            await showDatePicker(
+        final picked = await showDatePicker(
           context: context,
-          initialDate:
-              value ?? now,
+          initialDate: value ?? now,
 
           // 현재 날짜보다 1년 이전 날짜까지 선택 가능.
           //
           // 필요하면 계약 정책에 맞게 변경할 수 있다.
-          firstDate:
-              DateTime(now.year - 1),
+          firstDate: DateTime(now.year - 1),
 
           // 현재 날짜 기준 5년 뒤까지 선택 가능.
-          lastDate:
-              DateTime(now.year + 5),
+          lastDate: DateTime(now.year + 5),
         );
 
         // 사용자가 날짜를 선택하지 않고 취소한 경우
