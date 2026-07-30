@@ -24,6 +24,7 @@ import '../../shared/theme/brand_palette.dart';
 import '../../shared/theme/theme_tokens.dart';
 import 'state/gifticon_list_providers.dart';
 import 'state/gifticon_stats.dart';
+import '../../shared/util/date_format.dart' show formatYmdDot;
 import '../../shared/util/money_format.dart' show formatWon;
 import 'widgets/format.dart';
 import 'widgets/gifticon_status_label.dart';
@@ -531,7 +532,7 @@ class _RichGifticonCard extends StatelessWidget {
                         const SizedBox(width: 4),
                         Flexible(
                           child: Text(
-                            '${formatDate(gifticon.expiryDate)} 만료',
+                            '${formatYmdDot(gifticon.expiryDate)} 만료',
                             style: theme.textTheme.bodySmall?.copyWith(
                               color:
                                   used ? scheme.onSurfaceVariant : scheme.error,

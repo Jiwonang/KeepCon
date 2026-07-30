@@ -169,9 +169,12 @@ void main() {
       // 날짜 선택 버튼의 라벨이 "유효기간 선택 *"에서 실제 날짜로 바뀐다.
       expect(find.text('유효기간 선택 *'), findsNothing);
 
+      // 구분자는 점('.')이다 — v2.4에서 공유 정본 formatYmdDot으로 통일했다
+      // (이전에는 이 화면만 'YYYY-MM-DD'였다). 정본 함수를 호출해 비교하면
+      // 표기가 바뀌어도 항진 통과하므로, 기대 문자열은 여기서 직접 조립한다.
       final String label = '유효기간: '
-          '${picked!.year}-'
-          '${picked.month.toString().padLeft(2, '0')}-'
+          '${picked!.year}.'
+          '${picked.month.toString().padLeft(2, '0')}.'
           '${picked.day.toString().padLeft(2, '0')}';
 
       expect(find.text(label), findsOneWidget);

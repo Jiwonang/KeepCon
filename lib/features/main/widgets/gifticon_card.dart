@@ -11,6 +11,7 @@ import 'package:flutter/material.dart';
 
 import '../../../shared/models/gifticon.dart';
 import '../../../shared/theme/theme_tokens.dart';
+import '../../../shared/util/date_format.dart' show formatYmdDot;
 import '../../../shared/util/money_format.dart' show formatWon;
 import 'format.dart';
 
@@ -93,7 +94,7 @@ class GifticonGridCard extends StatelessWidget {
                       const SizedBox(width: 4),
                       Expanded(
                         child: Text(
-                          formatDate(gifticon.expiryDate),
+                          formatYmdDot(gifticon.expiryDate),
                           style: theme.textTheme.bodySmall?.copyWith(
                             color: dateColor,
                             fontWeight:

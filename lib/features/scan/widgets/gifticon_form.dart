@@ -32,6 +32,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../shared/models/gifticon.dart';
 import '../../../shared/theme/theme_tokens.dart';
+import '../../../shared/util/date_format.dart' show formatYmdDot;
 import '../state/gifticon_form_state.dart';
 import '../util/expiry_quick_pick.dart';
 import '../util/price_input_formatter.dart';
@@ -787,14 +788,10 @@ class _ExpiryDateField extends StatelessWidget {
     // 날짜가 아직 선택되지 않았다면
     // "유효기간 선택 *"을 표시한다.
     //
-    // 날짜가 선택되었다면
-    // YYYY-MM-DD 형태로 표시한다.
-    final label = value == null
-        ? '유효기간 선택 *'
-        : '유효기간: '
-            '${value!.year}-'
-            '${value!.month.toString().padLeft(2, '0')}-'
-            '${value!.day.toString().padLeft(2, '0')}';
+    // 날짜가 선택되었다면 공유 정본 formatYmdDot으로 YYYY.MM.DD 형태로 표시한다.
+    // (구현이 이 파일에 인라인돼 있던 시절엔 구분자가 '-'여서, 같은 유효기간이
+    //  등록 화면과 목록/공유 화면에서 다르게 보였다 — v2.4에서 다수 표기로 통일)
+    final label = value == null ? '유효기간 선택 *' : '유효기간: ${formatYmdDot(value!)}';
 
     return OutlinedButton.icon(
       icon: const Icon(
