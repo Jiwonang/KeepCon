@@ -82,6 +82,19 @@ abstract class ShareRepository {
     required String newOwnerUserId,
   });
 
+  /// 방장이 멤버를 그룹에서 내보낸다(강퇴).
+  ///
+  /// 가드: 행위자가 방장이어야 하고, [userId]는 방장 본인이 아닌 기존 멤버여야 한다
+  /// (방장 자신은 강퇴 대상이 아니다 — [leaveGroup]/[transferOwnershipAndLeave]를 쓴다).
+  /// 위반/그룹 없음이면 [StateError]. 성공 시 갱신된(해당 멤버 제거) 그룹을 반환한다.
+  ///
+  /// 내보낸 멤버가 그룹에 공유했던 항목은 [leaveGroup]과 동일하게 그대로 남는다
+  /// (멤버 이탈 시 공유 항목을 정리하지 않는 현행 규약과 일치).
+  Future<Group> removeMember({
+    required String groupId,
+    required String userId,
+  });
+
   /// 초대 권한 정책(방장 한정 여부)을 설정한다.
   ///
   /// 가드: 방장 본인만 정책을 바꿀 수 있다. 위반 시 [StateError].

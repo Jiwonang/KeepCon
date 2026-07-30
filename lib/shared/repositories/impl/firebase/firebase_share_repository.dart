@@ -254,6 +254,38 @@ class FirebaseShareRepository implements ShareRepository {
   }
 
   @override
+  Future<Group> removeMember({
+    required String groupId,
+    required String userId,
+  }) async {
+    final User me = _requireUser();
+    final DocumentReference<Map<String, dynamic>> ref = _groups.doc(groupId);
+
+    return _db.runTransaction<Group>((Transaction tx) async {
+      final DocumentSnapshot<Map<String, dynamic>> doc = await tx.get(ref);
+      if (!doc.exists) throw StateError('Group not found: $groupId');
+      final Group g = _groupFromDoc(doc);
+      if (!g.isOwnedBy(me.id)) {
+        throw StateError('Only the owner can remove members: $groupId');
+      }
+      if (userId == me.id) {
+        throw StateError('Owner cannot remove themselves: $groupId');
+      }
+      if (!g.isMember(userId)) {
+        throw StateError('Not a member of group: $userId');
+      }
+      // 방장은 남으므로 그룹이 비지 않는다(cascade 불필요). leaveGroup의 비-소멸
+      // 분기와 동일하게 멤버십만 제거한다(공유 항목은 그대로 유지).
+      final List<GroupMember> next = g.members
+          .where((GroupMember m) => m.userId != userId)
+          .toList(growable: false);
+      final Group updated = g.copyWith(members: next);
+      tx.update(ref, _groupToDoc(updated));
+      return updated;
+    });
+  }
+
+  @override
   Future<Group> setInviteOwnerOnly({
     required String groupId,
     required bool ownerOnly,
