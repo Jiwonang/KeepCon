@@ -24,6 +24,7 @@ import '../../shared/theme/brand_palette.dart';
 import '../../shared/theme/theme_tokens.dart';
 import 'state/gifticon_list_providers.dart';
 import 'state/gifticon_stats.dart';
+import '../../shared/util/money_format.dart' show formatWon;
 import 'widgets/format.dart';
 import 'widgets/gifticon_status_label.dart';
 import '../mypage/mypage_page.dart';
