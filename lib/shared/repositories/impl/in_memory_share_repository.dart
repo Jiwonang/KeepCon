@@ -49,6 +49,9 @@ class InMemoryShareRepository implements ShareRepository {
   final List<UsageLog> _usageLogs = <UsageLog>[];
   final List<GroupNotification> _notifications = <GroupNotification>[];
 
+  /// 사용자별 알림 마지막 읽음 시각(userId → 시각). 없으면 한 번도 안 읽음.
+  final Map<String, DateTime> _notifReadAt = <String, DateTime>{};
+
   final StreamController<void> _tick = StreamController<void>.broadcast();
   int _seq = 100;
 
@@ -544,6 +547,19 @@ class InMemoryShareRepository implements ShareRepository {
   @override
   Future<List<GroupNotification>> getNotifications(String userId) async =>
       _notificationsFor(userId);
+
+  @override
+  Stream<DateTime?> watchNotificationsReadAt(String userId) async* {
+    yield _notifReadAt[userId];
+    yield* _tick.stream.map((_) => _notifReadAt[userId]);
+  }
+
+  @override
+  Future<void> markNotificationsRead() async {
+    final User me = _requireUser();
+    _notifReadAt[me.id] = DateTime.now();
+    _emit();
+  }
 
   List<GroupNotification> _notificationsFor(String userId) =>
       List<GroupNotification>.unmodifiable(

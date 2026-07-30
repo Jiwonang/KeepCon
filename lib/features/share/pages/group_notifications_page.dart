@@ -9,16 +9,39 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../shared/models/share.dart';
+import '../../../shared/providers/repositories.dart';
 import '../../../shared/theme/theme_tokens.dart';
 import '../state/share_providers.dart';
 import '../widgets/share_format.dart';
 
 /// 그룹 알림 화면. 공유 메인 헤더의 알림 아이콘에서 push 한다.
-class GroupNotificationsPage extends ConsumerWidget {
+///
+/// 진입 시 [ShareRepository.markNotificationsRead]를 호출해 안읽음을 해소한다(뱃지 클리어).
+class GroupNotificationsPage extends ConsumerStatefulWidget {
   const GroupNotificationsPage({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<GroupNotificationsPage> createState() =>
+      _GroupNotificationsPageState();
+}
+
+class _GroupNotificationsPageState
+    extends ConsumerState<GroupNotificationsPage> {
+  @override
+  void initState() {
+    super.initState();
+    // 진입 즉시 모두 읽음 처리. 세션이 없으면(StateError) 조용히 무시한다.
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      try {
+        await ref.read(shareRepositoryProvider).markNotificationsRead();
+      } on StateError {
+        // 미로그인 상태에선 표시할 알림도 없으므로 무시.
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final List<GroupNotification> items =
         ref.watch(notificationsProvider).value ?? const <GroupNotification>[];
 

@@ -102,6 +102,11 @@ service cloud.firestore {
       allow read, write: if isSignedIn();
     }
 
+    // 알림 읽음 상태(마지막 읽음 시각) — 본인 것만 읽기/쓰기.
+    match /notificationReads/{userId} {
+      allow read, write: if isSignedIn() && uid() == userId;
+    }
+
     // 그 외 모든 문서 기본 차단.
     match /{document=**} {
       allow read, write: if false;
