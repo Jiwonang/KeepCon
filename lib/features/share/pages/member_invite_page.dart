@@ -136,9 +136,19 @@ class _MemberInvitePageState extends ConsumerState<MemberInvitePage> {
         ..hideCurrentSnackBar()
         ..showSnackBar(const SnackBar(content: Text('새 초대코드를 발급했어요.')));
     } on StateError {
+      // StateError는 권한 외에 그룹 없음(삭제됨)도 포함하므로 중립적으로 안내한다.
       messenger
         ..hideCurrentSnackBar()
-        ..showSnackBar(const SnackBar(content: Text('방장만 재발급할 수 있어요.')));
+        ..showSnackBar(
+          const SnackBar(content: Text('그룹이 없거나 재발급 권한이 없어요.')),
+        );
+    } catch (_) {
+      // 네트워크 등 기타 오류.
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(content: Text('초대코드를 재발급하지 못했어요. 다시 시도해 주세요.')),
+        );
     }
   }
 
