@@ -171,4 +171,15 @@ abstract class ShareRepository {
 
   /// [userId]가 속한 그룹들의 알림을 1회성으로 조회한다(최신순).
   Future<List<GroupNotification>> getNotifications(String userId);
+
+  /// [userId]의 알림 '마지막 읽음' 시각을 반응형으로 관찰한다.
+  ///
+  /// 한 번도 읽지 않았으면 `null`(= 모든 알림이 안읽음). 소비자는 이 시각 이후에
+  /// 생성된 [GroupNotification]을 안읽음으로 판정한다(안읽음 뱃지/카운트).
+  Stream<DateTime?> watchNotificationsReadAt(String userId);
+
+  /// 현재 사용자의 알림을 모두 읽음 처리한다(마지막 읽음 시각을 현재로 갱신).
+  ///
+  /// 세션에 현재 사용자가 없으면 [StateError]. 알림 화면 진입 시 호출해 안읽음을 해소한다.
+  Future<void> markNotificationsRead();
 }

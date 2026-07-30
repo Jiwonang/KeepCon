@@ -59,6 +59,7 @@ class FirebaseShareRepository implements ShareRepository {
   static const String usageLogsCollection = 'usageLogs';
   static const String notificationsCollection = 'notifications';
   static const String shareLocksCollection = 'shareLocks';
+  static const String notificationReadsCollection = 'notificationReads';
 
   static const String _defaultAvatar = '🙂';
 
@@ -70,6 +71,8 @@ class FirebaseShareRepository implements ShareRepository {
       _db.collection(usageLogsCollection);
   CollectionReference<Map<String, dynamic>> get _notifs =>
       _db.collection(notificationsCollection);
+  CollectionReference<Map<String, dynamic>> get _notifReads =>
+      _db.collection(notificationReadsCollection);
   CollectionReference<Map<String, dynamic>> get _locks =>
       _db.collection(shareLocksCollection);
 
@@ -609,6 +612,21 @@ class FirebaseShareRepository implements ShareRepository {
     return s.docs.map(_notifFromDoc).toList(growable: false);
   }
 
+  @override
+  Stream<DateTime?> watchNotificationsReadAt(String userId) {
+    return _notifReads.doc(userId).snapshots().map(
+        (DocumentSnapshot<Map<String, dynamic>> d) =>
+            _readAtFrom(d.data()?['readAt']));
+  }
+
+  @override
+  Future<void> markNotificationsRead() async {
+    final User me = _requireUser();
+    await _notifReads.doc(me.id).set(<String, dynamic>{
+      'readAt': Timestamp.fromDate(DateTime.now()),
+    });
+  }
+
   Future<List<String>> _userGroupIds(String userId) async {
     final List<Group> groups = await getGroups(userId);
     return groups.map((Group g) => g.id).take(_whereInLimit).toList();
@@ -806,6 +824,14 @@ class FirebaseShareRepository implements ShareRepository {
     if (value is Timestamp) return value.toDate();
     if (value is DateTime) return value;
     return DateTime.fromMillisecondsSinceEpoch(0);
+  }
+
+  /// 알림 마지막 읽음 시각 파서 — 없거나 손상 값이면 `null`(= 안 읽음). 안읽음 판정은
+  /// null을 "전부 안읽음"으로 안전하게 처리하므로 fail-open이 아니다.
+  DateTime? _readAtFrom(Object? value) {
+    if (value is Timestamp) return value.toDate();
+    if (value is DateTime) return value;
+    return null;
   }
 
   /// 초대코드 만료 시각을 문서 값에서 해석한다.
