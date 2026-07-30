@@ -280,6 +280,31 @@ class InMemoryShareRepository implements ShareRepository {
   }
 
   @override
+  Future<Group> removeMember({
+    required String groupId,
+    required String userId,
+  }) async {
+    final User me = _requireUser();
+    final Group g = _requireGroup(groupId);
+    if (!g.isOwnedBy(me.id)) {
+      throw StateError('Only the owner can remove members: $groupId');
+    }
+    if (userId == me.id) {
+      throw StateError('Owner cannot remove themselves: $groupId');
+    }
+    if (!g.isMember(userId)) {
+      throw StateError('Not a member of group: $userId');
+    }
+    final List<GroupMember> next = g.members
+        .where((GroupMember m) => m.userId != userId)
+        .toList(growable: false);
+    final Group updated = g.copyWith(members: next);
+    _groups[_groupIndex(groupId)] = updated;
+    _emit();
+    return updated;
+  }
+
+  @override
   Future<Group> setInviteOwnerOnly({
     required String groupId,
     required bool ownerOnly,

@@ -138,6 +138,10 @@ class _GroupDetailBody extends ConsumerWidget {
                     _MemberRow(
                       member: group.members[i],
                       isMe: uid != null && group.members[i].userId == uid,
+                      // 방장만, 방장 아닌 다른 멤버를 내보낼 수 있다.
+                      canRemove: iAmOwner && !group.members[i].isOwner,
+                      onRemove: () =>
+                          _onRemoveMember(context, ref, group.members[i]),
                     ),
                   ],
                 ],
@@ -257,6 +261,29 @@ class _GroupDetailBody extends ConsumerWidget {
       _snack(messenger, '그룹을 삭제했어요.');
     } on StateError {
       _snack(messenger, '방장만 삭제할 수 있어요.');
+    }
+  }
+
+  Future<void> _onRemoveMember(
+    BuildContext context,
+    WidgetRef ref,
+    GroupMember member,
+  ) async {
+    final bool confirmed = await _confirm(
+      context,
+      '멤버 내보내기',
+      '"${member.displayName}"님을 "${group.name}"에서 내보낼까요?',
+    );
+    if (!confirmed || !context.mounted) return;
+    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
+    try {
+      await ref.read(shareRepositoryProvider).removeMember(
+            groupId: group.id,
+            userId: member.userId,
+          );
+      _snack(messenger, '"${member.displayName}"님을 내보냈어요.');
+    } on StateError {
+      _snack(messenger, '방장만 멤버를 내보낼 수 있어요.');
     }
   }
 
@@ -410,11 +437,20 @@ class _SharePill extends StatelessWidget {
 }
 
 /// 멤버 한 줄 — 아바타 + 이름 + (방장 뱃지) + 셰브론.
+///
+/// [canRemove]면(방장이 다른 멤버를 볼 때) 셰브론 대신 내보내기 액션을 노출한다.
 class _MemberRow extends StatelessWidget {
-  const _MemberRow({required this.member, required this.isMe});
+  const _MemberRow({
+    required this.member,
+    required this.isMe,
+    this.canRemove = false,
+    this.onRemove,
+  });
 
   final GroupMember member;
   final bool isMe;
+  final bool canRemove;
+  final VoidCallback? onRemove;
 
   @override
   Widget build(BuildContext context) {
@@ -472,7 +508,16 @@ class _MemberRow extends StatelessWidget {
             ),
           ],
           const SizedBox(width: 6),
-          Icon(Icons.chevron_right, size: 20, color: scheme.onSurfaceVariant),
+          if (canRemove)
+            IconButton(
+              onPressed: onRemove,
+              icon: const Icon(Icons.person_remove_outlined, size: 20),
+              tooltip: '내보내기',
+              color: scheme.error,
+              visualDensity: VisualDensity.compact,
+            )
+          else
+            Icon(Icons.chevron_right, size: 20, color: scheme.onSurfaceVariant),
         ],
       ),
     );
