@@ -57,3 +57,31 @@
 ## 미검증 (미구현 — 계약 슬라이스 범위 밖)
 - share 페이지(그룹/공유/사용동기화/알림): 미구현. updateStatus 소비, ShareStatus/NotificationType enum, 그룹 모델은 후속 확장에서 재검증.
 - auth 실구현(실제 AuthRepository): 현재 `InMemoryAuthRepository` mock. 조립부 override 규칙(`repositories.dart:25-49`)은 문서화되어 있음. main.dart 조립부는 이번 슬라이스 범위 밖.
+
+---
+
+# feat/scan-camera 검증 (2026-07-30, 인라인 QA — 서브에이전트 529 장애로 리더 직접 수행)
+
+## 검증 대상
+카메라 실시간 바코드 스캔(mobile_scanner ^7.4.0) + 수동 입력 보완 4항목 (미커밋 working tree)
+
+## 경계면별 판정
+
+| # | 경계면 | 판정 | 근거 |
+|---|--------|------|------|
+| 1 | scan → 계약(lib/shared) | **통과** | `git diff develop -- lib/shared` 빈 출력(무수정). submit() 경로 무변경 — status=available, kDefaultCategory 보정, ownerId, addGifticon 시그니처 기존 검증 유지. SSOT guard ✓ |
+| 2 | scan → main (imagePath=null) | **통과** | 카메라 경로는 barcode만 프리필. 필수 필드는 validate()가 저장 전 강제. main gifticon_card.dart:126 — imagePath null/empty → 카테고리색 placeholder 분기 확인 |
+| 3 | 카메라 흐름 상태 안전성 | **통과** | camera 분기가 try 내부·startWith 이후에 위치(scan_page.dart:250), _busy 가드 공유, 취소(null) 시 return→finally reset(). 스캐너 화면은 Riverpod 미접촉·_handled 중복 pop 가드·dispose에서 컨트롤러 해제 |
+| 4 | 저장 후 계속 등록 | **통과** | _submitAndContinue: submit 성공 후 startWith(ScanSource.manual)로 세션을 의도적으로 manual 고정 갱신·폼 초기화(이전 source 유지 금지 — camera/gallery 출처 위장 방지, /code-review 반영). in-flight 중 이탈 시 세션 가드가 stale 결과 차단. ScanSubmitInProgress 비활성화 재사용 |
+| 5 | 콤마 포매터 ↔ parsedPrice | **통과** | digitsOnly 제거, ThousandsSeparatorInputFormatter 단독 사용(비숫자 제거 자체 수행 — 중복 방지, /code-review 반영), parsedPrice가 콤마 제거(기존 코드+신규 테스트로 고정) |
+| 6 | 스캐너 반환 계약 | **통과** | push<String> → String? → prefillFromRecognition(barcode:) 명명 파라미터 정합 |
+
+## 기계 검증
+- SSOT guard: 위반 없음 ✓
+- dart format --set-exit-if-changed: 0 changed ✓
+- flutter analyze: No issues found ✓
+- flutter test: 109 passed ✓
+
+## 발견 이슈
+- blocker/major: 없음
+- minor(비차단, 기록만): ①mobile_scanner 카메라 UX(프리뷰·플래시·권한 프롬프트)는 실기기 검증 필요 ②ios pod install 미실행(Windows 환경) ③main gifticon_card가 로컬 파일 경로에 Image.network 사용 — 기존 이슈(이번 변경과 무관, errorBuilder로 placeholder 폴백되어 안전)

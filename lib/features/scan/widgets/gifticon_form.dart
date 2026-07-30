@@ -30,7 +30,34 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../shared/models/gifticon.dart';
+import '../../../shared/theme/theme_tokens.dart';
 import '../state/gifticon_form_state.dart';
+import '../util/expiry_quick_pick.dart';
+import '../util/price_input_formatter.dart';
+
+/// 카테고리 빠른 선택 프리셋 (scan 페이지 로컬 상수).
+///
+/// 계약상 `Gifticon.category`는 **자유 문자열**이다(기본값 [kDefaultCategory]).
+/// 따라서 이 목록은 "자주 쓰는 값을 한 번에 넣어 주는 입력 편의"일 뿐,
+/// 계약이 허용하는 값의 집합이 아니다 — 사용자는 아래 입력창에 원하는
+/// 카테고리를 직접 적을 수 있다.
+///
+/// 왜 lib/shared로 승격하지 않나 (CLAUDE.md '늦게 승격'):
+/// 메인 페이지의 카테고리 필터는 저장된 데이터에서 카테고리를 **동적으로 도출**하므로
+/// 이 프리셋 목록을 소비하지 않는다. 즉 두 번째 소비자가 없다.
+/// (`_workspace/00_project_standards.md` — 카테고리 프리셋은 페이지 로컬)
+///
+/// 마지막 항목은 계약 기본값 [kDefaultCategory]와 같은 값이라
+/// "미입력과 동일한 선택"을 명시적으로 할 수 있게 한다.
+const List<String> kScanCategoryPresets = <String>[
+  '카페',
+  '치킨',
+  '버거',
+  '편의점',
+  '상품권',
+  kDefaultCategory,
+];
 
 /// 기프티콘 필드 편집 폼.
 ///
@@ -140,9 +167,17 @@ class _GifticonFormState extends ConsumerState<GifticonForm> {
           value: next.productName,
         );
 
+        // 금액은 동기화할 때도 콤마 포맷을 거친다.
+        //
+        // 프로그래밍 방식 대입(controller.value =)은 inputFormatters를
+        // 거치지 않으므로, OCR 프리필 값("12500")을 그대로 넣으면
+        // 직접 입력("12,500")과 표시가 어긋난다.
+        //
+        // formatThousands는 비숫자를 먼저 제거하므로
+        // 이미 포맷된 값("12,500")에도 안전하다(멱등).
         _syncController(
           controller: _priceController,
-          value: next.price,
+          value: formatThousands(next.price),
         );
 
         _syncController(
@@ -227,6 +262,12 @@ class _GifticonFormState extends ConsumerState<GifticonForm> {
       gifticonFormControllerProvider.notifier,
     );
 
+    // 저장 진행 중 여부.
+    //
+    // 저장/연속등록 두 버튼을 동시에 비활성화해
+    // 중복 저장 요청을 막는다.
+    final bool inProgress = form.submit is ScanSubmitInProgress;
+
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
@@ -281,17 +322,21 @@ class _GifticonFormState extends ConsumerState<GifticonForm> {
         // 금액
         // ─────────────────────────────────────────
         //
-        // 숫자만 입력할 수 있도록 제한한다.
+        // 입력 중 천 단위 콤마를 자동으로 붙인다("4500" → "4,500").
         //
-        // 실제 저장 시에는 GifticonFormState.parsedPrice가
-        // 문자열을 int로 변환한다.
+        // ThousandsSeparatorInputFormatter가 비숫자 제거까지 담당하므로
+        // 별도의 digitsOnly 포매터는 두지 않는다(동작이 완전히 중복된다).
+        //
+        // 상태에는 콤마가 포함된 문자열이 저장되지만,
+        // 저장 시 GifticonFormState.parsedPrice가 콤마를 제거하고
+        // int로 변환하므로 계약(price: int)에는 영향이 없다.
         _labeledField(
           label: '금액(원) *',
-          hint: '예: 4500 (무료/사은품은 0)',
+          hint: '예: 4,500 (무료/사은품은 0)',
           controller: _priceController,
           keyboardType: TextInputType.number,
-          inputFormatters: [
-            FilteringTextInputFormatter.digitsOnly,
+          inputFormatters: const [
+            ThousandsSeparatorInputFormatter(),
           ],
           onChanged: controller.setPrice,
         ),
@@ -300,8 +345,19 @@ class _GifticonFormState extends ConsumerState<GifticonForm> {
         // 카테고리
         // ─────────────────────────────────────────
         //
+        // 프리셋 칩 + 자유 입력창을 함께 제공한다.
+        //
+        // - 칩을 누르면 입력창에도 그 값이 반영된다
+        //   (setCategory → Riverpod 상태 → _syncController)
+        // - 프리셋에 없는 카테고리는 입력창에 직접 적을 수 있다
+        //
         // 입력하지 않아도 저장은 가능하다.
         // submit()에서 빈 값이면 "기타"로 자동 보정한다.
+        _CategoryPresetChips(
+          selected: form.category,
+          onSelected: controller.setCategory,
+        ),
+
         _labeledField(
           label: '카테고리',
           hint: '미입력 시 "$kDefaultCategory"로 저장',
@@ -333,7 +389,7 @@ class _GifticonFormState extends ConsumerState<GifticonForm> {
         // 유효기간
         // ─────────────────────────────────────────
         //
-        // TextField 대신 날짜 선택기를 사용한다.
+        // TextField 대신 날짜 선택기 + 빠른 선택 버튼을 사용한다.
         //
         // 선택한 날짜는 Riverpod 상태의
         // expiryDate에 저장된다.
@@ -378,36 +434,10 @@ class _GifticonFormState extends ConsumerState<GifticonForm> {
           // 저장 중에는 버튼을 비활성화한다.
           //
           // 중복 저장 요청을 방지하기 위한 처리다.
-          onPressed: form.submit is ScanSubmitInProgress
-              ? null
-              : () async {
-                  // Controller에서 검증 및 저장을 수행한다.
-                  final saved = await controller.submit();
-
-                  // 저장 성공 시 saved가 반환된다.
-                  if (saved != null && context.mounted) {
-                    // 사용자에게 저장 성공 메시지를 표시한다.
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(
-                          '저장됨: '
-                          '${saved.brand} '
-                          '${saved.productName}',
-                        ),
-                      ),
-                    );
-
-                    // 저장 완료 후 폼 화면을 닫는다.
-                    //
-                    // maybePop(saved)를 사용하면
-                    // 이전 화면에서 저장된 Gifticon을
-                    // 결과값으로 받을 수도 있다.
-                    Navigator.of(context).maybePop(saved);
-                  }
-                },
+          onPressed: inProgress ? null : () => _submitAndClose(controller),
 
           // 저장 중에는 로딩 인디케이터를 표시한다.
-          child: form.submit is ScanSubmitInProgress
+          child: inProgress
               ? const SizedBox(
                   height: 18,
                   width: 18,
@@ -417,8 +447,132 @@ class _GifticonFormState extends ConsumerState<GifticonForm> {
                 )
               : const Text('저장'),
         ),
+
+        const SizedBox(height: 8),
+
+        // ─────────────────────────────────────────
+        // 저장 후 연속 등록 (보조 버튼)
+        // ─────────────────────────────────────────
+        //
+        // 기프티콘은 보통 여러 장을 한 번에 정리하므로,
+        // 저장할 때마다 스캔 화면으로 돌아갔다 다시 들어오는 왕복을 없앤다.
+        //
+        // 저장 성공 후 화면을 닫지 않고 폼만 비운다.
+        // 다음 세션은 직접 입력(manual)로 시작한다 — 이유는
+        // _submitAndContinue doc 참조.
+        //
+        // 중복 저장 방지는 기본 저장 버튼과 동일하게
+        // ScanSubmitInProgress 비활성화 패턴을 재사용한다
+        // (같은 프레임 연타는 submit() 자체의 재진입 가드가 막는다).
+        OutlinedButton(
+          onPressed: inProgress ? null : () => _submitAndContinue(controller),
+          child: const Text('저장 후 계속 등록'),
+        ),
       ],
     );
+  }
+
+  /// 저장 공통 처리: submit → (성공 시) 저장 완료 스낵바.
+  ///
+  /// 반환:
+  ///
+  /// - 저장 성공 + 이 폼 세션이 아직 유효 → 저장된 [Gifticon]
+  /// - 검증 실패 / 저장 실패 / 세션 무효(사용자가 폼을 떠남) → null
+  ///
+  /// [GifticonFormController.submit]은 세션이 무효화된 경우
+  /// (await 중 startWith/reset이 실행된 경우) null을 반환하므로,
+  /// 여기서 null이면 어떤 후속 동작(닫기/폼 비우기)도 하면 안 된다.
+  ///
+  /// 두 저장 버튼([_submitAndClose]/[_submitAndContinue])이 이 공통
+  /// 프리픽스를 공유해, 가드·성공 메시지가 한 곳에서만 관리된다.
+  Future<Gifticon?> _submitWithFeedback(
+    GifticonFormController controller, {
+    String suffix = '',
+  }) async {
+    // Controller에서 검증 및 저장을 수행한다.
+    final Gifticon? saved = await controller.submit();
+
+    // 저장 실패 시에는 폼에 오류 메시지가 표시되므로 화면을 유지한다.
+    // 세션 무효 시에는 사용자가 이미 폼을 떠났으므로 아무것도 하지 않는다.
+    if (saved == null || !mounted) return null;
+
+    // 사용자에게 저장 성공 메시지를 표시한다.
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          '저장됨: '
+          '${saved.brand} '
+          '${saved.productName}'
+          '$suffix',
+        ),
+      ),
+    );
+
+    return saved;
+  }
+
+  /// 저장 후 폼 화면을 닫는다(기본 흐름).
+  ///
+  /// 저장에 성공하면 이전 화면(ScanPage)에 저장된 [Gifticon]을 결과로 넘긴다.
+  Future<void> _submitAndClose(GifticonFormController controller) async {
+    final Gifticon? saved = await _submitWithFeedback(controller);
+
+    if (saved == null || !mounted) return;
+
+    // 심층 방어: 이 라우트가 아직 최상단일 때만 닫는다.
+    //
+    // 사용자가 저장 대기 중 뒤로가기로 이미 pop을 시작한 경우,
+    // 라우트는 exit 애니메이션 동안 mounted로 남아 있어
+    // 여기서 또 pop하면 아래 화면(ScanPage)까지 닫힌다.
+    // (submit()의 세션 가드가 보통 먼저 거르지만, 이중으로 막는다)
+    final ModalRoute<Object?>? route = ModalRoute.of(context);
+    if (route == null || !route.isCurrent) return;
+
+    // 저장 완료 후 폼 화면을 닫는다.
+    //
+    // maybePop(saved)를 사용하면
+    // 이전 화면에서 저장된 Gifticon을
+    // 결과값으로 받을 수도 있다.
+    Navigator.of(context).maybePop(saved);
+  }
+
+  /// 저장 후 화면을 닫지 않고 다음 기프티콘 입력을 바로 시작한다.
+  ///
+  /// 흐름:
+  ///
+  /// submit()
+  ///   ↓ 성공(세션 유효)
+  /// 저장 완료 스낵바
+  ///   ↓
+  /// startWith(ScanSource.manual) — 폼 상태 초기화(세션도 갱신)
+  ///   ↓
+  /// _syncController가 입력창을 비움
+  ///
+  /// 다음 세션의 source를 **manual로 고정**하는 이유:
+  ///
+  /// 연속 등록은 카메라 재스캔/갤러리 재선택 없이 곧바로 손으로
+  /// 입력하는 흐름이다. 이전 source(camera/gallery)를 유지하면
+  ///
+  /// - 바코드/이미지 없는 저장이 "카메라/갤러리 출처"로 위장되고
+  ///   (source의 의미 = 이 기프티콘 데이터가 어떻게 들어왔는가)
+  /// - await 후 상태에서 source를 다시 읽어야 해서, 저장 대기 중
+  ///   사용자가 이탈한 경우 stale 값을 읽는 레이스가 생긴다
+  ///
+  /// 화면 제목도 "기프티콘 직접 입력"으로 바뀌어 실제 입력 방식과 일치한다.
+  /// 카메라로 다시 스캔하려면 폼을 닫고 카메라 카드를 다시 누르면 된다.
+  ///
+  /// 화면을 닫지 않으므로 ScanPage의 finally(reset)는
+  /// 사용자가 최종적으로 폼을 나갈 때 한 번만 실행된다.
+  Future<void> _submitAndContinue(GifticonFormController controller) async {
+    final Gifticon? saved = await _submitWithFeedback(
+      controller,
+      suffix: ' — 이어서 등록할 수 있어요.',
+    );
+
+    if (saved == null || !mounted) return;
+
+    // 다음 입력을 직접 입력 세션으로 시작한다(위 doc 참조).
+    controller.startWith(ScanSource.manual);
   }
 
   /// 공통 입력 필드.
@@ -484,13 +638,90 @@ class _GifticonFormState extends ConsumerState<GifticonForm> {
   }
 }
 
+// ─────────────────────── 카테고리 프리셋 칩 ───────────────────────
+
+/// 카테고리 빠른 선택 칩 행.
+///
+/// [kScanCategoryPresets]의 값을 [ChoiceChip]으로 보여준다.
+///
+/// 흐름:
+///
+/// 칩 탭
+///   ↓
+/// onSelected(카테고리 문자열)
+///   ↓
+/// GifticonFormController.setCategory()
+///   ↓
+/// GifticonFormState.category 변경
+///   ↓
+/// _syncController → 아래 카테고리 입력창에도 반영
+///
+/// 이미 선택된 칩을 다시 누르면 빈 문자열로 되돌린다
+/// (선택 해제 = 미입력 = 저장 시 [kDefaultCategory]로 보정).
+class _CategoryPresetChips extends StatelessWidget {
+  const _CategoryPresetChips({
+    required this.selected,
+    required this.onSelected,
+  });
+
+  /// 현재 폼 상태의 카테고리 값.
+  ///
+  /// 사용자가 입력창에 직접 적은 값일 수도 있으므로
+  /// 프리셋과 일치하지 않으면 어떤 칩도 선택되지 않는다.
+  final String selected;
+
+  /// 칩을 눌렀을 때 호출할 콜백.
+  final ValueChanged<String> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    // 입력창의 앞뒤 공백은 무시하고 비교한다
+    // (submit()의 trim 보정과 판정 기준을 맞춘다).
+    final String current = selected.trim();
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Text(
+            '카테고리 빠른 선택',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+          const SizedBox(height: 8),
+
+          // 화면 폭이 좁아도 줄바꿈되도록 Wrap을 사용한다.
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: <Widget>[
+              for (final String preset in kScanCategoryPresets)
+                ChoiceChip(
+                  label: Text(preset),
+                  selected: current == preset,
+
+                  // 선택 → 그 값, 선택 해제 → 빈 문자열(미입력).
+                  onSelected: (bool isSelected) {
+                    onSelected(isSelected ? preset : '');
+                  },
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─────────────────────── 유효기간 선택 ───────────────────────
+
 /// 유효기간(만료일) 선택 필드.
 ///
-/// 일반 TextField 대신 날짜 선택기를 사용한다.
+/// 일반 TextField 대신 날짜 선택기 + 빠른 선택 버튼을 사용한다.
 ///
 /// 사용자가 날짜를 선택하면
 ///
-/// DatePicker
+/// DatePicker 또는 빠른 선택(+30일/+90일/+1년)
 ///   ↓
 /// onPicked(DateTime)
 ///   ↓
@@ -513,6 +744,46 @@ class _ExpiryDateField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        _datePickerButton(context),
+
+        const SizedBox(height: 8),
+
+        // ─────────────────────────────────────────
+        // 유효기간 빠른 선택
+        // ─────────────────────────────────────────
+        //
+        // 기프티콘 유효기간은 "오늘부터 N일/N년"으로 적혀 있는 경우가 많다.
+        // DatePicker에서 날짜를 찾는 대신 버튼 하나로 계산한다.
+        //
+        // 계산 규칙(달력 기준·자정 정규화)은 ExpiryQuickPick.resolve가 소유한다.
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: <Widget>[
+            for (final ExpiryQuickPick pick in ExpiryQuickPick.values)
+              OutlinedButton(
+                style: OutlinedButton.styleFrom(
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(AppRadii.action),
+                  ),
+                ),
+
+                // 기준일은 항상 "오늘"이다(이미 선택된 날짜에 누적하지 않는다 —
+                // 버튼을 두 번 누르면 +60일이 되는 혼동을 막는다).
+                onPressed: () => onPicked(pick.resolve(DateTime.now())),
+                child: Text(pick.label),
+              ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  /// 날짜 선택기를 여는 버튼.
+  Widget _datePickerButton(BuildContext context) {
     // 날짜가 아직 선택되지 않았다면
     // "유효기간 선택 *"을 표시한다.
     //
