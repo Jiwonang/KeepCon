@@ -30,7 +30,7 @@ if [ -n "$defs" ]; then
 fi
 
 # 2) SSOT provider 재선언 금지 (소비 ref.watch(...)는 허용, 선언은 금지)
-SSOT_PROVIDERS="authRepositoryProvider|gifticonRepositoryProvider|shareRepositoryProvider|themeModeProvider"
+SSOT_PROVIDERS="authRepositoryProvider|gifticonRepositoryProvider|shareRepositoryProvider|themeModeProvider|myGroupsProvider"
 
 # 선택적 `late`, 선택적 타입(`Provider<T> ` 등)을 포괄해 `final NAME =`,
 # `late final NAME =`, `final Provider<T> NAME =` 형태를 모두 잡는다.

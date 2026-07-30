@@ -4,8 +4,10 @@
 /// 화면(그룹 상세·공유 기프티콘 상세·사용 이력·알림)으로 이동하도록 배선한다.
 ///
 /// **계약 소비.** 그룹/공유 도메인은 `lib/shared`의 계약(SSOT)을 소비한다:
-/// - 상태 구독 = [ShareRepository]의 watch 스트림([myGroupsProvider]/[allSharedProvider]/
-///   [usageLogsProvider]) — Riverpod `ref.watch`.
+/// - 상태 구독 = [ShareRepository]의 watch 스트림([allSharedProvider]/[usageLogsProvider])
+///   — Riverpod `ref.watch`.
+/// - 내 그룹 목록 = 계약 정본 [myGroupsProvider](`lib/shared/providers/my_groups_provider.dart`).
+///   scan 페이지도 같은 정본을 보므로 `watchGroups` 구독이 하나로 합쳐진다.
 /// - 행위자/멤버 식별 = [AuthRepository.currentUser]([shareCurrentUserProvider]).
 /// - 공유 후보(내 기프티콘)는 [GifticonRepository.watchGifticons]로 원본 [Gifticon]을 받는다.
 ///
@@ -19,6 +21,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../shared/models/group.dart';
 import '../../shared/models/share.dart';
 import '../../shared/models/user.dart';
+import '../../shared/providers/my_groups_provider.dart' show myGroupsProvider;
 import '../../shared/theme/theme_tokens.dart';
 import 'pages/group_detail_page.dart';
 import 'pages/group_notifications_page.dart';
@@ -45,7 +48,7 @@ class SharePage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final List<Group> groups =
-        ref.watch(myGroupsProvider).value ?? const <Group>[];
+        ref.watch(myGroupsProvider).valueOrNull ?? const <Group>[];
     final List<SharedGifticon> shared = ref.watch(allSharedProvider);
     final List<UsageLog> logs =
         ref.watch(usageLogsProvider).value ?? const <UsageLog>[];

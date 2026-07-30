@@ -4,7 +4,7 @@
 > 이번 검증 슬라이스 범위: **scan(생산) → main(소비)**. auth는 인터페이스+mock으로 대체.
 > 계약 위치: `lib/shared/`. 이 문서와 소스가 어긋나면 소스가 아니라 **양쪽을 함께** 갱신한다.
 
-작성일: 2026-07-06 · 최종 갱신: 2026-07-30 · 계약 버전: v2.4 (날짜 포맷 유틸 승격)
+작성일: 2026-07-06 · 최종 갱신: 2026-07-30 · 계약 버전: v2.5 (내 그룹 목록 provider 승격)
 
 ---
 
@@ -67,6 +67,7 @@
 | `josa(word, withBatchim, withoutBatchim)` / `KoreanJosa` 확장(`eulReul`/`iGa`/`eunNeun`/`waGwa`) | util | `lib/shared/util/korean_particle.dart` | 2 |
 | `groupThousands(digits)` (코어) / `digitsOnly(input)` / `formatThousands(input)` (scan 진입점) / `formatWon(won)` (main 진입점) | util | `lib/shared/util/money_format.dart` | 2.3 |
 | `formatYmdDot(DateTime)` → `'YYYY.MM.DD'` (코어 — main·share·scan 공통 날짜 표기) | util | `lib/shared/util/date_format.dart` | 2.4 |
+| `myGroupsProvider` (`AutoDisposeProvider<AsyncValue<List<Group>>>`) — **SSOT**. 세션→`watchGroups` 체인 정본. scan·share **공용 구독 1개** | provider | `lib/shared/providers/my_groups_provider.dart` | 2.5 |
 
 ### `Gifticon` 필드 계약
 
@@ -91,9 +92,9 @@
 | 페이지 | 소비 (읽음) | 생산 (씀) |
 |--------|------|------|
 | **auth** (mock) | `User` | `AuthRepository.currentUser`, `watchCurrentUser()` (→ `InMemoryAuthRepository` 제공) |
-| **scan** (생산자) | `authRepositoryProvider`→`AuthRepository.currentUser`·`watchCurrentUser()` (소유자/세션 식별), `gifticonRepositoryProvider`, `Gifticon`, `GifticonStatus.available`, `AppRoutes.scan`, `shareRepositoryProvider`→`watchGroups(uid)`(저장할 그룹 선택지), `Group`(id·name·emoji) | `GifticonRepository.addGifticon(Gifticon)`, (그룹 선택 시) `ShareRepository.shareGifticon({groupId, gifticon: saved})` |
+| **scan** (생산자) | `authRepositoryProvider`→`AuthRepository.currentUser` (소유자 식별), `gifticonRepositoryProvider`, `Gifticon`, `GifticonStatus.available`, `AppRoutes.scan`, `shareRepositoryProvider`→`shareGifticon(...)`, **`myGroupsProvider`**(저장할 그룹 선택지 — 세션→`watchGroups(uid)` 체인 정본; scan 파생에서 `valueOrNull ?? []` 폴딩), `Group`(id·name·emoji) | `GifticonRepository.addGifticon(Gifticon)`, (그룹 선택 시) `ShareRepository.shareGifticon({groupId, gifticon: saved})` |
 | **main** (소비자) | `gifticonRepositoryProvider`→`watchGifticons(ownerId)`, `Gifticon`(+`price`), `SortOption`, `FilterOption`, `GifticonStatus`, `AppRoutes.main`, `Theme.of(context)`(AppTheme) | 총금액 통계 = `price` 합산, (상태 변경 시) `GifticonRepository.updateStatus(id, status)` |
-| **share** (그룹/공유) | `shareRepositoryProvider`→`ShareRepository`(그룹 CRUD·멤버·초대·공유/취소·`markUsed`·이력·알림), `Group`/`GroupMember`/`SharedGifticon`/`UsageLog`/`GroupNotification`, `ShareStatus`/`MemberRole`/`GroupNotificationType`, `authRepositoryProvider`→`currentUser`(행위자 식별), `gifticonRepositoryProvider`→`watchGifticons(uid)`(공유 후보 = `Gifticon`), `AppRoutes.share` | `SharedGifticon`/`UsageLog`/`GroupNotification`(share repo에 씀), **`GifticonRepository.updateStatus(gifticonId, GifticonStatus.used)`**(원본 사용 동기화, `markUsed` 경유) |
+| **share** (그룹/공유) | `shareRepositoryProvider`→`ShareRepository`(그룹 CRUD·멤버·초대·공유/취소·`markUsed`·이력·알림), **`myGroupsProvider`**(내 그룹 목록 — `AsyncValue` 그대로 전파), `Group`/`GroupMember`/`SharedGifticon`/`UsageLog`/`GroupNotification`, `ShareStatus`/`MemberRole`/`GroupNotificationType`, `authRepositoryProvider`→`currentUser`(행위자 식별), `gifticonRepositoryProvider`→`watchGifticons(uid)`(공유 후보 = `Gifticon`), `AppRoutes.share` | `SharedGifticon`/`UsageLog`/`GroupNotification`(share repo에 씀), **`GifticonRepository.updateStatus(gifticonId, GifticonStatus.used)`**(원본 사용 동기화, `markUsed` 경유) |
 | **auth/설정('마이')** | `themeModeProvider`(watch) | `ThemeModeController.setDark(bool)`/`.set(mode)` (다크 토글) |
 | **앱 조립부(main.dart)** | `themeModeProvider`(watch), `AppTheme.light`/`AppTheme.dark` | `MaterialApp.theme`/`darkTheme`/`themeMode` 배선 |
 
@@ -199,6 +200,43 @@
      즉 main 목록에는 항상 반영되고, 그룹 공유만 누락될 수 있다.
    - 선택 식별자는 index가 아니라 **groupId**(`String?`, null = 내 지갑)다.
 
+13. **`myGroupsProvider` = SSOT (`lib/shared/providers/my_groups_provider.dart`, v2.5)**
+   - "현재 사용자의 그룹 목록"은 **오직 이 provider**가 소유한다. 페이지는
+     `watchCurrentUser()` → `watchGroups(uid)` 체인을 **다시 조립하지 않고** 이것을 `watch` 한다.
+   - **왜 정본인가 = 구독 중복 방어.** provider 인스턴스가 다르면 Riverpod은 스트림을 각각
+     열기 때문에, 같은 사용자에 대해 `watchGroups`가 두 번 구독됐다(승격 전 scan+share).
+     in-memory에서는 조용히 넘어가지만 Firestore에서는 `arrayContains` 리스너 2개 =
+     **문서 읽기·과금 2배**(초기 스냅샷 + 이후 모든 변경분). 같은 인스턴스를 watch 하면
+     Riverpod이 구독을 1개로 합친다 — 인스턴스 분기 결함(#7)의 provider 버전이다.
+   - **노출 형태 = `AsyncValue<List<Group>>`.** 로딩/에러 구분은 정본이 보존하고, 정보를
+     잃는 방향의 변환(빈 목록 폴딩)은 페이지 파생/소비 지점에서 한다:
+     share는 `groupByIdProvider`만 `AsyncValue` 구분 소비(whenData)하고 목록/요약 소비
+     지점들은 `valueOrNull ?? []` 폴딩 / scan = `scanTargetGroupsProvider`에서
+     `valueOrNull ?? const <Group>[]`.
+   - **상태 규약:** 알려진 user가 있으면(확정 방출 또는 세션 일시 순단 중 **이전 값 보존**)
+     그 user의 그룹 스트림을 그대로 반환 — 세션 순단으로 이미 로드된 목록이 사라지지 않는다.
+     알려진 user 없이 세션 로딩 중 → `AsyncLoading` 전파(빈 목록으로 접지 않음),
+     세션 `data(null)`(미로그인 확정) → `AsyncData(<Group>[])` + **`watchGroups` 미구독**,
+     그 외 에러 → `AsyncError` 전파.
+   - **⚠️ 접을 때는 `.value`가 아니라 `valueOrNull`.** `.value`는 이전 값이 없는
+     `AsyncError`에서 **rethrow** 하므로, 첫 방출이 에러면 폴백(`?? []`)에 도달하지 못하고
+     소비 provider가 throw 한다. 정본·파생·소비 지점 어느 층에서도 이 함정을 쓰지 않는다
+     (v2.5에서 share 소비 5곳의 기존 `.value`도 `valueOrNull`로 정리 완료).
+   - **수명 = `autoDispose`.** scan은 일회성 플로우라 이탈 시 리스너가 남으면 안 되고,
+     share의 파생은 keepAlive라 한 번 만들어지면 정본 수명을 **붙잡는다**(승격 전 keepAlive
+     체인과 동일한 수명 — share 동작 불변). 결과적으로 구독 수는 **0 또는 1**이며 승격 전
+     최댓값(2)보다 항상 적거나 같다. keepAlive provider가 autoDispose 정본을 `watch` 하는
+     조합은 허용된다(Riverpod 2.6 확인, 테스트로 고정).
+     ⚠️ 알려진 한계: keepAlive 파생이 생성된 뒤 그룹 스트림이 에러로 끝나면 그 `AsyncError`가
+     캐시에 남아 앱 세션 내 자동 재시도 경로가 없다(무조건 invalidate는 장애 중 retry storm
+     위험이라 넣지 않음) — 에러 표시/수동 재시도 UI가 후속 과제이며 그때 함께 해소한다.
+   - **아직 정본이 아닌 것:** 세션 스트림(`watchCurrentUser()`) 자체. 앱 조립부·main·mypage·
+     share가 각각 구독하고 정본 내부에도 하나 있다(총 5곳). 소비자가 많아 별도 승격 후보로 남긴다.
+     ⚠️ 정산 기록: share 정상상태의 동시 세션 구독이 승격 전 1개(shareCurrentUserProvider 공용)
+     → 승격 후 2개(그것 + 정본 내부)로 늘었다(비과금 auth 리스너라 실비용 미미). 또한
+     `memberNamesProvider`가 두 세션 소스를 혼합하므로 계정 전환 프레임에서 두 값이 한 프레임
+     어긋날 수 있다 — 세션 정본화 슬라이스에서 정본 내부 구독을 세션 정본 소비로 바꿔 해소할 것.
+
 ---
 
 ## 데이터 소스 = 인터페이스 뒤에서 교체 가능 (in-memory ↔ Firebase)
@@ -258,6 +296,7 @@
 | v2.2 | 2026-07-10 | **공유 페이지 계약 소비 전환 완료 + 계약 방어 강화(회귀/리뷰 반영).** (1) share-page-dev가 `lib/features/share/data/`(로컬 모델·스토어·util) **제거 완료**, 페이지가 `lib/shared` 계약을 직접 소비. share 테스트가 `InMemoryShareRepository` 대상으로 전환(`test/features/share/share_repository_*_test.dart`). (2) [회귀] `InMemoryShareRepository.shareGifticon`에 **"한 기프티콘은 최대 1회만 공유" 불변식** 복원(중복 공유 → `StateError`, 이중 사용·`UsageLog` 다중 방지). (3) [CodeRabbit] `Group` 생성자에 **owner 불변식**(멤버≥1, 방장 정확히 1명) assert 추가 + **`members`를 `List.unmodifiable`로 방어 복사**, `owner` getter의 조용한 `orElse: members.first` 제거(불변식 위반 시 `StateError`). 기존 계약 시그니처 무수정 — breaking 없음. | share(제거·소비 전환), 계약 방어(모든 `Group`/공유 소비자) |
 | v2.3 | 2026-07-30 | **금액 포맷 유틸 승격 (non-breaking, 순수 리팩터).** 동일한 천 단위 그룹핑 알고리즘이 main(`formatWon`, `lib/features/main/widgets/format.dart`)과 scan(`formatThousands`, `lib/features/scan/util/price_input_formatter.dart`)에 복사돼 있어 승격 규칙 ③(실제 두 번째 소비자)을 충족 → `lib/shared/util/money_format.dart` 정본 신설. **코어 하나 + 소비자별 얇은 진입점** 구조: `groupThousands(String digits)`(순수 그룹핑, digits-only 전제 debug assert, 3자리 이하 빠른 경로) / `digitsOnly(String)`(비숫자 제거) / `formatThousands(String)`= `groupThousands(digitsOnly(x))`(scan — 관용·멱등) / `formatWon(int)`(main — 절댓값 그룹핑 후 부호 앞 결합). 소비자는 정본을 **직접 import**한다(main_page·gifticon_card는 `show formatWon`; scan 입력 포매터는 코어·`digitsOnly` 소비, `gifticon_form`용 `formatThousands` 재export는 기존 테스트가 경로를 고정하는 scan 쪽에만 유지). 신규 테스트 `test/shared/util/money_format_test.dart`, **기존 `test/features/scan/price_input_formatter_test.dart` 무수정 통과**(동작 불변의 증거). | (없음 — non-breaking, 시그니처·동작 불변. main·scan은 이미 정본 소비로 전환됨) |
 | v2.4 | 2026-07-30 | **날짜 포맷 유틸 승격 (non-breaking 계약 + scan 표시 통일 1건).** 같은 `YYYY.MM.DD` 조립이 세 페이지에 분산돼 있어(승격 규칙 ③의 두 번째·세 번째 소비자 확인) `lib/shared/util/date_format.dart` 정본 신설 — **코어 `formatYmdDot(DateTime)` → `'YYYY.MM.DD'` 하나만** 승격했다(월·일 두 자리 패딩, 연도는 패딩하지 않고 네 자리 전제를 debug assert로 가드, 시·분·초 무시). 소비자 고유 표현은 각 페이지에 남긴다: share의 `~` 접두(`formatExpiryLabel`)·`HH:mm` 조합(`formatInviteExpiry`)·상대 시각(`formatRelativeKo`), main의 `formatDDay`. 소비 전환 — main: 로컬 `formatDate` **삭제**, 호출부(`main_page.dart`·`gifticon_card.dart`)가 정본을 `show formatYmdDot`으로 **직접 import**(재export shim 없음, v2.3 리뷰에서 확정된 방식) / share: `share_format.dart`가 코어에 위임(공개 함수명·출력 문자열 불변, 페이지 호출부 무수정) / scan: `gifticon_form.dart` 인라인 `padLeft` 조립 제거 후 정본 소비. **⚠️ 의도된 표시 변경 1건:** scan 날짜 선택 버튼 라벨이 `YYYY-MM-DD` → `YYYY.MM.DD`. 같은 유효기간이 등록 화면과 목록/공유 화면에서 다르게 보이던 불일치를 **다수 표기(`.`)로 통일**한 것이며, 계약 값(`Gifticon.expiryDate: DateTime`)·시그니처는 불변이다. 신규 테스트 `test/shared/util/date_format_test.dart`. **삭제 구현과의 문자 단위 코드 비교 + 신설 share_format 출력 고정 테스트(`test/features/share/share_format_test.dart`)로 확인**(기존 main·share 테스트는 이 경로를 지나지 않아 증거가 아님 — share 라벨 출력은 이번에 처음 테스트로 고정됨), scan 위젯 테스트(`test/features/scan/gifticon_form_input_test.dart`)는 구분자 단언만 `.`로 갱신. | scan(**표시 문자열 변경** — QA 시각 확인 대상), main·share(동작 불변, 정본 위임) |
+| v2.5 | 2026-07-30 | **"내 그룹 목록" provider 승격 (non-breaking, 중복 구독 제거).** scan(`_scanCurrentUserProvider`/`_scanGroupsByUserProvider`)과 share(`_groupsByUserProvider`+`myGroupsProvider`)가 세션→`watchGroups(uid)` 체인을 각자 조립해 **같은 사용자에 대해 `watchGroups`를 두 번 구독**하던 문제(integration-qa 검출, 규칙 ③ 충족) → `lib/shared/providers/my_groups_provider.dart` 정본 신설. 정본은 `AsyncValue<List<Group>>`를 노출해 **로딩/에러 구분을 보존**하고(share 기존 규약과 동일: 세션 로딩→`AsyncLoading` 전파, `data(null)`→`AsyncData([])`), 정보를 잃는 폴딩은 페이지 파생에 남긴다(scan `scanTargetGroupsProvider` = `valueOrNull ?? []`). 세션·그룹 스트림 provider는 정본 파일 **내부(private)** 로 감춘다. **수명 = `autoDispose`**(scan 일회성 플로우 보호 + share 상시 탭이 보는 동안 유지 → 구독은 0 또는 1로 수렴, 승격 전 최댓값 2보다 항상 적거나 같다). 소비 전환 — scan: 중복 체인 2개 **삭제**, `scanTargetGroupsProvider`가 정본 소비(공개 이름·폴딩 동작 불변) / share: `_groupsByUserProvider`+로컬 `myGroupsProvider` **삭제**, 정본을 **직접 import**(재export shim 없음 — v2.3/v2.4에서 확정된 방식; `share_page.dart`·`usage_log_page.dart`는 import 1줄만 추가, `ref.watch(myGroupsProvider)` 호출부는 무수정). `.value`의 AsyncError rethrow 함정은 정본·파생 모두 `valueOrNull`로 회피(주석에 명시). 신규 테스트 `test/shared/providers/my_groups_provider_test.dart` — 계측 `ShareRepository`(구독 카운터)로 **"두 소비자 동시 watch → `watchGroups` 호출·구독 각 1회"**, "scan만 해제 시 재구독 없이 유지 / 마지막 소비자 해제 시 구독 0", "미로그인 시 미구독 + `AsyncData([])`", "로딩 전파 + scan은 빈 목록", "에러 전파 시 rethrow 없음"을 고정. 크로스페이지 주의점 #13 신설. | scan·share(동작 불변, 정본 소비 — 호출 표현·공개 provider 이름 불변) |
 
 ## 후속 확장 예정(이번 슬라이스 범위 밖)
 
@@ -265,5 +304,7 @@
   - 그룹 관리 행위(생성/삭제/나가기/소유권이전/초대정책)와 `GroupRepository`로 따로 나눌 필요 없이 **하나의 `ShareRepository`**로 통합했다(그룹과 공유가 강결합 도메인).
 - ✅ **리팩터 완료(share-page-dev, v2.2):** `lib/features/share/data/`(로컬 `share_models.dart`·`share_store.dart`·`korean_particle.dart`) **제거 완료** → 페이지가 `lib/shared` 계약을 소비. share 테스트는 `ShareStore` 대상에서 **`InMemoryShareRepository` 대상**으로 전환됨(`test/features/share/share_repository_*_test.dart`), korean_particle 테스트는 `test/shared/util/`로 이동. 매핑은 `02_share_contract_promotion.md` D절.
 - ✅ **승격 완료(v2.4):** 날짜 라벨 포맷 — 3곳(main `formatDate` / share `formatExpiryLabel` 계열 / scan 인라인)에 분산됐던 `YYYY.MM.DD` 조립을 `lib/shared/util/date_format.dart`의 `formatYmdDot`으로 통합. 표기 규칙 합의 결과는 **점 구분자 통일**(다수 표기, scan만 `-`였음)이고, D-day 라벨(`formatDDay`)·상대 시각(`formatRelativeKo`)은 입력·의미가 달라 **승격 대상이 아님**(각 페이지 로컬 유지).
-- **다음 승격 후보:** "현재 사용자의 그룹 목록 스트림" provider — scan의 `_scanCurrentUserProvider`/`_scanGroupsByUserProvider`(lib/features/scan/state/scan_target_group_state.dart)와 share의 `shareCurrentUserProvider`/`_groupsByUserProvider`가 본문이 사실상 동일하고, 같은 사용자에 대해 `watchGroups`를 **두 번 구독**한다(Firebase에서는 리스너 2개 = 중복 읽기·과금). 규칙 ③ 충족(두 소비자) — `lib/shared/providers/` 승격을 `contract-architect`에게 요청할 것(직접 수정 금지, `CODEOWNERS` 리뷰 강제). 각 페이지의 파생 형태(AsyncValue 전파 vs 빈 목록 폴딩)는 페이지 로컬 유지.
+- ✅ **승격 완료(v2.5):** "현재 사용자의 그룹 목록 스트림" provider — scan/share에 중복 조립돼 `watchGroups`를 두 번 구독했던 체인을 `lib/shared/providers/my_groups_provider.dart`의 `myGroupsProvider`(**SSOT**, `autoDispose`, `AsyncValue` 노출)로 통합. 페이지 파생 형태는 계획대로 로컬 유지(share = `AsyncValue` 전파, scan = 빈 목록 폴딩). 구독 단일화는 테스트로 고정(`test/shared/providers/my_groups_provider_test.dart`). 상세는 크로스페이지 주의점 #13.
+- **다음 승격 후보:** **세션 스트림(`AuthRepository.watchCurrentUser()`) provider** — 현재 5곳이 각자 구독한다: 앱 조립부(`lib/app/auth_gate.dart`), main(`currentUserProvider`, `lib/features/main/state/gifticon_list_providers.dart`), mypage(`lib/features/mypage/mypage_page.dart`), share(`shareCurrentUserProvider`, `lib/features/share/state/share_providers.dart`), 그리고 `my_groups_provider.dart` 내부. 규칙 ③은 이미 충족(소비자 다수)이지만 그룹 목록보다 소비자가 많고 셸(조립부) 수명과 얽혀 있어 별도 슬라이스로 다룬다 — 승격 시 `lib/shared/providers/`에 세션 정본을 두고 `my_groups_provider.dart`가 그것을 소비하도록 바꾼다. Firestore 과금 영향은 그룹 목록보다 작다(인증 상태 리스너는 문서 읽기가 아니다) — 이득은 **인스턴스/타이밍 일관성**이다. 페이지 담당은 직접 `lib/shared`를 고치지 말고 `contract-architect`에게 요청할 것(`CODEOWNERS` 리뷰 강제).
+- **가드 보강 후보(계약 소유자 판단 필요):** `tool/check_ssot.sh`의 `SSOT_PROVIDERS` 목록에 **`myGroupsProvider`가 아직 없다** — 지금은 페이지가 같은 이름의 provider를 다시 선언해도 CI가 잡지 못한다(정본이 없던 시절과 같은 재발 경로). 이번 변경 범위(계약+소비 전환)와 분리해 CI 가드 PR로 다루기를 권한다.
 - **미착수:** 기기 푸시 알림용 `NotificationService`/범용 `NotificationType`(그룹 알림은 `ShareRepository`가 충족), auth/share **세부** 라우트(그룹 상세·초대 등 페이지 내부 내비게이션 — 현재 `AppRoutes.share` 탭 라우트만 존재).
