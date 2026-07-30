@@ -11,6 +11,7 @@ import 'package:flutter/material.dart';
 
 import '../../../shared/models/gifticon.dart';
 import '../../../shared/theme/theme_tokens.dart';
+import '../../../shared/util/money_format.dart' show formatWon;
 import 'format.dart';
 
 /// 만료 임박 기준(일). 이 일수 이하로 남으면 만료일 텍스트를 danger로.
