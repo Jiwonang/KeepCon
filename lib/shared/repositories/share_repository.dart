@@ -114,6 +114,15 @@ abstract class ShareRepository {
     required InviteExpiry expiry,
   });
 
+  /// 초대코드를 재발급한다 — 새 코드를 발급해 **기존 코드/링크를 무효화**한다.
+  ///
+  /// 재발급된 초대는 즉시 사용 가능해야 하므로 만료([Group.inviteExpiresAt])를
+  /// 초기화(무제한)한다. 만료가 필요하면 [setInviteExpiry]로 다시 설정한다.
+  ///
+  /// 가드: 방장 본인만 재발급할 수 있다. 위반/그룹 없음이면 [StateError].
+  /// 성공 시 갱신된(새 코드·만료 초기화) 그룹을 반환한다.
+  Future<Group> regenerateInviteCode({required String groupId});
+
   // ── 공유 기프티콘 ────────────────────────────────────────────────────
   /// 특정 그룹의 공유 기프티콘 목록을 반응형으로 관찰한다.
   Stream<List<SharedGifticon>> watchSharedGifticons(String groupId);

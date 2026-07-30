@@ -336,6 +336,29 @@ class FirebaseShareRepository implements ShareRepository {
     });
   }
 
+  @override
+  Future<Group> regenerateInviteCode({required String groupId}) async {
+    final User me = _requireUser();
+    final DocumentReference<Map<String, dynamic>> ref = _groups.doc(groupId);
+
+    return _db.runTransaction<Group>((Transaction tx) async {
+      final DocumentSnapshot<Map<String, dynamic>> doc = await tx.get(ref);
+      if (!doc.exists) throw StateError('Group not found: $groupId');
+      final Group g = _groupFromDoc(doc);
+      if (!g.isOwnedBy(me.id)) {
+        throw StateError('Only the owner can regenerate invite code: $groupId');
+      }
+      // 새 코드 발급 + 만료 초기화(재발급된 코드는 즉시 사용 가능해야 한다).
+      final Group updated =
+          g.copyWith(inviteCode: _randomCode(), inviteExpiresAt: null);
+      tx.update(ref, <String, dynamic>{
+        'inviteCode': updated.inviteCode,
+        'inviteExpiresAt': null,
+      });
+      return updated;
+    });
+  }
+
   // ── 공유 기프티콘 ─────────────────────────────────────────────────────
   @override
   Stream<List<SharedGifticon>> watchSharedGifticons(String groupId) {
