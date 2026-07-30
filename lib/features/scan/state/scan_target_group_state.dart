@@ -48,13 +48,19 @@ final _scanGroupsByUserProvider =
 /// '내 지갑'(그룹 공유 없음) 타일을 첫 번째로 두기 때문에, 빈 목록도 그 자체로
 /// 정상 상태이며 사용자는 언제나 저장을 진행할 수 있다(로딩 스피너 불필요).
 ///
-/// 스트림 **error**도 빈 목록으로 접힌다(권한/네트워크 오류 시 타일이 사라질 뿐
-/// 별도 안내 없음) — 저장은 부분 실패 정책이 백스톱이고, 에러 표시/재시도 UI는
+/// 스트림 **error**는 조용히 접힌다(별도 안내 없음) — 이전에 방출된 목록이
+/// 있으면 그 목록을 유지하고(AsyncValue의 이전 값 보존), 첫 방출부터 에러면
+/// 빈 목록이 된다. 저장은 부분 실패 정책이 백스톱이고, 에러 표시/재시도 UI는
 /// 후속 과제로 남긴다. autoDispose라 재진입 시 재구독으로 자연 복구된다.
+///
+/// `.value`가 아니라 `valueOrNull`을 쓴다 — Riverpod의 `.value`는 이전 값이
+/// 없는 AsyncError에서 에러를 **rethrow**하므로, 첫 방출이 에러면 폴백(`?? []`)에
+/// 도달하지 못하고 이 provider 자체가 throw해 선택 UI가 깨진다.
 final scanTargetGroupsProvider = Provider.autoDispose<List<Group>>((ref) {
-  final User? user = ref.watch(_scanCurrentUserProvider).value;
+  final User? user = ref.watch(_scanCurrentUserProvider).valueOrNull;
 
   if (user == null) return const <Group>[];
 
-  return ref.watch(_scanGroupsByUserProvider(user.id)).value ?? const <Group>[];
+  return ref.watch(_scanGroupsByUserProvider(user.id)).valueOrNull ??
+      const <Group>[];
 });
