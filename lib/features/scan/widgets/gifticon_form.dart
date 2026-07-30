@@ -60,6 +60,34 @@ const List<String> kScanCategoryPresets = <String>[
   kDefaultCategory,
 ];
 
+/// 저장 완료 스낵바에 덧붙일 그룹 공유 결과 문구.
+///
+/// 세 가지 경우를 구분한다.
+///
+/// - '내 지갑' 저장(대상 그룹 없음) → 빈 문자열(추가 안내 없음)
+/// - 그룹 공유 성공 → ' — 가족 그룹에 공유됨'(그룹명 미확인 시 ' — 그룹에 공유됨')
+/// - 그룹 공유 실패 → ' — <shareError 완결 문장>'
+///   (shareError가 이미 사용자용 완결 문장이므로 별도 라벨로 감싸지 않는다 —
+///    "(그룹 공유 실패: 그룹에 공유하지 못했어요…)"처럼 실패가 이중 서술되는 것 방지)
+///
+/// 공유 실패는 **저장 실패가 아니다** — 기프티콘은 이미 내 목록에 저장돼 있고
+/// 그룹 공유만 안 된 상태다(부분 실패 정책 — [GifticonFormController.submit] 참조).
+String _shareNote(ScanSubmitSuccess success) {
+  final String? error = success.shareError;
+
+  if (error != null) {
+    return ' — $error';
+  }
+
+  if (!success.sharedToGroup) {
+    return '';
+  }
+
+  final String? name = success.sharedGroupName;
+
+  return name == null ? ' — 그룹에 공유됨' : ' — $name 그룹에 공유됨';
+}
+
 /// 기프티콘 필드 편집 폼.
 ///
 /// TextEditingController를 사용해 OCR/바코드 인식 결과를
@@ -497,6 +525,16 @@ class _GifticonFormState extends ConsumerState<GifticonForm> {
     // 세션 무효 시에는 사용자가 이미 폼을 떠났으므로 아무것도 하지 않는다.
     if (saved == null || !mounted) return null;
 
+    // 그룹 공유 결과는 제출 성공 상태에 담겨 온다.
+    //
+    // saved가 non-null이면 이 세션의 제출이 성공했다는 뜻이므로,
+    // 여기서 읽는 submit 상태는 방금 그 제출의 ScanSubmitSuccess다.
+    final ScanSubmitState submitState =
+        ref.read(gifticonFormControllerProvider).submit;
+
+    final String shareNote =
+        submitState is ScanSubmitSuccess ? _shareNote(submitState) : '';
+
     // 사용자에게 저장 성공 메시지를 표시한다.
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -504,6 +542,7 @@ class _GifticonFormState extends ConsumerState<GifticonForm> {
           '저장됨: '
           '${saved.brand} '
           '${saved.productName}'
+          '$shareNote'
           '$suffix',
         ),
       ),
@@ -545,7 +584,8 @@ class _GifticonFormState extends ConsumerState<GifticonForm> {
   ///   ↓ 성공(세션 유효)
   /// 저장 완료 스낵바
   ///   ↓
-  /// startWith(ScanSource.manual) — 폼 상태 초기화(세션도 갱신)
+  /// startWith(ScanSource.manual, targetGroupId: 이전 대상 그룹)
+  ///   — 폼 상태 초기화(세션도 갱신), 저장 대상 그룹은 유지
   ///   ↓
   /// _syncController가 입력창을 비움
   ///
@@ -565,6 +605,14 @@ class _GifticonFormState extends ConsumerState<GifticonForm> {
   /// 화면을 닫지 않으므로 ScanPage의 finally(reset)는
   /// 사용자가 최종적으로 폼을 나갈 때 한 번만 실행된다.
   Future<void> _submitAndContinue(GifticonFormController controller) async {
+    // 저장 대상 그룹은 제출 **전에** 읽어 둔다.
+    //
+    // 연속 등록은 여러 장을 같은 그룹에 몰아 넣는 흐름이므로 대상 그룹을 그대로
+    // 물려준다(source만 manual로 고정 — 아래 doc 참조). await 뒤에 상태를 다시
+    // 읽으면 그 사이 세션이 바뀐 경우 stale 값을 읽게 되므로 미리 캡처한다.
+    final String? targetGroupId =
+        ref.read(gifticonFormControllerProvider).targetGroupId;
+
     final Gifticon? saved = await _submitWithFeedback(
       controller,
       suffix: ' — 이어서 등록할 수 있어요.',
@@ -572,8 +620,25 @@ class _GifticonFormState extends ConsumerState<GifticonForm> {
 
     if (saved == null || !mounted) return;
 
+    // 이번 저장에서 그룹 공유가 실패했으면 다음 세션에 그 그룹을 물려주지 않는다.
+    //
+    // 실패 원인(그룹 소멸/비멤버)은 대부분 다음 저장에서도 반복되므로,
+    // 그대로 상속하면 연속 등록 내내 저장마다 공유 실패가 반복된다 —
+    // '내 지갑'으로 폴백해 저장 흐름은 끊기지 않게 한다.
+    //
+    // saved != null이므로 세션이 유효했고, startWith 전이라 아직 안 바뀌었다 —
+    // 이 시점의 submit 상태는 이번 제출의 ScanSubmitSuccess다.
+    final ScanSubmitState submit =
+        ref.read(gifticonFormControllerProvider).submit;
+    final bool shareFailed =
+        submit is ScanSubmitSuccess && submit.shareError != null;
+
     // 다음 입력을 직접 입력 세션으로 시작한다(위 doc 참조).
-    controller.startWith(ScanSource.manual);
+    // 저장 대상 그룹은 공유가 성공했을 때만 유지한다.
+    controller.startWith(
+      ScanSource.manual,
+      targetGroupId: shareFailed ? null : targetGroupId,
+    );
   }
 
   /// 공통 입력 필드.

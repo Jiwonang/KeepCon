@@ -32,11 +32,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_mlkit_barcode_scanning/google_mlkit_barcode_scanning.dart';
 import 'package:image_picker/image_picker.dart';
 
+import '../../shared/models/group.dart';
 import '../../shared/routes.dart';
 import '../../shared/theme/theme_tokens.dart';
 import 'services/gifticon_ocr_parser.dart';
 import 'services/ml_kit_service.dart';
 import 'state/gifticon_form_state.dart';
+import 'state/scan_target_group_state.dart';
 import 'widgets/barcode_scanner_screen.dart';
 import 'widgets/gifticon_form.dart';
 import 'widgets/scan_tokens.dart';
@@ -81,6 +83,12 @@ class _ScanPageState extends ConsumerState<ScanPage> {
   /// - 인식 진행 중 다른 입력 경로 시작
   ///   → 늦게 도착한 인식 결과가 엉뚱한 폼에 주입되는 문제
   bool _busy = false;
+
+  /// 저장 대상 그룹의 id. `null`이면 '내 지갑'(개인 보관 — 그룹 공유 없음).
+  ///
+  /// 세 입력 경로가 공유하는 선택값이므로 선택 위젯이 아니라 이 State가 소유한다
+  /// ([_openForm]이 폼 세션에 넘겨야 한다).
+  String? _targetGroupId;
 
   @override
   Widget build(BuildContext context) {
@@ -173,9 +181,16 @@ class _ScanPageState extends ConsumerState<ScanPage> {
 
               // 저장할 그룹 선택 영역.
               //
-              // 현재는 정적 디자인이며 실제 그룹 Repository 연동은
-              // TODO로 남겨둔다.
-              const _GroupSelector(),
+              // 선택값(groupId)은 이 State가 소유하고, 저장 흐름 시작 시
+              // 폼 세션으로 넘어간다(_openForm → startWith).
+              _GroupSelector(
+                selectedGroupId: _targetGroupId,
+                onSelected: (String? groupId) {
+                  setState(() {
+                    _targetGroupId = groupId;
+                  });
+                },
+              ),
             ],
           ),
         ),
@@ -208,13 +223,16 @@ class _ScanPageState extends ConsumerState<ScanPage> {
         ref.read(gifticonFormControllerProvider.notifier);
 
     try {
-      // 사용자가 선택한 입력 경로를 폼 상태에 기록하고
+      // 사용자가 선택한 입력 경로와 저장 대상 그룹을 폼 상태에 기록하고
       // 이전에 입력되어 있던 폼 상태를 초기화한다.
       //
       // 예:
       // ScanSource.gallery를 선택하면
       // 이후 폼 상태의 source도 gallery가 된다.
-      controller.startWith(source);
+      //
+      // 대상 그룹은 폼 진입 시점의 선택값으로 고정된다(저장 성공 후 이 그룹으로
+      // shareGifticon이 호출된다 — GifticonFormController.submit 참조).
+      controller.startWith(source, targetGroupId: _targetGroupId);
 
       // ─────────────────────────────────────────
       // 직접 입력
@@ -727,61 +745,67 @@ class _AiBanner extends StatelessWidget {
   }
 }
 
-// ─────────────────────── 저장할 그룹 선택 (정적 스캐폴드) ───────────────────────
+// ─────────────────────── 저장할 그룹 선택 ───────────────────────
 
 /// 저장 대상 그룹 선택 그리드.
 ///
-/// 현재는 UI 디자인과 선택 상태만 구현되어 있다.
+/// 첫 타일은 항상 '내 지갑'(개인 보관 — 그룹 공유 없음, groupId `null`)이고,
+/// 이어서 계약에서 읽어온 **내 그룹**([scanTargetGroupsProvider])이 이모지·이름으로 붙는다.
 ///
-/// TODO(scan):
-/// 실제 그룹 연동.
+/// 연동 방식(계약 무변경):
 ///
-/// 향후에는:
+/// `ShareRepository.watchGroups(currentUser.id)`  ← 목록
+///   ↓ 사용자가 타일 선택 → groupId
+/// `GifticonFormController.startWith(source, targetGroupId: groupId)`
+///   ↓ 저장 버튼
+/// `GifticonRepository.addGifticon(...)` → 성공 후
+/// `ShareRepository.shareGifticon(groupId:, gifticon: saved)`
 ///
-/// ShareRepository.watchGroups(...)
-/// → 사용자의 그룹 목록 조회
-/// → 그룹 타일 생성
-/// → 선택된 groupId 저장
-/// → GifticonFormController에 groupId 전달
-/// → Gifticon 저장
+/// 즉 [Gifticon]에 groupId를 추가하지 않고, 그룹 소속은 share 도메인의 공유 항목으로만
+/// 표현한다(등록 알림·1회 공유 불변식·markUsed 시 원본 동기화에 그대로 합류).
 ///
-/// 형태로 확장한다.
+/// 선택 식별자는 index가 아니라 **groupId**다 — 스트림이 갱신돼 그룹 순서가 바뀌어도
+/// 선택이 다른 그룹으로 옮겨가지 않는다. 그룹이 없거나(미로그인/로딩 포함) 목록이 비면
+/// '내 지갑' 한 장만 보인다.
 ///
-/// 현재는 홈의 검색/필터와 마찬가지로
-/// 정적 자리표시자 역할만 한다.
-class _GroupSelector extends StatefulWidget {
-  const _GroupSelector();
+/// 선택된 groupId가 현재 목록에 없는 순간에는 어떤 타일도 선택으로 보이지 않는다.
+/// 이 상태는 두 경로로 생긴다:
+///
+/// - **로딩 지연**(실서버 watchGroups가 아직 방출 전): 잠시 표시만 비어 보일 뿐
+///   `_targetGroupId`는 살아 있어, 목록이 도착하면 선택 표시가 복원되고
+///   그 사이 저장해도 선택한 그룹으로 정상 공유된다(데이터 정상, 표시만 일시 stale).
+/// - **탈퇴/삭제로 실제 소멸**: 그 상태로 저장하면 공유 단계만 실패한다
+///   (저장은 성공 — [GifticonFormController.submit]의 부분 실패 정책).
+class _GroupSelector extends ConsumerWidget {
+  const _GroupSelector({
+    required this.selectedGroupId,
+    required this.onSelected,
+  });
+
+  /// 현재 선택된 그룹 id. `null`이면 '내 지갑'.
+  final String? selectedGroupId;
+
+  /// 타일을 선택했을 때 호출한다. '내 지갑'은 `null`을 넘긴다.
+  final ValueChanged<String?> onSelected;
 
   @override
-  State<_GroupSelector> createState() => _GroupSelectorState();
-}
+  Widget build(BuildContext context, WidgetRef ref) {
+    final List<Group> groups = ref.watch(scanTargetGroupsProvider);
 
-class _GroupSelectorState extends State<_GroupSelector> {
-  // 현재 선택된 그룹의 index.
-  //
-  // TODO(scan):
-  // 실제 그룹 모델을 연결할 경우 index 대신
-  // groupId를 사용하는 것이 안전하다.
-  int _selected = 0;
+    // 첫 타일은 항상 개인 보관('내 지갑'), 이후가 실제 그룹이다.
+    final List<_GroupTileData> tiles = <_GroupTileData>[
+      const _GroupTileData(
+        icon: Icons.account_balance_wallet_outlined,
+        label: '내 지갑',
+      ),
+      for (final Group group in groups)
+        _GroupTileData(
+          groupId: group.id,
+          emoji: group.emoji,
+          label: group.name,
+        ),
+    ];
 
-  // 현재는 테스트용 정적 그룹 목록이다.
-  static const List<_GroupTileData> _groups = <_GroupTileData>[
-    _GroupTileData(
-      icon: Icons.account_balance_wallet_outlined,
-      label: '내 지갑',
-    ),
-    _GroupTileData(
-      emoji: '🏡',
-      label: '가족',
-    ),
-    _GroupTileData(
-      emoji: '👬',
-      label: '친구 모임',
-    ),
-  ];
-
-  @override
-  Widget build(BuildContext context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -790,23 +814,44 @@ class _GroupSelectorState extends State<_GroupSelector> {
           style: context.sectionTitleStyle,
         ),
         const SizedBox(height: 14),
-        Row(
-          children: [
-            for (int i = 0; i < _groups.length; i++) ...[
-              if (i > 0) const SizedBox(width: 12),
-              Expanded(
-                child: _GroupTile(
-                  data: _groups[i],
-                  selected: i == _selected,
-                  onTap: () {
-                    setState(() {
-                      _selected = i;
-                    });
-                  },
-                ),
-              ),
-            ],
-          ],
+
+        // 한 줄에 3개씩 같은 폭으로 배치한다.
+        //
+        // 그룹 수는 가변(0개~정원)이므로 고정 Row로는 4개 이상에서 타일이 짜부라진다.
+        // 폭을 직접 계산해 Wrap에 넘기면, 3개까지는 기존 Row+Expanded와 동일한 폭이
+        // 유지되고 그 이상은 다음 줄로 넘어간다.
+        LayoutBuilder(
+          builder: (BuildContext context, BoxConstraints constraints) {
+            const int perRow = 3;
+            const double gap = 12;
+
+            // floorToDouble: (w-24)/3을 그대로 쓰면 3개 합이 부동소수 오차로
+            // maxWidth를 1ulp 초과할 수 있고, RenderWrap은 엄격 비교(>)라
+            // 세 번째 타일이 다음 줄로 밀린다(특정 기기 폭에서 간헐 재현).
+            //
+            // clamp(0, …): web/데스크톱 창을 극단적으로 좁히면 계산이 음수가
+            // 되어 SizedBox 어설션으로 크래시하므로 하한을 0으로 막는다.
+            final double tileWidth =
+                ((constraints.maxWidth - gap * (perRow - 1)) / perRow)
+                    .floorToDouble()
+                    .clamp(0.0, double.maxFinite);
+
+            return Wrap(
+              spacing: gap,
+              runSpacing: gap,
+              children: <Widget>[
+                for (final _GroupTileData data in tiles)
+                  SizedBox(
+                    width: tileWidth,
+                    child: _GroupTile(
+                      data: data,
+                      selected: data.groupId == selectedGroupId,
+                      onTap: () => onSelected(data.groupId),
+                    ),
+                  ),
+              ],
+            );
+          },
         ),
       ],
     );
@@ -818,6 +863,7 @@ class _GroupSelectorState extends State<_GroupSelector> {
 /// 아이콘 또는 이모지 중 하나를 사용한다.
 class _GroupTileData {
   const _GroupTileData({
+    this.groupId,
     this.icon,
     this.emoji,
     required this.label,
@@ -825,6 +871,9 @@ class _GroupTileData {
           icon != null || emoji != null,
           'icon 또는 emoji 중 하나는 필요',
         );
+
+  /// 이 타일이 가리키는 그룹 id. `null`이면 '내 지갑'(그룹 공유 없음).
+  final String? groupId;
 
   final IconData? icon;
   final String? emoji;

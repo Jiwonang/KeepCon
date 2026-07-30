@@ -91,7 +91,7 @@
 | 페이지 | 소비 (읽음) | 생산 (씀) |
 |--------|------|------|
 | **auth** (mock) | `User` | `AuthRepository.currentUser`, `watchCurrentUser()` (→ `InMemoryAuthRepository` 제공) |
-| **scan** (생산자) | `authRepositoryProvider`→`AuthRepository.currentUser` (소유자 식별), `gifticonRepositoryProvider`, `Gifticon`, `GifticonStatus.available`, `AppRoutes.scan` | `GifticonRepository.addGifticon(Gifticon)` |
+| **scan** (생산자) | `authRepositoryProvider`→`AuthRepository.currentUser`·`watchCurrentUser()` (소유자/세션 식별), `gifticonRepositoryProvider`, `Gifticon`, `GifticonStatus.available`, `AppRoutes.scan`, `shareRepositoryProvider`→`watchGroups(uid)`(저장할 그룹 선택지), `Group`(id·name·emoji) | `GifticonRepository.addGifticon(Gifticon)`, (그룹 선택 시) `ShareRepository.shareGifticon({groupId, gifticon: saved})` |
 | **main** (소비자) | `gifticonRepositoryProvider`→`watchGifticons(ownerId)`, `Gifticon`(+`price`), `SortOption`, `FilterOption`, `GifticonStatus`, `AppRoutes.main`, `Theme.of(context)`(AppTheme) | 총금액 통계 = `price` 합산, (상태 변경 시) `GifticonRepository.updateStatus(id, status)` |
 | **share** (그룹/공유) | `shareRepositoryProvider`→`ShareRepository`(그룹 CRUD·멤버·초대·공유/취소·`markUsed`·이력·알림), `Group`/`GroupMember`/`SharedGifticon`/`UsageLog`/`GroupNotification`, `ShareStatus`/`MemberRole`/`GroupNotificationType`, `authRepositoryProvider`→`currentUser`(행위자 식별), `gifticonRepositoryProvider`→`watchGifticons(uid)`(공유 후보 = `Gifticon`), `AppRoutes.share` | `SharedGifticon`/`UsageLog`/`GroupNotification`(share repo에 씀), **`GifticonRepository.updateStatus(gifticonId, GifticonStatus.used)`**(원본 사용 동기화, `markUsed` 경유) |
 | **auth/설정('마이')** | `themeModeProvider`(watch) | `ThemeModeController.setDark(bool)`/`.set(mode)` (다크 토글) |
@@ -178,6 +178,27 @@
      `authRepositoryProvider`, `gifticonRepositoryProvider` (또는 상대경로
      `../../../shared/providers/repositories.dart`).
 
+12. **scan → share: 저장 시 선택 그룹으로 `shareGifticon` 소비 (계약 무변경)**
+   - 스캔/추가 화면의 '저장할 그룹 선택'은 `ShareRepository.watchGroups(currentUser.id)`로
+     내 그룹을 읽어 타일을 만들고(첫 타일 = '내 지갑' = 대상 없음), 저장 시
+     `GifticonRepository.addGifticon` **성공 후** 대상 그룹이 있으면
+     `ShareRepository.shareGifticon(groupId:, gifticon: saved)`를 호출한다.
+   - **`Gifticon`에 `groupId`를 추가하지 않는다.** 그룹 소속은 share 도메인의
+     `SharedGifticon`으로만 표현되므로, scan은 기존 share 규약(등록 알림 · "한 기프티콘은
+     1회만 공유" 불변식 · `markUsed` 시 원본 `GifticonStatus.used` 동기화)에 그대로 합류한다.
+     신규 저장 직후 공유이므로 정상 흐름에서 이중 공유 `StateError`는 발생하지 않는다.
+   - **부분 실패 정책:** 공유는 저장 성공 뒤의 부수 단계다. 공유가 실패해도(선택한 그룹이
+     사라짐/비멤버 등 `StateError`) 저장을 되돌리지 않고 제출은 성공으로 유지하며, UI가
+     "저장됨 + 그룹 공유됨" / "저장됨(그룹 공유 실패)"를 문구로 구분해 안내한다.
+     내부 `StateError.message`(영문·raw id)는 사용자에게 노출하지 않는다 —
+     share 페이지 규약과 동일하게 한국어 중립 문구 + debug 로그.
+   - 공유 성공 안내 문구의 그룹명은 **원격 재조회 없이** scan의 선택 목록
+     provider(`scanTargetGroupsProvider` — `watchGroups` 파생)에서 동기 캡처한다
+     (`getGroupById` 미소비 — shareGifticon 구현이 이미 그룹 문서를 읽으므로
+     이중 read 방지. 목록에 없으면 문구만 "그룹에 공유됨"으로 일반화).
+     즉 main 목록에는 항상 반영되고, 그룹 공유만 누락될 수 있다.
+   - 선택 식별자는 index가 아니라 **groupId**(`String?`, null = 내 지갑)다.
+
 ---
 
 ## 데이터 소스 = 인터페이스 뒤에서 교체 가능 (in-memory ↔ Firebase)
@@ -244,5 +265,5 @@
   - 그룹 관리 행위(생성/삭제/나가기/소유권이전/초대정책)와 `GroupRepository`로 따로 나눌 필요 없이 **하나의 `ShareRepository`**로 통합했다(그룹과 공유가 강결합 도메인).
 - ✅ **리팩터 완료(share-page-dev, v2.2):** `lib/features/share/data/`(로컬 `share_models.dart`·`share_store.dart`·`korean_particle.dart`) **제거 완료** → 페이지가 `lib/shared` 계약을 소비. share 테스트는 `ShareStore` 대상에서 **`InMemoryShareRepository` 대상**으로 전환됨(`test/features/share/share_repository_*_test.dart`), korean_particle 테스트는 `test/shared/util/`로 이동. 매핑은 `02_share_contract_promotion.md` D절.
 - ✅ **승격 완료(v2.4):** 날짜 라벨 포맷 — 3곳(main `formatDate` / share `formatExpiryLabel` 계열 / scan 인라인)에 분산됐던 `YYYY.MM.DD` 조립을 `lib/shared/util/date_format.dart`의 `formatYmdDot`으로 통합. 표기 규칙 합의 결과는 **점 구분자 통일**(다수 표기, scan만 `-`였음)이고, D-day 라벨(`formatDDay`)·상대 시각(`formatRelativeKo`)은 입력·의미가 달라 **승격 대상이 아님**(각 페이지 로컬 유지).
-- **다음 승격 후보:** 현재 알려진 후보 없음. 새로 발견하면 규칙 ③(**실제 두 번째 소비자가 생겼을 때**)을 확인한 뒤 여기에 후보로 기록하고, 직접 `lib/shared`를 고치지 말고 `contract-architect`에게 요청한다(`CODEOWNERS` 리뷰 강제).
+- **다음 승격 후보:** "현재 사용자의 그룹 목록 스트림" provider — scan의 `_scanCurrentUserProvider`/`_scanGroupsByUserProvider`(lib/features/scan/state/scan_target_group_state.dart)와 share의 `shareCurrentUserProvider`/`_groupsByUserProvider`가 본문이 사실상 동일하고, 같은 사용자에 대해 `watchGroups`를 **두 번 구독**한다(Firebase에서는 리스너 2개 = 중복 읽기·과금). 규칙 ③ 충족(두 소비자) — `lib/shared/providers/` 승격을 `contract-architect`에게 요청할 것(직접 수정 금지, `CODEOWNERS` 리뷰 강제). 각 페이지의 파생 형태(AsyncValue 전파 vs 빈 목록 폴딩)는 페이지 로컬 유지.
 - **미착수:** 기기 푸시 알림용 `NotificationService`/범용 `NotificationType`(그룹 알림은 `ShareRepository`가 충족), auth/share **세부** 라우트(그룹 상세·초대 등 페이지 내부 내비게이션 — 현재 `AppRoutes.share` 탭 라우트만 존재).
