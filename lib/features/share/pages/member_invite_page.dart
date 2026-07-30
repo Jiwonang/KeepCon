@@ -106,6 +106,42 @@ class _MemberInvitePageState extends ConsumerState<MemberInvitePage> {
     }
   }
 
+  /// 초대코드를 재발급한다(방장 전용). 기존 코드/링크가 무효화됨을 확인 후 진행한다.
+  Future<void> _regenerate(String groupId) async {
+    final bool ok = await showDialog<bool>(
+          context: context,
+          builder: (BuildContext ctx) => AlertDialog(
+            title: const Text('초대코드 재발급'),
+            content: const Text('재발급하면 기존 코드와 링크는 더 이상 사용할 수 없어요. 계속할까요?'),
+            actions: <Widget>[
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(false),
+                child: const Text('닫기'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(true),
+                child: const Text('재발급'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+    if (!ok || !mounted) return;
+    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
+    try {
+      await ref
+          .read(shareRepositoryProvider)
+          .regenerateInviteCode(groupId: groupId);
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(const SnackBar(content: Text('새 초대코드를 발급했어요.')));
+    } on StateError {
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(const SnackBar(content: Text('방장만 재발급할 수 있어요.')));
+    }
+  }
+
   AppBar _navBar() => AppBar(
         centerTitle: true,
         title: Text('멤버 초대', style: context.navTitleStyle),
@@ -169,6 +205,16 @@ class _MemberInvitePageState extends ConsumerState<MemberInvitePage> {
               emphasize: true,
               onCopy: () => _copy(g.inviteCode, '초대코드'),
             ),
+            // 방장만 재발급 가능 — 기존 코드/링크 무효화.
+            if (iAmOwner)
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton.icon(
+                  onPressed: () => _regenerate(g.id),
+                  icon: const Icon(Icons.refresh, size: 18),
+                  label: const Text('코드 재발급'),
+                ),
+              ),
             const SizedBox(height: 32),
 
             // 초대코드 만료.

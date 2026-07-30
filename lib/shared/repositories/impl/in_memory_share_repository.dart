@@ -343,6 +343,21 @@ class InMemoryShareRepository implements ShareRepository {
     return updated;
   }
 
+  @override
+  Future<Group> regenerateInviteCode({required String groupId}) async {
+    final User me = _requireUser();
+    final Group g = _requireGroup(groupId);
+    if (!g.isOwnedBy(me.id)) {
+      throw StateError('Only the owner can regenerate invite code: $groupId');
+    }
+    // 새 코드 발급 + 만료 초기화(재발급된 코드는 즉시 사용 가능해야 한다).
+    final Group updated =
+        g.copyWith(inviteCode: _nextCode(), inviteExpiresAt: null);
+    _groups[_groupIndex(groupId)] = updated;
+    _emit();
+    return updated;
+  }
+
   void _removeGroup(String groupId) {
     _groups.removeWhere((Group g) => g.id == groupId);
     _sharedByGroup.remove(groupId);
@@ -584,6 +599,13 @@ class InMemoryShareRepository implements ShareRepository {
   String _randomCode() {
     final int base = 100000 + (_seq * 37) % 900000;
     return base.toString();
+  }
+
+  /// 매 호출마다 다른 코드 — 재발급용. [_randomCode]는 [_seq]에 결정적이므로
+  /// 시퀀스를 먼저 진행시켜 이전 코드와 겹치지 않게 한다.
+  String _nextCode() {
+    _seq++;
+    return _randomCode();
   }
 
   // ── 시드 데이터 ──────────────────────────────────────────────────────
