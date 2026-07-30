@@ -49,16 +49,20 @@ import '../../../shared/providers/repositories.dart';
 /// - gallery: 이미지 인식 결과로 프리필
 /// - manual: 빈 폼에서 직접 입력
 enum ScanSource {
-  /// 카메라 촬영 후 인식(OCR/바코드) → 폼 프리필.
+  /// 카메라 실시간 바코드/QR 인식 → 폼 프리필.
   ///
-  /// TODO(scan):
-  /// 실제 카메라 플러그인 연동 후
-  /// 인식 결과를 [prefillFromRecognition]으로 전달한다.
+  /// mobile_scanner(`BarcodeScannerScreen`)가 프리뷰 프레임에서
+  /// 첫 유효 바코드를 확정하면 [prefillFromRecognition]으로 전달된다.
+  ///
+  /// 프리뷰 프레임을 이미지 파일로 남기지 않으므로 이 경로가 채우는 값은
+  /// barcode 하나뿐이다(imagePath 없음). 나머지 필수 필드는 사용자가 폼에서
+  /// 입력하며, 누락은 [GifticonFormState.validate]가 저장 전에 막는다.
   camera,
 
   /// 갤러리 이미지 선택 후 인식 → 폼 프리필.
   ///
-  /// 현재 [ScanPage]에서 실제로 연결된 경로다.
+  /// 정지 이미지 1장에서 ML Kit OCR + 바코드를 함께 추출하므로
+  /// brand/productName/price/expiryDate까지 프리필될 수 있다.
   gallery,
 
   /// 사용자가 직접 입력.
@@ -193,8 +197,10 @@ class GifticonFormState {
 
   /// 원본 기프티콘 이미지 경로.
   ///
-  /// 갤러리/카메라 인식 경로에서는 이미지 경로가 들어갈 수 있고,
-  /// 직접 입력에서는 null일 수 있다.
+  /// 갤러리 경로에서는 선택한 이미지 경로가 들어가고,
+  /// 카메라(프리뷰 실시간 인식)/직접 입력에서는 null이다.
+  ///
+  /// 계약상 `Gifticon.imagePath`는 nullable이므로 null이어도 저장에 문제없다.
   final String? imagePath;
 
   /// 현재 제출 상태.
@@ -356,8 +362,11 @@ class GifticonFormController extends StateNotifier<GifticonFormState> {
   /// 카메라/갤러리 경로는 이후 인식 결과가 나오면
   /// [prefillFromRecognition]으로 필드를 채운다.
   ///
-  /// 현재 카메라는 플러그인 미연동 상태이므로
-  /// 이후 직접 입력으로 폴백할 수 있다.
+  /// 인식이 실패하거나 일부 필드만 채워진 경우에도 폼은 열리므로,
+  /// 사용자는 그대로 수동 입력으로 폴백할 수 있다.
+  ///
+  /// 저장 성공 후 '계속 등록'을 누를 때도 이 메서드를 호출한다
+  /// (같은 입력 경로를 유지한 채 폼만 비운다).
   void startWith(ScanSource source) {
     // 새 폼 세션 시작 — 진행 중이던 이전 세션의
     // 비동기 결과(submit 등)는 무효화된다.
@@ -403,9 +412,10 @@ class GifticonFormController extends StateNotifier<GifticonFormState> {
   /// → 사용자가 필요하면 수정
   /// → 저장
   ///
-  /// TODO(scan):
-  /// 카메라/갤러리 플러그인 연동 시
-  /// 추출 결과를 이 메서드로 전달한다.
+  /// 현재 호출 지점:
+  ///
+  /// - 카메라 경로: `barcode`만 전달(mobile_scanner rawValue)
+  /// - 갤러리 경로: OCR/바코드 결과 + `imagePath` 전달
   void prefillFromRecognition({
     String? brand,
     String? productName,
@@ -525,6 +535,20 @@ class GifticonFormController extends StateNotifier<GifticonFormState> {
   /// 성공하면 Repository가 반환한 최종 Gifticon을 반환한다.
   Future<Gifticon?> submit() async {
     // ─────────────────────────────────────────
+    // 0단계: 재진입 가드
+    // ─────────────────────────────────────────
+    //
+    // 이미 저장이 진행 중이면 무시한다.
+    //
+    // UI의 버튼 비활성화는 다음 프레임 rebuild에서야 반영되므로,
+    // 같은 프레임에 두 번 탭되면(두 손가락으로 저장+계속 등록 동시 탭 등)
+    // 두 번째 호출이 여기 도달할 수 있다. 이 가드가 없으면
+    // addGifticon이 두 번 실행되어 기프티콘이 중복 등록된다.
+    if (state.submit is ScanSubmitInProgress) {
+      return null;
+    }
+
+    // ─────────────────────────────────────────
     // 1단계: 입력값 검증
     // ─────────────────────────────────────────
     final String? error = state.validate();
@@ -643,12 +667,21 @@ class GifticonFormController extends StateNotifier<GifticonFormState> {
           await _ref.read(gifticonRepositoryProvider).addGifticon(draft);
 
       // 저장 중에 폼 세션이 바뀌었으면(사용자가 폼을 떠나
-      // 새 흐름을 시작했으면) 결과를 상태에 반영하지 않는다.
+      // 새 흐름을 시작했으면) 결과를 상태에 반영하지 않고
+      // **null을 반환한다**.
       //
-      // 반영하면 사용자가 제출한 적 없는 새 폼에
-      // 이전 제출의 성공/실패가 표시된다.
+      // 상태에 반영하면 사용자가 제출한 적 없는 새 폼에
+      // 이전 제출의 성공/실패가 표시되고,
+      //
+      // non-null을 반환하면 호출자(저장 버튼 핸들러)가
+      // "이 폼의 저장 성공"으로 오인해 pop/스낵바/폼 초기화 같은
+      // 후속 동작을 실행한다 — 특히 이미 pop 중인 라우트에서
+      // maybePop이 한 번 더 실행되면 ScanPage까지 닫힌다.
+      //
+      // (데이터 자체는 Repository에 정상 저장되어 목록에 반영된다.
+      //  null은 "저장 안 됨"이 아니라 "이 폼 세션의 결과가 아님"이다.)
       if (!mounted || session != _session) {
-        return saved;
+        return null;
       }
 
       // ─────────────────────────────────────────

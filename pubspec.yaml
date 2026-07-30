@@ -5,8 +5,15 @@ version: 0.1.0
 
 environment:
   # Color.withValues() 등 3.27+ API를 코드 전반에서 사용하므로 하한을 실제에 맞춘다.
+  # flutter 하한은 mobile_scanner 7.4.0의 요구(flutter >=3.29.0, sdk ^3.7.0)에
+  # 맞춘다 — 낮게 두면 선언 범위 내 구버전에서 pub get이 실패한다.
+  # (Flutter 3.29+는 Dart 3.7+를 내장하므로 sdk 요구도 함께 충족된다)
+  #
+  # 주의: sdk 하한을 3.7로 올리면 Dart 3.7의 새 포매터 스타일이 활성화되어
+  # 저장소 전체가 재포맷 대상이 된다. 전체 재포맷은 별도 PR에서 팀 합의로
+  # 진행하고, 여기서는 언어 버전을 3.6으로 유지한다.
   sdk: ">=3.6.0 <4.0.0"
-  flutter: ">=3.27.0"
+  flutter: ">=3.29.0"
 
 dependencies:
   flutter:
@@ -20,10 +27,15 @@ dependencies:
   firebase_auth: ^5.3.1
   cloud_firestore: ^5.4.4
 
-  # ML Kit 및 이미지 피커
+  # ML Kit 및 이미지 피커 (갤러리 경로: 정지 이미지 OCR + 바코드)
   google_mlkit_text_recognition: ^0.14.0
   google_mlkit_barcode_scanning: ^0.13.0
   image_picker: ^1.1.2
+
+  # 카메라 실시간 바코드/QR 스캔 (스캔 페이지 카메라 경로).
+  # CAMERA 권한은 플러그인 자체 AndroidManifest가 선언하므로 앱 매니페스트에 추가하지 않는다.
+  # iOS는 NSCameraUsageDescription을 ios/Runner/Info.plist에 직접 넣어야 한다.
+  mobile_scanner: ^7.4.0
 
 dev_dependencies:
   flutter_test:

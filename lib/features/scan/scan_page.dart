@@ -37,6 +37,7 @@ import '../../shared/theme/theme_tokens.dart';
 import 'services/gifticon_ocr_parser.dart';
 import 'services/ml_kit_service.dart';
 import 'state/gifticon_form_state.dart';
+import 'widgets/barcode_scanner_screen.dart';
 import 'widgets/gifticon_form.dart';
 import 'widgets/scan_tokens.dart';
 
@@ -111,8 +112,12 @@ class _ScanPageState extends ConsumerState<ScanPage> {
               // 1. 카메라 스캔
               // ─────────────────────────────────────────
               //
-              // 현재는 실제 카메라 플러그인 연결 전 단계이므로
-              // 버튼을 누르면 준비 중 안내 메시지가 표시된다.
+              // mobile_scanner로 실시간 인식이 연결된 경로다.
+              //
+              // 카메라 스캔 화면(BarcodeScannerScreen)
+              // → 첫 유효 바코드 rawValue 반환
+              // → 폼 상태에 바코드 프리필
+              // → GifticonForm 화면 이동
               _SourceCard(
                 icon: Icons.photo_camera_outlined,
                 accent: Theme.of(context).colorScheme.primary,
@@ -186,8 +191,8 @@ class _ScanPageState extends ConsumerState<ScanPage> {
   /// 이후:
   ///
   /// - manual → 바로 빈 폼 화면으로 이동
+  /// - camera → 실시간 바코드 스캔 → 바코드 프리필
   /// - gallery → 이미지 선택 → OCR/바코드 인식 → 폼 프리필
-  /// - camera → 현재는 준비 중 안내
   ///
   /// 흐름이 끝나면(폼이 닫히거나 취소/오류가 나면)
   /// [GifticonFormController.reset]으로 전역 폼 상태를 비워
@@ -196,29 +201,6 @@ class _ScanPageState extends ConsumerState<ScanPage> {
     // 이미 다른 추가 흐름이 진행 중이면 무시한다.
     // (연타/중복 진입 방지 — [_busy] 문서 참조)
     if (_busy) return;
-
-    // ─────────────────────────────────────────
-    // 카메라
-    // ─────────────────────────────────────────
-    //
-    // TODO(scan):
-    // 실제 카메라 플러그인을 연결한다.
-    //
-    // 향후 흐름:
-    //
-    // 카메라 실행
-    // → 바코드/QR 인식
-    // → 필요하면 OCR 처리
-    // → prefillFromRecognition()
-    // → GifticonForm 이동
-    //
-    // 아직 폼을 열지 않으므로 폼 상태도 건드리지 않는다.
-    // (여기서 startWith를 먼저 호출하면 폼을 열지 않은 채
-    //  source=camera 상태가 전역 상태에 남는다)
-    if (source == ScanSource.camera) {
-      _showPlaceholderNotice(source);
-      return;
-    }
 
     _busy = true;
 
@@ -253,10 +235,60 @@ class _ScanPageState extends ConsumerState<ScanPage> {
       }
 
       // ─────────────────────────────────────────
+      // 카메라 실시간 스캔
+      // ─────────────────────────────────────────
+      //
+      // 갤러리와 동일한 골격이지만 인식 주체가 다르다.
+      //
+      // - 갤러리: 정지 이미지 1장 → ML Kit OCR + 바코드
+      // - 카메라: mobile_scanner가 프리뷰 프레임을 실시간 인식
+      //
+      // 카메라 경로는 프리뷰에서 바코드만 확정할 수 있으므로
+      // (프레임 이미지 파일을 남기지 않는다) 브랜드/상품명/금액/유효기간은
+      // 사용자가 폼에서 입력한다. 계약 필수 필드(brand/productName/price/
+      // expiryDate)는 GifticonFormState.validate()가 저장 전에 강제한다.
+      if (source == ScanSource.camera) {
+        if (!mounted) return;
+
+        // 스캔 화면은 "카메라를 띄워 문자열 하나를 돌려주는" 얇은 계약이다.
+        //
+        // - 인식 성공 → rawValue
+        // - 닫기/권한 거부 등 → null
+        final String? barcode = await Navigator.of(context).push<String>(
+          MaterialPageRoute<String>(
+            builder: (_) => const BarcodeScannerScreen(),
+          ),
+        );
+
+        // 사용자가 스캔을 취소했으면 폼을 열지 않고 그대로 머문다.
+        // (finally에서 폼 상태를 비운다 — 갤러리 취소와 동일한 처리)
+        if (barcode == null) return;
+
+        // 인식된 바코드만 폼에 채운다.
+        //
+        // 나머지 필드는 프리필하지 않으므로 기존 빈 값이 유지되고,
+        // 사용자가 폼에서 직접 입력한다(= 인식 실패 시 수동 입력 폴백).
+        controller.prefillFromRecognition(
+          barcode: barcode,
+        );
+
+        if (!mounted) return;
+
+        await Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) => const _GifticonFormScreen(),
+          ),
+        );
+
+        return;
+      }
+
+      // ─────────────────────────────────────────
       // 갤러리 이미지 선택
       // ─────────────────────────────────────────
       //
-      // 현재 세 경로 중 실제 인식 기능이 연결된 경로다.
+      // 정지 이미지 1장에서 OCR + 바코드를 함께 추출하는 경로다.
+      // (카메라 경로는 위에서 바코드만 확정한다)
       //
       // pickImage부터 try 안에 두어, 갤러리 연타 시
       // image_picker가 던지는 PlatformException(already_active)도
@@ -406,14 +438,25 @@ class _ScanPageState extends ConsumerState<ScanPage> {
         ),
       );
     } catch (e) {
-      // 이미지 선택/OCR/바코드 인식 과정에서
+      // 카메라 실행/이미지 선택/OCR/바코드 인식 과정에서
       // 예외가 발생한 경우 사용자에게 알려준다.
+      //
+      // 카메라 미지원·권한 거부는 mobile_scanner가 예외로 던지지 않고
+      // 스캔 화면 내부의 errorBuilder로 안내하지만, 그 밖의 실패
+      // (플랫폼 채널 오류 등)는 여기로 올라온다.
       if (!mounted) return;
+
+      // 어떤 경로에서 실패했는지 문구를 맞춘다(매직 문자열 분기 대신 enum switch).
+      final String what = switch (source) {
+        ScanSource.camera => '카메라 스캔',
+        ScanSource.gallery => '이미지 인식',
+        ScanSource.manual => '입력 화면을 여는',
+      };
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            '이미지 인식 중 오류가 발생했습니다: $e',
+            '$what 중 오류가 발생했습니다: $e',
           ),
         ),
       );
@@ -429,19 +472,6 @@ class _ScanPageState extends ConsumerState<ScanPage> {
 
       _busy = false;
     }
-  }
-
-  /// 아직 구현되지 않은 입력 경로에 대한 임시 안내 메시지.
-  void _showPlaceholderNotice(ScanSource source) {
-    final String name = source == ScanSource.camera ? '카메라' : '갤러리';
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          '$name 인식은 준비 중입니다. 직접 입력을 이용해 주세요.',
-        ),
-      ),
-    );
   }
 }
 
