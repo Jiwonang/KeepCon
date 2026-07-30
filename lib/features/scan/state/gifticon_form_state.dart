@@ -31,13 +31,20 @@
 /// - status는 항상 [GifticonStatus.available]로 시작한다(계약).
 /// - ownerId는 현재 사용자 id로 채운다.
 /// - id/registeredAt은 Repository 발급에 위임(빈 id/생성시각 채워 전달)한다.
+/// - 저장 대상 그룹을 골랐으면(내 지갑이 아니면) **저장 성공 후**
+///   `ShareRepository.shareGifticon(groupId:, gifticon: saved)`를 호출한다.
+///   `Gifticon`에 groupId를 추가하지 않는다(계약 무변경 — share 도메인의 기존
+///   규약: 등록 알림·1회 공유 불변식·markUsed 시 원본 동기화에 그대로 합류).
 library;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../shared/models/gifticon.dart';
+import '../../../shared/models/group.dart';
 import '../../../shared/providers/repositories.dart';
+import '../../../shared/repositories/share_repository.dart';
+import 'scan_target_group_state.dart';
 
 /// scan 입력 경로 구분.
 ///
@@ -113,10 +120,38 @@ class ScanSubmitInProgress extends ScanSubmitState {
 ///
 /// Repository가 id/registeredAt 등을 발급한다면
 /// 그 결과가 [saved]에 들어온다.
+///
+/// 저장 대상 그룹을 골랐던 경우에는 **그룹 공유 결과**도 함께 담는다.
+/// 공유는 저장 성공 후의 부수 단계이므로, 공유가 실패해도 이 상태는 성공이다
+/// (부분 실패 정책 — [GifticonFormController.submit] 참조). UI는 [sharedToGroup]/
+/// [shareError]로 "저장됨 + 그룹 공유됨"과 "저장됨(그룹 공유 실패)"를 구분해 안내한다.
 class ScanSubmitSuccess extends ScanSubmitState {
-  const ScanSubmitSuccess(this.saved);
+  const ScanSubmitSuccess(
+    this.saved, {
+    this.sharedGroupId,
+    this.sharedGroupName,
+    this.shareError,
+  });
 
+  /// Repository가 확정한 최종 기프티콘.
   final Gifticon saved;
+
+  /// 공유를 시도한 대상 그룹 id(= 제출 시점의 [GifticonFormState.targetGroupId]).
+  ///
+  /// `null`이면 '내 지갑' 저장이라 그룹 공유 단계를 아예 거치지 않았다.
+  final String? sharedGroupId;
+
+  /// 공유에 성공한 그룹명(안내 문구용).
+  ///
+  /// 공유는 성공했지만 그룹명 조회에 실패한 경우 `null`일 수 있다
+  /// (문구를 일반화할 뿐 공유 성공 판정에는 쓰지 않는다 — [sharedToGroup] 참조).
+  final String? sharedGroupName;
+
+  /// 그룹 공유 실패 사유. `null`이면 실패 없음(공유하지 않았거나 성공).
+  final String? shareError;
+
+  /// 그룹 공유가 실제로 성공했는지. '내 지갑' 저장은 `false`.
+  bool get sharedToGroup => sharedGroupId != null && shareError == null;
 }
 
 /// 제출 실패.
@@ -149,6 +184,7 @@ class GifticonFormState {
     this.category = '',
     this.expiryDate,
     this.imagePath,
+    this.targetGroupId,
     this.submit = const ScanSubmitIdle(),
   });
 
@@ -203,6 +239,14 @@ class GifticonFormState {
   /// 계약상 `Gifticon.imagePath`는 nullable이므로 null이어도 저장에 문제없다.
   final String? imagePath;
 
+  /// 저장 대상 그룹의 id. `null`이면 '내 지갑'(개인 보관 — 그룹 공유 없음).
+  ///
+  /// 스캔 화면의 '저장할 그룹 선택'에서 고른 값이 [GifticonFormController.startWith]로
+  /// 전달된다. 이 값은 **[Gifticon]에 저장되지 않는다** — 계약상 기프티콘은 그룹을
+  /// 모르고(계약 무변경), 그룹 공유는 저장 성공 후 `ShareRepository.shareGifticon`으로
+  /// 별도 표현된다([GifticonFormController.submit] 참조).
+  final String? targetGroupId;
+
   /// 현재 제출 상태.
   ///
   /// Idle / InProgress / Success / Failure 중 하나다.
@@ -222,6 +266,7 @@ class GifticonFormState {
     String? category,
     DateTime? expiryDate,
     String? imagePath,
+    String? targetGroupId,
     ScanSubmitState? submit,
   }) {
     return GifticonFormState(
@@ -233,6 +278,7 @@ class GifticonFormState {
       category: category ?? this.category,
       expiryDate: expiryDate ?? this.expiryDate,
       imagePath: imagePath ?? this.imagePath,
+      targetGroupId: targetGroupId ?? this.targetGroupId,
       submit: submit ?? this.submit,
     );
   }
@@ -366,14 +412,20 @@ class GifticonFormController extends StateNotifier<GifticonFormState> {
   /// 사용자는 그대로 수동 입력으로 폴백할 수 있다.
   ///
   /// 저장 성공 후 '계속 등록'을 누를 때도 이 메서드를 호출한다
-  /// (같은 입력 경로를 유지한 채 폼만 비운다).
-  void startWith(ScanSource source) {
+  /// (폼만 비우고 저장 대상 그룹은 그대로 물려준다 — 연속 등록은 보통 같은 그룹에
+  /// 몰아 넣는 흐름이다).
+  ///
+  /// [targetGroupId]는 스캔 화면 '저장할 그룹 선택'의 값이다. `null`(기본)이면
+  /// '내 지갑'(개인 보관 — 그룹 공유 없음)이다. [copyWith]로는 null로 되돌릴 수 없으므로
+  /// 대상 해제는 새 세션([startWith]/[reset])에서 이루어진다.
+  void startWith(ScanSource source, {String? targetGroupId}) {
     // 새 폼 세션 시작 — 진행 중이던 이전 세션의
     // 비동기 결과(submit 등)는 무효화된다.
     _session++;
 
     state = GifticonFormState(
       source: source,
+      targetGroupId: targetGroupId,
     );
   }
 
@@ -524,13 +576,26 @@ class GifticonFormController extends StateNotifier<GifticonFormState> {
   /// 3. 제출 상태 → InProgress
   /// 4. FormState → Gifticon 변환
   /// 5. Repository.addGifticon() 호출
-  /// 6. 성공 → ScanSubmitSuccess
-  /// 7. 실패 → ScanSubmitFailure
+  /// 6. 저장 성공 시, 대상 그룹을 골랐으면 ShareRepository.shareGifticon() 호출
+  /// 7. 성공 → ScanSubmitSuccess(공유 결과 포함)
+  /// 8. 실패 → ScanSubmitFailure
   ///
   /// 계약 메서드:
   ///
   /// [GifticonRepository.addGifticon](Gifticon)
   /// → Future<Gifticon>
+  ///
+  /// [ShareRepository.shareGifticon](groupId:, gifticon:)
+  /// → Future<SharedGifticon>
+  ///
+  /// ## 그룹 공유의 부분 실패 정책
+  /// 그룹 공유는 **저장 성공 후**의 부수 단계다. 공유가 실패해도
+  ///
+  /// - 저장을 되돌리지 않는다(기프티콘은 이미 내 목록에 있다),
+  /// - 제출 결과는 [ScanSubmitSuccess]로 유지하고,
+  /// - 실패 사유를 [ScanSubmitSuccess.shareError]에 담아 UI가 문구로 구분해 안내한다.
+  ///
+  /// 반대로 저장 자체가 실패하면 공유는 시도하지 않는다(공유할 원본이 없다).
   ///
   /// 성공하면 Repository가 반환한 최종 Gifticon을 반환한다.
   Future<Gifticon?> submit() async {
@@ -599,6 +664,35 @@ class GifticonFormController extends StateNotifier<GifticonFormState> {
     // 이 제출의 결과는 새 폼 상태에 반영하지 않고 버린다.
     final int session = _session;
 
+    // 저장 대상 그룹(선택). null이면 '내 지갑'이라 공유 단계를 건너뛴다.
+    final String? targetGroupId = state.targetGroupId;
+
+    // 공유 저장소는 await **전에** 읽어 둔다.
+    //
+    // 저장 완료 후에 _ref.read를 하면, 그 사이 ProviderContainer가 폐기된 경우
+    // (화면 종료/테스트 teardown) read 자체가 예외를 던진다.
+    final ShareRepository? shareRepository =
+        targetGroupId == null ? null : _ref.read(shareRepositoryProvider);
+
+    // 안내 문구용 그룹명도 await **전에** 같은 feature의 선택 목록에서
+    // 동기 조회해 둔다.
+    //
+    // 별도 getGroupById 원격 조회를 쓰지 않는 이유:
+    // shareGifticon 구현이 내부에서 이미 그룹 문서를 읽으므로 같은 문서의
+    // 이중 read이고, 성공 스낵바가 그 왕복만큼 지연된다. 사용자가 방금 이
+    // 목록에서 타일을 골랐으므로 이름은 이미 메모리에 있다.
+    // 목록에 없으면(로딩/소멸) null → 문구만 '그룹에 공유됨'으로 일반화.
+    String? targetGroupName;
+
+    if (targetGroupId != null) {
+      for (final Group g in _ref.read(scanTargetGroupsProvider)) {
+        if (g.id == targetGroupId) {
+          targetGroupName = g.name;
+          break;
+        }
+      }
+    }
+
     // ─────────────────────────────────────────
     // 4단계: 폼 원시 입력 → 계약 Gifticon 변환
     // ─────────────────────────────────────────
@@ -666,6 +760,50 @@ class GifticonFormController extends StateNotifier<GifticonFormState> {
       final Gifticon saved =
           await _ref.read(gifticonRepositoryProvider).addGifticon(draft);
 
+      // ─────────────────────────────────────────
+      // 5-1단계: 선택한 그룹에 공유 (내 지갑이면 생략)
+      // ─────────────────────────────────────────
+      //
+      // 계약을 바꾸지 않고 share 도메인의 기존 규약에 합류한다
+      // (등록 알림 / "한 기프티콘은 1회만 공유" 불변식 / markUsed 시 원본 동기화).
+      // 신규 저장이므로 정상 흐름에서 이중 공유 StateError는 발생할 수 없다.
+      //
+      // 세션 가드는 여기서 적용하지 않는다 — 공유는 "이미 성공한 저장"에 딸린
+      // 데이터 측 효과이므로, 사용자가 그 사이 폼을 떠났다고 해서 선택한 그룹에
+      // 넣지 않는 것은 오히려 데이터가 사용자 의도와 어긋나게 된다.
+      // (상태 쓰기만 아래 세션 가드로 보호한다)
+      String? sharedGroupName;
+      String? shareError;
+
+      if (targetGroupId != null && shareRepository != null) {
+        try {
+          await shareRepository.shareGifticon(
+            groupId: targetGroupId,
+            gifticon: saved,
+          );
+
+          // 그룹명은 안내 문구용 — submit 시작 시 선택 목록에서 캡처해 둔 값.
+          // (원격 재조회 없음. null이면 문구만 "그룹에 공유됨"으로 일반화)
+          sharedGroupName = targetGroupName;
+        } catch (e) {
+          // 계약상 가드 위반은 StateError다(그룹 없음/비멤버/이중 공유 등).
+          //
+          // 내부 메시지(영문·raw id 포함)를 사용자에게 그대로 노출하지 않는다 —
+          // share 페이지의 규약(예외 → 자체 한국어 중립 문구)과 동일하게
+          // 중립 문구로 안내하고, 원인은 debug 로그로만 남긴다.
+          // 회수 경로(공유 탭에서 수동 공유)를 함께 안내한다 —
+          // 원인(그룹 소멸/비멤버)은 대부분 즉시 재시도로 해소되지 않으므로
+          // '다시 시도'보다 대안 경로 안내가 실패 분포에 맞다.
+          shareError = '그룹에 공유하지 못했어요. 공유 탭에서 다시 공유할 수 있어요.';
+
+          if (kDebugMode) {
+            debugPrint('===== 그룹 공유 실패(저장은 성공) =====');
+            debugPrint('targetGroupId = $targetGroupId');
+            debugPrint('$e');
+          }
+        }
+      }
+
       // 저장 중에 폼 세션이 바뀌었으면(사용자가 폼을 떠나
       // 새 흐름을 시작했으면) 결과를 상태에 반영하지 않고
       // **null을 반환한다**.
@@ -688,9 +826,14 @@ class GifticonFormController extends StateNotifier<GifticonFormState> {
       // 6단계: 저장 성공
       // ─────────────────────────────────────────
       //
-      // Repository가 반환한 최종 Gifticon을 상태에 저장한다.
+      // Repository가 반환한 최종 Gifticon과 그룹 공유 결과를 상태에 저장한다.
       state = state.copyWith(
-        submit: ScanSubmitSuccess(saved),
+        submit: ScanSubmitSuccess(
+          saved,
+          sharedGroupId: targetGroupId,
+          sharedGroupName: sharedGroupName,
+          shareError: shareError,
+        ),
       );
 
       return saved;
