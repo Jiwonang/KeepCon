@@ -34,7 +34,7 @@ class _UsageLogPageState extends ConsumerState<UsageLogPage> {
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final List<UsageLog> all =
-        ref.watch(usageLogsProvider).value ?? const <UsageLog>[];
+        ref.watch(usageLogsProvider).valueOrNull ?? const <UsageLog>[];
     final List<Group> groups =
         ref.watch(myGroupsProvider).valueOrNull ?? const <Group>[];
     final MemberNames names = ref.watch(memberNamesProvider);
@@ -165,7 +165,7 @@ class _LogRow extends ConsumerWidget {
     final ColorScheme scheme = theme.colorScheme;
     final BrandStyle brand = BrandPalette.of(log.brand);
     final String groupName =
-        ref.watch(groupByIdProvider(log.groupId)).value?.name ?? '그룹';
+        ref.watch(groupByIdProvider(log.groupId)).valueOrNull?.name ?? '그룹';
 
     return IntrinsicHeight(
       child: Row(

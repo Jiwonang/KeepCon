@@ -184,7 +184,7 @@ class _MemberInvitePageState extends ConsumerState<MemberInvitePage> {
 
   Widget _buildContent(BuildContext context, Group g) {
     final ThemeData theme = Theme.of(context);
-    final String? uid = ref.watch(shareCurrentUserProvider).value?.id;
+    final String? uid = ref.watch(shareCurrentUserProvider).valueOrNull?.id;
     final bool iAmOwner = uid != null && g.isOwnedBy(uid);
 
     return Scaffold(

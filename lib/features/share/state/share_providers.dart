@@ -71,7 +71,7 @@ final allSharedProvider = Provider<List<SharedGifticon>>((ref) {
   final List<SharedGifticon> out = <SharedGifticon>[];
   for (final Group g in groups) {
     out.addAll(
-      ref.watch(sharedGifticonsProvider(g.id)).value ??
+      ref.watch(sharedGifticonsProvider(g.id)).valueOrNull ??
           const <SharedGifticon>[],
     );
   }
@@ -85,7 +85,7 @@ final sharedItemByIdProvider =
       ref.watch(myGroupsProvider).valueOrNull ?? const <Group>[];
   for (final Group g in groups) {
     final List<SharedGifticon> list =
-        ref.watch(sharedGifticonsProvider(g.id)).value ??
+        ref.watch(sharedGifticonsProvider(g.id)).valueOrNull ??
             const <SharedGifticon>[];
     for (final SharedGifticon s in list) {
       if (s.id == itemId) return s;
@@ -136,11 +136,12 @@ final _notifReadAtByUserProvider =
   return ref.watch(shareRepositoryProvider).watchNotificationsReadAt(userId);
 });
 
-/// 내 알림 마지막 읽음 시각. 미로그인/로딩은 null로 접는다(안읽음 판정은 보수적으로 동작).
+/// 내 알림 마지막 읽음 시각. 미로그인/로딩/에러는 null로 접는다
+/// (null = 전부 안읽음 판정 — 과대 표시가 과소 표시보다 안전한 보수적 방향).
 final notificationsReadAtProvider = Provider<DateTime?>((ref) {
-  final User? user = ref.watch(shareCurrentUserProvider).value;
+  final User? user = ref.watch(shareCurrentUserProvider).valueOrNull;
   if (user == null) return null;
-  return ref.watch(_notifReadAtByUserProvider(user.id)).value;
+  return ref.watch(_notifReadAtByUserProvider(user.id)).valueOrNull;
 });
 
 /// 안읽음 알림 개수 — 마지막 읽음 시각 이후에 생성된 알림 수.
@@ -149,7 +150,8 @@ final notificationsReadAtProvider = Provider<DateTime?>((ref) {
 /// [ShareRepository.markNotificationsRead]가 호출되면 읽음 시각이 갱신돼 0으로 수렴한다.
 final unreadNotificationCountProvider = Provider<int>((ref) {
   final List<GroupNotification> notifs =
-      ref.watch(notificationsProvider).value ?? const <GroupNotification>[];
+      ref.watch(notificationsProvider).valueOrNull ??
+          const <GroupNotification>[];
   final DateTime? readAt = ref.watch(notificationsReadAtProvider);
   if (readAt == null) return notifs.length;
   return notifs
@@ -183,7 +185,7 @@ final shareableGifticonsProvider = Provider<AsyncValue<List<Gifticon>>>((ref) {
 /// 사전 차단하는 UX 방어선이다(저장소의 [StateError] 가드와 이중 방어).
 final unsharedGifticonsProvider = Provider<List<Gifticon>>((ref) {
   final List<Gifticon> mine =
-      ref.watch(shareableGifticonsProvider).value ?? const <Gifticon>[];
+      ref.watch(shareableGifticonsProvider).valueOrNull ?? const <Gifticon>[];
   final Set<String> sharedGifticonIds = ref
       .watch(allSharedProvider)
       .map((SharedGifticon s) => s.gifticonId)
@@ -202,7 +204,7 @@ final unsharedGifticonsProvider = Provider<List<Gifticon>>((ref) {
 final memberNamesProvider = Provider<MemberNames>((ref) {
   final List<Group> groups =
       ref.watch(myGroupsProvider).valueOrNull ?? const <Group>[];
-  final User? user = ref.watch(shareCurrentUserProvider).value;
+  final User? user = ref.watch(shareCurrentUserProvider).valueOrNull;
   final Map<String, String> byId = <String, String>{};
   for (final Group g in groups) {
     for (final GroupMember m in g.members) {

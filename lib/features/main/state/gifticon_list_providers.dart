@@ -32,7 +32,7 @@ final currentUserProvider = StreamProvider<User?>((ref) {
 /// 사용자 id로 GifticonRepository.watchGifticons(ownerId)를 구독한다.
 /// 미로그인(null)이면 빈 목록 스트림을 방출한다.
 final rawGifticonsProvider = StreamProvider<List<Gifticon>>((ref) {
-  final User? user = ref.watch(currentUserProvider).value;
+  final User? user = ref.watch(currentUserProvider).valueOrNull;
   if (user == null) {
     return Stream<List<Gifticon>>.value(const <Gifticon>[]);
   }
@@ -52,7 +52,8 @@ final filterProvider =
 ///
 /// 카테고리 필터 드롭다운의 선택지로 쓴다. 원천 목록에서 계약 [Gifticon.category]만 참조.
 final availableCategoriesProvider = Provider<List<String>>((ref) {
-  final List<Gifticon> raw = ref.watch(rawGifticonsProvider).value ?? const [];
+  final List<Gifticon> raw =
+      ref.watch(rawGifticonsProvider).valueOrNull ?? const [];
   final Set<String> cats = <String>{for (final g in raw) g.category};
   final List<String> sorted = cats.toList()
     ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
