@@ -43,7 +43,8 @@ class GifticonStats {
 ///
 /// [rawGifticonsProvider]를 구독하므로 scan 추가/share 동기화로 목록이 바뀌면 자동 재계산된다.
 final gifticonStatsProvider = Provider<GifticonStats>((ref) {
-  final List<Gifticon> raw = ref.watch(rawGifticonsProvider).value ?? const [];
+  final List<Gifticon> raw =
+      ref.watch(rawGifticonsProvider).valueOrNull ?? const [];
   final DateTime now = DateTime.now();
 
   int holding = 0;

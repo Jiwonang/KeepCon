@@ -48,7 +48,7 @@ class _DetailBody extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
-    final String? uid = ref.watch(shareCurrentUserProvider).value?.id;
+    final String? uid = ref.watch(shareCurrentUserProvider).valueOrNull?.id;
     final MemberNames names = ref.watch(memberNamesProvider);
     final String actorId = uid ?? '';
     final BrandStyle brand = BrandPalette.of(item.brand);

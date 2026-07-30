@@ -51,9 +51,9 @@ class SharePage extends ConsumerWidget {
         ref.watch(myGroupsProvider).valueOrNull ?? const <Group>[];
     final List<SharedGifticon> shared = ref.watch(allSharedProvider);
     final List<UsageLog> logs =
-        ref.watch(usageLogsProvider).value ?? const <UsageLog>[];
+        ref.watch(usageLogsProvider).valueOrNull ?? const <UsageLog>[];
     final MemberNames names = ref.watch(memberNamesProvider);
-    final User? user = ref.watch(shareCurrentUserProvider).value;
+    final User? user = ref.watch(shareCurrentUserProvider).valueOrNull;
     final int unreadNotifications = ref.watch(unreadNotificationCountProvider);
 
     return Scaffold(
@@ -282,7 +282,7 @@ class _GroupCard extends ConsumerWidget {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
     final int sharedCount =
-        ref.watch(sharedGifticonsProvider(group.id)).value?.length ?? 0;
+        ref.watch(sharedGifticonsProvider(group.id)).valueOrNull?.length ?? 0;
 
     return Material(
       color: scheme.surface,
@@ -396,7 +396,7 @@ class _UsageLogTile extends ConsumerWidget {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
     final String groupName =
-        ref.watch(groupByIdProvider(log.groupId)).value?.name ?? '그룹';
+        ref.watch(groupByIdProvider(log.groupId)).valueOrNull?.name ?? '그룹';
 
     return ListTile(
       leading: CircleAvatar(

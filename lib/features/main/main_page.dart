@@ -61,7 +61,9 @@ class _HomeBody extends ConsumerWidget {
     final GifticonStats stats = ref.watch(gifticonStatsProvider);
     final SortOption sort = ref.watch(sortOptionProvider);
 
-    final List<Gifticon> list = visibleAsync.value ?? const <Gifticon>[];
+    // valueOrNull: .value는 이전 값 없는 AsyncError에서 rethrow하므로
+    // 첫 방출이 에러면 홈 전체가 에러 화면이 된다(계약 매트릭스 #13 규약).
+    final List<Gifticon> list = visibleAsync.valueOrNull ?? const <Gifticon>[];
 
     return CustomScrollView(
       slivers: [

@@ -754,7 +754,9 @@ class _AiBanner extends StatelessWidget {
 ///
 /// 연동 방식(계약 무변경):
 ///
-/// `ShareRepository.watchGroups(currentUser.id)`  ← 목록
+/// 정본 `myGroupsProvider`(lib/shared/providers — 내부에서
+/// `ShareRepository.watchGroups(uid)` 구독) → scan 파생
+/// `scanTargetGroupsProvider`(빈 목록 폴딩)  ← 목록
 ///   ↓ 사용자가 타일 선택 → groupId
 /// `GifticonFormController.startWith(source, targetGroupId: groupId)`
 ///   ↓ 저장 버튼

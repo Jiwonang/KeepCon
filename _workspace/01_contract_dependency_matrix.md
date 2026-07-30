@@ -180,8 +180,9 @@
      `../../../shared/providers/repositories.dart`).
 
 12. **scan → share: 저장 시 선택 그룹으로 `shareGifticon` 소비 (계약 무변경)**
-   - 스캔/추가 화면의 '저장할 그룹 선택'은 `ShareRepository.watchGroups(currentUser.id)`로
-     내 그룹을 읽어 타일을 만들고(첫 타일 = '내 지갑' = 대상 없음), 저장 시
+   - 스캔/추가 화면의 '저장할 그룹 선택'은 정본 `myGroupsProvider`(#13, v2.5 —
+     내부적으로 `watchGroups(uid)` 체인)를 scan 파생 `scanTargetGroupsProvider`로
+     폴딩(`valueOrNull ?? []`)해 타일을 만들고(첫 타일 = '내 지갑' = 대상 없음), 저장 시
      `GifticonRepository.addGifticon` **성공 후** 대상 그룹이 있으면
      `ShareRepository.shareGifticon(groupId:, gifticon: saved)`를 호출한다.
    - **`Gifticon`에 `groupId`를 추가하지 않는다.** 그룹 소속은 share 도메인의
@@ -220,8 +221,9 @@
      그 외 에러 → `AsyncError` 전파.
    - **⚠️ 접을 때는 `.value`가 아니라 `valueOrNull`.** `.value`는 이전 값이 없는
      `AsyncError`에서 **rethrow** 하므로, 첫 방출이 에러면 폴백(`?? []`)에 도달하지 못하고
-     소비 provider가 throw 한다. 정본·파생·소비 지점 어느 층에서도 이 함정을 쓰지 않는다
-     (v2.5에서 share 소비 5곳의 기존 `.value`도 `valueOrNull`로 정리 완료).
+     소비 provider가 throw 한다. 정본·파생·소비 지점 어느 층에서도 이 함정을 쓰지 않는다.
+     v2.5 후속 정리에서 **lib 전수**(share 전 소비 지점 + main의 세션·목록·통계 폴딩,
+     mypage·scan은 기존 준수)를 `valueOrNull`로 통일 완료 — 새 폴딩 코드는 이 규약을 따를 것.
    - **수명 = `autoDispose`.** scan은 일회성 플로우라 이탈 시 리스너가 남으면 안 되고,
      share의 파생은 keepAlive라 한 번 만들어지면 정본 수명을 **붙잡는다**(승격 전 keepAlive
      체인과 동일한 수명 — share 동작 불변). 결과적으로 구독 수는 **0 또는 1**이며 승격 전
@@ -305,6 +307,7 @@
 - ✅ **리팩터 완료(share-page-dev, v2.2):** `lib/features/share/data/`(로컬 `share_models.dart`·`share_store.dart`·`korean_particle.dart`) **제거 완료** → 페이지가 `lib/shared` 계약을 소비. share 테스트는 `ShareStore` 대상에서 **`InMemoryShareRepository` 대상**으로 전환됨(`test/features/share/share_repository_*_test.dart`), korean_particle 테스트는 `test/shared/util/`로 이동. 매핑은 `02_share_contract_promotion.md` D절.
 - ✅ **승격 완료(v2.4):** 날짜 라벨 포맷 — 3곳(main `formatDate` / share `formatExpiryLabel` 계열 / scan 인라인)에 분산됐던 `YYYY.MM.DD` 조립을 `lib/shared/util/date_format.dart`의 `formatYmdDot`으로 통합. 표기 규칙 합의 결과는 **점 구분자 통일**(다수 표기, scan만 `-`였음)이고, D-day 라벨(`formatDDay`)·상대 시각(`formatRelativeKo`)은 입력·의미가 달라 **승격 대상이 아님**(각 페이지 로컬 유지).
 - ✅ **승격 완료(v2.5):** "현재 사용자의 그룹 목록 스트림" provider — scan/share에 중복 조립돼 `watchGroups`를 두 번 구독했던 체인을 `lib/shared/providers/my_groups_provider.dart`의 `myGroupsProvider`(**SSOT**, `autoDispose`, `AsyncValue` 노출)로 통합. 페이지 파생 형태는 계획대로 로컬 유지(share = `AsyncValue` 전파, scan = 빈 목록 폴딩). 구독 단일화는 테스트로 고정(`test/shared/providers/my_groups_provider_test.dart`). 상세는 크로스페이지 주의점 #13.
+- **다음 승격 후보(경량):** `AsyncValue<List<T>>` 폴딩 확장(예: `orEmpty` — `valueOrNull ?? const []`) — 같은 관용구가 lib 16곳에 반복되고, 단일 폴딩 지점이 없으면 `.value` 변형이 재유입될 수 있다(v2.5 후속 정리에서 main 홈 1곳 재유입 실증). 표준 관용구 대비 프로젝트 고유 어휘 도입이라 순이득은 중간 — 채택 여부는 `contract-architect` 판단.
 - **다음 승격 후보:** **세션 스트림(`AuthRepository.watchCurrentUser()`) provider** — 현재 5곳이 각자 구독한다: 앱 조립부(`lib/app/auth_gate.dart`), main(`currentUserProvider`, `lib/features/main/state/gifticon_list_providers.dart`), mypage(`lib/features/mypage/mypage_page.dart`), share(`shareCurrentUserProvider`, `lib/features/share/state/share_providers.dart`), 그리고 `my_groups_provider.dart` 내부. 규칙 ③은 이미 충족(소비자 다수)이지만 그룹 목록보다 소비자가 많고 셸(조립부) 수명과 얽혀 있어 별도 슬라이스로 다룬다 — 승격 시 `lib/shared/providers/`에 세션 정본을 두고 `my_groups_provider.dart`가 그것을 소비하도록 바꾼다. Firestore 과금 영향은 그룹 목록보다 작다(인증 상태 리스너는 문서 읽기가 아니다) — 이득은 **인스턴스/타이밍 일관성**이다. 페이지 담당은 직접 `lib/shared`를 고치지 말고 `contract-architect`에게 요청할 것(`CODEOWNERS` 리뷰 강제).
 - **가드 보강 후보(계약 소유자 판단 필요):** `tool/check_ssot.sh`의 `SSOT_PROVIDERS` 목록에 **`myGroupsProvider`가 아직 없다** — 지금은 페이지가 같은 이름의 provider를 다시 선언해도 CI가 잡지 못한다(정본이 없던 시절과 같은 재발 경로). 이번 변경 범위(계약+소비 전환)와 분리해 CI 가드 PR로 다루기를 권한다.
 - **미착수:** 기기 푸시 알림용 `NotificationService`/범용 `NotificationType`(그룹 알림은 `ShareRepository`가 충족), auth/share **세부** 라우트(그룹 상세·초대 등 페이지 내부 내비게이션 — 현재 `AppRoutes.share` 탭 라우트만 존재).

@@ -43,7 +43,8 @@ class _GroupNotificationsPageState
   @override
   Widget build(BuildContext context) {
     final List<GroupNotification> items =
-        ref.watch(notificationsProvider).value ?? const <GroupNotification>[];
+        ref.watch(notificationsProvider).valueOrNull ??
+            const <GroupNotification>[];
 
     return Scaffold(
       appBar: AppBar(

@@ -63,10 +63,10 @@ class _GroupDetailBody extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
-    final String? uid = ref.watch(shareCurrentUserProvider).value?.id;
+    final String? uid = ref.watch(shareCurrentUserProvider).valueOrNull?.id;
     final MemberNames names = ref.watch(memberNamesProvider);
     final List<SharedGifticon> shared =
-        ref.watch(sharedGifticonsProvider(group.id)).value ??
+        ref.watch(sharedGifticonsProvider(group.id)).valueOrNull ??
             const <SharedGifticon>[];
     // 초대 권한(방장 한정 정책 반영) — 없으면 초대 진입점을 숨긴다.
     final bool canInvite = uid != null && group.canInvite(uid);
