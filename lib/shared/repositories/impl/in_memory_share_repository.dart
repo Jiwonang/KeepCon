@@ -49,6 +49,9 @@ class InMemoryShareRepository implements ShareRepository {
   final List<UsageLog> _usageLogs = <UsageLog>[];
   final List<GroupNotification> _notifications = <GroupNotification>[];
 
+  /// 사용자별 알림 마지막 읽음 시각(userId → 시각). 없으면 한 번도 안 읽음.
+  final Map<String, DateTime> _notifReadAt = <String, DateTime>{};
+
   final StreamController<void> _tick = StreamController<void>.broadcast();
   int _seq = 100;
 
@@ -280,6 +283,31 @@ class InMemoryShareRepository implements ShareRepository {
   }
 
   @override
+  Future<Group> removeMember({
+    required String groupId,
+    required String userId,
+  }) async {
+    final User me = _requireUser();
+    final Group g = _requireGroup(groupId);
+    if (!g.isOwnedBy(me.id)) {
+      throw StateError('Only the owner can remove members: $groupId');
+    }
+    if (userId == me.id) {
+      throw StateError('Owner cannot remove themselves: $groupId');
+    }
+    if (!g.isMember(userId)) {
+      throw StateError('Not a member of group: $userId');
+    }
+    final List<GroupMember> next = g.members
+        .where((GroupMember m) => m.userId != userId)
+        .toList(growable: false);
+    final Group updated = g.copyWith(members: next);
+    _groups[_groupIndex(groupId)] = updated;
+    _emit();
+    return updated;
+  }
+
+  @override
   Future<Group> setInviteOwnerOnly({
     required String groupId,
     required bool ownerOnly,
@@ -310,6 +338,21 @@ class InMemoryShareRepository implements ShareRepository {
     final Group updated = g.copyWith(
       inviteExpiresAt: d == null ? null : DateTime.now().add(d),
     );
+    _groups[_groupIndex(groupId)] = updated;
+    _emit();
+    return updated;
+  }
+
+  @override
+  Future<Group> regenerateInviteCode({required String groupId}) async {
+    final User me = _requireUser();
+    final Group g = _requireGroup(groupId);
+    if (!g.isOwnedBy(me.id)) {
+      throw StateError('Only the owner can regenerate invite code: $groupId');
+    }
+    // 새 코드 발급 + 만료 초기화(재발급된 코드는 즉시 사용 가능해야 한다).
+    final Group updated =
+        g.copyWith(inviteCode: _nextCode(), inviteExpiresAt: null);
     _groups[_groupIndex(groupId)] = updated;
     _emit();
     return updated;
@@ -520,6 +563,19 @@ class InMemoryShareRepository implements ShareRepository {
   Future<List<GroupNotification>> getNotifications(String userId) async =>
       _notificationsFor(userId);
 
+  @override
+  Stream<DateTime?> watchNotificationsReadAt(String userId) async* {
+    yield _notifReadAt[userId];
+    yield* _tick.stream.map((_) => _notifReadAt[userId]);
+  }
+
+  @override
+  Future<void> markNotificationsRead() async {
+    final User me = _requireUser();
+    _notifReadAt[me.id] = DateTime.now();
+    _emit();
+  }
+
   List<GroupNotification> _notificationsFor(String userId) =>
       List<GroupNotification>.unmodifiable(
         _notifications
@@ -543,6 +599,13 @@ class InMemoryShareRepository implements ShareRepository {
   String _randomCode() {
     final int base = 100000 + (_seq * 37) % 900000;
     return base.toString();
+  }
+
+  /// 매 호출마다 다른 코드 — 재발급용. [_randomCode]는 [_seq]에 결정적이므로
+  /// 시퀀스를 먼저 진행시켜 이전 코드와 겹치지 않게 한다.
+  String _nextCode() {
+    _seq++;
+    return _randomCode();
   }
 
   // ── 시드 데이터 ──────────────────────────────────────────────────────

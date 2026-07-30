@@ -51,6 +51,7 @@ class SharePage extends ConsumerWidget {
         ref.watch(usageLogsProvider).value ?? const <UsageLog>[];
     final MemberNames names = ref.watch(memberNamesProvider);
     final User? user = ref.watch(shareCurrentUserProvider).value;
+    final int unreadNotifications = ref.watch(unreadNotificationCountProvider);
 
     return Scaffold(
       body: SafeArea(
@@ -59,6 +60,7 @@ class SharePage extends ConsumerWidget {
           children: <Widget>[
             // ── 헤더(큰 타이틀 + 알림벨 + 그룹 추가) ──
             _ShareHeader(
+              unreadCount: unreadNotifications,
               onNotifications: () =>
                   _push(context, const GroupNotificationsPage()),
               onCreate: () => showCreateGroupSheet(context),
@@ -146,10 +148,16 @@ class SharePage extends ConsumerWidget {
 
 // ─────────────────────────── 헤더 ───────────────────────────
 
-/// 상단 헤더 — 큰 타이틀 "공유" + 알림벨(초록 점) + 그룹 추가. 홈/스캔과 동일 톤.
+/// 상단 헤더 — 큰 타이틀 "공유" + 알림벨(안읽음 뱃지) + 그룹 추가. 홈/스캔과 동일 톤.
 class _ShareHeader extends StatelessWidget {
-  const _ShareHeader({required this.onNotifications, required this.onCreate});
+  const _ShareHeader({
+    required this.unreadCount,
+    required this.onNotifications,
+    required this.onCreate,
+  });
 
+  /// 안읽음 알림 개수. 0이면 뱃지를 숨긴다.
+  final int unreadCount;
   final VoidCallback onNotifications;
   final VoidCallback onCreate;
 
@@ -165,7 +173,7 @@ class _ShareHeader extends StatelessWidget {
             style: context.pageHeaderStyle,
           ),
         ),
-        // 알림 벨 + 초록 뱃지 점 → 그룹 알림.
+        // 알림 벨 + 안읽음 카운트 뱃지(있을 때만) → 그룹 알림.
         SizedBox(
           width: 44,
           height: 44,
@@ -176,19 +184,31 @@ class _ShareHeader extends StatelessWidget {
               clipBehavior: Clip.none,
               children: <Widget>[
                 Icon(Icons.notifications_none, color: scheme.onSurface),
-                Positioned(
-                  top: -1,
-                  right: -1,
-                  child: Container(
-                    width: 9,
-                    height: 9,
-                    decoration: BoxDecoration(
-                      color: scheme.primary,
-                      shape: BoxShape.circle,
-                      border: Border.all(color: scheme.surface, width: 1.5),
+                if (unreadCount > 0)
+                  Positioned(
+                    top: -4,
+                    right: -5,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 4),
+                      constraints:
+                          const BoxConstraints(minWidth: 16, minHeight: 16),
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: scheme.error,
+                        borderRadius: BorderRadius.circular(AppRadii.pill),
+                        border: Border.all(color: scheme.surface, width: 1.5),
+                      ),
+                      child: Text(
+                        unreadCount > 9 ? '9+' : '$unreadCount',
+                        style: TextStyle(
+                          color: scheme.onError,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w800,
+                          height: 1.1,
+                        ),
+                      ),
                     ),
                   ),
-                ),
               ],
             ),
           ),

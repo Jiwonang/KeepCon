@@ -82,6 +82,19 @@ abstract class ShareRepository {
     required String newOwnerUserId,
   });
 
+  /// 방장이 멤버를 그룹에서 내보낸다(강퇴).
+  ///
+  /// 가드: 행위자가 방장이어야 하고, [userId]는 방장 본인이 아닌 기존 멤버여야 한다
+  /// (방장 자신은 강퇴 대상이 아니다 — [leaveGroup]/[transferOwnershipAndLeave]를 쓴다).
+  /// 위반/그룹 없음이면 [StateError]. 성공 시 갱신된(해당 멤버 제거) 그룹을 반환한다.
+  ///
+  /// 내보낸 멤버가 그룹에 공유했던 항목은 [leaveGroup]과 동일하게 그대로 남는다
+  /// (멤버 이탈 시 공유 항목을 정리하지 않는 현행 규약과 일치).
+  Future<Group> removeMember({
+    required String groupId,
+    required String userId,
+  });
+
   /// 초대 권한 정책(방장 한정 여부)을 설정한다.
   ///
   /// 가드: 방장 본인만 정책을 바꿀 수 있다. 위반 시 [StateError].
@@ -100,6 +113,15 @@ abstract class ShareRepository {
     required String groupId,
     required InviteExpiry expiry,
   });
+
+  /// 초대코드를 재발급한다 — 새 코드를 발급해 **기존 코드/링크를 무효화**한다.
+  ///
+  /// 재발급된 초대는 즉시 사용 가능해야 하므로 만료([Group.inviteExpiresAt])를
+  /// 초기화(무제한)한다. 만료가 필요하면 [setInviteExpiry]로 다시 설정한다.
+  ///
+  /// 가드: 방장 본인만 재발급할 수 있다. 위반/그룹 없음이면 [StateError].
+  /// 성공 시 갱신된(새 코드·만료 초기화) 그룹을 반환한다.
+  Future<Group> regenerateInviteCode({required String groupId});
 
   // ── 공유 기프티콘 ────────────────────────────────────────────────────
   /// 특정 그룹의 공유 기프티콘 목록을 반응형으로 관찰한다.
@@ -158,4 +180,15 @@ abstract class ShareRepository {
 
   /// [userId]가 속한 그룹들의 알림을 1회성으로 조회한다(최신순).
   Future<List<GroupNotification>> getNotifications(String userId);
+
+  /// [userId]의 알림 '마지막 읽음' 시각을 반응형으로 관찰한다.
+  ///
+  /// 한 번도 읽지 않았으면 `null`(= 모든 알림이 안읽음). 소비자는 이 시각 이후에
+  /// 생성된 [GroupNotification]을 안읽음으로 판정한다(안읽음 뱃지/카운트).
+  Stream<DateTime?> watchNotificationsReadAt(String userId);
+
+  /// 현재 사용자의 알림을 모두 읽음 처리한다(마지막 읽음 시각을 현재로 갱신).
+  ///
+  /// 세션에 현재 사용자가 없으면 [StateError]. 알림 화면 진입 시 호출해 안읽음을 해소한다.
+  Future<void> markNotificationsRead();
 }

@@ -143,6 +143,33 @@ final notificationsProvider =
       );
 });
 
+/// 특정 사용자의 알림 마지막 읽음 시각 스트림(내부용).
+final _notifReadAtByUserProvider =
+    StreamProvider.family<DateTime?, String>((ref, userId) {
+  return ref.watch(shareRepositoryProvider).watchNotificationsReadAt(userId);
+});
+
+/// 내 알림 마지막 읽음 시각. 미로그인/로딩은 null로 접는다(안읽음 판정은 보수적으로 동작).
+final notificationsReadAtProvider = Provider<DateTime?>((ref) {
+  final User? user = ref.watch(shareCurrentUserProvider).value;
+  if (user == null) return null;
+  return ref.watch(_notifReadAtByUserProvider(user.id)).value;
+});
+
+/// 안읽음 알림 개수 — 마지막 읽음 시각 이후에 생성된 알림 수.
+///
+/// 읽음 시각이 없으면(한 번도 안 읽음) 전체가 안읽음이다. 알림 화면 진입 시
+/// [ShareRepository.markNotificationsRead]가 호출되면 읽음 시각이 갱신돼 0으로 수렴한다.
+final unreadNotificationCountProvider = Provider<int>((ref) {
+  final List<GroupNotification> notifs =
+      ref.watch(notificationsProvider).value ?? const <GroupNotification>[];
+  final DateTime? readAt = ref.watch(notificationsReadAtProvider);
+  if (readAt == null) return notifs.length;
+  return notifs
+      .where((GroupNotification n) => n.createdAt.isAfter(readAt))
+      .length;
+});
+
 /// 특정 사용자의 원본 기프티콘 스트림(내부용).
 final _gifticonsByUserProvider =
     StreamProvider.family<List<Gifticon>, String>((ref, userId) {

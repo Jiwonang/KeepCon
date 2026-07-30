@@ -59,6 +59,7 @@ class FirebaseShareRepository implements ShareRepository {
   static const String usageLogsCollection = 'usageLogs';
   static const String notificationsCollection = 'notifications';
   static const String shareLocksCollection = 'shareLocks';
+  static const String notificationReadsCollection = 'notificationReads';
 
   static const String _defaultAvatar = '🙂';
 
@@ -70,6 +71,8 @@ class FirebaseShareRepository implements ShareRepository {
       _db.collection(usageLogsCollection);
   CollectionReference<Map<String, dynamic>> get _notifs =>
       _db.collection(notificationsCollection);
+  CollectionReference<Map<String, dynamic>> get _notifReads =>
+      _db.collection(notificationReadsCollection);
   CollectionReference<Map<String, dynamic>> get _locks =>
       _db.collection(shareLocksCollection);
 
@@ -254,6 +257,38 @@ class FirebaseShareRepository implements ShareRepository {
   }
 
   @override
+  Future<Group> removeMember({
+    required String groupId,
+    required String userId,
+  }) async {
+    final User me = _requireUser();
+    final DocumentReference<Map<String, dynamic>> ref = _groups.doc(groupId);
+
+    return _db.runTransaction<Group>((Transaction tx) async {
+      final DocumentSnapshot<Map<String, dynamic>> doc = await tx.get(ref);
+      if (!doc.exists) throw StateError('Group not found: $groupId');
+      final Group g = _groupFromDoc(doc);
+      if (!g.isOwnedBy(me.id)) {
+        throw StateError('Only the owner can remove members: $groupId');
+      }
+      if (userId == me.id) {
+        throw StateError('Owner cannot remove themselves: $groupId');
+      }
+      if (!g.isMember(userId)) {
+        throw StateError('Not a member of group: $userId');
+      }
+      // 방장은 남으므로 그룹이 비지 않는다(cascade 불필요). leaveGroup의 비-소멸
+      // 분기와 동일하게 멤버십만 제거한다(공유 항목은 그대로 유지).
+      final List<GroupMember> next = g.members
+          .where((GroupMember m) => m.userId != userId)
+          .toList(growable: false);
+      final Group updated = g.copyWith(members: next);
+      tx.update(ref, _groupToDoc(updated));
+      return updated;
+    });
+  }
+
+  @override
   Future<Group> setInviteOwnerOnly({
     required String groupId,
     required bool ownerOnly,
@@ -296,6 +331,29 @@ class FirebaseShareRepository implements ShareRepository {
       tx.update(ref, <String, dynamic>{
         'inviteExpiresAt':
             expiresAt == null ? null : Timestamp.fromDate(expiresAt),
+      });
+      return updated;
+    });
+  }
+
+  @override
+  Future<Group> regenerateInviteCode({required String groupId}) async {
+    final User me = _requireUser();
+    final DocumentReference<Map<String, dynamic>> ref = _groups.doc(groupId);
+
+    return _db.runTransaction<Group>((Transaction tx) async {
+      final DocumentSnapshot<Map<String, dynamic>> doc = await tx.get(ref);
+      if (!doc.exists) throw StateError('Group not found: $groupId');
+      final Group g = _groupFromDoc(doc);
+      if (!g.isOwnedBy(me.id)) {
+        throw StateError('Only the owner can regenerate invite code: $groupId');
+      }
+      // 새 코드 발급 + 만료 초기화(재발급된 코드는 즉시 사용 가능해야 한다).
+      final Group updated =
+          g.copyWith(inviteCode: _randomCode(), inviteExpiresAt: null);
+      tx.update(ref, <String, dynamic>{
+        'inviteCode': updated.inviteCode,
+        'inviteExpiresAt': null,
       });
       return updated;
     });
@@ -577,6 +635,21 @@ class FirebaseShareRepository implements ShareRepository {
     return s.docs.map(_notifFromDoc).toList(growable: false);
   }
 
+  @override
+  Stream<DateTime?> watchNotificationsReadAt(String userId) {
+    return _notifReads.doc(userId).snapshots().map(
+        (DocumentSnapshot<Map<String, dynamic>> d) =>
+            _readAtFrom(d.data()?['readAt']));
+  }
+
+  @override
+  Future<void> markNotificationsRead() async {
+    final User me = _requireUser();
+    await _notifReads.doc(me.id).set(<String, dynamic>{
+      'readAt': Timestamp.fromDate(DateTime.now()),
+    });
+  }
+
   Future<List<String>> _userGroupIds(String userId) async {
     final List<Group> groups = await getGroups(userId);
     return groups.map((Group g) => g.id).take(_whereInLimit).toList();
@@ -774,6 +847,14 @@ class FirebaseShareRepository implements ShareRepository {
     if (value is Timestamp) return value.toDate();
     if (value is DateTime) return value;
     return DateTime.fromMillisecondsSinceEpoch(0);
+  }
+
+  /// 알림 마지막 읽음 시각 파서 — 없거나 손상 값이면 `null`(= 안 읽음). 안읽음 판정은
+  /// null을 "전부 안읽음"으로 안전하게 처리하므로 fail-open이 아니다.
+  DateTime? _readAtFrom(Object? value) {
+    if (value is Timestamp) return value.toDate();
+    if (value is DateTime) return value;
+    return null;
   }
 
   /// 초대코드 만료 시각을 문서 값에서 해석한다.
