@@ -21,7 +21,7 @@
 /// `lib/shared/util/`에 둔다(`korean_particle.dart`·`invite_link.dart`와 동일한 성격).
 /// 계약값(`Gifticon.price: int`)을 바꾸지 않으며, 표시 문자열만 만든다.
 ///
-/// 다음 승격 후보: 날짜 라벨 포맷(main `formatDate`/share `formatExpiryLabel`/scan 인라인).
+/// (승격 이력·다음 후보는 계약 매트릭스의 "다음 승격 후보" 절에서 관리한다)
 library;
 
 /// 숫자 이외의 문자.
