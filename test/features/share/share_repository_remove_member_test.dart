@@ -12,6 +12,7 @@
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:keepcon/shared/models/group.dart';
+import 'package:keepcon/shared/models/share.dart';
 import 'package:keepcon/shared/repositories/impl/in_memory_auth_repository.dart';
 import 'package:keepcon/shared/repositories/impl/in_memory_gifticon_repository.dart';
 import 'package:keepcon/shared/repositories/impl/in_memory_share_repository.dart';
@@ -51,6 +52,11 @@ void main() {
     expect(updated.isOwnedBy(me), isTrue);
 
     expect((await repo.getGroupById('g_family'))!.isMember('u_mom'), isFalse);
+
+    // 계약: 내보낸 멤버가 공유했던 항목(u_mom의 s_1)은 그대로 남는다(leave와 동일).
+    final List<SharedGifticon> stillShared =
+        await repo.getSharedGifticons('g_family');
+    expect(stillShared.any((SharedGifticon s) => s.id == 's_1'), isTrue);
   });
 
   test('방장은 자신을 내보낼 수 없다(StateError)', () async {

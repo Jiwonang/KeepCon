@@ -283,7 +283,9 @@ class _GroupDetailBody extends ConsumerWidget {
           );
       _snack(messenger, '"${member.displayName}"님을 내보냈어요.');
     } on StateError {
-      _snack(messenger, '방장만 멤버를 내보낼 수 있어요.');
+      // StateError는 권한 외에도 그룹 없음·이미 이탈한 멤버 등을 포함하므로
+      // 원인을 특정하지 않는 일반 실패 메시지로 안내한다.
+      _snack(messenger, '멤버를 내보낼 수 없어요. 다시 확인해 주세요.');
     }
   }
 
