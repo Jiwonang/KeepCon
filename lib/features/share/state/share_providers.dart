@@ -8,6 +8,12 @@
 /// 계약 준수:
 /// - 행위자/멤버 식별 = [AuthRepository.currentUser]([shareCurrentUserProvider]).
 /// - 그룹/공유/이력/알림은 [ShareRepository]의 watch 스트림을 구독한다.
+/// - **내 그룹 목록은 계약 정본 [myGroupsProvider]**
+///   (`lib/shared/providers/my_groups_provider.dart`)를 소비한다 — 이 페이지에서 세션→
+///   `watchGroups` 체인을 다시 조립하지 않는다. scan 페이지도 같은 정본을 보므로 두
+///   페이지의 구독이 하나로 합쳐진다(승격 전에는 같은 사용자에 대해 `watchGroups`가
+///   2번 구독됐다). 노출 형태(`AsyncValue` 전파)는 정본이 이미 이 페이지 규약과 같아
+///   파생 없이 그대로 쓴다.
 /// - 공유 후보(내 기프티콘)는 원본 [Gifticon]을 [GifticonRepository.watchGifticons]로 받는다
 ///   (프로토타입의 `MyGifticon` 폐기).
 /// - 표시 이름/상대 시각 포맷은 소비자(UI) 책임 — userId→이름 해석은 [memberNamesProvider].
@@ -19,6 +25,7 @@ import '../../../shared/models/gifticon.dart';
 import '../../../shared/models/group.dart';
 import '../../../shared/models/share.dart';
 import '../../../shared/models/user.dart';
+import '../../../shared/providers/my_groups_provider.dart';
 import '../../../shared/providers/repositories.dart';
 import '../../../shared/util/invite_link.dart';
 
@@ -34,26 +41,6 @@ final shareCurrentUserProvider = StreamProvider<User?>((ref) {
 /// 테스트/조립부에서 override로 주입할 수 있다.
 final pendingInviteCodeProvider =
     StateProvider<String?>((ref) => pendingInviteCodeFromPlatform());
-
-/// 특정 사용자의 그룹 스트림(내부용 — 확정된 userId로만 구독).
-final _groupsByUserProvider =
-    StreamProvider.family<List<Group>, String>((ref, userId) {
-  return ref.watch(shareRepositoryProvider).watchGroups(userId);
-});
-
-/// 내가 멤버로 속한 그룹 목록.
-///
-/// 세션이 **로딩 중이면 로딩을 그대로 전파**하고(빈 목록으로 접지 않음), data(null)
-/// (미로그인)일 때만 빈 목록을 낸다. 소비자가 로딩과 "멤버십 사라짐"을 구분할 수 있게 한다.
-final myGroupsProvider = Provider<AsyncValue<List<Group>>>((ref) {
-  return ref.watch(shareCurrentUserProvider).when(
-        data: (User? user) => user == null
-            ? const AsyncData<List<Group>>(<Group>[])
-            : ref.watch(_groupsByUserProvider(user.id)),
-        loading: () => const AsyncLoading<List<Group>>(),
-        error: (Object e, StackTrace st) => AsyncError<List<Group>>(e, st),
-      );
-});
 
 /// id로 내 그룹 단건 조회. 로딩은 로딩으로 전파하고, data(null)은 "그룹 없음"
 /// (나가기/삭제/이전으로 멤버십이 사라진 경우 포함)을 뜻한다. 소비 페이지는 로딩과
@@ -80,7 +67,7 @@ final sharedGifticonsProvider =
 /// 내 그룹 집합이 바뀌면 자동 재계산된다(리액티브 결합).
 final allSharedProvider = Provider<List<SharedGifticon>>((ref) {
   final List<Group> groups =
-      ref.watch(myGroupsProvider).value ?? const <Group>[];
+      ref.watch(myGroupsProvider).valueOrNull ?? const <Group>[];
   final List<SharedGifticon> out = <SharedGifticon>[];
   for (final Group g in groups) {
     out.addAll(
@@ -95,7 +82,7 @@ final allSharedProvider = Provider<List<SharedGifticon>>((ref) {
 final sharedItemByIdProvider =
     Provider.family<SharedGifticon?, String>((ref, itemId) {
   final List<Group> groups =
-      ref.watch(myGroupsProvider).value ?? const <Group>[];
+      ref.watch(myGroupsProvider).valueOrNull ?? const <Group>[];
   for (final Group g in groups) {
     final List<SharedGifticon> list =
         ref.watch(sharedGifticonsProvider(g.id)).value ??
@@ -214,7 +201,7 @@ final unsharedGifticonsProvider = Provider<List<Gifticon>>((ref) {
 /// 멤버 정보로 해석한다. 본인은 '나'로 표시한다.
 final memberNamesProvider = Provider<MemberNames>((ref) {
   final List<Group> groups =
-      ref.watch(myGroupsProvider).value ?? const <Group>[];
+      ref.watch(myGroupsProvider).valueOrNull ?? const <Group>[];
   final User? user = ref.watch(shareCurrentUserProvider).value;
   final Map<String, String> byId = <String, String>{};
   for (final Group g in groups) {

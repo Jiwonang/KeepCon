@@ -11,6 +11,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../shared/models/group.dart';
 import '../../../shared/models/share.dart';
+import '../../../shared/providers/my_groups_provider.dart'
+    show myGroupsProvider;
 import '../../../shared/theme/brand_palette.dart';
 import '../../../shared/theme/theme_tokens.dart';
 import '../state/share_providers.dart';
@@ -34,7 +36,7 @@ class _UsageLogPageState extends ConsumerState<UsageLogPage> {
     final List<UsageLog> all =
         ref.watch(usageLogsProvider).value ?? const <UsageLog>[];
     final List<Group> groups =
-        ref.watch(myGroupsProvider).value ?? const <Group>[];
+        ref.watch(myGroupsProvider).valueOrNull ?? const <Group>[];
     final MemberNames names = ref.watch(memberNamesProvider);
 
     // 선택된 그룹이 사라졌으면(나가기 등) 전체로 폴백.
