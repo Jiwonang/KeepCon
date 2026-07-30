@@ -140,8 +140,11 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
     final ThemeData theme = Theme.of(context);
 
     return Scaffold(
-      // 카메라 프리뷰 위에 얹히는 화면이므로 배경/전경을 어둡게 고정한다.
-      backgroundColor: Colors.black,
+      // 카메라 프리뷰 위에 얹히는 화면이므로 배경을 어둡게 깐다.
+      //
+      // 하드코딩(Colors.black) 대신 테마의 scrim 토큰을 사용한다
+      // (lib/features/** 색상 하드코딩 금지 규약).
+      backgroundColor: theme.colorScheme.scrim,
 
       extendBodyBehindAppBar: true,
 
@@ -313,6 +316,10 @@ class _ScannerError extends StatelessWidget {
     final ThemeData theme = Theme.of(context);
     final Color onDark = context.onDarkSurface;
 
+    // 프리뷰 자리와 동일하게 테마의 scrim 토큰으로 어둡게 깐다
+    // (색상 하드코딩 금지 규약).
+    final Color backdrop = theme.colorScheme.scrim;
+
     // 사용자에게 보여줄 원인 문구.
     //
     // 패키지의 영문 message를 그대로 노출하지 않고
@@ -325,7 +332,7 @@ class _ScannerError extends StatelessWidget {
     };
 
     return ColoredBox(
-      color: Colors.black,
+      color: backdrop,
       child: Center(
         child: Padding(
           padding: const EdgeInsets.all(32),

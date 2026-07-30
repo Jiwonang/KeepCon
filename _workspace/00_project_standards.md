@@ -10,5 +10,5 @@
 ## 스캔 페이지 패키지 표준 (2026-07-30 사용자 확정)
 
 - **갤러리/이미지:** image_picker + google_mlkit_text_recognition(korean) + google_mlkit_barcode_scanning (기확정, 구현 완료)
-- **카메라 실시간 바코드/QR 스캔:** **mobile_scanner** — ML Kit 기반 실시간 스캐너 위젯. 플래시·카메라 전환 내장, 웹 부분 지원.
+- **카메라 실시간 바코드/QR 스캔:** **mobile_scanner** — 플랫폼별 네이티브/웹 백엔드(Android: ML Kit·CameraX, iOS/macOS: Apple Vision, 웹: Barcode Detector/ZXing-WASM)를 사용하는 실시간 스캐너 위젯. 플래시·카메라 전환 내장, 웹 부분 지원.
 - **카테고리:** 계약상 자유 문자열(기본값 "기타") 유지. 스캔 페이지의 프리셋 칩은 페이지 로컬(두 번째 소비자가 생기면 승격 — 메인 필터는 데이터에서 동적 도출하므로 현재 불필요).

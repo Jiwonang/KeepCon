@@ -72,8 +72,8 @@
 | 1 | scan → 계약(lib/shared) | **통과** | `git diff develop -- lib/shared` 빈 출력(무수정). submit() 경로 무변경 — status=available, kDefaultCategory 보정, ownerId, addGifticon 시그니처 기존 검증 유지. SSOT guard ✓ |
 | 2 | scan → main (imagePath=null) | **통과** | 카메라 경로는 barcode만 프리필. 필수 필드는 validate()가 저장 전 강제. main gifticon_card.dart:126 — imagePath null/empty → 카테고리색 placeholder 분기 확인 |
 | 3 | 카메라 흐름 상태 안전성 | **통과** | camera 분기가 try 내부·startWith 이후에 위치(scan_page.dart:250), _busy 가드 공유, 취소(null) 시 return→finally reset(). 스캐너 화면은 Riverpod 미접촉·_handled 중복 pop 가드·dispose에서 컨트롤러 해제 |
-| 4 | 저장 후 계속 등록 | **통과** | _submitAndContinue: submit 성공 후 startWith(현재 source)로 세션 갱신·폼 초기화. in-flight 중 이탈 시 세션 가드가 stale 결과 차단(기존 메커니즘). ScanSubmitInProgress 비활성화 재사용 |
-| 5 | 콤마 포매터 ↔ parsedPrice | **통과** | digitsOnly→ThousandsSeparator 순서, parsedPrice가 콤마 제거(기존 코드+신규 테스트로 고정) |
+| 4 | 저장 후 계속 등록 | **통과** | _submitAndContinue: submit 성공 후 startWith(ScanSource.manual)로 세션을 의도적으로 manual 고정 갱신·폼 초기화(이전 source 유지 금지 — camera/gallery 출처 위장 방지, /code-review 반영). in-flight 중 이탈 시 세션 가드가 stale 결과 차단. ScanSubmitInProgress 비활성화 재사용 |
+| 5 | 콤마 포매터 ↔ parsedPrice | **통과** | digitsOnly 제거, ThousandsSeparatorInputFormatter 단독 사용(비숫자 제거 자체 수행 — 중복 방지, /code-review 반영), parsedPrice가 콤마 제거(기존 코드+신규 테스트로 고정) |
 | 6 | 스캐너 반환 계약 | **통과** | push<String> → String? → prefillFromRecognition(barcode:) 명명 파라미터 정합 |
 
 ## 기계 검증
