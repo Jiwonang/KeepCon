@@ -400,4 +400,47 @@ void main() {
       expect(auth.watchCalls, 1, reason: '멀쩡한 세션은 그대로 둔다');
     });
   });
+
+  // 계약 폴딩 함수의 분기 규약을 순수 함수 수준에서 고정한다 — 특히 `copyWithPrevious`가
+  // 만드는 "이전 상태 보존" 전이들은 위젯 테스트로는 재현 창이 좁아 여기서 직접 다룬다.
+  group('foldSessionUser — 분기 규약(순수 함수)', () {
+    const User someone = User(id: 'u-1', email: 'a@b.c', displayName: '가');
+    AsyncValue<List<String>> fold(AsyncValue<User?> session) =>
+        foldSessionUser<List<String>>(
+          session,
+          (User user) => AsyncData<List<String>>(<String>[user.id]),
+          signedOut: const <String>[],
+        );
+
+    test('보존 user가 있으면(순단 에러 포함) forUser로 계속 간다', () {
+      final AsyncValue<User?> blip =
+          AsyncError<User?>(StateError('x'), StackTrace.empty)
+              .copyWithPrevious(const AsyncData<User?>(someone));
+      expect(fold(blip), const AsyncData<List<String>>(<String>['u-1']));
+    });
+
+    test('값 없는 에러는 재시도(refresh) 중에도 에러를 유지한다(배너 왕복 방지)', () {
+      final AsyncValue<User?> retrying = const AsyncLoading<User?>()
+          .copyWithPrevious(
+              AsyncError<User?>(StateError('x'), StackTrace.empty),
+              isRefresh: true);
+      expect(fold(retrying).hasError, isTrue,
+          reason: '로딩을 먼저 보면 재시도 순간 배너가 사라졌다 재등장한다');
+    });
+
+    test('미로그인 확정(data(null))은 재조회 중에도 AsyncData(signedOut)를 보존한다', () {
+      // #13 규약: 알림 읽음 가드의 StateError 복원 경로가 이 형태(AsyncData)에 의존한다.
+      final AsyncValue<User?> refreshingSignedOut = const AsyncLoading<User?>()
+          .copyWithPrevious(const AsyncData<User?>(null), isRefresh: true);
+      expect(
+          fold(refreshingSignedOut), const AsyncData<List<String>>(<String>[]));
+      expect(fold(const AsyncData<User?>(null)),
+          const AsyncData<List<String>>(<String>[]));
+    });
+
+    test('값도 에러도 없는 첫 로딩만 AsyncLoading으로 전파한다', () {
+      expect(
+          fold(const AsyncLoading<User?>()), isA<AsyncLoading<List<String>>>());
+    });
+  });
 }

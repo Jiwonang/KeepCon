@@ -113,9 +113,12 @@ final AutoDisposeStreamProvider<User?> sessionUserProvider =
 ///   로딩 상태를 만들므로, 로딩을 먼저 보면 재시도를 누르는 순간 에러 표시(배너)가
 ///   사라졌다가 실패 시 재등장하는 왕복 깜빡임이 생긴다. 구 `.when`의
 ///   `skipLoadingOnRefresh`(기본 true)와 동형인 동작이다.
-/// - 알려진 user 없이 **로딩**(첫 구독) → [AsyncLoading] 전파(빈 값으로 접지 않는다 —
-///   소비자가 로딩과 확정 부재를 구분해야 한다).
-/// - 세션 `data(null)` = **미로그인 확정** → [AsyncData]([signedOut]).
+/// - 세션 `data(null)` = **미로그인 확정** → [AsyncData]([signedOut]). 재조회 중이라도
+///   확정 값이 보존돼 있으면(`hasValue`) 이 분기를 유지한다 — 무효화(refresh)가
+///   `data(null)`을 "로딩"으로 되돌리면 확정 부재에 의존하는 소비자(알림 읽음 가드의
+///   `StateError` 복원 경로 등)가 흔들린다(#13 규약: 이 경로는 반드시 보존).
+/// - 알려진 user 없이 **로딩**(값도 에러도 없는 첫 구독) → [AsyncLoading] 전파(빈
+///   값으로 접지 않는다 — 소비자가 로딩과 확정 부재를 구분해야 한다).
 ///
 /// 순단(값 보존) 중 무배너 유지가 안전한 전제: 두 구현 모두 세션 스트림이 에러로
 /// **종료되지 않는다**(InMemory는 에러 방출 자체가 없고, Firebase `userChanges().map`은
@@ -135,6 +138,7 @@ AsyncValue<T> foldSessionUser<T>(
       session.stackTrace ?? StackTrace.current,
     );
   }
-  if (session.isLoading) return AsyncLoading<T>();
-  return AsyncData<T>(signedOut);
+  // hasValue인데 user가 null = 미로그인 "확정"(재조회 로딩 중 보존 포함).
+  if (session.hasValue) return AsyncData<T>(signedOut);
+  return AsyncLoading<T>();
 }

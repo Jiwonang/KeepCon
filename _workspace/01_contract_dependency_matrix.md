@@ -292,11 +292,13 @@
      전환 완료: **`my_groups_provider.dart` 내부**(내부 `_currentUserProvider` 삭제) +
      **share**(`shareCurrentUserProvider`가 자체 `watchCurrentUser()` 구독을 버리고 정본
      pass-through 별칭이 됨 — 아래 판정 참조). 아직 각자 구독 중인 잔여:
+
      | 잔여 소비자 | 위치 | 담당 |
      |------|------|------|
      | `currentUserProvider` | `lib/features/main/state/gifticon_list_providers.dart` | main-page-dev |
      | (인라인 구독) | `lib/features/mypage/mypage_page.dart` | main-page-dev |
      | `authStateProvider` | `lib/app/auth_gate.dart` | 앱 조립부 |
+
      정본 도입만으로 중복이 사라지지는 않는다 — 정본은 **수렴 지점**이고, 위 3곳이 옮겨와야
      구독이 1개가 된다. 전환 시 `currentUserProvider`(main)는 이름이 정본과 다르므로
      **선언 삭제 + 정본 import**로 처리한다(재export shim 금지 — v2.3에서 확정된 방식).
@@ -314,11 +316,13 @@
      체크리스트는 **라인 번호가 아니라 심볼**로 특정한다(라인은 편집마다 밀려 썩는다 —
      실측: v2.6 리뷰에서 dartdoc 확장만으로 30~40줄이 밀려 기존 좌표가 전부 낡았다).
      실행 시점에 `grep -n "shareCurrentUserProvider" lib/features/share/`로 전수 재확인할 것:
+
      | 위치 | 개수 | 심볼(형태) |
      |------|------|------|
      | 화면 | **4** | `group_detail_page` / `member_invite_page` / `shared_gifticon_detail_page`(`_DetailBody`) / `share_page` (전부 `watch`) |
      | `share_providers.dart` 파생 `watch` | **5** | `usageLogsProvider` · `notificationsProvider` · `notificationsReadAtProvider` · `shareableGifticonsProvider` · `memberNamesProvider` |
      | `share_providers.dart` 함수 내부 `read` | **3** | `retryNotifications` · `retryUsageLogs` · `retryShareCandidates` (각각 user 판독) |
+
      ⚠️ **함수 안의 `read`가 누락되기 쉽다**(화면·파생만 훑으면 안 보인다) —
      체크리스트를 "전수(grep)"로 잡지 않으면 전환이 절반만 된 채 "완료"로 판정된다(QA [minor 1]).
      ⚠️ 정산 기록: share 정상상태의 동시 세션 구독은 v2.5에서 2개(share 자체 + 정본 내부)로
