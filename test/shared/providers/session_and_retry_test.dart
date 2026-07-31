@@ -416,7 +416,12 @@ void main() {
       final AsyncValue<User?> blip =
           AsyncError<User?>(StateError('x'), StackTrace.empty)
               .copyWithPrevious(const AsyncData<User?>(someone));
-      expect(fold(blip), const AsyncData<List<String>>(<String>['u-1']));
+      final AsyncValue<List<String>> folded = fold(blip);
+      // AsyncValue ==는 valueOrNull을 List identity로 비교하므로(내용 비교 아님)
+      // 상태와 내용을 나눠 단언한다.
+      expect(folded.hasValue, isTrue);
+      expect(folded.hasError, isFalse);
+      expect(folded.valueOrNull, <String>['u-1']);
     });
 
     test('값 없는 에러는 재시도(refresh) 중에도 에러를 유지한다(배너 왕복 방지)', () {
