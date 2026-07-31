@@ -41,6 +41,11 @@ class SharedGifticonDetailPage extends ConsumerWidget {
       // 것이다. 이전 값을 보존한 그룹 순단 에러는 조회가 계속 동작하므로 여기 해당
       // 없고, 공유 스트림 에러의 재시도 버튼을 가리지도 않는다(단일 판정점 규약).
       final bool groupsUnavailable = ref.watch(myGroupListUnavailableProvider);
+      // 세 번째 원인: 조회 경로가 아직 첫 방출 전(값 없는 로딩)이면 부재가 확정이
+      // 아니다 — "찾을 수 없어요"로 위장하지 않고 스피너를 둔다. 현 진입 경로
+      // (목록 타일 탭)에서는 캐시가 항상 따뜻해 닿지 않지만, 알림→상세 직행·딥링크
+      // 같은 콜드 진입이 추가되는 순간 현실화되는 창이라 미리 막는다.
+      final bool pending = ref.watch(sharedGifticonsPendingProvider);
       return Scaffold(
         appBar: AppBar(centerTitle: true, title: const Text('공유 기프티콘')),
         body: hasError
@@ -56,7 +61,9 @@ class SharedGifticonDetailPage extends ConsumerWidget {
                   ),
                 ),
               )
-            : const Center(child: Text('기프티콘을 찾을 수 없어요.')),
+            : pending
+                ? const Center(child: CircularProgressIndicator())
+                : const Center(child: Text('기프티콘을 찾을 수 없어요.')),
       );
     }
     return _DetailBody(item: item);

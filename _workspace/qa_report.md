@@ -174,12 +174,13 @@
   "다른 섹션의 false-empty 잔존" 1건.
 
 ## 기계 검증
+
 | 항목 | 결과 |
 |------|------|
 | `bash tool/check_ssot.sh` | exit 0 (통과) |
 | `dart format --set-exit-if-changed .` | exit 0 — `No issues found!` |
 | `flutter analyze` | exit 0 — 이슈 0 |
-| `flutter test` | exit 0 — `00:08 +165: All tests passed!` |
+| `flutter test` | exit 0 — QA 시점 165개 → **최종(리뷰 반영 후) 178개 전부 통과** |
 
 ## 경계면별 판정
 
@@ -190,7 +191,7 @@
 | 2 | 알림 읽음 가드 4경로 | `notificationsProvider` | `_markReadWhenVisible` | (a)(b)(c)(d) 전부 성립, listen 누수 없음 / 미로그인 경로 1건 ([minor 1]) |
 | 3 | 재시도 진입점 4개 | `retry*` | 원천 provider | 4/4 정확한 원천 지정 / family 과잉 invalidate ([minor 2]) |
 | 4 | `myGroups` 재시도 불가 실측 | `my_groups_provider.dart:79/87/110` | `share_page.dart:81-89` | 프로브 결론 **정확**(Riverpod semantics상 옳음) / 계약 요청에 세션 계층 누락 ([minor 5]) |
-| 5 | 배너 소비 정합(오배선) | 각 화면 표시 데이터 원천 | 각 화면 `hasError` 원천 | 오배선 0건 / 재시도 불가 케이스 2건 ([medium 1][minor 4]) + false-empty 1건 ([medium 2]) |
+| 5 | 배너 소비 정합(오배선) | 각 화면 표시 데이터 원천 | 각 화면 `hasError` 원천 | 오배선 0건 / 재시도 불가 케이스 2건 (`medium 1`, `minor 4`) + false-empty 1건 (`medium 2`) |
 | 6 | scan/main 영향 0 | 브랜치 diff 범위 | — | 통과 — 변경은 `lib/features/share/**` + 매트릭스뿐 |
 
 ### #2 읽음 가드 4경로 추적 (코드 근거)
@@ -217,6 +218,20 @@
 명시해 **후속 실행 가능 수준**이다. 다만 [minor 5]의 세션 계층 누락을 보완할 것.
 
 ## 발견 이슈 (심각도순 — 전부 비차단)
+
+> **처리 결과(리더 반영, 같은 브랜치에서 해소 — 아래 원문은 발견 시점 기록으로 보존):**
+>
+> | 이슈 | 상태 | 근거 위치 |
+> |------|------|-----------|
+> | `medium 1` | ✅ 해소 | `shared_gifticon_detail_page.dart` — `myGroupListUnavailableProvider` 분기로 `onRetry` null 강등 |
+> | `medium 2` | ✅ 해소 | `share_page.dart` — 공유 빈 안내를 `!groupsUnavailable`(+로딩)로 게이트 |
+> | `minor 1` | ✅ 해소 | `group_notifications_page.dart` — 실패 시 `_markedRead` 복원(비-StateError 포함) + 복원 직후 재평가 |
+> | `minor 2` | ✅ 해소 | `share_providers.dart` — `retrySharedGifticons(ref, groupId:)` 스코프 재시도(그룹 상세가 `group.id` 전달), 인자 없는 경로도 실패 인스턴스만 invalidate |
+> | `minor 3` | ✅ 해소 | `share_repository.dart` dartdoc 정정(계약 소유자 수행 — CODEOWNERS 리뷰 대상) |
+> | `minor 4` | ✅ 해소 | `share_sheets.dart` — `medium 1`과 동일 분기 |
+> | `minor 5` | ✅ 해소 | 매트릭스 #13 계약 요청에 `_currentUserProvider` 계층 + 세션 승격 연계 명시 |
+> | `minor 6` | ✅ 해소 | `share_error_ui_test.dart` — 이력/시트 재시도·`groupsFail` false-empty·스코프 재시도·순단 보존·로딩 게이트 회귀 추가 |
+> | `minor 7` | ✅ 해소 | `usage_log_page.dart` — 그룹 축 `onRetry: null` 배너 추가 |
 
 ### [medium 1] 공유 상세: `myGroups` 에러일 때 동작하지 않는 재시도 버튼
 - 위치: `lib/features/share/pages/shared_gifticon_detail_page.dart:37,47`

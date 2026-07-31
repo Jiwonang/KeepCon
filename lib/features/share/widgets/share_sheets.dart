@@ -291,6 +291,12 @@ class _ShareGifticonSheet extends ConsumerWidget {
     // 공유 상세와 같은 규칙: 원인이 내 그룹 목록(정본 private 체인)의 "값 없는
     // 에러"면 재시도가 불가능하므로 버튼을 감춘다(#13 — 배너가 복구 안내를 붙인다).
     final bool groupsUnavailable = ref.watch(myGroupListUnavailableProvider);
+    // 후보 계산 원천이 아직 첫 방출 전(값 없는 로딩)이면 후보 0개는 확정이 아니다 —
+    // "없어요"로 위장하지 않고 스피너를 둔다(콜드 로딩 false-empty 게이트).
+    final AsyncValue<List<Gifticon>> mineAsync =
+        ref.watch(shareableGifticonsProvider);
+    final bool pending = (mineAsync.isLoading && !mineAsync.hasValue) ||
+        ref.watch(sharedGifticonsPendingProvider);
     final Widget? errorBanner = hasError
         ? ShareErrorBanner(
             message: '공유할 기프티콘 목록을 불러오지 못했어요.',
@@ -304,12 +310,14 @@ class _ShareGifticonSheet extends ConsumerWidget {
           ? Padding(
               padding: const EdgeInsets.symmetric(vertical: 24),
               child: errorBanner ??
-                  Center(
-                    child: Text(
-                      '공유할 수 있는 기프티콘이 없어요.',
-                      style: theme.textTheme.bodySmall,
-                    ),
-                  ),
+                  (pending
+                      ? const Center(child: CircularProgressIndicator())
+                      : Center(
+                          child: Text(
+                            '공유할 수 있는 기프티콘이 없어요.',
+                            style: theme.textTheme.bodySmall,
+                          ),
+                        )),
             )
           : Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,

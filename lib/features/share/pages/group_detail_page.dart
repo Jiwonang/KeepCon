@@ -73,6 +73,8 @@ class _GroupDetailBody extends ConsumerWidget {
     // 같은 화면의 groupByIdProvider는 이미 에러 UI가 있는데 공유 목록만 무음이던
     // 비대칭을 해소한다(#13). 폴딩은 유지하고 hasError만 함께 관찰한다.
     final bool sharedHasError = sharedAsync.hasError;
+    // 첫 방출 전(값 없는 로딩)은 "없음" 확정이 아니다 — 빈 안내 게이트용.
+    final bool sharedPending = sharedAsync.isLoading && !sharedAsync.hasValue;
     // 초대 권한(방장 한정 정책 반영) — 없으면 초대 진입점을 숨긴다.
     final bool canInvite = uid != null && group.canInvite(uid);
     final bool iAmOwner = uid != null && group.isOwnedBy(uid);
@@ -174,8 +176,9 @@ class _GroupDetailBody extends ConsumerWidget {
               ),
               if (shared.isNotEmpty) const SizedBox(height: 12),
             ],
-            // 에러일 땐 "없어요"를 띄우지 않는다 — 위 배너가 실패를 설명한다.
-            if (shared.isEmpty && !sharedHasError)
+            // 에러일 땐 "없어요"를 띄우지 않고(위 배너가 실패를 설명한다),
+            // 첫 방출 전 로딩도 확정 부재로 위장하지 않는다.
+            if (shared.isEmpty && !sharedHasError && !sharedPending)
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 20),
                 child: Center(

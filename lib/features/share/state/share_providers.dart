@@ -318,7 +318,12 @@ void _retryFailedSharedInstances(WidgetRef ref) {
 void retryNotifications(WidgetRef ref) {
   _retrySessionIfFailed(ref);
   final User? user = ref.read(shareCurrentUserProvider).valueOrNull;
-  if (user == null) return; // 세션 없음 — 세션이 회복되면 하위가 함께 재구성된다.
+  // 세션이 null인 경우는 "알려진 user가 한 번도 없던" 상태뿐이다: 세션이 값을 가진 적이
+  // 있으면 에러 전이도, 위 invalidate 직후의 로딩 전이도 copyWithPrevious로 값을
+  // 보존하므로 valueOrNull이 그 user를 계속 돌려준다(하위 스코프 재시도 진행). user가
+  // 없었다면 하위 family 인스턴스도 만들어진 적이 없어 되살릴 대상 자체가 없다 —
+  // 세션이 회복되면 하위가 함께 재구성된다.
+  if (user == null) return;
   if (ref.read(_notificationsByUserProvider(user.id)).hasError) {
     ref.invalidate(_notificationsByUserProvider(user.id));
   }
