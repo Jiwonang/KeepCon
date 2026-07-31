@@ -229,9 +229,35 @@
      체인과 동일한 수명 — share 동작 불변). 결과적으로 구독 수는 **0 또는 1**이며 승격 전
      최댓값(2)보다 항상 적거나 같다. keepAlive provider가 autoDispose 정본을 `watch` 하는
      조합은 허용된다(Riverpod 2.6 확인, 테스트로 고정).
-     ⚠️ 알려진 한계: keepAlive 파생이 생성된 뒤 그룹 스트림이 에러로 끝나면 그 `AsyncError`가
-     캐시에 남아 앱 세션 내 자동 재시도 경로가 없다(무조건 invalidate는 장애 중 retry storm
-     위험이라 넣지 않음) — 에러 표시/수동 재시도 UI가 후속 과제이며 그때 함께 해소한다.
+     ✅ **share 화면 에러 표시/재시도 완료(main 목록·scan 타일은 후속).** 폴딩(`valueOrNull`)은
+     그대로 두고, 화면이 **원천 provider의 `hasError`를 함께 관찰**해 인라인 배너
+     (`lib/features/share/widgets/share_error_banner.dart`)를 얹는다. 재시도는 **사용자 액션
+     전용**이며(자동 재시도 금지 — 장애 중 retry storm) 구현은 원천 `ref.invalidate`다
+     (`retryNotifications`/`retryUsageLogs`/`retrySharedGifticons`/`retryShareCandidates`).
+     재시도 스코프 규약: **에러인 원천 인스턴스만** invalidate한다(멀쩡한 스트림 재구독 =
+     불필요 재읽기·과금 — 그룹별 공유 family는 실패 인스턴스만 골라 되살린다. 테스트가
+     "멀쩡한 그룹 비재구독"을 고정). 빈 안내는 에러뿐 아니라 **값 없는 로딩에도 게이트**한다
+     (콜드 스타트에 "없어요"로 위장 금지 — 전면 화면은 스피너, 섹션은 억제).
+     알림 화면은 **성공 데이터 방출 뒤에만** `markNotificationsRead`를 호출한다(읽음 가드 —
+     에러 중 진입 시 읽음 처리가 일어나 못 본 알림이 유실되던 문제 해소. 이전 값을 보존한
+     에러 상태도 "봤다"로 치지 않는다 — 보존 목록은 최신이 아닐 수 있어, 지금 readAt을 찍으면
+     에러 중 도착 못 한 새 알림이 유실된다. 실패 시 가드 복원은 StateError뿐 아니라 저장소
+     구현별 예외 전체에 적용).
+     ⚠️ **남은 한계(내 그룹 목록 한정):** 이 provider가 에러로 끝나면 `AsyncError`가
+     정본의 **private 체인**(`_currentUserProvider`/`_groupsByUserProvider`)에 캐시되고,
+     페이지에서 `invalidate(myGroupsProvider)`를 해도 그 dependency는 재구독되지 않는다
+     (실측 확인 — Riverpod의 invalidate는 dependency로 전파되지 않는다). 그래서 **에러의 원인이
+     그룹 목록인 배너는 표시만 하고 재시도 버튼을 두지 않는다**(동작하지 않는 버튼 방지 —
+     `ShareErrorBanner`가 onRetry=null이면 복구 안내 접미를 스스로 붙인다):
+     share 메인 '내 그룹'·사용 이력 배너는 항상, 공유 상세·공유 시트 배너는
+     `myGroupListUnavailableProvider`가 true일 때. 판정은 **"값도 없는 에러"로 한정**한다
+     (`hasError && !hasValue`) — 이전 값을 보존한 순단 에러까지 포함하면 멀쩡히 렌더되는
+     목록 위에 해소 불가능한 배너가 앱 재시작 전까지 영구 표시되고, 함께 발생한 재시도
+     가능한 공유 스트림 에러의 버튼까지 부당하게 사라진다(재시도 훅 승격 후 순단 표시 재검토).
+     원인이 share 소유 스트림이면 같은 배너가 재시도 버튼을 갖는다(원인별 분기).
+     해소하려면 정본에 재시도 훅(예: private 체인을 되살리는 `refreshMyGroups(Ref)` 또는
+     `myGroupsRetryProvider`)이 필요하다 — `lib/shared`는 `CODEOWNERS` 대상이라 페이지 담당이
+     직접 고치지 않고 `contract-architect`에게 요청한다(아래 후속 목록 참조).
    - **아직 정본이 아닌 것:** 세션 스트림(`watchCurrentUser()`) 자체. 앱 조립부·main·mypage·
      share가 각각 구독하고 정본 내부에도 하나 있다(총 5곳). 소비자가 많아 별도 승격 후보로 남긴다.
      ⚠️ 정산 기록: share 정상상태의 동시 세션 구독이 승격 전 1개(shareCurrentUserProvider 공용)
@@ -309,5 +335,20 @@
 - ✅ **승격 완료(v2.5):** "현재 사용자의 그룹 목록 스트림" provider — scan/share에 중복 조립돼 `watchGroups`를 두 번 구독했던 체인을 `lib/shared/providers/my_groups_provider.dart`의 `myGroupsProvider`(**SSOT**, `autoDispose`, `AsyncValue` 노출)로 통합. 페이지 파생 형태는 계획대로 로컬 유지(share = `AsyncValue` 전파, scan = 빈 목록 폴딩). 구독 단일화는 테스트로 고정(`test/shared/providers/my_groups_provider_test.dart`). 상세는 크로스페이지 주의점 #13.
 - **다음 승격 후보(경량):** `AsyncValue<List<T>>` 폴딩 확장(예: `orEmpty` — `valueOrNull ?? const []`) — 같은 관용구가 lib 16곳에 반복되고, 단일 폴딩 지점이 없으면 `.value` 변형이 재유입될 수 있다(v2.5 후속 정리에서 main 홈 1곳 재유입 실증). 표준 관용구 대비 프로젝트 고유 어휘 도입이라 순이득은 중간 — 채택 여부는 `contract-architect` 판단.
 - **다음 승격 후보:** **세션 스트림(`AuthRepository.watchCurrentUser()`) provider** — 현재 5곳이 각자 구독한다: 앱 조립부(`lib/app/auth_gate.dart`), main(`currentUserProvider`, `lib/features/main/state/gifticon_list_providers.dart`), mypage(`lib/features/mypage/mypage_page.dart`), share(`shareCurrentUserProvider`, `lib/features/share/state/share_providers.dart`), 그리고 `my_groups_provider.dart` 내부. 규칙 ③은 이미 충족(소비자 다수)이지만 그룹 목록보다 소비자가 많고 셸(조립부) 수명과 얽혀 있어 별도 슬라이스로 다룬다 — 승격 시 `lib/shared/providers/`에 세션 정본을 두고 `my_groups_provider.dart`가 그것을 소비하도록 바꾼다. Firestore 과금 영향은 그룹 목록보다 작다(인증 상태 리스너는 문서 읽기가 아니다) — 이득은 **인스턴스/타이밍 일관성**이다. 페이지 담당은 직접 `lib/shared`를 고치지 말고 `contract-architect`에게 요청할 것(`CODEOWNERS` 리뷰 강제).
+- **계약 요청(share → contract-architect, #13 후속):** `myGroupsProvider`의 **수동 재시도 훅**.
+  share 화면들은 이제 원천 `hasError`를 관찰해 배너+재시도를 제공하지만(알림·사용 이력·그룹별
+  공유 스트림·공유 후보), **내 그룹 목록만 재시도 경로가 없다** — 에러가 정본 파일 안의 private
+  provider에 캐시되고 `invalidate(myGroupsProvider)`는 dependency로 전파되지 않기 때문이다.
+  정본 쪽에 재시도 진입점(private 체인을 invalidate하는 공개 함수/provider)이 생기면 share 메인
+  '내 그룹' 배너에 재시도 버튼을 붙일 수 있다. 시그니처·형태는 계약 소유자 판단.
+  - ⚠️ **두 계층을 모두 되살려야 한다 — `_groupsByUserProvider`(그룹 스트림)만으로는 절반만
+    해소된다.** 정본은 세션도 자기 파일 안의 별도 `_currentUserProvider`로 구독한다(같은
+    `watchCurrentUser()`의 두 번째 구독 — 아래 "세션 스트림 승격 후보"가 기록한 그 중복).
+    인증 스트림이 실패하면 **캐시된 에러가 둘**(share의 `shareCurrentUserProvider` + 정본 내부)
+    생기고, share의 `_retrySessionIfFailed`는 앞의 것만 되살릴 수 있다. 따라서 훅은
+    `_currentUserProvider`도 함께 무효화해야 한다.
+  - 대안: **세션 스트림 승격과 묶어서** 처리한다. 정본이 세션 정본을 소비하도록 바뀌면
+    중복 구독이 사라지고, share가 세션 정본 하나만 invalidate해도 그룹 목록까지 회복되므로
+    이 요청의 절반이 자동으로 해소된다(그 경우 남는 것은 `_groupsByUserProvider` 계층뿐).
 - **가드 보강 후보(계약 소유자 판단 필요):** `tool/check_ssot.sh`의 `SSOT_PROVIDERS` 목록에 **`myGroupsProvider`가 아직 없다** — 지금은 페이지가 같은 이름의 provider를 다시 선언해도 CI가 잡지 못한다(정본이 없던 시절과 같은 재발 경로). 이번 변경 범위(계약+소비 전환)와 분리해 CI 가드 PR로 다루기를 권한다.
 - **미착수:** 기기 푸시 알림용 `NotificationService`/범용 `NotificationType`(그룹 알림은 `ShareRepository`가 충족), auth/share **세부** 라우트(그룹 상세·초대 등 페이지 내부 내비게이션 — 현재 `AppRoutes.share` 탭 라우트만 존재).

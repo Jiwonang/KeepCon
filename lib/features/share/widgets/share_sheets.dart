@@ -15,6 +15,7 @@ import '../../../shared/providers/repositories.dart';
 import '../../../shared/util/korean_particle.dart';
 import '../state/share_providers.dart';
 import 'share_common.dart';
+import 'share_error_banner.dart';
 import 'share_format.dart';
 
 /// 바텀시트 공통 컨테이너 — 키보드 인셋·핸들·패딩을 통일한다.
@@ -283,22 +284,48 @@ class _ShareGifticonSheet extends ConsumerWidget {
     // 공유 후보 = 사용 가능하고 아직 내 어느 그룹에도 공유하지 않은 내 기프티콘.
     // (이미 다른 그룹에 공유된 것도 제외 → 이중 공유/이중 사용 사전 차단.)
     final List<Gifticon> candidates = ref.watch(unsharedGifticonsProvider);
+    // 후보 계산의 원천(내 기프티콘 / 그룹별 공유 목록)이 에러면 목록을 믿을 수 없다:
+    // 후보가 0개로 접히거나(→ "없어요" 오인), 이미 공유된 항목이 다시 노출된다.
+    // 저장소 [StateError] 가드가 최후 방어선이지만, 이유를 알려 헛수고를 줄인다.
+    final bool hasError = ref.watch(shareCandidatesHaveErrorProvider);
+    // 공유 상세와 같은 규칙: 원인이 내 그룹 목록(정본 private 체인)의 "값 없는
+    // 에러"면 재시도가 불가능하므로 버튼을 감춘다(#13 — 배너가 복구 안내를 붙인다).
+    final bool groupsUnavailable = ref.watch(myGroupListUnavailableProvider);
+    // 후보 계산 원천이 아직 첫 방출 전(값 없는 로딩)이면 후보 0개는 확정이 아니다 —
+    // "없어요"로 위장하지 않고 스피너를 둔다(콜드 로딩 false-empty 게이트).
+    final AsyncValue<List<Gifticon>> mineAsync =
+        ref.watch(shareableGifticonsProvider);
+    final bool pending = (mineAsync.isLoading && !mineAsync.hasValue) ||
+        ref.watch(sharedGifticonsPendingProvider);
+    final Widget? errorBanner = hasError
+        ? ShareErrorBanner(
+            message: '공유할 기프티콘 목록을 불러오지 못했어요.',
+            onRetry: groupsUnavailable ? null : () => retryShareCandidates(ref),
+          )
+        : null;
 
     return _SheetScaffold(
       title: '기프티콘 공유',
       child: candidates.isEmpty
           ? Padding(
               padding: const EdgeInsets.symmetric(vertical: 24),
-              child: Center(
-                child: Text(
-                  '공유할 수 있는 기프티콘이 없어요.',
-                  style: theme.textTheme.bodySmall,
-                ),
-              ),
+              child: errorBanner ??
+                  (pending
+                      ? const Center(child: CircularProgressIndicator())
+                      : Center(
+                          child: Text(
+                            '공유할 수 있는 기프티콘이 없어요.',
+                            style: theme.textTheme.bodySmall,
+                          ),
+                        )),
             )
           : Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: <Widget>[
+                if (errorBanner != null) ...<Widget>[
+                  errorBanner,
+                  const SizedBox(height: 12),
+                ],
                 Text('내 기프티콘에서 선택', style: theme.textTheme.bodySmall),
                 const SizedBox(height: 8),
                 ConstrainedBox(

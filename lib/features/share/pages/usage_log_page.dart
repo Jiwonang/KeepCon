@@ -16,6 +16,7 @@ import '../../../shared/providers/my_groups_provider.dart'
 import '../../../shared/theme/brand_palette.dart';
 import '../../../shared/theme/theme_tokens.dart';
 import '../state/share_providers.dart';
+import '../widgets/share_error_banner.dart';
 import '../widgets/share_format.dart';
 
 /// 사용 이력 로그 화면. 공유 메인의 '최근 사용 이력'에서 push 한다.
@@ -33,10 +34,18 @@ class _UsageLogPageState extends ConsumerState<UsageLogPage> {
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
-    final List<UsageLog> all =
-        ref.watch(usageLogsProvider).valueOrNull ?? const <UsageLog>[];
+    final AsyncValue<List<UsageLog>> logsAsync = ref.watch(usageLogsProvider);
+    // 폴딩 규약(#13)은 유지하고, 에러 표시만 hasError 관찰로 얹는다.
+    // 감사(audit) 성격의 화면이라 "실패"가 "이력 없음"으로 보이면 특히 위험하다.
+    final List<UsageLog> all = logsAsync.valueOrNull ?? const <UsageLog>[];
+    final bool hasError = logsAsync.hasError;
+    final bool isPending = logsAsync.isLoading && !logsAsync.hasValue;
     final List<Group> groups =
         ref.watch(myGroupsProvider).valueOrNull ?? const <Group>[];
+    // 그룹 목록이 값도 없이 에러면 필터 칩이 사라지고 활성 필터도 아래에서 '전체'로
+    // 폴백된다 — 감사 화면에서 이를 무음으로 두면 "특정 그룹만 보는 중"이라는
+    // 사용자 전제가 조용히 깨지므로, 원인을 배너로 알린다(재시도 불가 원천 — #13).
+    final bool groupsUnavailable = ref.watch(myGroupListUnavailableProvider);
     final MemberNames names = ref.watch(memberNamesProvider);
 
     // 선택된 그룹이 사라졌으면(나가기 등) 전체로 폴백.
@@ -81,13 +90,32 @@ class _UsageLogPageState extends ConsumerState<UsageLogPage> {
                 ],
               ),
             ),
+            if (groupsUnavailable)
+              const Padding(
+                padding: EdgeInsets.fromLTRB(20, 14, 20, 0),
+                child: ShareErrorBanner(message: '그룹 목록을 불러오지 못했어요.'),
+              ),
+            if (hasError)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
+                child: ShareErrorBanner(
+                  message: '사용 이력을 불러오지 못했어요.',
+                  onRetry: () => retryUsageLogs(ref),
+                ),
+              ),
             const SizedBox(height: 14),
             Expanded(
               child: logs.isEmpty
-                  ? Center(
-                      child: Text('아직 사용 이력이 없어요.',
-                          style: theme.textTheme.bodySmall),
-                    )
+                  // 에러일 땐 배너가 실패를 설명하고, 첫 방출 전 로딩엔 스피너를
+                  // 둔다 — "이력이 없어요"라는 확정 부재로 오인시키지 않는다.
+                  ? (hasError
+                      ? const SizedBox.shrink()
+                      : isPending
+                          ? const Center(child: CircularProgressIndicator())
+                          : Center(
+                              child: Text('아직 사용 이력이 없어요.',
+                                  style: theme.textTheme.bodySmall),
+                            ))
                   : ListView.builder(
                       padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
                       itemCount: logs.length,

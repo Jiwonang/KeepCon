@@ -16,6 +16,7 @@ import '../../../shared/theme/theme_tokens.dart';
 import '../../../shared/util/korean_particle.dart';
 import '../state/share_providers.dart';
 import '../widgets/share_common.dart';
+import '../widgets/share_error_banner.dart';
 import '../widgets/share_format.dart';
 
 /// 공유 기프티콘 상세 화면. 셸의 push 패턴으로 전체화면 이동한다.
@@ -30,9 +31,39 @@ class SharedGifticonDetailPage extends ConsumerWidget {
     // 항상 최신 항목을 조회. 공유취소 등으로 사라지면 안내를 표시한다.
     final SharedGifticon? item = ref.watch(sharedItemByIdProvider(itemId));
     if (item == null) {
+      // null의 원인이 둘이다 — ① 정말 사라짐(공유취소·그룹 이탈) ② 조회 실패(스트림 에러).
+      // 폴딩된 [sharedItemByIdProvider]만 보면 구분이 안 되므로, 원천 에러 여부를
+      // 함께 관찰해 "찾을 수 없어요"(확정)와 "불러오지 못했어요"(재시도 가능)를 나눈다.
+      final bool hasError = ref.watch(sharedItemLookupHasErrorProvider);
+      // 재시도 가능 여부는 **에러의 출처**에 달렸다. 내 그룹 목록(계약 정본)이 값도
+      // 없이 에러면 페이지에서 되살릴 수 없으므로(#13) 버튼을 감춘다(배너가 복구
+      // 안내 접미를 붙인다) — 아무 일도 일어나지 않는 버튼을 보여 주지 않기 위한
+      // 것이다. 이전 값을 보존한 그룹 순단 에러는 조회가 계속 동작하므로 여기 해당
+      // 없고, 공유 스트림 에러의 재시도 버튼을 가리지도 않는다(단일 판정점 규약).
+      final bool groupsUnavailable = ref.watch(myGroupListUnavailableProvider);
+      // 세 번째 원인: 조회 경로가 아직 첫 방출 전(값 없는 로딩)이면 부재가 확정이
+      // 아니다 — "찾을 수 없어요"로 위장하지 않고 스피너를 둔다. 현 진입 경로
+      // (목록 타일 탭)에서는 캐시가 항상 따뜻해 닿지 않지만, 알림→상세 직행·딥링크
+      // 같은 콜드 진입이 추가되는 순간 현실화되는 창이라 미리 막는다.
+      final bool pending = ref.watch(sharedGifticonsPendingProvider);
       return Scaffold(
         appBar: AppBar(centerTitle: true, title: const Text('공유 기프티콘')),
-        body: const Center(child: Text('기프티콘을 찾을 수 없어요.')),
+        body: hasError
+            ? Padding(
+                padding: const EdgeInsets.fromLTRB(24, 24, 24, 24),
+                child: Align(
+                  alignment: Alignment.topCenter,
+                  child: ShareErrorBanner(
+                    message: '공유 기프티콘 정보를 불러오지 못했어요.',
+                    onRetry: groupsUnavailable
+                        ? null
+                        : () => retrySharedGifticons(ref),
+                  ),
+                ),
+              )
+            : pending
+                ? const Center(child: CircularProgressIndicator())
+                : const Center(child: Text('기프티콘을 찾을 수 없어요.')),
       );
     }
     return _DetailBody(item: item);

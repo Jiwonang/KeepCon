@@ -18,6 +18,7 @@ import '../../../shared/theme/brand_palette.dart';
 import '../../../shared/theme/theme_tokens.dart';
 import '../state/share_providers.dart';
 import '../widgets/share_common.dart';
+import '../widgets/share_error_banner.dart';
 import '../widgets/share_format.dart';
 import '../widgets/share_sheets.dart';
 import 'member_invite_page.dart';
@@ -65,9 +66,15 @@ class _GroupDetailBody extends ConsumerWidget {
     final ColorScheme scheme = theme.colorScheme;
     final String? uid = ref.watch(shareCurrentUserProvider).valueOrNull?.id;
     final MemberNames names = ref.watch(memberNamesProvider);
+    final AsyncValue<List<SharedGifticon>> sharedAsync =
+        ref.watch(sharedGifticonsProvider(group.id));
     final List<SharedGifticon> shared =
-        ref.watch(sharedGifticonsProvider(group.id)).valueOrNull ??
-            const <SharedGifticon>[];
+        sharedAsync.valueOrNull ?? const <SharedGifticon>[];
+    // 같은 화면의 groupByIdProvider는 이미 에러 UI가 있는데 공유 목록만 무음이던
+    // 비대칭을 해소한다(#13). 폴딩은 유지하고 hasError만 함께 관찰한다.
+    final bool sharedHasError = sharedAsync.hasError;
+    // 첫 방출 전(값 없는 로딩)은 "없음" 확정이 아니다 — 빈 안내 게이트용.
+    final bool sharedPending = sharedAsync.isLoading && !sharedAsync.hasValue;
     // 초대 권한(방장 한정 정책 반영) — 없으면 초대 진입점을 숨긴다.
     final bool canInvite = uid != null && group.canInvite(uid);
     final bool iAmOwner = uid != null && group.isOwnedBy(uid);
@@ -160,7 +167,18 @@ class _GroupDetailBody extends ConsumerWidget {
               ],
             ),
             const SizedBox(height: 12),
-            if (shared.isEmpty)
+            if (sharedHasError) ...<Widget>[
+              ShareErrorBanner(
+                message: '공유 기프티콘을 불러오지 못했어요.',
+                // 이 화면은 이 그룹의 스트림만 본다 → 그 인스턴스만 재구독한다
+                // (전체 family 무효화는 멀쩡한 그룹까지 재구독시켜 읽기·과금을 늘린다).
+                onRetry: () => retrySharedGifticons(ref, groupId: group.id),
+              ),
+              if (shared.isNotEmpty) const SizedBox(height: 12),
+            ],
+            // 에러일 땐 "없어요"를 띄우지 않고(위 배너가 실패를 설명한다),
+            // 첫 방출 전 로딩도 확정 부재로 위장하지 않는다.
+            if (shared.isEmpty && !sharedHasError && !sharedPending)
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 20),
                 child: Center(
@@ -168,7 +186,7 @@ class _GroupDetailBody extends ConsumerWidget {
                       style: theme.textTheme.bodySmall),
                 ),
               )
-            else
+            else if (shared.isNotEmpty)
               _CardShell(
                 padding: EdgeInsets.zero,
                 child: Column(
