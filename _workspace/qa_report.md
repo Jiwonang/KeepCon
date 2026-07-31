@@ -153,3 +153,193 @@
 ## 남은 리스크
 - 실기기 검증 미수행(Windows 환경): 그룹 타일 4개 이상일 때의 `Wrap` 줄바꿈 레이아웃, 실제 Firebase `watchGroups` 지연 하에서의 minor 2 체감도.
 - `FirebaseShareRepository.shareGifticon`의 1회 공유 불변식은 `_locks/{gifticonId}` 문서로 원자 강제됨을 **코드로만** 확인(에뮬레이터 실행 검증 미수행). in-memory 경로는 테스트로 고정됨.
+
+---
+
+# feat/share-error-ui 검증 (2026-07-31, integration-qa)
+
+## 검증 대상
+`git diff develop` + 미커밋 신규 파일. 신설 `lib/features/share/widgets/share_error_banner.dart`,
+`test/features/share/share_error_ui_test.dart`; 수정 `share_providers.dart`(에러 감지 파생 3 + 재시도 진입점 4),
+알림/사용이력/공유상세/그룹상세/share 메인/공유 시트, 매트릭스 #13.
+
+설계 전제(리더 확정): 자동 재시도 금지 · 에러 감지는 원천 `hasError` · 폴딩(`valueOrNull`) 규약 무변경 ·
+`lib/shared` 무수정 · 알림 읽음은 AsyncData 방출 후 1회.
+
+## 요약
+- 통과 6 / 실패 0 / 관찰·개선 7 (**차단 이슈 없음**)
+- 기계 검증 4종 전부 green. 설계 전제 6개 모두 코드로 확인됨.
+- 발견된 불일치는 전부 **보수적 방향**(에러를 과소 표시)이며, 엉뚱한 스트림의 에러가 다른 화면에
+  뜨는 **오배선(cross-wiring)은 0건**이다. 실질 이슈는 "동작하지 않는 재시도 버튼" 2건과
+  "다른 섹션의 false-empty 잔존" 1건.
+
+## 기계 검증
+| 항목 | 결과 |
+|------|------|
+| `bash tool/check_ssot.sh` | exit 0 (통과) |
+| `dart format --set-exit-if-changed .` | exit 0 — `No issues found!` |
+| `flutter analyze` | exit 0 — 이슈 0 |
+| `flutter test` | exit 0 — `00:08 +165: All tests passed!` |
+
+## 경계면별 판정
+
+| # | 경계면 | 생산자 (왼쪽) | 소비자 (오른쪽) | 판정 |
+|---|--------|--------------|----------------|------|
+| 1 | share → 계약 무수정 | `lib/shared/**` | 브랜치 diff | 통과 — `git diff develop -- lib/shared` 빈 출력, SSOT guard exit 0 |
+| 1b | `markNotificationsRead` 시그니처·의미 | `share_repository.dart:190-193` | `group_notifications_page.dart:70` | 시그니처 일치 / dartdoc 문구 드리프트 ([minor 3]) |
+| 2 | 알림 읽음 가드 4경로 | `notificationsProvider` | `_markReadWhenVisible` | (a)(b)(c)(d) 전부 성립, listen 누수 없음 / 미로그인 경로 1건 ([minor 1]) |
+| 3 | 재시도 진입점 4개 | `retry*` | 원천 provider | 4/4 정확한 원천 지정 / family 과잉 invalidate ([minor 2]) |
+| 4 | `myGroups` 재시도 불가 실측 | `my_groups_provider.dart:79/87/110` | `share_page.dart:81-89` | 프로브 결론 **정확**(Riverpod semantics상 옳음) / 계약 요청에 세션 계층 누락 ([minor 5]) |
+| 5 | 배너 소비 정합(오배선) | 각 화면 표시 데이터 원천 | 각 화면 `hasError` 원천 | 오배선 0건 / 재시도 불가 케이스 2건 ([medium 1][minor 4]) + false-empty 1건 ([medium 2]) |
+| 6 | scan/main 영향 0 | 브랜치 diff 범위 | — | 통과 — 변경은 `lib/features/share/**` + 매트릭스뿐 |
+
+### #2 읽음 가드 4경로 추적 (코드 근거)
+- **(a) 첫 프레임 데이터 존재** — `initState`의 `addPostFrameCallback` → `ref.read(notificationsProvider)`가
+  `AsyncData` → 즉시 mark. `mounted` 가드 있음. 테스트 "정상 진입(데이터 방출)"이 고정.
+- **(b) 늦은 도착** — `build`의 `ref.listen`이 이후 첫 `AsyncData`를 받아 mark. 테스트 "회복되어 목록이 보이면"이 고정.
+- **(c) 에러→회복** — (b)와 동일 경로. 에러 진입 시 `readAt`이 `null`로 유지됨을 테스트가 단언(알림 보존).
+- **(d) 이전 값 안은 AsyncLoading/AsyncError 제외** — `value is! AsyncData<...>`(`:63`)로 성립.
+  Riverpod에서 `copyWithPrevious`된 로딩/에러는 각각 `AsyncLoading`/`AsyncError` 타입을 유지하므로
+  타입 검사만으로 정확히 배제된다. **단 직접 테스트 없음**([minor 6]).
+- **누수** — `ref.listen`을 `ConsumerState.build`에서 호출하는 것은 정규 용법이라 element와 함께 자동 해제된다.
+  `_markRead()`는 `await` **이전에** `ref.read`를 끝내므로 dispose 후 ref 접근이 없다. 화면 재진입 시
+  새 State가 `_markedRead=false`로 시작해 재호출되는데, 연산이 멱등이라 정상.
+
+### #4 Riverpod semantics 교차 확인
+`ref.invalidate(P)`는 **P와 P의 dependents**를 무효화하며 **dependencies로는 전파되지 않는다**.
+`myGroupsProvider`(`:110`)는 같은 파일의 private `_currentUserProvider`(`:79`)·`_groupsByUserProvider`(`:87`)를
+`watch`하므로, `invalidate(myGroupsProvider)`는 본문만 재실행하고 **여전히 캐시된 `AsyncError`를 다시 읽는다**.
+→ 프로브 결론 정확, `onRetry: null` 판단 타당.
+보강 근거: autoDispose에 기대는 우회(무효화 순간 마지막 리스너가 떨어져 private family가 자멸하기를 기대)도
+**신뢰 불가**다 — 재빌드가 같은 tick 안에서 다시 `watch`하므로 autoDispose 스윕과의 순서가 Riverpod 내부
+구현에 의존한다. 정본 훅이 유일한 해법이라는 매트릭스 결론이 맞다.
+매트릭스 "계약 요청" 항목은 대상 provider·원인·구체적 형태 2안(`refreshMyGroups(Ref)` / `myGroupsRetryProvider`)을
+명시해 **후속 실행 가능 수준**이다. 다만 [minor 5]의 세션 계층 누락을 보완할 것.
+
+## 발견 이슈 (심각도순 — 전부 비차단)
+
+### [medium 1] 공유 상세: `myGroups` 에러일 때 동작하지 않는 재시도 버튼
+- 위치: `lib/features/share/pages/shared_gifticon_detail_page.dart:37,47`
+- 문제: 배너 조건은 `sharedItemLookupHasErrorProvider`(= `myGroups.hasError || sharedGifticonsHaveError`)인데
+  재시도는 `retrySharedGifticons(ref)` 하나뿐이다. 에러 출처가 **`myGroups` 쪽이면** 이 재시도는
+  `sharedGifticonsProvider`만 invalidate하므로 아무 효과가 없다. 더구나 `myGroups`가 에러면
+  `sharedGifticonsHaveErrorProvider`는 그룹 목록이 빈 목록으로 접혀 `false`를 반환하므로
+  (`share_providers.dart:215-222`), **이 경로에서 배너의 유일한 원인이 곧 재시도 불가능한 원인**이다.
+  사용자는 눌러도 배너가 사라지지 않는 버튼을 반복해서 누르게 된다.
+- 규약 위반: `share_error_banner.dart:16-18`이 스스로 "재시도 경로가 실제로 없는 원천에서는 버튼을 숨긴다"고
+  규정했는데, 이 화면이 그 규칙을 지키지 못한다(`share_page.dart:87`의 '내 그룹' 배너는 지킴 — 비대칭).
+- 수정: 재시도 가능 여부를 원인별로 갈라 넘긴다.
+  `onRetry: ref.watch(myGroupsProvider).hasError ? null : () => retrySharedGifticons(ref)`
+  (버튼이 사라질 때의 문구는 share 메인 '내 그룹' 배너와 같은 톤으로 "앱을 다시 열어 주세요" 안내 권장.)
+- 통지: share-page-dev
+
+### [medium 2] share 메인: `myGroups` 에러 시 '공유 기프티콘' 섹션에 false-empty 잔존
+- 위치: `lib/features/share/share_page.dart:56,116,123-124`
+- 문제: `sharedGifticonsHaveErrorProvider`가 배너 중복을 피하려 `myGroups` 에러를 **의도적으로 제외**한다
+  (설계 의도 자체는 타당). 그런데 `myGroups`가 에러면 (1) `allSharedProvider`가 빈 목록으로 접히고
+  (2) `sharedHaveError`는 그룹 순회가 0회라 `false`가 된다 → `:123-124`가 **"공유된 기프티콘이 없어요."**를
+  띄운다. 이번 변경이 없애려던 바로 그 "실패를 없음으로 위장" 현상이, 자기 배너 바로 아래 섹션에 남는다.
+  (사용 이력 섹션은 독립 스트림이라 영향 없음.)
+- 수정: 공유 섹션의 빈 안내를 그룹 에러에도 게이트한다 —
+  `if (shared.isEmpty && !sharedHaveError && !groupsHaveError)`.
+  그룹 에러 시에는 아무것도 띄우지 않거나(위 배너가 이미 설명) 중립 placeholder를 쓴다.
+  `group_detail_page`는 그룹이 인자로 확정돼 들어오므로 이 문제가 없다(그쪽 배선이 모범).
+- 통지: share-page-dev
+
+### [minor 1] 알림 읽음 1회 가드가 '미로그인 AsyncData(빈 목록)'에 소모됨
+- 위치: `lib/features/share/pages/group_notifications_page.dart:63-65, 68-73`
+- 문제: 세션이 `data(null)`이면 `notificationsProvider`가 `const AsyncData(<GroupNotification>[])`를 돌려주는데
+  (`share_providers.dart:124-125`) 이것도 `AsyncData`라 가드를 통과한다 → `_markedRead = true`로 확정되고
+  `markNotificationsRead()`는 `StateError`로 조용히 삼켜진다(`:71-73`). 이후 **진짜 세션이 도착해 목록을 보여도
+  읽음 처리가 영영 일어나지 않아 뱃지가 남는다.** 실서버 `authStateChanges()`가 복원 전 `null`을 먼저 방출하는
+  패턴에서 재현 가능하나, 이 화면은 로그인 상태의 share 탭에서만 진입하므로 실사용 노출은 낮다.
+- 수정: 실패 시 가드를 되돌린다 —
+  `on StateError { _markedRead = false; }` (또는 `_markReadWhenVisible`에서 미로그인일 때 아예 mark 시도를 건너뛰기).
+  전자가 최소 변경.
+- 통지: share-page-dev
+
+### [minor 2] `retrySharedGifticons`가 family 전 인스턴스를 invalidate — 그룹 상세에서 과잉 재구독
+- 위치: `lib/features/share/state/share_providers.dart:270-273` ↔ `lib/features/share/pages/group_detail_page.dart:169-171`
+- 문제: 그룹 상세의 배너는 **그 그룹만**(`sharedGifticonsProvider(group.id)`) 관찰하는데, 재시도는 인자 없는
+  `ref.invalidate(sharedGifticonsProvider)`라 **내 모든 그룹의 스트림을 재구독**한다. 정확성 문제는 없으나
+  Firestore에서는 실패하지 않은 그룹들까지 리스너가 재시작돼 불필요한 문서 읽기·과금이 발생한다
+  (그룹 N개면 1건 실패에 N건 재구독). share 메인·공유 시트는 전 그룹을 합쳐 보므로 전체 무효화가 맞다.
+- 수정: 선택 인자를 추가해 호출부가 범위를 정하게 한다 —
+  `void retrySharedGifticons(WidgetRef ref, {String? groupId})` → `groupId != null`이면
+  `ref.invalidate(sharedGifticonsProvider(groupId))`, 아니면 기존 전체 무효화. 그룹 상세만
+  `retrySharedGifticons(ref, groupId: group.id)`로 바꾼다.
+- 통지: share-page-dev
+
+### [minor 3] 계약 dartdoc 드리프트 — "알림 화면 진입 시 호출"
+- 위치: `lib/shared/repositories/share_repository.dart:192`
+- 판정: **계약 충돌 아님(문구 드리프트).** 규범적 계약((1) 세션 없으면 `StateError` (2) 마지막 읽음 시각을 현재로 갱신)은
+  양쪽 모두 그대로다. 바뀐 것은 *호출 시점*뿐이고, "진입 시 호출해 안읽음을 해소한다"는 **호출자 가이드 문장**이다.
+  `markNotificationsRead`의 소비자는 `group_notifications_page.dart:70` **단 하나**임을 전수 확인했으므로
+  다른 페이지에 파급이 없고, 변경 방향도 엄격히 안전한 쪽(못 본 알림 유실 방지)이다. 코드 수정 불필요.
+- 수정: 계약 dartdoc을 실제 규약에 맞게 정정 요청 — 예: "알림 화면이 **목록을 실제로 표시한 뒤** 호출해 안읽음을
+  해소한다(로딩·에러 중 호출하면 못 본 알림이 읽음 처리돼 유실된다)." 매트릭스 #13에는 이미 반영돼 있어
+  **드리프트는 계약 파일 쪽에만 남아 있다.** `lib/shared`는 `CODEOWNERS` 대상이므로 페이지 담당이 직접 고치지 않는다.
+- 통지: contract-architect (주), share-page-dev
+
+### [minor 4] 공유 시트도 [medium 1]과 같은 계열 — `myGroups` 에러 시 무효 재시도
+- 위치: `lib/features/share/widgets/share_sheets.dart:288-294`
+  (`shareCandidatesHaveErrorProvider` ← `sharedItemLookupHasErrorProvider` ← `myGroups.hasError`)
+- 문제: `retryShareCandidates`는 `_gifticonsByUserProvider` + `sharedGifticonsProvider`만 되살리므로 `myGroups`
+  에러는 해소 못 한다. 다만 시트는 닫고 다시 열 수 있고 저장소 `StateError` 가드가 최후 방어선이라 체감 영향은
+  [medium 1]보다 작다.
+- 수정: [medium 1]과 동일 패턴(`myGroups.hasError`면 `onRetry: null`) 적용. 정본 재시도 훅이 생기면 두 곳 모두 자연 해소.
+- 통지: share-page-dev
+
+### [minor 5] 매트릭스 계약 요청이 '세션 계층'을 포함하지 않음 — 훅만으로는 절반만 해소
+- 위치: `_workspace/01_contract_dependency_matrix.md` 신규 "계약 요청(share → contract-architect, #13 후속)"
+  ↔ `lib/features/share/state/share_providers.dart:250-254` ↔ `lib/shared/providers/my_groups_provider.dart:79`
+- 문제: `_retrySessionIfFailed`는 share의 `shareCurrentUserProvider`만 invalidate한다. 그러나 `myGroupsProvider`는
+  **정본 파일 내부의 별도 `_currentUserProvider`**를 쓴다(같은 `watchCurrentUser()`의 두 번째 구독 — 매트릭스가
+  "아직 정본이 아닌 것"으로 이미 기록한 그 중복). 즉 인증 스트림이 실패하면 **캐시된 에러가 두 개** 생기고,
+  share의 재시도 버튼을 전부 눌러도 그룹 목록 쪽 절반은 살아나지 않는다. 요청서가 `watchGroups` 계층만 언급하면
+  훅을 받아도 이 경로가 남는다.
+- 수정: 계약 요청에 "훅이 `_groupsByUserProvider`뿐 아니라 `_currentUserProvider`도 되살려야 한다"를 명시하거나,
+  이미 후보로 올라 있는 **세션 스트림 승격**과 묶어 처리하도록 의존 관계를 적는다.
+- 통지: contract-architect (주), share-page-dev
+
+### [minor 6] 신규 테스트의 커버리지 공백
+- 위치: `test/features/share/share_error_ui_test.dart`
+- 문제: 재시도 4개 중 **2개만 실증**된다 — `retryNotifications`(구독 1→2)·`retrySharedGifticons`(증가)는 O,
+  `retryUsageLogs`·`retryShareCandidates`는 미검증. 또한 가드 경로 (d)(이전 값을 안은 `AsyncLoading`/`AsyncError` 배제)와
+  share 메인 섹션별 배너·그룹 상세 그룹별 배너가 테스트로 고정돼 있지 않다. 특히 [medium 2]는 테스트가 있었다면
+  잡혔을 케이스다(`myGroups` 에러 시 share 메인 렌더링).
+- 수정: `_FlakyShareRepository`에 `usageLogsFail`/`groupsFail` 토글과 `usageLogSubscriptions` 카운터를 추가해
+  (1) 사용 이력 배너+재시도 재구독 (2) 공유 시트 배너+재시도 (3) `groupsFail=true`일 때 share 메인이
+  "공유된 기프티콘이 없어요"를 띄우지 않는지(= [medium 2] 회귀 고정)를 추가한다.
+- 통지: share-page-dev
+
+### [minor 7] 사용 이력 화면: `myGroups` 에러가 표시되지 않음(그룹 필터가 조용히 사라짐)
+- 위치: `lib/features/share/pages/usage_log_page.dart:42-43`
+- 문제: 이 화면은 `usageLogsProvider`(배너 O)와 별개로 `myGroupsProvider`를 빈 목록 폴딩으로 소비해 그룹 필터를 만든다.
+  그룹 목록이 실패하면 **필터 UI만 조용히 사라지고** 사용자는 이유를 모른다. 주 데이터(이력)의 false-empty는 아니라
+  영향은 작다.
+- 수정: 그룹 필터 영역에 `onRetry: null` 배너를 얹거나(정본 훅 도착 시 버튼 부여), 최소한 주석으로 알려진 한계를 남긴다.
+- 통지: share-page-dev
+
+## 통과 항목 (교차 비교 근거)
+- **재시도 진입점 ↔ 원천 매핑 4/4 정확**: `retryNotifications` → `_notificationsByUserProvider` + `_notifReadAtByUserProvider`
+  (= `notificationsProvider`/`notificationsReadAtProvider`의 실제 원천) · `retryUsageLogs` → `_usageLogsByUserProvider` ·
+  `retrySharedGifticons` → `sharedGifticonsProvider` · `retryShareCandidates` → `_gifticonsByUserProvider` + `sharedGifticonsProvider`
+  (= `unsharedGifticonsProvider`의 두 원천). 폴딩된 파생을 재시도 지점으로 삼은 곳이 **한 곳도 없다**.
+- **재구독 실증**: share의 파생은 모두 keepAlive라 invalidate 즉시 리스너가 살아 있는 채로 재빌드된다.
+  테스트가 `notificationSubscriptions` 1→2, `sharedSubscriptions` 증가로 실제 재구독을 고정한다
+  (인자 없는 family invalidate가 전 인스턴스에 적용됨도 이로써 실증).
+- **자동 재시도 부재 실증**: 에러 후 `pump(1s)`에도 구독 수가 1로 유지됨을 단언 — retry storm 방어가 회귀로 고정됨.
+- **에러 감지 원천 정합**: 5개 화면 모두 자기가 표시하는 데이터의 원천을 관찰한다. 특히
+  `sharedItemLookupHasErrorProvider`는 `sharedItemByIdProvider`가 순회하는 **두 원천을 정확히** 합쳤다(누락·과잉 없음).
+  **다른 스트림의 에러가 엉뚱한 화면에 뜨는 오배선은 0건.**
+- **폴딩 규약 무변경**: 모든 소비 지점이 `valueOrNull ?? const []`를 유지하고 `.value` 재유입이 없다(analyze·수동 확인).
+- **테마 SSOT 준수**: `share_error_banner.dart`는 색을 `colorScheme.error` 계열, 반경을 `AppRadii.tile`에서만 가져온다(하드코딩 0).
+- **내부 에러 메시지 비노출**: 5개 배너 문구 전부 한국어 중립 문구이며 `StateError.message`·raw id 노출 없음.
+- **scan/main 영향 0**: 변경 파일이 `lib/features/share/**` + 매트릭스로 한정됨을 `git diff develop --name-only`로 확인.
+
+## 남은 리스크
+- `myGroups` 에러 경로는 이번 브랜치에서 **표시만 되고 회복 불가**다. 정본 재시도 훅([minor 5] 포함)이 도착하기
+  전까지 사용자의 유일한 복구 수단은 앱 재시작이며, 배너 문구도 그렇게 안내한다(의도된 상태).
+- 실기기·실서버(Firestore) 검증 미수행(Windows 환경). 특히 [minor 2]의 과잉 재구독 비용과, 실제
+  `authStateChanges()` 초기 `null` 방출로 인한 [minor 1] 재현성은 코드 추론 기반이다.

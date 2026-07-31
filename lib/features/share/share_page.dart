@@ -28,6 +28,7 @@ import 'pages/group_notifications_page.dart';
 import 'pages/shared_gifticon_detail_page.dart';
 import 'pages/usage_log_page.dart';
 import 'state/share_providers.dart';
+import 'widgets/share_error_banner.dart';
 import 'widgets/share_format.dart';
 import 'widgets/share_sheets.dart';
 import 'widgets/shared_gifticon_card.dart';
@@ -47,11 +48,22 @@ class SharePage extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final List<Group> groups =
-        ref.watch(myGroupsProvider).valueOrNull ?? const <Group>[];
+    // 폴딩(#13)은 그대로 두고, 섹션별로 원천의 hasError를 함께 관찰해 배너를 얹는다.
+    final AsyncValue<List<Group>> groupsAsync = ref.watch(myGroupsProvider);
+    final List<Group> groups = groupsAsync.valueOrNull ?? const <Group>[];
+    // "값도 없는 에러"만 배너 대상이다(단일 판정점 provider와 같은 규칙) — 이전 값을
+    // 보존한 순단 에러는 목록이 계속 표시·조회되므로, 재시도 훅이 없는 현재로선
+    // 해소 불가능한 배너를 영구 표시하는 것보다 목록 유지가 낫다(#13 후속 재검토).
+    final bool groupsUnavailable = ref.watch(myGroupListUnavailableProvider);
+    // 첫 방출 전(값 없는 로딩)은 "없음"이 아직 확정이 아니다 — 빈 안내 게이트용.
+    final bool groupsPending = groupsAsync.isLoading && !groupsAsync.hasValue;
     final List<SharedGifticon> shared = ref.watch(allSharedProvider);
-    final List<UsageLog> logs =
-        ref.watch(usageLogsProvider).valueOrNull ?? const <UsageLog>[];
+    final bool sharedHaveError = ref.watch(sharedGifticonsHaveErrorProvider);
+    final bool sharedPending = ref.watch(sharedGifticonsPendingProvider);
+    final AsyncValue<List<UsageLog>> logsAsync = ref.watch(usageLogsProvider);
+    final List<UsageLog> logs = logsAsync.valueOrNull ?? const <UsageLog>[];
+    final bool logsHaveError = logsAsync.hasError;
+    final bool logsPending = logsAsync.isLoading && !logsAsync.hasValue;
     final MemberNames names = ref.watch(memberNamesProvider);
     final User? user = ref.watch(shareCurrentUserProvider).valueOrNull;
     final int unreadNotifications = ref.watch(unreadNotificationCountProvider);
@@ -73,11 +85,21 @@ class SharePage extends ConsumerWidget {
             // ── 1. 내 그룹 ──
             const _SectionHeader(title: '내 그룹'),
             const SizedBox(height: 12),
-            if (groups.isEmpty)
+            if (groupsUnavailable) ...<Widget>[
+              // ⚠️ 재시도 버튼 없음(onRetry: null → 배너가 복구 안내 접미를 붙인다).
+              // 내 그룹 목록의 에러는 계약 정본 `myGroupsProvider`가 watch하는
+              // **private 체인**(lib/shared)에 캐시되며, 페이지에서
+              // `invalidate(myGroupsProvider)`를 해도 그 dependency는 재구독되지
+              // 않는다(실측 확인). 동작하지 않는 버튼을 두는 대신 표시만 하고,
+              // 재시도 훅은 contract-architect에 요청한다(#13 후속).
+              const ShareErrorBanner(message: '그룹 목록을 불러오지 못했어요.'),
+              if (groups.isNotEmpty) const SizedBox(height: 12),
+            ],
+            if (groups.isEmpty && !groupsUnavailable && !groupsPending)
               const _EmptyHint(
                 text: '아직 참여한 그룹이 없어요.\n그룹을 만들거나 초대코드로 참여해 보세요.',
               )
-            else
+            else if (groups.isNotEmpty)
               for (int i = 0; i < groups.length; i++) ...<Widget>[
                 if (i > 0) const SizedBox(height: 12),
                 _GroupCard(
@@ -97,9 +119,25 @@ class SharePage extends ConsumerWidget {
             // ── 2. 공유 기프티콘 ──
             const _SectionHeader(title: '공유 기프티콘'),
             const SizedBox(height: 12),
-            if (shared.isEmpty)
+            if (sharedHaveError) ...<Widget>[
+              ShareErrorBanner(
+                message: '공유 기프티콘을 불러오지 못했어요.',
+                onRetry: () => retrySharedGifticons(ref),
+              ),
+              if (shared.isNotEmpty) const SizedBox(height: 12),
+            ],
+            // `sharedGifticonsHaveErrorProvider`는 배너 중복을 피하려 그룹 목록 에러를
+            // 일부러 제외한다. 그래서 그룹 목록이 실패하면 순회할 그룹이 0개라
+            // `sharedHaveError`가 false가 되고, 여기서 "공유된 기프티콘이 없어요"라는
+            // false-empty가 되살아난다 — 이번 변경이 없애려던 바로 그 위장이다.
+            // 빈 안내를 그룹 사용 불가에도, 첫 방출 전 로딩에도 게이트해 막는다
+            // (에러는 위 배너들이 설명하고, 로딩은 곧 실제 상태로 바뀐다).
+            if (shared.isEmpty &&
+                !sharedHaveError &&
+                !groupsUnavailable &&
+                !sharedPending)
               const _EmptyHint(text: '공유된 기프티콘이 없어요.')
-            else
+            else if (shared.isNotEmpty)
               for (int i = 0; i < shared.length; i++) ...<Widget>[
                 if (i > 0) const SizedBox(height: 12),
                 SharedGifticonCard(
@@ -127,9 +165,16 @@ class SharePage extends ConsumerWidget {
               ],
             ),
             const SizedBox(height: 4),
-            if (logs.isEmpty)
+            if (logsHaveError) ...<Widget>[
+              ShareErrorBanner(
+                message: '사용 이력을 불러오지 못했어요.',
+                onRetry: () => retryUsageLogs(ref),
+              ),
+              if (logs.isNotEmpty) const SizedBox(height: 12),
+            ],
+            if (logs.isEmpty && !logsHaveError && !logsPending)
               const _EmptyHint(text: '사용 이력이 없어요.')
-            else
+            else if (logs.isNotEmpty)
               Card(
                 clipBehavior: Clip.antiAlias,
                 child: Column(
