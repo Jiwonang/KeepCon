@@ -4,7 +4,7 @@
 > 이번 검증 슬라이스 범위: **scan(생산) → main(소비)**. auth는 인터페이스+mock으로 대체.
 > 계약 위치: `lib/shared/`. 이 문서와 소스가 어긋나면 소스가 아니라 **양쪽을 함께** 갱신한다.
 
-작성일: 2026-07-06 · 최종 갱신: 2026-07-30 · 계약 버전: v2.5 (내 그룹 목록 provider 승격)
+작성일: 2026-07-06 · 최종 갱신: 2026-07-31 · 계약 버전: v2.6 (세션 스트림 정본 승격 + 내 그룹 재시도 훅)
 
 ---
 
@@ -68,6 +68,9 @@
 | `groupThousands(digits)` (코어) / `digitsOnly(input)` / `formatThousands(input)` (scan 진입점) / `formatWon(won)` (main 진입점) | util | `lib/shared/util/money_format.dart` | 2.3 |
 | `formatYmdDot(DateTime)` → `'YYYY.MM.DD'` (코어 — main·share·scan 공통 날짜 표기) | util | `lib/shared/util/date_format.dart` | 2.4 |
 | `myGroupsProvider` (`AutoDisposeProvider<AsyncValue<List<Group>>>`) — **SSOT**. 세션→`watchGroups` 체인 정본. scan·share **공용 구독 1개** | provider | `lib/shared/providers/my_groups_provider.dart` | 2.5 |
+| `sessionUserProvider` (`AutoDisposeStreamProvider<User?>`) — **SSOT**. `watchCurrentUser()` 세션 스트림 정본 | provider | `lib/shared/providers/session_provider.dart` | 2.6 |
+| `myGroupsRetryProvider` (`Provider<MyGroupsRetry>`) + `MyGroupsRetry.retry()` — 내 그룹 체인 **수동 재시도 훅**(에러 계층만 재구독) | provider | `lib/shared/providers/my_groups_provider.dart` | 2.6 |
+| `retryMyGroups(WidgetRef ref)` → `void` — 위 훅의 화면용 진입점(`ref.read(myGroupsRetryProvider).retry()`와 동일) | function | 〃 | 2.6 |
 
 ### `Gifticon` 필드 계약
 
@@ -94,9 +97,15 @@
 | **auth** (mock) | `User` | `AuthRepository.currentUser`, `watchCurrentUser()` (→ `InMemoryAuthRepository` 제공) |
 | **scan** (생산자) | `authRepositoryProvider`→`AuthRepository.currentUser` (소유자 식별), `gifticonRepositoryProvider`, `Gifticon`, `GifticonStatus.available`, `AppRoutes.scan`, `shareRepositoryProvider`→`shareGifticon(...)`, **`myGroupsProvider`**(저장할 그룹 선택지 — 세션→`watchGroups(uid)` 체인 정본; scan 파생에서 `valueOrNull ?? []` 폴딩), `Group`(id·name·emoji) | `GifticonRepository.addGifticon(Gifticon)`, (그룹 선택 시) `ShareRepository.shareGifticon({groupId, gifticon: saved})` |
 | **main** (소비자) | `gifticonRepositoryProvider`→`watchGifticons(ownerId)`, `Gifticon`(+`price`), `SortOption`, `FilterOption`, `GifticonStatus`, `AppRoutes.main`, `Theme.of(context)`(AppTheme) | 총금액 통계 = `price` 합산, (상태 변경 시) `GifticonRepository.updateStatus(id, status)` |
-| **share** (그룹/공유) | `shareRepositoryProvider`→`ShareRepository`(그룹 CRUD·멤버·초대·공유/취소·`markUsed`·이력·알림), **`myGroupsProvider`**(내 그룹 목록 — `AsyncValue` 그대로 전파), `Group`/`GroupMember`/`SharedGifticon`/`UsageLog`/`GroupNotification`, `ShareStatus`/`MemberRole`/`GroupNotificationType`, `authRepositoryProvider`→`currentUser`(행위자 식별), `gifticonRepositoryProvider`→`watchGifticons(uid)`(공유 후보 = `Gifticon`), `AppRoutes.share` | `SharedGifticon`/`UsageLog`/`GroupNotification`(share repo에 씀), **`GifticonRepository.updateStatus(gifticonId, GifticonStatus.used)`**(원본 사용 동기화, `markUsed` 경유) |
+| **share** (그룹/공유) | `shareRepositoryProvider`→`ShareRepository`(그룹 CRUD·멤버·초대·공유/취소·`markUsed`·이력·알림), **`myGroupsProvider`**(내 그룹 목록 — `AsyncValue` 그대로 전파), `Group`/`GroupMember`/`SharedGifticon`/`UsageLog`/`GroupNotification`, `ShareStatus`/`MemberRole`/`GroupNotificationType`, `authRepositoryProvider`→`currentUser`(행위자 식별), `gifticonRepositoryProvider`→`watchGifticons(uid)`(공유 후보 = `Gifticon`), `AppRoutes.share`, **`retryMyGroups(ref)`/`myGroupsRetryProvider`**(v2.6 — 내 그룹 배너 4곳의 `onRetry`), **`sessionUserProvider`**(v2.6 — 세션 정본. `shareCurrentUserProvider`는 자체 구독 없는 별칭) | `SharedGifticon`/`UsageLog`/`GroupNotification`(share repo에 씀), **`GifticonRepository.updateStatus(gifticonId, GifticonStatus.used)`**(원본 사용 동기화, `markUsed` 경유) |
 | **auth/설정('마이')** | `themeModeProvider`(watch) | `ThemeModeController.setDark(bool)`/`.set(mode)` (다크 토글) |
 | **앱 조립부(main.dart)** | `themeModeProvider`(watch), `AppTheme.light`/`AppTheme.dark` | `MaterialApp.theme`/`darkTheme`/`themeMode` 배선 |
+
+> **세션 스트림 소비(v2.6 이후 규약):** `watchCurrentUser()` 체인을 페이지에서 새로 조립하지 말고
+> `sessionUserProvider`(`lib/shared/providers/session_provider.dart`)를 소비한다. 전환 완료 =
+> `myGroupsProvider` + share(`shareCurrentUserProvider`는 자체 구독 없는 **pass-through 별칭** —
+> #13 판정 참조). **main·mypage·앱 조립부는 아직 각자 선언한 provider를 쓴다**(전환 예정 —
+> #13의 잔여 표). 새 코드는 별칭이 아니라 정본을 쓴다.
 
 ---
 
@@ -214,6 +223,14 @@
      share는 `groupByIdProvider`만 `AsyncValue` 구분 소비(whenData)하고 목록/요약 소비
      지점들은 `valueOrNull ?? []` 폴딩 / scan = `scanTargetGroupsProvider`에서
      `valueOrNull ?? const <Group>[]`.
+   - 📌 **판정(v2.6, QA [medium 1]): 정본의 세션 폴딩 규약은 파생에도 그대로 적용된다.**
+     세션 `AsyncValue` 위에 얹는 파생은 **`.when`을 쓰지 않는다** — `when`은 `skipError`가 기본
+     `false`라 **이전 값을 보존한 순단 에러에서도 error 분기**를 타 하위 스트림의 멀쩡한 데이터를
+     통째로 버린다. 그 결과 같은 한 번의 세션 순단에 '내 그룹'(정본 폴딩)은 멀쩡한데 알림·사용
+     이력·공유 후보(`.when` 파생)만 비워지는 **비대칭 화면**이 된다(실측). 아래 상태 규약과 같은
+     `valueOrNull` 기반 4분기로 통일하되, **미로그인 확정(`data(null)`) → `AsyncData(<T>[])` 경로는
+     반드시 보존**한다(알림 읽음 가드의 `StateError` 복원 분기가 그 형태에 의존). 적용 중:
+     share `usageLogsProvider`·`notificationsProvider`·`shareableGifticonsProvider`(share-page-dev).
    - **상태 규약:** 알려진 user가 있으면(확정 방출 또는 세션 일시 순단 중 **이전 값 보존**)
      그 user의 그룹 스트림을 그대로 반환 — 세션 순단으로 이미 로드된 목록이 사라지지 않는다.
      알려진 user 없이 세션 로딩 중 → `AsyncLoading` 전파(빈 목록으로 접지 않음),
@@ -243,27 +260,74 @@
      에러 상태도 "봤다"로 치지 않는다 — 보존 목록은 최신이 아닐 수 있어, 지금 readAt을 찍으면
      에러 중 도착 못 한 새 알림이 유실된다. 실패 시 가드 복원은 StateError뿐 아니라 저장소
      구현별 예외 전체에 적용).
-     ⚠️ **남은 한계(내 그룹 목록 한정):** 이 provider가 에러로 끝나면 `AsyncError`가
-     정본의 **private 체인**(`_currentUserProvider`/`_groupsByUserProvider`)에 캐시되고,
-     페이지에서 `invalidate(myGroupsProvider)`를 해도 그 dependency는 재구독되지 않는다
-     (실측 확인 — Riverpod의 invalidate는 dependency로 전파되지 않는다). 그래서 **에러의 원인이
-     그룹 목록인 배너는 표시만 하고 재시도 버튼을 두지 않는다**(동작하지 않는 버튼 방지 —
-     `ShareErrorBanner`가 onRetry=null이면 복구 안내 접미를 스스로 붙인다):
-     share 메인 '내 그룹'·사용 이력 배너는 항상, 공유 상세·공유 시트 배너는
-     `myGroupListUnavailableProvider`가 true일 때. 판정은 **"값도 없는 에러"로 한정**한다
-     (`hasError && !hasValue`) — 이전 값을 보존한 순단 에러까지 포함하면 멀쩡히 렌더되는
-     목록 위에 해소 불가능한 배너가 앱 재시작 전까지 영구 표시되고, 함께 발생한 재시도
-     가능한 공유 스트림 에러의 버튼까지 부당하게 사라진다(재시도 훅 승격 후 순단 표시 재검토).
-     원인이 share 소유 스트림이면 같은 배너가 재시도 버튼을 갖는다(원인별 분기).
-     해소하려면 정본에 재시도 훅(예: private 체인을 되살리는 `refreshMyGroups(Ref)` 또는
-     `myGroupsRetryProvider`)이 필요하다 — `lib/shared`는 `CODEOWNERS` 대상이라 페이지 담당이
-     직접 고치지 않고 `contract-architect`에게 요청한다(아래 후속 목록 참조).
-   - **아직 정본이 아닌 것:** 세션 스트림(`watchCurrentUser()`) 자체. 앱 조립부·main·mypage·
-     share가 각각 구독하고 정본 내부에도 하나 있다(총 5곳). 소비자가 많아 별도 승격 후보로 남긴다.
-     ⚠️ 정산 기록: share 정상상태의 동시 세션 구독이 승격 전 1개(shareCurrentUserProvider 공용)
-     → 승격 후 2개(그것 + 정본 내부)로 늘었다(비과금 auth 리스너라 실비용 미미). 또한
-     `memberNamesProvider`가 두 세션 소스를 혼합하므로 계정 전환 프레임에서 두 값이 한 프레임
-     어긋날 수 있다 — 세션 정본화 슬라이스에서 정본 내부 구독을 세션 정본 소비로 바꿔 해소할 것.
+     ✅ **재시도 훅 도착(v2.6) — 내 그룹 목록도 되살릴 수 있다.** 승격 전에는 이 provider가
+     에러로 끝나면 `AsyncError`가 정본의 **private 체인**에 캐시되고, 페이지의
+     `invalidate(myGroupsProvider)`는 dependency로 전파되지 않아(실측 — Riverpod의 invalidate는
+     dependents 방향으로만 전파) 되살릴 수 없었다. 그래서 원인이 그룹 목록인 배너는
+     `onRetry: null`(+"앱을 다시 열어 주세요")로 남아 있었다. 이제 정본 파일이 재시도 진입점을
+     제공한다:
+     - **`retryMyGroups(WidgetRef ref)`** (= `ref.read(myGroupsRetryProvider).retry()`).
+       share의 `retry*(WidgetRef)` 관용구와 동형이라 배너 콜백에 그대로 넣을 수 있다.
+     - 되살리는 계층은 **세션(`sessionUserProvider`) + 그룹 스트림(`_groupsByUserProvider`의
+       현재 user 인스턴스)** 둘 다이며, **에러인 계층만** 재구독한다(멀쩡한 스트림 재구독 =
+       불필요한 읽기·과금·로딩 깜빡임 — share의 `_retrySessionIfFailed`와 같은 스코프 원칙).
+       세션에 알려진 user가 없으면 그룹 계층은 건드리지 않는다(family 인스턴스가 없다).
+     - **자동 재시도 금지 규약은 그대로**다 — 훅은 사용자 액션(버튼/당김 새로고침)에서만 호출한다.
+       `build`/`listen`에서 에러 감지 후 자동 호출하면 장애 중 retry storm이 된다.
+     - 회귀 고정: `test/shared/providers/session_and_retry_test.dart`
+       (세션만/그룹만/둘 다/정상 4경우 + 회복 + `WidgetRef` 진입점).
+     ✅ **share 소비 전환 완료(share-page-dev, 같은 v2.6).** `onRetry` 강등(동작하지 않는
+     버튼 방지)이 제거되고 배너 4곳이 훅에 배선됐다 — share 메인 '내 그룹'·사용 이력은
+     `retryMyGroups(ref)` 직접, 공유 상세는 신설 `retrySharedItemLookup`(= `retryMyGroups`
+     + 실패한 그룹별 공유 인스턴스), 공유 시트는 `retryShareCandidates`가 세션 계층 재시도를
+     `retryMyGroups`로 승격. **분담 규약:** `retryMyGroups`가 세션+그룹을 함께 맡으므로, 그것을
+     부르는 경로에서는 share의 `_retrySessionIfFailed`를 **겹쳐 부르지 않는다**(중복 invalidate
+     방지). 그룹과 무관한 경로(알림·이력·그룹별 공유 스트림)만 `_retrySessionIfFailed`를 쓴다.
+     `myGroupListUnavailableProvider`는 남아 있지만 이제 **표시 판정 전용**이다(재시도 가능
+     여부와 무관 — "값도 없는 에러"에서만 배너를 띄운다는 UX 판단은 유지: 멀쩡히 렌더되는
+     목록 위에 실패를 얹지 않는다).
+   - **세션 스트림 = 정본화 완료(v2.6), 소비 전환은 share까지 완료·3곳 잔여.**
+     `lib/shared/providers/session_provider.dart`의 **`sessionUserProvider`**
+     (`AutoDisposeStreamProvider<User?>` — `myGroupsProvider`와 같은 수명 근거)가 정본이다.
+     전환 완료: **`my_groups_provider.dart` 내부**(내부 `_currentUserProvider` 삭제) +
+     **share**(`shareCurrentUserProvider`가 자체 `watchCurrentUser()` 구독을 버리고 정본
+     pass-through 별칭이 됨 — 아래 판정 참조). 아직 각자 구독 중인 잔여:
+     | 잔여 소비자 | 위치 | 담당 |
+     |------|------|------|
+     | `currentUserProvider` | `lib/features/main/state/gifticon_list_providers.dart` | main-page-dev |
+     | (인라인 구독) | `lib/features/mypage/mypage_page.dart` | main-page-dev |
+     | `authStateProvider` | `lib/app/auth_gate.dart` | 앱 조립부 |
+     정본 도입만으로 중복이 사라지지는 않는다 — 정본은 **수렴 지점**이고, 위 3곳이 옮겨와야
+     구독이 1개가 된다. 전환 시 `currentUserProvider`(main)는 이름이 정본과 다르므로
+     **선언 삭제 + 정본 import**로 처리한다(재export shim 금지 — v2.3에서 확정된 방식).
+     📌 **판정(계약 소유자): share의 이름 유지 pass-through는 "재export shim 금지" 규약과
+     문면상 어긋나지만, 경과 조치로 허용한다.** 근거 — 그 규약이 막으려던 실질 위험은
+     ①정본 미소비(로컬 경로가 정본과 **다른 값/인스턴스**를 낳음) ②시간이 지나며 갈라짐인데,
+     `shareCurrentUserProvider`는 자체 구독을 열지 않는 `ref.watch(sessionUserProvider)` 한 줄이라
+     값·인스턴스·수명이 정본과 동일하고 갈라질 본문이 없다(포맷 유틸의 재export shim은
+     "함수 본문이 두 곳"이 될 수 있었던 것과 다르다). 다만 provider 고유의 함정이 하나 생겼다 —
+     **별칭은 invalidate 대상이 아니다**(invalidate는 dependents 방향으로만 전파되므로 별칭을
+     무효화해도 원천은 재구독되지 않는다). 이 점이 dartdoc에 명시돼 있고 재시도는 정본을 직접
+     invalidate하므로 현 상태는 안전하다. **종착점은 별칭 제거**다: 아래 **12곳**을
+     `sessionUserProvider` 직수입으로 기계적 치환하면 별칭을 삭제할 수 있다(후속 슬라이스 —
+     잔여 3곳 전환과 함께). 새 코드는 별칭이 아니라 정본을 쓴다.
+     체크리스트는 **라인 번호가 아니라 심볼**로 특정한다(라인은 편집마다 밀려 썩는다 —
+     실측: v2.6 리뷰에서 dartdoc 확장만으로 30~40줄이 밀려 기존 좌표가 전부 낡았다).
+     실행 시점에 `grep -n "shareCurrentUserProvider" lib/features/share/`로 전수 재확인할 것:
+     | 위치 | 개수 | 심볼(형태) |
+     |------|------|------|
+     | 화면 | **4** | `group_detail_page` / `member_invite_page` / `shared_gifticon_detail_page`(`_DetailBody`) / `share_page` (전부 `watch`) |
+     | `share_providers.dart` 파생 `watch` | **5** | `usageLogsProvider` · `notificationsProvider` · `notificationsReadAtProvider` · `shareableGifticonsProvider` · `memberNamesProvider` |
+     | `share_providers.dart` 함수 내부 `read` | **3** | `retryNotifications` · `retryUsageLogs` · `retryShareCandidates` (각각 user 판독) |
+     ⚠️ **함수 안의 `read`가 누락되기 쉽다**(화면·파생만 훑으면 안 보인다) —
+     체크리스트를 "전수(grep)"로 잡지 않으면 전환이 절반만 된 채 "완료"로 판정된다(QA [minor 1]).
+     ⚠️ 정산 기록: share 정상상태의 동시 세션 구독은 v2.5에서 2개(share 자체 + 정본 내부)로
+     늘었다가 v2.6에서 **1개(정본 하나 — share가 그것을 통과 소비)** 로 수렴했다.
+     `memberNamesProvider`가 두 세션 소스를 혼합해 계정 전환 프레임에서 한 프레임 어긋날 수
+     있던 위험도 이로써 사라졌다(그룹 목록과 세션이 **같은 스트림**을 본다).
+     💰 세션 정본화의 이득은 **과금이 아니라 인스턴스/타이밍 일관성**이다(인증 상태 리스너는
+     Firestore 문서 읽기가 아니다). 대신 "실패 시 캐시된 에러가 소스 수만큼 생겨 재시도가
+     절반만 먹히는" 문제는 과금과 무관하게 실제 버그였다(QA [minor 5]).
 
 ---
 
@@ -325,6 +389,7 @@
 | v2.3 | 2026-07-30 | **금액 포맷 유틸 승격 (non-breaking, 순수 리팩터).** 동일한 천 단위 그룹핑 알고리즘이 main(`formatWon`, `lib/features/main/widgets/format.dart`)과 scan(`formatThousands`, `lib/features/scan/util/price_input_formatter.dart`)에 복사돼 있어 승격 규칙 ③(실제 두 번째 소비자)을 충족 → `lib/shared/util/money_format.dart` 정본 신설. **코어 하나 + 소비자별 얇은 진입점** 구조: `groupThousands(String digits)`(순수 그룹핑, digits-only 전제 debug assert, 3자리 이하 빠른 경로) / `digitsOnly(String)`(비숫자 제거) / `formatThousands(String)`= `groupThousands(digitsOnly(x))`(scan — 관용·멱등) / `formatWon(int)`(main — 절댓값 그룹핑 후 부호 앞 결합). 소비자는 정본을 **직접 import**한다(main_page·gifticon_card는 `show formatWon`; scan 입력 포매터는 코어·`digitsOnly` 소비, `gifticon_form`용 `formatThousands` 재export는 기존 테스트가 경로를 고정하는 scan 쪽에만 유지). 신규 테스트 `test/shared/util/money_format_test.dart`, **기존 `test/features/scan/price_input_formatter_test.dart` 무수정 통과**(동작 불변의 증거). | (없음 — non-breaking, 시그니처·동작 불변. main·scan은 이미 정본 소비로 전환됨) |
 | v2.4 | 2026-07-30 | **날짜 포맷 유틸 승격 (non-breaking 계약 + scan 표시 통일 1건).** 같은 `YYYY.MM.DD` 조립이 세 페이지에 분산돼 있어(승격 규칙 ③의 두 번째·세 번째 소비자 확인) `lib/shared/util/date_format.dart` 정본 신설 — **코어 `formatYmdDot(DateTime)` → `'YYYY.MM.DD'` 하나만** 승격했다(월·일 두 자리 패딩, 연도는 패딩하지 않고 네 자리 전제를 debug assert로 가드, 시·분·초 무시). 소비자 고유 표현은 각 페이지에 남긴다: share의 `~` 접두(`formatExpiryLabel`)·`HH:mm` 조합(`formatInviteExpiry`)·상대 시각(`formatRelativeKo`), main의 `formatDDay`. 소비 전환 — main: 로컬 `formatDate` **삭제**, 호출부(`main_page.dart`·`gifticon_card.dart`)가 정본을 `show formatYmdDot`으로 **직접 import**(재export shim 없음, v2.3 리뷰에서 확정된 방식) / share: `share_format.dart`가 코어에 위임(공개 함수명·출력 문자열 불변, 페이지 호출부 무수정) / scan: `gifticon_form.dart` 인라인 `padLeft` 조립 제거 후 정본 소비. **⚠️ 의도된 표시 변경 1건:** scan 날짜 선택 버튼 라벨이 `YYYY-MM-DD` → `YYYY.MM.DD`. 같은 유효기간이 등록 화면과 목록/공유 화면에서 다르게 보이던 불일치를 **다수 표기(`.`)로 통일**한 것이며, 계약 값(`Gifticon.expiryDate: DateTime`)·시그니처는 불변이다. 신규 테스트 `test/shared/util/date_format_test.dart`. **삭제 구현과의 문자 단위 코드 비교 + 신설 share_format 출력 고정 테스트(`test/features/share/share_format_test.dart`)로 확인**(기존 main·share 테스트는 이 경로를 지나지 않아 증거가 아님 — share 라벨 출력은 이번에 처음 테스트로 고정됨), scan 위젯 테스트(`test/features/scan/gifticon_form_input_test.dart`)는 구분자 단언만 `.`로 갱신. | scan(**표시 문자열 변경** — QA 시각 확인 대상), main·share(동작 불변, 정본 위임) |
 | v2.5 | 2026-07-30 | **"내 그룹 목록" provider 승격 (non-breaking, 중복 구독 제거).** scan(`_scanCurrentUserProvider`/`_scanGroupsByUserProvider`)과 share(`_groupsByUserProvider`+`myGroupsProvider`)가 세션→`watchGroups(uid)` 체인을 각자 조립해 **같은 사용자에 대해 `watchGroups`를 두 번 구독**하던 문제(integration-qa 검출, 규칙 ③ 충족) → `lib/shared/providers/my_groups_provider.dart` 정본 신설. 정본은 `AsyncValue<List<Group>>`를 노출해 **로딩/에러 구분을 보존**하고(share 기존 규약과 동일: 세션 로딩→`AsyncLoading` 전파, `data(null)`→`AsyncData([])`), 정보를 잃는 폴딩은 페이지 파생에 남긴다(scan `scanTargetGroupsProvider` = `valueOrNull ?? []`). 세션·그룹 스트림 provider는 정본 파일 **내부(private)** 로 감춘다. **수명 = `autoDispose`**(scan 일회성 플로우 보호 + share 상시 탭이 보는 동안 유지 → 구독은 0 또는 1로 수렴, 승격 전 최댓값 2보다 항상 적거나 같다). 소비 전환 — scan: 중복 체인 2개 **삭제**, `scanTargetGroupsProvider`가 정본 소비(공개 이름·폴딩 동작 불변) / share: `_groupsByUserProvider`+로컬 `myGroupsProvider` **삭제**, 정본을 **직접 import**(재export shim 없음 — v2.3/v2.4에서 확정된 방식; `share_page.dart`·`usage_log_page.dart`는 import 1줄만 추가, `ref.watch(myGroupsProvider)` 호출부는 무수정). `.value`의 AsyncError rethrow 함정은 정본·파생 모두 `valueOrNull`로 회피(주석에 명시). 신규 테스트 `test/shared/providers/my_groups_provider_test.dart` — 계측 `ShareRepository`(구독 카운터)로 **"두 소비자 동시 watch → `watchGroups` 호출·구독 각 1회"**, "scan만 해제 시 재구독 없이 유지 / 마지막 소비자 해제 시 구독 0", "미로그인 시 미구독 + `AsyncData([])`", "로딩 전파 + scan은 빈 목록", "에러 전파 시 rethrow 없음"을 고정. 크로스페이지 주의점 #13 신설. | scan·share(동작 불변, 정본 소비 — 호출 표현·공개 provider 이름 불변) |
+| v2.6 | 2026-07-31 | **세션 스트림 정본 승격 + 내 그룹 재시도 훅 (non-breaking, 순수 추가 + 내부 대체).** (1) `lib/shared/providers/session_provider.dart` 신설 — `sessionUserProvider`(**SSOT**, `AutoDisposeStreamProvider<User?>`). 수명·노출 형태는 `myGroupsProvider`와 같은 근거(구독 0/1, keepAlive 소비자가 수명을 붙잡음, `AsyncValue`로 로딩/에러 구분 보존, `.value` 금지·`valueOrNull`). (2) `my_groups_provider.dart`의 내부 `_currentUserProvider` **삭제** → 정본 소비(공개 API·상태 규약·수명 전부 불변). 이로써 `watchCurrentUser()`의 "정본 내부 두 번째 구독"이 사라져 **QA [minor 5]**(세션 실패 시 캐시된 에러가 둘 → 재시도가 절반만 먹힘)의 원인 절반이 제거됐다. (3) **재시도 훅 신설**(정본 파일): `myGroupsRetryProvider`→`MyGroupsRetry.retry()`와 화면용 진입점 `retryMyGroups(WidgetRef)`. **에러인 계층만** 재구독한다(세션 / 그룹 family의 현재 user 인스턴스) — 멀쩡한 스트림은 건드리지 않는다(share `_retrySessionIfFailed`와 같은 스코프 원칙). 자동 재시도 금지 규약 유지(사용자 액션 전용, dartdoc 명시). provider 형태를 택한 이유는 private 원천 접근에 정본 파일의 `Ref`가 필요하고, `WidgetRef`/`Ref`/`ProviderContainer` 어디서든 같은 방법으로 호출되기 때문이다. (4) 신규 테스트 `test/shared/providers/session_and_retry_test.dart`(8) — 두 소비자 동시 watch 시 `watchCurrentUser` 구독 1회, autoDispose 수명, 훅의 4경우(둘 다 정상/그룹만/세션만/둘 다 에러) + `invalidate(myGroupsProvider)`의 무력함 실증 + 회복 + `WidgetRef` 진입점. **기존 `my_groups_provider_test.dart` 무수정 통과**(동작 불변의 증거). (5) `tool/check_ssot.sh` 보강 — `SSOT_PROVIDERS`에 `sessionUserProvider`·`myGroupsRetryProvider` 추가에 더해, QA [minor 3] 반영으로 **언더스코어 접두 재선언**(`final _sessionUserProvider =` — v2.6에서 삭제한 `_currentUserProvider`, 승격 전 `_scanCurrentUserProvider`와 같은 실제 재발 경로), **계약 클래스**(`MyGroupsRetry`, private 복제 포함), **계약 함수 재정의**(`SSOT_FUNCTIONS`=`retryMyGroups` — 반환 타입을 요구해 선언만 잡고 호출은 통과)까지 검출한다. 6개 선언 형태 프로브로 전수 실증 + 호출 형태 오탐 없음 확인 후 프로브 삭제. ※ 이름 기반 가드의 한계(다른 이름의 의미상 중복 — main `currentUserProvider` 등)는 잔여 표가 유일한 방어선이다. (7) QA [medium 1] 판정으로 **세션 폴딩 규약(`.when` 금지, `valueOrNull` 4분기)을 파생에도 적용**(#13), [minor 1] 반영으로 별칭 소비처 수치를 **12곳**(화면 4 + 파생 5 + `retry*` 내부 `read` 3)으로 정정. (6) **share 소비 전환 동반 완료(share-page-dev, 같은 v2.6):** `shareCurrentUserProvider`가 자체 `watchCurrentUser()` 구독을 버리고 정본 **pass-through 별칭**(`ref.watch(sessionUserProvider)`)이 됨(이름 유지 — 소비처 12곳 무수정, "invalidate 대상 아님"을 dartdoc에 명시), 배너 4곳이 `retryMyGroups` 기반으로 재배선(`retrySharedItemLookup` 신설, `retryShareCandidates` 승격), `_retrySessionIfFailed`는 정본 직접 invalidate로 교체 + **훅과 겹쳐 부르지 않는 분담 규약**. (8) **리뷰 라운드 반영(같은 v2.6):** 세션 폴딩 규약을 산문에서 **계약 함수 `foldSessionUser`로 기계화**(정본 `session_provider.dart` — `myGroupsProvider`와 share 파생 3곳이 같은 한 구현 소비, 동형성 드리프트 구조적 차단). 분기 순서는 **에러를 로딩보다 먼저**(invalidate=refresh가 이전 에러를 보존한 로딩을 만들므로, 로딩 우선이면 재시도 순간 배너가 사라졌다 재등장하는 왕복 깜빡임 — riverpod 소스로 실증, 구 `.when`의 `skipLoadingOnRefresh`와 동형). `MyGroupsRetry.retry()`의 검사용 `read`는 `Ref.exists` 가드(미마운트 autoDispose 인스턴스를 새로 만들어 낭비 구독을 여는 부수효과 차단). 순단(값 보존) 무배너 유지의 전제를 정본 dartdoc에 명시(두 구현 모두 세션 스트림이 에러로 **종료되지 않아** 다음 인증 이벤트에 자동 회복 — 종료형 구현 도입 시 재검토). `check_ssot.sh` 함수 가드에 `foldSessionUser` 추가 + 수식어/`dynamic`/제네릭/타입 생략 선언까지 검출(프로브 5형태 실증), 이름 기반 가드의 한계는 주석에 정직하게 기록. 테스트 **193** 통과. **⏳ 후속:** 세션 정본 소비 전환 잔여(main·mypage·앱 조립부)와 share 별칭 제거(소비처 직수입 치환)는 각 담당. 단일 세션 장애 시 그룹·이력 배너가 각각 뜨는 문구 중복의 통합(원인 단위 배너)은 UX 설계 항목으로 계류. 세션 전용 재시도 진입점(`retrySession`류)은 잔여 3곳 전환 시 두 번째 소비자가 생기는 시점에 승격 검토. | share(**전환·재시도 복구 완료**), main·mypage·앱 조립부(세션 전환 예정 — 이번 변경으로 깨지는 것 없음), scan(영향 없음) |
 
 ## 후속 확장 예정(이번 슬라이스 범위 밖)
 
@@ -334,21 +399,17 @@
 - ✅ **승격 완료(v2.4):** 날짜 라벨 포맷 — 3곳(main `formatDate` / share `formatExpiryLabel` 계열 / scan 인라인)에 분산됐던 `YYYY.MM.DD` 조립을 `lib/shared/util/date_format.dart`의 `formatYmdDot`으로 통합. 표기 규칙 합의 결과는 **점 구분자 통일**(다수 표기, scan만 `-`였음)이고, D-day 라벨(`formatDDay`)·상대 시각(`formatRelativeKo`)은 입력·의미가 달라 **승격 대상이 아님**(각 페이지 로컬 유지).
 - ✅ **승격 완료(v2.5):** "현재 사용자의 그룹 목록 스트림" provider — scan/share에 중복 조립돼 `watchGroups`를 두 번 구독했던 체인을 `lib/shared/providers/my_groups_provider.dart`의 `myGroupsProvider`(**SSOT**, `autoDispose`, `AsyncValue` 노출)로 통합. 페이지 파생 형태는 계획대로 로컬 유지(share = `AsyncValue` 전파, scan = 빈 목록 폴딩). 구독 단일화는 테스트로 고정(`test/shared/providers/my_groups_provider_test.dart`). 상세는 크로스페이지 주의점 #13.
 - **다음 승격 후보(경량):** `AsyncValue<List<T>>` 폴딩 확장(예: `orEmpty` — `valueOrNull ?? const []`) — 같은 관용구가 lib 16곳에 반복되고, 단일 폴딩 지점이 없으면 `.value` 변형이 재유입될 수 있다(v2.5 후속 정리에서 main 홈 1곳 재유입 실증). 표준 관용구 대비 프로젝트 고유 어휘 도입이라 순이득은 중간 — 채택 여부는 `contract-architect` 판단.
-- **다음 승격 후보:** **세션 스트림(`AuthRepository.watchCurrentUser()`) provider** — 현재 5곳이 각자 구독한다: 앱 조립부(`lib/app/auth_gate.dart`), main(`currentUserProvider`, `lib/features/main/state/gifticon_list_providers.dart`), mypage(`lib/features/mypage/mypage_page.dart`), share(`shareCurrentUserProvider`, `lib/features/share/state/share_providers.dart`), 그리고 `my_groups_provider.dart` 내부. 규칙 ③은 이미 충족(소비자 다수)이지만 그룹 목록보다 소비자가 많고 셸(조립부) 수명과 얽혀 있어 별도 슬라이스로 다룬다 — 승격 시 `lib/shared/providers/`에 세션 정본을 두고 `my_groups_provider.dart`가 그것을 소비하도록 바꾼다. Firestore 과금 영향은 그룹 목록보다 작다(인증 상태 리스너는 문서 읽기가 아니다) — 이득은 **인스턴스/타이밍 일관성**이다. 페이지 담당은 직접 `lib/shared`를 고치지 말고 `contract-architect`에게 요청할 것(`CODEOWNERS` 리뷰 강제).
-- **계약 요청(share → contract-architect, #13 후속):** `myGroupsProvider`의 **수동 재시도 훅**.
-  share 화면들은 이제 원천 `hasError`를 관찰해 배너+재시도를 제공하지만(알림·사용 이력·그룹별
-  공유 스트림·공유 후보), **내 그룹 목록만 재시도 경로가 없다** — 에러가 정본 파일 안의 private
-  provider에 캐시되고 `invalidate(myGroupsProvider)`는 dependency로 전파되지 않기 때문이다.
-  정본 쪽에 재시도 진입점(private 체인을 invalidate하는 공개 함수/provider)이 생기면 share 메인
-  '내 그룹' 배너에 재시도 버튼을 붙일 수 있다. 시그니처·형태는 계약 소유자 판단.
-  - ⚠️ **두 계층을 모두 되살려야 한다 — `_groupsByUserProvider`(그룹 스트림)만으로는 절반만
-    해소된다.** 정본은 세션도 자기 파일 안의 별도 `_currentUserProvider`로 구독한다(같은
-    `watchCurrentUser()`의 두 번째 구독 — 아래 "세션 스트림 승격 후보"가 기록한 그 중복).
-    인증 스트림이 실패하면 **캐시된 에러가 둘**(share의 `shareCurrentUserProvider` + 정본 내부)
-    생기고, share의 `_retrySessionIfFailed`는 앞의 것만 되살릴 수 있다. 따라서 훅은
-    `_currentUserProvider`도 함께 무효화해야 한다.
-  - 대안: **세션 스트림 승격과 묶어서** 처리한다. 정본이 세션 정본을 소비하도록 바뀌면
-    중복 구독이 사라지고, share가 세션 정본 하나만 invalidate해도 그룹 목록까지 회복되므로
-    이 요청의 절반이 자동으로 해소된다(그 경우 남는 것은 `_groupsByUserProvider` 계층뿐).
-- **가드 보강 후보(계약 소유자 판단 필요):** `tool/check_ssot.sh`의 `SSOT_PROVIDERS` 목록에 **`myGroupsProvider`가 아직 없다** — 지금은 페이지가 같은 이름의 provider를 다시 선언해도 CI가 잡지 못한다(정본이 없던 시절과 같은 재발 경로). 이번 변경 범위(계약+소비 전환)와 분리해 CI 가드 PR로 다루기를 권한다.
+- ✅ **승격 완료(v2.6):** **세션 스트림(`AuthRepository.watchCurrentUser()`) provider** → `lib/shared/providers/session_provider.dart`의 `sessionUserProvider`(**SSOT**, `autoDispose`, `AsyncValue<User?>` 노출). 정본 신설 + `my_groups_provider.dart` 내부 전환에 이어 **share도 같은 v2.6에서 전환 완료**(`shareCurrentUserProvider` = 자체 구독 없는 pass-through 별칭). **잔여 소비 전환(후속 슬라이스):** main(`currentUserProvider`)·mypage → 앱 조립부(`authStateProvider`), 그리고 share 별칭 제거(소비처 **12곳** 직수입 치환 — 화면 4 + 파생 `watch` 5 + `retry*` 내부 `read` 3). 각 담당은 자기 페이지의 선언을 삭제하고 정본을 import 한다(재export shim 금지 — 별칭 허용은 경과 조치, 판정은 #13). 상세·표는 크로스페이지 주의점 #13.
+- ✅ **이행 완료(계약 요청 share → contract-architect, v2.6):** `myGroupsProvider`의 **수동 재시도 훅**.
+  요청서가 지적한 대로 **두 계층을 모두** 되살리는 형태로 이행했고(그룹 스트림만으로는 절반),
+  기록된 대안(**세션 스트림 승격과 묶어 처리**)을 택해 정본 내부의 두 번째 세션 구독 자체를
+  없앴다. 결과 API:
+  - `retryMyGroups(WidgetRef ref)` — 화면용(배너 `onRetry`에 직접 연결).
+  - `myGroupsRetryProvider` → `MyGroupsRetry.retry()` — provider/테스트용 동일 동작.
+  - 되살림 대상 = **에러인 계층만**(세션 `sessionUserProvider` / 그룹 `_groupsByUserProvider`의
+    현재 user 인스턴스). 자동 재시도 금지 규약 유지.
+  - ✅ **share 배선 완료(같은 v2.6):** `onRetry` 강등이 제거되고 배너 4곳이 훅에 연결됐다
+    (`retrySharedItemLookup` 신설 / `retryShareCandidates` 승격 / 훅과 `_retrySessionIfFailed`를
+    겹쳐 부르지 않는 분담 규약). 상세는 #13.
+- ✅ **가드 보강 완료(v2.6):** `tool/check_ssot.sh`의 `SSOT_PROVIDERS`에 `myGroupsProvider`(선행 반영)에 더해 **`sessionUserProvider`·`myGroupsRetryProvider`를 추가**했다 — 페이지가 같은 이름의 provider를 재선언하면 CI `SSOT guard`가 실패한다(임시 프로브로 두 이름·두 선언 형태 모두 실제 검출 확인 후 프로브 삭제).
 - **미착수:** 기기 푸시 알림용 `NotificationService`/범용 `NotificationType`(그룹 알림은 `ShareRepository`가 충족), auth/share **세부** 라우트(그룹 상세·초대 등 페이지 내부 내비게이션 — 현재 `AppRoutes.share` 탭 라우트만 존재).

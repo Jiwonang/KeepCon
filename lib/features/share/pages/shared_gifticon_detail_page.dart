@@ -35,12 +35,10 @@ class SharedGifticonDetailPage extends ConsumerWidget {
       // 폴딩된 [sharedItemByIdProvider]만 보면 구분이 안 되므로, 원천 에러 여부를
       // 함께 관찰해 "찾을 수 없어요"(확정)와 "불러오지 못했어요"(재시도 가능)를 나눈다.
       final bool hasError = ref.watch(sharedItemLookupHasErrorProvider);
-      // 재시도 가능 여부는 **에러의 출처**에 달렸다. 내 그룹 목록(계약 정본)이 값도
-      // 없이 에러면 페이지에서 되살릴 수 없으므로(#13) 버튼을 감춘다(배너가 복구
-      // 안내 접미를 붙인다) — 아무 일도 일어나지 않는 버튼을 보여 주지 않기 위한
-      // 것이다. 이전 값을 보존한 그룹 순단 에러는 조회가 계속 동작하므로 여기 해당
-      // 없고, 공유 스트림 에러의 재시도 버튼을 가리지도 않는다(단일 판정점 규약).
-      final bool groupsUnavailable = ref.watch(myGroupListUnavailableProvider);
+      // 에러의 출처가 둘(내 그룹 목록 / 그룹별 공유 스트림)이므로 재시도도 두 축을
+      // 함께 되살린다([retrySharedItemLookup] — 각 축은 에러인 계층만 재구독한다).
+      // 예전엔 그룹 목록이 원인이면 되살릴 방법이 없어 버튼을 감췄지만(#13), 계약
+      // 정본이 재시도 훅을 제공하면서 그 강등 분기가 사라졌다.
       // 세 번째 원인: 조회 경로가 아직 첫 방출 전(값 없는 로딩)이면 부재가 확정이
       // 아니다 — "찾을 수 없어요"로 위장하지 않고 스피너를 둔다. 현 진입 경로
       // (목록 타일 탭)에서는 캐시가 항상 따뜻해 닿지 않지만, 알림→상세 직행·딥링크
@@ -55,9 +53,7 @@ class SharedGifticonDetailPage extends ConsumerWidget {
                   alignment: Alignment.topCenter,
                   child: ShareErrorBanner(
                     message: '공유 기프티콘 정보를 불러오지 못했어요.',
-                    onRetry: groupsUnavailable
-                        ? null
-                        : () => retrySharedGifticons(ref),
+                    onRetry: () => retrySharedItemLookup(ref),
                   ),
                 ),
               )

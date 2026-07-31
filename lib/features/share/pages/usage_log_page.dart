@@ -12,7 +12,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../shared/models/group.dart';
 import '../../../shared/models/share.dart';
 import '../../../shared/providers/my_groups_provider.dart'
-    show myGroupsProvider;
+    show myGroupsProvider, retryMyGroups;
 import '../../../shared/theme/brand_palette.dart';
 import '../../../shared/theme/theme_tokens.dart';
 import '../state/share_providers.dart';
@@ -44,7 +44,7 @@ class _UsageLogPageState extends ConsumerState<UsageLogPage> {
         ref.watch(myGroupsProvider).valueOrNull ?? const <Group>[];
     // 그룹 목록이 값도 없이 에러면 필터 칩이 사라지고 활성 필터도 아래에서 '전체'로
     // 폴백된다 — 감사 화면에서 이를 무음으로 두면 "특정 그룹만 보는 중"이라는
-    // 사용자 전제가 조용히 깨지므로, 원인을 배너로 알린다(재시도 불가 원천 — #13).
+    // 사용자 전제가 조용히 깨지므로, 원인을 배너로 알리고 계약 훅으로 재시도한다(#13).
     final bool groupsUnavailable = ref.watch(myGroupListUnavailableProvider);
     final MemberNames names = ref.watch(memberNamesProvider);
 
@@ -91,9 +91,12 @@ class _UsageLogPageState extends ConsumerState<UsageLogPage> {
               ),
             ),
             if (groupsUnavailable)
-              const Padding(
-                padding: EdgeInsets.fromLTRB(20, 14, 20, 0),
-                child: ShareErrorBanner(message: '그룹 목록을 불러오지 못했어요.'),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
+                child: ShareErrorBanner(
+                  message: '그룹 목록을 불러오지 못했어요.',
+                  onRetry: () => retryMyGroups(ref),
+                ),
               ),
             if (hasError)
               Padding(
