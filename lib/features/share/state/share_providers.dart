@@ -7,8 +7,8 @@
 ///
 /// 계약 준수:
 /// - 행위자/멤버 식별 = 세션 정본 [sessionUserProvider]
-///   (`lib/shared/providers/session_provider.dart`) — [shareCurrentUserProvider]는 그
-///   정본을 그대로 통과시키는 페이지 별칭이다(자체 구독 없음).
+///   (`lib/shared/providers/session_provider.dart`)를 **직접** 소비한다(페이지 별칭 없음).
+///   세션 재구독(invalidate) 대상도 그 정본이다 — [_retrySessionIfFailed] 참조.
 /// - 그룹/공유/이력/알림은 [ShareRepository]의 watch 스트림을 구독한다.
 /// - **내 그룹 목록은 계약 정본 [myGroupsProvider]**
 ///   (`lib/shared/providers/my_groups_provider.dart`)를 소비한다 — 이 페이지에서 세션→
@@ -32,30 +32,16 @@ import '../../../shared/providers/repositories.dart';
 import '../../../shared/providers/session_provider.dart';
 import '../../../shared/util/invite_link.dart';
 
-/// 현재 로그인 사용자(행위자) — 세션 **정본 [sessionUserProvider]의 통과(pass-through)
-/// 별칭**이다. 이 provider는 자체 구독을 열지 않는다.
-///
-/// 승격 전에는 여기서 [AuthRepository.watchCurrentUser]를 **직접 구독**했다. 그 결과
-/// share의 세션과 계약 정본([myGroupsProvider]가 보는 세션)이 서로 다른 인스턴스여서
-/// ① 계정 전환 프레임에서 [memberNamesProvider]가 두 소스를 혼합해 한 프레임 어긋날 수
-/// 있었고, ② 세션이 실패하면 캐시된 에러가 소스마다 생겨 재시도가 절반만 먹혔다
-/// (매트릭스 #13 / QA [minor 5]). 정본 소비로 두 문제가 함께 사라진다.
-///
-/// 이름을 유지하는 이유는 소비처(화면 4곳 + 이 파일 내부 8곳 — `watch` 5 / `read` 3)가
-/// 이미 이 이름으로 `AsyncValue<User?>` 인터페이스만 쓰기 때문이다 — 형태를
-/// [StreamProvider]에서 [Provider]로 바꿔도 소비 표현(`valueOrNull`)은 그대로다.
-///
-/// **수명:** 별칭은 keepAlive이므로 **한 번이라도 빌드되면**(= share 탭을 한 번 연 뒤로는)
-/// 마지막 리스너가 떨어져도 스스로 dispose되지 않고 autoDispose 정본의 구독을 **컨테이너
-/// 수명 동안** 붙잡는다(QA 실측 — 로그아웃 후에도 유지). 승격 전 share 자체 StreamProvider도
-/// keepAlive였으므로 동작은 불변이며, 정본 dartdoc의 수명 서술과 같은 규약이다.
-///
-/// ⚠️ **재시도(무효화) 대상이 아니다.** 이 별칭을 invalidate해도 원천은 정본이라
-/// 재구독되지 않는다(Riverpod의 invalidate는 dependents 방향으로만 전파). 세션 재구독은
-/// [_retrySessionIfFailed](정본 직접 invalidate) 또는 [retryMyGroups](세션+그룹 계층)로 한다.
-final Provider<AsyncValue<User?>> shareCurrentUserProvider =
-    Provider<AsyncValue<User?>>((ref) => ref.watch(sessionUserProvider));
-
+// 세션은 계약 정본 [sessionUserProvider]를 각 파생·화면이 직접 `watch` 한다(경과 조치였던
+// 페이지 별칭 `shareCurrentUserProvider`는 제거됨 — 매트릭스 #13).
+// 정본은 autoDispose지만 이 파일의 keepAlive 파생들이 그것을 watch하므로, share 탭을
+// 한 번 연 뒤로는 별칭이 하던 것과 동일하게 컨테이너 수명 동안 구독이 유지된다.
+//
+// **id만 쓰는 소비 지점은 `select`로 좁힌다.** 정본은 [StreamProvider]라 같은 값이 다시
+// 방출돼도(Firebase `userChanges()`의 토큰 갱신 등) 리스너에게 통지한다 — 삭제된 별칭이
+// [Provider]의 `!=` 비교로 흡수하던 몫이다. 세션 [AsyncValue] 전체가 필요한 폴딩 3곳만
+// provider를 통째로 watch하고, 나머지(읽는 값이 `user?.id` 뿐인 곳)는 select로 거른다.
+//
 // 세션 파생들의 폴딩은 계약 정본 [foldSessionUser](`session_provider.dart`)를 그대로
 // 소비한다 — 정본 [myGroupsProvider]와 같은 한 구현이라, 같은 세션 순단에 그룹 목록만
 // 멀쩡하고 알림·이력·후보가 비워지는 축 간 비대칭(QA [medium 1])이 구조적으로 불가능하다.
@@ -132,7 +118,7 @@ final _usageLogsByUserProvider =
 /// 전파, 미로그인 확정만 빈 목록, 세션 순단(보존 user)에는 목록을 유지한다.
 final usageLogsProvider = Provider<AsyncValue<List<UsageLog>>>((ref) {
   return foldSessionUser<List<UsageLog>>(
-    ref.watch(shareCurrentUserProvider),
+    ref.watch(sessionUserProvider),
     (User user) => ref.watch(_usageLogsByUserProvider(user.id)),
     signedOut: const <UsageLog>[],
   );
@@ -149,7 +135,7 @@ final _notificationsByUserProvider =
 final notificationsProvider =
     Provider<AsyncValue<List<GroupNotification>>>((ref) {
   return foldSessionUser<List<GroupNotification>>(
-    ref.watch(shareCurrentUserProvider),
+    ref.watch(sessionUserProvider),
     (User user) => ref.watch(_notificationsByUserProvider(user.id)),
     signedOut: const <GroupNotification>[],
   );
@@ -164,9 +150,12 @@ final _notifReadAtByUserProvider =
 /// 내 알림 마지막 읽음 시각. 미로그인/로딩/에러는 null로 접는다
 /// (null = 전부 안읽음 판정 — 과대 표시가 과소 표시보다 안전한 보수적 방향).
 final notificationsReadAtProvider = Provider<DateTime?>((ref) {
-  final User? user = ref.watch(shareCurrentUserProvider).valueOrNull;
-  if (user == null) return null;
-  return ref.watch(_notifReadAtByUserProvider(user.id)).valueOrNull;
+  // 읽는 값이 id 뿐이라 `select`로 좁힌다(같은 사용자 재방출에는 재계산 없음).
+  final String? uid = ref.watch(
+    sessionUserProvider.select((AsyncValue<User?> s) => s.valueOrNull?.id),
+  );
+  if (uid == null) return null;
+  return ref.watch(_notifReadAtByUserProvider(uid)).valueOrNull;
 });
 
 /// 안읽음 알림 개수 — 마지막 읽음 시각 이후에 생성된 알림 수.
@@ -196,7 +185,7 @@ final _gifticonsByUserProvider =
 /// (그러지 않으면 세션 순단만으로 공유 시트에 배너가 뜬다 — QA [medium 1] ③).
 final shareableGifticonsProvider = Provider<AsyncValue<List<Gifticon>>>((ref) {
   return foldSessionUser<List<Gifticon>>(
-    ref.watch(shareCurrentUserProvider),
+    ref.watch(sessionUserProvider),
     (User user) => ref.watch(_gifticonsByUserProvider(user.id)),
     signedOut: const <Gifticon>[],
   );
@@ -313,8 +302,8 @@ final shareCandidatesHaveErrorProvider = Provider<bool>((ref) {
 
 /// 세션 스트림이 에러일 때만 재구독한다(정상일 땐 건드리지 않아 불필요한 리빌드 방지).
 ///
-/// 대상은 **계약 정본 [sessionUserProvider]** 다 — share의 [shareCurrentUserProvider]는
-/// 정본을 통과시키는 별칭이라 그것을 invalidate해도 원천은 재구독되지 않는다.
+/// 대상은 **계약 정본 [sessionUserProvider]** 다(share는 그것을 직접 소비한다 — 통과
+/// 별칭을 두면 invalidate가 dependents 방향으로만 전파돼 원천이 재구독되지 않는다).
 /// 세션은 share 탭 전반이 watch하므로 멀쩡한 세션을 invalidate하면 화면 전체가 잠깐
 /// 로딩으로 깜빡인다. 알림/이력/기프티콘 스트림은 모두 세션 뒤에 붙으므로, 세션이
 /// 에러면 그것부터 되살려야 하위 재시도가 의미를 갖는다.
@@ -325,6 +314,11 @@ final shareCandidatesHaveErrorProvider = Provider<bool>((ref) {
 /// 스트림)는 이 함수가 세션만 맡는다. 한 번의 사용자 액션에서 둘을 겹쳐 부르지 않는다
 /// (겹치면 이미 재구독 중인 세션을 한 번 더 끊었다 잇는다).
 void _retrySessionIfFailed(WidgetRef ref) {
+  // 검사용 read를 [WidgetRef.exists]로 가드한다(계약 훅 [MyGroupsRetry.retry]와 같은
+  // 근거): `read`는 살아 있지 않은 autoDispose 인스턴스를 새로 만들어 실제 스트림을
+  // 구독하므로, 세션 체인이 마운트되지 않은 컨텍스트에서 호출되면 검사가 곧 낭비
+  // 구독이 된다. 존재하지 않는 인스턴스엔 캐시된 에러도 있을 수 없어 판정으로도 정확하다.
+  if (!ref.exists(sessionUserProvider)) return;
   if (ref.read(sessionUserProvider).hasError) {
     ref.invalidate(sessionUserProvider);
   }
@@ -353,7 +347,7 @@ void _retryFailedSharedInstances(WidgetRef ref) {
 /// 전체-안읽음으로 튄다 — 배너의 원인이 아닌 스트림은 건드리지 않는다.
 void retryNotifications(WidgetRef ref) {
   _retrySessionIfFailed(ref);
-  final User? user = ref.read(shareCurrentUserProvider).valueOrNull;
+  final User? user = ref.read(sessionUserProvider).valueOrNull;
   // 세션이 null인 경우는 "알려진 user가 한 번도 없던" 상태뿐이다: 세션이 값을 가진 적이
   // 있으면 에러 전이도, 위 invalidate 직후의 로딩 전이도 copyWithPrevious로 값을
   // 보존하므로 valueOrNull이 그 user를 계속 돌려준다(하위 스코프 재시도 진행). user가
@@ -371,7 +365,7 @@ void retryNotifications(WidgetRef ref) {
 /// 사용 이력 스트림 수동 재시도(에러일 때만 재구독 — [retryNotifications]와 같은 원칙).
 void retryUsageLogs(WidgetRef ref) {
   _retrySessionIfFailed(ref);
-  final User? user = ref.read(shareCurrentUserProvider).valueOrNull;
+  final User? user = ref.read(sessionUserProvider).valueOrNull;
   if (user == null) return;
   if (ref.read(_usageLogsByUserProvider(user.id)).hasError) {
     ref.invalidate(_usageLogsByUserProvider(user.id));
@@ -420,7 +414,7 @@ void retryShareCandidates(WidgetRef ref) {
   // 재시도도 lookup 재시도를 **합성**한다 — 감지와 재시도가 1:1로 대응해, lookup
   // 축에 계층이 추가될 때 한쪽만 갱신되는 비대칭이 생기지 않는다.
   retrySharedItemLookup(ref);
-  final User? user = ref.read(shareCurrentUserProvider).valueOrNull;
+  final User? user = ref.read(sessionUserProvider).valueOrNull;
   if (user != null && ref.read(_gifticonsByUserProvider(user.id)).hasError) {
     ref.invalidate(_gifticonsByUserProvider(user.id));
   }
@@ -433,14 +427,19 @@ void retryShareCandidates(WidgetRef ref) {
 final memberNamesProvider = Provider<MemberNames>((ref) {
   final List<Group> groups =
       ref.watch(myGroupsProvider).valueOrNull ?? const <Group>[];
-  final User? user = ref.watch(shareCurrentUserProvider).valueOrNull;
+  // 본인 판별에 쓰는 값이 id 뿐이므로 `select`로 좁힌다. [MemberNames]는 `==`가 없어
+  // 재계산이 곧 새 인스턴스 = 소비 위젯 리빌드이므로, 같은 사용자 재방출(토큰 갱신 등)에
+  // 반응하지 않게 거르는 것이 특히 중요하다.
+  final String? currentUserId = ref.watch(
+    sessionUserProvider.select((AsyncValue<User?> s) => s.valueOrNull?.id),
+  );
   final Map<String, String> byId = <String, String>{};
   for (final Group g in groups) {
     for (final GroupMember m in g.members) {
       byId[m.userId] = m.displayName;
     }
   }
-  return MemberNames(byId: byId, currentUserId: user?.id);
+  return MemberNames(byId: byId, currentUserId: currentUserId);
 });
 
 /// userId를 표시 이름으로 바꾸는 해석기(불변).

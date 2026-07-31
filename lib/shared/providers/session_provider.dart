@@ -44,28 +44,29 @@
 ///    (수명을 keepAlive로 올리면 "마지막 소비자가 사라져도 리스너가 남는" 새 동작이 된다).
 /// 2. **구독 수 0 또는 1.** 아무도 보지 않으면 0, 그 외에는 1이다. keepAlive 소비자
 ///    (share 파생 등)가 이 autoDispose 정본을 `watch` 하면 그 소비자가 수명을 붙잡으므로,
-///    상시 화면의 체감 수명은 승격 전(keepAlive 체인)과 같다. 잔여 전환이 끝나면 앱
-///    게이트가 루트에서 항상 세션을 보게 되어 사실상 앱 수명 = 구독 1개가 된다(현재는
-///    아직 게이트가 자체 구독이라, 정본 수명의 앵커는 share 진입 후의 keepAlive 별칭이다).
+///    상시 화면의 체감 수명은 승격 전(keepAlive 체인)과 같다. 전환 완결(v2.7) 이후로는
+///    **앱 게이트(`auth_gate`)가 루트에서 정본을 상시 `watch` 하므로 수명 앵커가 게이트다** —
+///    실효 수명은 앱 수명, 구독은 항상 1개다(테스트로 고정: `main_session_consumer_test`).
 /// 3. keepAlive provider가 autoDispose 정본을 `watch` 하는 조합은 허용된다(Riverpod 2.6
 ///    확인 — `test/shared/providers/my_groups_provider_test.dart`가 고정).
 ///
 /// ---
-/// ## 소비 전환 현황 (점진 이행)
-/// 전환 완료:
-/// - `my_groups_provider.dart` 내부(내부 세션 provider 삭제 → 정본 소비)
-/// - share `lib/features/share/state/share_providers.dart` — `shareCurrentUserProvider`는
-///   자체 구독을 열지 않는 **pass-through 별칭**(`ref.watch(sessionUserProvider)`)이다.
-///   ⚠️ 그 별칭을 `invalidate` 해도 원천은 재구독되지 않는다(invalidate는 dependents
-///   방향으로만 전파) — 세션 재시도는 **이 정본을 직접** invalidate 한다.
+/// ## 소비 전환 완료 (v2.7 — 수렴 완료)
+/// 승격 전 5곳이 각자 열던 세션 구독은 **전부 이 정본으로 옮겨왔다.** 지금
+/// [AuthRepository.watchCurrentUser]를 구독하는 코드는 **이 파일 하나뿐**이다:
+/// 앱 조립부(`lib/app/auth_gate.dart`) · main(`gifticon_list_providers.dart`·`main_page.dart`) ·
+/// mypage · share(`share_providers.dart` 파생과 화면들) · `my_groups_provider.dart` —
+/// 모두 페이지 선언 없이 이 provider를 직접 `watch`/`read` 한다.
+/// 페이지 별칭·재export shim은 두지 않는다(경과 조치였던 share의 `shareCurrentUserProvider`
+/// 별칭도 제거됐다 — 매트릭스 #13).
 ///
-/// 아래는 **아직 각자 구독 중**이며 후속 슬라이스에서 옮긴다:
-/// - 앱 조립부 `lib/app/auth_gate.dart`의 `authStateProvider`
-/// - main `lib/features/main/state/gifticon_list_providers.dart`의 `currentUserProvider`
-/// - mypage `lib/features/mypage/mypage_page.dart`
+/// 새로 세션이 필요하면 **만들지 말고 이 provider를 소비한다.** 일부 필드만 쓰는 소비자는
+/// `sessionUserProvider.select((s) => s.valueOrNull?.id)`처럼 좁혀 구독하면, 값이 같은
+/// 재방출(예: Firebase `userChanges()`의 토큰 갱신)에서 불필요한 리빌드를 피할 수 있다 —
+/// [StreamProvider]는 data→data 재방출도 무조건 통지하기 때문이다.
 ///
-/// 전환이 끝나기 전까지는 세션 구독이 여전히 여러 개다 — 정본은 그 **수렴 지점**이지,
-/// 도입만으로 중복이 사라지지는 않는다(매트릭스 #13에 잔여 목록·별칭 판정 유지).
+/// ⚠️ 이름 기반 CI 가드(`tool/check_ssot.sh`)는 이 provider의 **재선언**은 잡지만
+/// *다른 이름으로 다시 조립한 세션 체인*은 잡지 못한다. 그 방어선은 이 규약과 리뷰다.
 library;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
