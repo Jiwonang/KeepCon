@@ -288,9 +288,10 @@ class _ShareGifticonSheet extends ConsumerWidget {
     // 후보가 0개로 접히거나(→ "없어요" 오인), 이미 공유된 항목이 다시 노출된다.
     // 저장소 [StateError] 가드가 최후 방어선이지만, 이유를 알려 헛수고를 줄인다.
     final bool hasError = ref.watch(shareCandidatesHaveErrorProvider);
-    // 공유 상세와 같은 규칙: 원인이 내 그룹 목록(정본 private 체인)의 "값 없는
-    // 에러"면 재시도가 불가능하므로 버튼을 감춘다(#13 — 배너가 복구 안내를 붙인다).
-    final bool groupsUnavailable = ref.watch(myGroupListUnavailableProvider);
+    // 공유 상세와 같은 규칙: 원인이 어느 축이든 재시도는 하나의 진입점으로 한다
+    // ([retryShareCandidates] — 내 기프티콘·내 그룹 목록·그룹별 공유 중 에러인 원천만
+    // 되살린다). 그룹 목록이 원인일 때 버튼을 감추던 강등은 계약 재시도 훅 도착으로
+    // 제거됐다(#13).
     // 후보 계산 원천이 아직 첫 방출 전(값 없는 로딩)이면 후보 0개는 확정이 아니다 —
     // "없어요"로 위장하지 않고 스피너를 둔다(콜드 로딩 false-empty 게이트).
     final AsyncValue<List<Gifticon>> mineAsync =
@@ -300,7 +301,7 @@ class _ShareGifticonSheet extends ConsumerWidget {
     final Widget? errorBanner = hasError
         ? ShareErrorBanner(
             message: '공유할 기프티콘 목록을 불러오지 못했어요.',
-            onRetry: groupsUnavailable ? null : () => retryShareCandidates(ref),
+            onRetry: () => retryShareCandidates(ref),
           )
         : null;
 

@@ -8,7 +8,8 @@
 ///   — Riverpod `ref.watch`.
 /// - 내 그룹 목록 = 계약 정본 [myGroupsProvider](`lib/shared/providers/my_groups_provider.dart`).
 ///   scan 페이지도 같은 정본을 보므로 `watchGroups` 구독이 하나로 합쳐진다.
-/// - 행위자/멤버 식별 = [AuthRepository.currentUser]([shareCurrentUserProvider]).
+/// - 행위자/멤버 식별 = 세션 정본 `sessionUserProvider`를 통과시키는
+///   [shareCurrentUserProvider](share 별칭 — 자체 구독 없음).
 /// - 공유 후보(내 기프티콘)는 [GifticonRepository.watchGifticons]로 원본 [Gifticon]을 받는다.
 ///
 /// 색/폰트/라운드/그림자는 전부 `Theme.of(context)`에서 오고, 공유 기프티콘 카드의
@@ -21,7 +22,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../shared/models/group.dart';
 import '../../shared/models/share.dart';
 import '../../shared/models/user.dart';
-import '../../shared/providers/my_groups_provider.dart' show myGroupsProvider;
+import '../../shared/providers/my_groups_provider.dart'
+    show myGroupsProvider, retryMyGroups;
 import '../../shared/theme/theme_tokens.dart';
 import 'pages/group_detail_page.dart';
 import 'pages/group_notifications_page.dart';
@@ -52,8 +54,8 @@ class SharePage extends ConsumerWidget {
     final AsyncValue<List<Group>> groupsAsync = ref.watch(myGroupsProvider);
     final List<Group> groups = groupsAsync.valueOrNull ?? const <Group>[];
     // "값도 없는 에러"만 배너 대상이다(단일 판정점 provider와 같은 규칙) — 이전 값을
-    // 보존한 순단 에러는 목록이 계속 표시·조회되므로, 재시도 훅이 없는 현재로선
-    // 해소 불가능한 배너를 영구 표시하는 것보다 목록 유지가 낫다(#13 후속 재검토).
+    // 보존한 순단 에러는 목록이 계속 표시·조회되므로, 사용자가 할 일이 없는 배너를
+    // 멀쩡한 목록 위에 얹지 않는다(재시도 훅 도착 후에도 유지된 판단 — #13/v2.6).
     final bool groupsUnavailable = ref.watch(myGroupListUnavailableProvider);
     // 첫 방출 전(값 없는 로딩)은 "없음"이 아직 확정이 아니다 — 빈 안내 게이트용.
     final bool groupsPending = groupsAsync.isLoading && !groupsAsync.hasValue;
@@ -86,13 +88,14 @@ class SharePage extends ConsumerWidget {
             const _SectionHeader(title: '내 그룹'),
             const SizedBox(height: 12),
             if (groupsUnavailable) ...<Widget>[
-              // ⚠️ 재시도 버튼 없음(onRetry: null → 배너가 복구 안내 접미를 붙인다).
-              // 내 그룹 목록의 에러는 계약 정본 `myGroupsProvider`가 watch하는
-              // **private 체인**(lib/shared)에 캐시되며, 페이지에서
-              // `invalidate(myGroupsProvider)`를 해도 그 dependency는 재구독되지
-              // 않는다(실측 확인). 동작하지 않는 버튼을 두는 대신 표시만 하고,
-              // 재시도 훅은 contract-architect에 요청한다(#13 후속).
-              const ShareErrorBanner(message: '그룹 목록을 불러오지 못했어요.'),
+              // 재시도는 계약 정본의 훅으로 한다 — 그룹 목록의 에러는 정본이 watch하는
+              // **private 체인**(lib/shared)에 캐시돼 페이지의
+              // `invalidate(myGroupsProvider)`로는 되살릴 수 없기 때문이다(#13 실측).
+              // `retryMyGroups`가 세션·그룹 두 계층 중 에러인 것만 재구독한다.
+              ShareErrorBanner(
+                message: '그룹 목록을 불러오지 못했어요.',
+                onRetry: () => retryMyGroups(ref),
+              ),
               if (groups.isNotEmpty) const SizedBox(height: 12),
             ],
             if (groups.isEmpty && !groupsUnavailable && !groupsPending)

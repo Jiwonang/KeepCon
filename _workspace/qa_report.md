@@ -358,3 +358,210 @@
   전까지 사용자의 유일한 복구 수단은 앱 재시작이며, 배너 문구도 그렇게 안내한다(의도된 상태).
 - 실기기·실서버(Firestore) 검증 미수행(Windows 환경). 특히 [minor 2]의 과잉 재구독 비용과, 실제
   `authStateChanges()` 초기 `null` 방출로 인한 [minor 1] 재현성은 코드 추론 기반이다.
+
+---
+
+# refactor/shared-session-retry 검증 (2026-07-31, integration-qa)
+
+## 검증 대상
+`git diff develop`(c2765e9 분기, 전부 미커밋) + 신규 파일.
+신설 `lib/shared/providers/session_provider.dart`, `test/shared/providers/session_and_retry_test.dart`;
+수정 `my_groups_provider.dart`(내부 `_currentUserProvider` 삭제 + 재시도 훅), `share_providers.dart`
+(별칭 전환 + 재시도 재배선), share 화면 4개, `share_error_banner.dart`, `share_error_ui_test.dart`,
+`tool/check_ssot.sh`, 매트릭스 v2.6.
+
+## 요약
+
+> ⚠️ 이 절부터 아래는 **QA 검증 시점의 스냅샷 기록**이다 — 발견 이슈 4건은 같은
+> 브랜치에서 전부 해소됐다("발견 이슈" 절 상단의 처리 결과 표가 최종 상태이며,
+> 테스트 수도 리뷰 라운드 반영 후 **193**이 최종이다).
+
+- 통과 8 / 이슈 4 (medium 1 · minor 3) / 미검증 0 — **차단 이슈 없음**
+- 기계 검증 4종 전부 green (테스트 189 — QA 시점, 최종은 193).
+- 이번 슬라이스의 핵심 주장(세션 구독 단일화 · 훅 스코프 · 별칭 무해성 · 수명 체인)은 **전부 코드/실측으로 확인됨.**
+- 유일한 실질 이슈 `medium 1`은 이번 변경이 만든 것이 아니라 **이번 변경이 드러낸** 기존 비대칭이다
+  (세션 정본화로 그룹 축과 알림/이력 축이 **같은 스트림 인스턴스**를 보게 되면서, 같은 순단에
+  두 축이 정반대로 반응하는 것이 비로소 관측 가능해졌다).
+
+## 기계 검증
+
+| 항목 | 결과 |
+|------|------|
+| `bash tool/check_ssot.sh` | exit 0 — `위반 없음 ✓` |
+| `dart format --set-exit-if-changed --output=none lib test` | exit 0 |
+| `flutter analyze` | exit 0 — `No issues found!` |
+| `flutter test` | exit 0 — QA 시점 189개 → **최종(리뷰 라운드 반영 후) 193개 전부 통과** |
+
+## 경계면별 판정
+
+| # | 경계면 | 생산자 (왼쪽) | 소비자 (오른쪽) | 판정 |
+|---|--------|--------------|----------------|------|
+| 1 | 세션 단일화 실증 | `session_provider.dart:95-98` | `watchCurrentUser()` 구독 전수(grep) | **통과** — lib 내 직접 구독 4곳: 정본 1 + 잔여 3(`auth_gate.dart:20`, `gifticon_list_providers.dart:27`, `mypage_page.dart:39`). share 경로 자체 구독 **0** |
+| 2 | 훅 스코프(에러 계층만) | `MyGroupsRetry.retry()` (`my_groups_provider.dart:193-205`) | 배너 콜백 | **통과** — `hasError` 가드 2중, family는 현재 user 인스턴스만 |
+| 2b | 분담 규약(겹쳐 부르지 않음) | `_retrySessionIfFailed` (`share_providers.dart:321`) | `retry*` 5개 호출 그래프 | **통과** — 커버 공백 0 / 이중 커버 0 (아래 표) |
+| 3 | 별칭 함정 | `shareCurrentUserProvider` (`share_providers.dart:52`) | 소비처 전수 | **통과** — `invalidate(별칭)` 잔존 **0건**, StreamProvider 전용 API(`.future`/`.stream`/`.notifier`) 사용 **0건**, 테스트 override **0건** |
+| 4 | 읽음 가드 회귀 | `notificationsProvider` (`share_providers.dart:139-149`) | `_markReadWhenVisible` (`group_notifications_page.dart:60-71`) | **통과** — 미로그인 `data(null)`→`AsyncData([])`→가드 통과→저장소 `StateError`→`_markedRead` 복원 경로 유지. 단 `medium 1`의 부수효과 있음 |
+| 5 | autoDispose 수명 체인 | `sessionUserProvider`(autoDispose) | 별칭(keepAlive) / 훅(keepAlive) | **통과**(실측) — 훅의 `ref.read`는 붙잡지 않음(PROBE A=0), 별칭은 붙잡음(PROBE B=1, 의도) |
+| 6 | SSOT/재선언 | `tool/check_ssot.sh:33` | `lib/features` | **통과** — 신규 2개 이름 실제 검출 확인(임시 프로브). 패턴 한계는 `minor 3` |
+| 7 | 매트릭스 ↔ 코드 | 매트릭스 v2.6 | 실제 코드 | **대체로 일치** — 배너 4곳 배선·잔여 3곳·테스트 수(8/189)·별칭 판정 모두 확인. 수치 1건 불일치(`minor 1`) |
+| 8 | main·scan 영향 | 브랜치 diff | — | **통과** — `lib/features/main`·`scan` 무수정, 계약 변경은 순수 추가 + 내부 대체 |
+
+### #2b 재시도 호출 그래프 (세션 축 커버 교차 확인)
+
+| 진입점 | 세션 축 | 그룹 축 | 하위 스트림 | 세션 중복? |
+|--------|---------|---------|-------------|-----------|
+| `retryMyGroups` (계약) | 직접(에러 시) | 현재 user 인스턴스 | — | — |
+| `retryNotifications:348` | `_retrySessionIfFailed` | 없음(불필요) | 알림 + readAt | 없음 |
+| `retryUsageLogs:366` | `_retrySessionIfFailed` | 없음(불필요) | 이력 | 없음 |
+| `retrySharedGifticons:382` | `_retrySessionIfFailed` | 없음(불필요) | 그룹별 공유 | 없음 |
+| `retrySharedItemLookup:399` | **`retryMyGroups` 경유** | 커버 | 실패 인스턴스 | 없음(`_retrySessionIfFailed` 미호출 — 규약대로) |
+| `retryShareCandidates:412` | **`retryMyGroups` 경유** | 커버 | 내 기프티콘 + 실패 인스턴스 | 없음(동일) |
+
+**커버 공백 0:** 사용자가 볼 수 있는 배너 9곳(share 메인 3 · 사용이력 2 · 알림 1 · 그룹상세 1 · 공유상세 1 · 시트 1)이
+전부 `onRetry`를 갖고, 각 경로가 자기 에러 원인이 될 수 있는 모든 축을 덮는다. `onRetry: null` 사이트는 lib에 **0건**
+(배너 dartdoc의 "휴면 규약" 서술이 정확하며, 위젯 단위 테스트가 그 분기를 직접 고정한다).
+
+### #5 수명 체인 실측 (임시 프로브 — 검증 후 삭제)
+- **PROBE A** — 세션을 watch하던 마지막 리스너를 닫은 뒤 `activeListens = 0`.
+  keepAlive인 `myGroupsRetryProvider`가 `ref.read(sessionUserProvider)`로 정본을 만져도
+  **수명을 붙잡지 않는다**(`read`는 일시 구독 후 해제). 훅이 세션 리스너를 누수시키지 않음이 확인됨.
+- **PROBE B** — 별칭을 watch하던 리스너를 닫은 뒤에도 `activeListens = 1`.
+  keepAlive 별칭이 autoDispose 정본을 **영구히 붙잡는다**. 이는 `my_groups_provider` 때와 **동일한 규약**이고
+  승격 전(share 자체 StreamProvider도 keepAlive)과 체감 수명이 같으므로 **의도된 동작**이다.
+  다만 dartdoc 문구는 부정확하다(`minor 2`).
+
+## 발견 이슈 (심각도순 — 전부 비차단)
+
+> **처리 결과(리더 반영, 같은 브랜치에서 해소 — 아래 원문은 발견 시점 기록으로 보존):**
+>
+> | 이슈 | 상태 | 근거 위치 |
+> |------|------|-----------|
+> | `medium 1` | ✅ 해소 | 폴딩을 계약 정본 함수 `foldSessionUser`(`session_provider.dart`)로 승격·통일 — 정본 `myGroupsProvider`와 share 파생 3곳이 같은 한 구현을 소비(순단 회귀 테스트 3건 + 양성 대조 단언으로 고정, 리뷰 라운드에서 에러-우선 분기·재시도 중 배너 유지까지 보강) |
+> | `minor 1` | ✅ 해소 | 매트릭스 소비처 수치 12곳 정정 + 리뷰 라운드에서 라인 좌표를 **심볼 기반** 체크리스트로 교체(좌표 부패 재발 방지) |
+> | `minor 2` | ✅ 해소 | `shareCurrentUserProvider` dartdoc 수명 서술을 실측(컨테이너 수명 유지)에 맞게 정정 |
+> | `minor 3` | ✅ 해소 | `check_ssot.sh` 3검사 보강(언더스코어 접두·계약 클래스·계약 함수) + 리뷰 라운드에서 수식어/`dynamic`/제네릭/타입 생략 선언까지 확장(프로브 실증), 이름 기반 가드의 한계는 주석·매트릭스에 정직 기록 |
+
+### [medium 1] 세션 순단 시 share 파생 3곳이 계약 정본과 **정반대로** 동작한다 (`.when` vs `valueOrNull`)
+- 위치: `lib/features/share/state/share_providers.dart:123`(`usageLogsProvider`),
+  `:141`(`notificationsProvider`), `:190`(`shareableGifticonsProvider`)
+- 문제: 세 provider는 세션 `AsyncValue`를 **`.when(...)`** 으로 분기한다. `AsyncValue.when`은
+  `skipError`가 기본 `false`라, **이전 값을 보존한 순단 에러**(`copyWithPrevious`)에서도 `error` 분기를 타
+  하위 스트림의 멀쩡한 데이터를 통째로 버린다. 반면 계약 정본 `myGroupsProvider`는 같은 상황을
+  `valueOrNull` 기반으로 접어(`my_groups_provider.dart:113-139`) **보존된 user로 하위 스트림을 계속 반환**한다.
+  정본 dartdoc(`session_provider.dart:34-37`, `my_groups_provider.dart:36-40`)이 명시한
+  "접을 때는 `valueOrNull`" 규약과 어긋나는 잔여 지점이다.
+- 실측(임시 프로브, 세션 스트림에 순단 에러 주입):
+
+  ```text
+  BEFORE groups=1 notifs=1
+  AFTER  groups: hasValue=true  len=1     hasError=false   <- 목록 유지, 배너 없음
+  AFTER  notifs: hasValue=false len=null  hasError=true    <- 목록 소멸, 배너 표시
+  ```
+
+  같은 한 번의 세션 순단에 **'내 그룹'은 아무 일도 없고, 알림·사용이력·공유후보는 비워지며 배너가 뜬다.**
+- 영향: ① share 메인에서 그룹 카드는 멀쩡한데 사용 이력만 사라지는 비대칭 화면.
+  ② 알림 화면에서 **사용자가 읽고 있던 목록이 사라진다**(읽음 가드 자체는 보수적 방향이라 안전 —
+  `AsyncData`가 아니므로 `readAt`을 찍지 않고, 회복되면 `ref.listen`이 다시 처리한다. 알림 유실 없음).
+  ③ `shareCandidatesHaveErrorProvider`가 `shareableGifticonsProvider.hasError`를 포함하므로
+  시트 배너도 세션 순단만으로 뜬다.
+- **회귀 아님:** 승격 전 `shareCurrentUserProvider`도 StreamProvider라 `AsyncValue` 의미가 같았고
+  `.when` 거동도 동일했다. 다만 정본화로 두 축이 **같은 스트림 인스턴스**를 보게 되면서
+  "같은 순단, 정반대 반응"이 비로소 한 화면에서 동시에 관측 가능해졌다.
+- 수정: 세 provider를 `myGroupsProvider`(`:113-139`)와 **같은 폴딩 형태**로 맞춘다. 예(알림):
+
+  ```dart
+  final session = ref.watch(shareCurrentUserProvider);
+  final user = session.valueOrNull;
+  if (user != null) return ref.watch(_notificationsByUserProvider(user.id));
+  if (session.isLoading) return const AsyncLoading<List<GroupNotification>>();
+  if (session.hasError) {
+    return AsyncError<List<GroupNotification>>(
+        session.error!, session.stackTrace ?? StackTrace.current);
+  }
+  return const AsyncData<List<GroupNotification>>(<GroupNotification>[]);
+  ```
+
+  **미로그인 확정(`data(null)`) → `AsyncData([])` 경로는 반드시 보존**해야 읽음 가드의
+  `StateError` 복원 분기(`group_notifications_page.dart:78-84`)가 그대로 성립한다.
+  회귀 테스트는 "세션 순단 시 알림 목록이 유지되고 배너가 뜨지 않는다"로 고정 권장.
+- 통지: share-page-dev(구현), contract-architect(정본 폴딩 규약을 파생에도 적용할지 판정)
+
+### [minor 1] 매트릭스의 별칭 소비처 수치가 실제와 다르다 (후속 슬라이스의 체크리스트 숫자)
+- 위치: `_workspace/01_contract_dependency_matrix.md` #13 — "소비처(이 파일의 파생 + **화면 5곳, 총 10곳**)",
+  v2.6 변경 이력 "소비처 10곳 무수정", 후속 목록 "소비처 10곳 직수입 치환"
+- 실제(grep 전수): **화면 4곳**(`group_detail_page.dart:67`, `member_invite_page.dart:187`,
+  `shared_gifticon_detail_page.dart:78`, `share_page.dart:70`) + `share_providers.dart` 내부 8곳
+  (`watch` 파생 5: `:123 :141 :160 :190 :428` / `read` 3: `:350 :368 :414`) = **총 12곳**.
+- 문제: 별칭 제거가 후속 슬라이스의 실행 항목인데, 그 체크리스트 숫자가 틀리면 `retry*` 함수 안의
+  `read` 3곳이 누락된 채 "완료" 판정될 수 있다.
+- 수정: "화면 4곳 + 파일 내부 8곳(`watch` 5 / `read` 3) = 12곳"으로 정정.
+- 통지: contract-architect
+
+### [minor 2] 별칭 수명 서술이 실제보다 좁다
+- 위치: `lib/features/share/state/share_providers.dart:46-47`
+  — "별칭은 keepAlive라 **share 탭이 살아 있는 동안** autoDispose 정본의 수명을 붙잡는다"
+- 문제: PROBE B 실측 결과 별칭이 **한 번이라도 빌드되면** 마지막 리스너가 떨어진 뒤에도 정본 구독이
+  유지된다(`activeListens`가 1로 잔존). 즉 실제 수명은 "share 탭이 살아 있는 동안"이 아니라
+  **ProviderContainer 수명 내내**다(로그아웃 후에도 유지). 동작 자체는 승격 전과 같아 문제없지만,
+  서술이 좁아 후속에 "탭을 닫으면 풀린다"는 잘못된 전제를 만든다.
+- 수정: "share 탭을 한 번 연 뒤로는 컨테이너 수명 동안"으로 정정.
+  (`session_provider.dart:44-48`의 서술은 정확하다 — 이 한 줄만 어긋난다.)
+- 통지: share-page-dev
+
+### [minor 3] SSOT guard 패턴이 잡지 못하는 재선언 형태
+- 위치: `tool/check_ssot.sh:33-39`
+- 실측(임시 프로브 파일로 확인) — 신규 2개 이름은 정상 검출되나 다음은 **통과해 버린다**:
+
+  | 형태 | 검출 |
+  |------|------|
+  | `final sessionUserProvider = ...` | 검출됨 |
+  | `final _sessionUserProvider = ...` (언더스코어 접두) | **미검출** |
+  | `void retryMyGroups(WidgetRef ref) {}` (훅 함수 재정의) | **미검출** |
+  | `class MyGroupsRetry {}` (훅 클래스 재정의) | **미검출** |
+
+- 문제: 언더스코어 접두는 **이번에 삭제된 `_currentUserProvider`와 정확히 같은 형태**이자
+  scan의 `_scanCurrentUserProvider`가 그랬던 실제 재발 경로인데, 가드가 못 잡는다.
+  훅은 이번 v2.6에서 계약 API가 됐으나 `SHARED_TYPES`·`SSOT_PROVIDERS` 어디에도 없다.
+- 수정: ① provider 정규식의 이름 앞에 `_?`를 허용, ② `SHARED_TYPES`에 `MyGroupsRetry` 추가,
+  ③ 훅 함수용 3번째 검사 추가.
+  ※ 이름 기반 가드의 근본 한계(다른 이름의 의미상 중복 — main `currentUserProvider` 등)는
+  이 가드로 막을 수 없다. 잔여 3곳 전환이 끝날 때까지는 매트릭스 잔여 표가 유일한 방어선이다.
+- 통지: contract-architect
+
+## 회귀 확인 (직전 리포트 `feat/share-error-ui` 지적 항목)
+
+| 이전 이슈 | 현재 상태 | 근거 |
+|-----------|----------|------|
+| `medium 1` 공유 상세 무력한 재시도 버튼 | **더 강하게 해소** — null 강등 대신 `retrySharedItemLookup`(그룹+공유 두 축) | `shared_gifticon_detail_page.dart:56`, 신규 테스트가 `groupSubscriptions` 증가 단언 |
+| `medium 2` 공유 섹션 false-empty | 유지 | `share_page.dart:138-141` — `!groupsUnavailable && !sharedPending` 게이트 존속 |
+| `minor 1` 읽음 가드 복원 | 유지 | `group_notifications_page.dart:84-94` — `_markedRead=false` + 복원 직후 재평가 |
+| `minor 2` 스코프 재시도 | 유지·확장 | `retrySharedGifticons(ref, groupId:)`(`group_detail_page.dart:175`) + `_retryFailedSharedInstances` |
+| `minor 4` 시트 무력한 버튼 | **더 강하게 해소** — `retryShareCandidates`가 그룹 축까지 커버 | `share_sheets.dart:304`, 테스트 단언 |
+| `minor 5` 계약 요청에 세션 계층 누락 | **구조적으로 해소** — 세션 정본화로 중복 캐시 에러 소스 자체가 제거 | `my_groups_provider.dart:85,115` |
+| `minor 7` 사용이력 그룹 축 배너 | **버튼까지 부활** | `usage_log_page.dart:98` — `retryMyGroups(ref)` |
+
+**신규 회귀 없음.** 이전에 `onRetry: null`로 강등됐던 4곳이 전부 실제 재시도로 승격됐고,
+그때 함께 도입된 false-empty 게이트·읽음 가드·스코프 재시도는 모두 그대로 남아 있다.
+
+## 통과 항목 (교차 비교 근거)
+- **세션 구독 수** — 정본 1 + 잔여 3(main·mypage·조립부). share는 0(별칭 pass-through).
+  매트릭스 잔여 표와 grep 결과가 정확히 일치.
+- **훅 스코프** — `retry()`가 `session.hasError` / `_groupsByUserProvider(user.id).hasError`를
+  각각 확인한 뒤에만 invalidate. family 전체 무효화 없음. 세션에 알려진 user가 없으면 그룹 계층 미접촉.
+- **별칭 안전성** — 무력한 `invalidate(별칭)` 0건, StreamProvider 전용 API 소비 0건.
+  타입 변경(`StreamProvider<User?>` → `Provider<AsyncValue<User?>>`)으로 깨지는 소비처 없음
+  (전 소비처가 `valueOrNull`/`when`만 사용).
+- **읽음 가드** — 미로그인 `data(null)` → `AsyncData([])` → 가드 통과 → `StateError` → 복원 경로가
+  정본 `AsyncValue` 규약(`AsyncData(null)` = 미로그인 확정)과 정합.
+- **테스트 커버리지** — 신규 `session_and_retry_test.dart` 8개(구독 1회 / autoDispose 수명 /
+  훅 4경우 / `invalidate(myGroupsProvider)` 무력함 실증 / 회복 / `WidgetRef` 진입점),
+  `share_error_ui_test.dart`에 재시도 부활 4 + 스코프 회귀 1 + 배너 휴면 규약 1.
+  기존 `my_groups_provider_test.dart` 무수정 통과 = 동작 불변의 증거.
+
+## 남은 리스크 (발견 당시 기록 — `medium 1`은 이후 해소됨, 상단 처리 결과 표 참조)
+- **`medium 1` 미해소 시(→ 해소됨):** 세션이 불안정한 실환경(모바일 네트워크 전환 등)에서 share 탭의 세 섹션이
+  근거 없이 깜빡이며 비워진다. 데이터 유실은 없고 재시도 경로도 있으나, 이번 슬라이스가 내세운
+  "인스턴스/타이밍 일관성"이라는 이득을 화면 층에서 스스로 깎는다.
+- **잔여 3곳(main·mypage·조립부) 전환 전까지** 세션 구독은 여전히 4개다. 계정 전환 프레임에서
+  main과 share가 한 프레임 어긋날 수 있다(share↔그룹 목록 간 어긋남은 이번에 해소됨).
+- **별칭 제거 슬라이스**는 `minor 1`의 정정된 12곳을 기준으로 진행해야 한다.

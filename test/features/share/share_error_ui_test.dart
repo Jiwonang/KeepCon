@@ -29,7 +29,10 @@ import 'package:keepcon/features/share/widgets/share_error_banner.dart';
 import 'package:keepcon/features/share/widgets/share_sheets.dart';
 import 'package:keepcon/shared/models/group.dart';
 import 'package:keepcon/shared/models/share.dart';
+import 'package:keepcon/shared/models/user.dart';
 import 'package:keepcon/shared/providers/repositories.dart';
+import 'package:keepcon/shared/providers/session_provider.dart';
+import 'package:keepcon/shared/repositories/auth_repository.dart';
 import 'package:keepcon/shared/repositories/impl/in_memory_auth_repository.dart';
 import 'package:keepcon/shared/repositories/impl/in_memory_gifticon_repository.dart';
 import 'package:keepcon/shared/repositories/impl/in_memory_share_repository.dart';
@@ -58,8 +61,11 @@ class _FlakyShareRepository implements ShareRepository {
   bool usageLogsFail = false;
 
   /// 내 그룹 목록(계약 정본이 구독하는 스트림)을 실패시킨다.
-  /// 이 에러는 페이지에서 재시도할 수 없는 유일한 계층이다(#13).
+  /// v2.6부터 이 계층도 계약 훅 `retryMyGroups`로 되살릴 수 있다(#13).
   bool groupsFail = false;
+
+  /// `watchGroups` 구독 횟수(그룹 축 재시도 = 재구독 단언용).
+  int groupSubscriptions = 0;
 
   /// 그룹 목록을 **한 번 방출한 뒤** 실패시킨다 — Riverpod이 `copyWithPrevious`로
   /// 이전 값을 보존하는 "순단" 상태(hasError=true && valueOrNull=목록) 재현용.
@@ -92,6 +98,7 @@ class _FlakyShareRepository implements ShareRepository {
 
   @override
   Stream<List<Group>> watchGroups(String userId) {
+    groupSubscriptions++;
     if (groupsHang) return StreamController<List<Group>>().stream;
     if (groupsFail) return Stream<List<Group>>.error(StateError('boom'));
     if (groupsFailAfterData) return _dataThenError(groups);
@@ -169,6 +176,56 @@ class _FlakyShareRepository implements ShareRepository {
       );
 }
 
+/// 세션 스트림을 **"데이터 방출 뒤 에러"(순단)** 로 만드는 [AuthRepository] 래퍼.
+///
+/// Riverpod이 `copyWithPrevious`로 이전 user를 보존하는 상태(hasError=true인데
+/// `valueOrNull`은 그 user)를 재현한다 — share 파생들이 정본 [myGroupsProvider]와
+/// **같은 방향**으로 반응하는지(목록 유지)를 고정하기 위한 계측이다. 세션 이외의 계약
+/// 메서드는 전부 실제 구현([inner])에 위임한다.
+class _SessionBlipAuthRepository implements AuthRepository {
+  _SessionBlipAuthRepository(this.inner);
+
+  final InMemoryAuthRepository inner;
+
+  @override
+  Stream<User?> watchCurrentUser() async* {
+    yield inner.currentUser; // 확정 방출(= 이후 보존될 값).
+    throw StateError('session blip'); // 순단.
+  }
+
+  @override
+  User? get currentUser => inner.currentUser;
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) =>
+      throw UnimplementedError('이 테스트가 쓰지 않는 계약 메서드: ${invocation.memberName}');
+}
+
+/// 세션 스트림을 **"값 없이 에러 → 재시도하면 응답 없음(행)"** 으로 만드는 래퍼.
+///
+/// 재시도(invalidate) 직후의 리프레시 상태(로딩 + 이전 에러 보존, 값 없음)를 화면에
+/// 고정해, 배너가 사라졌다 재등장하는 왕복 깜빡임이 없는지(정본 [foldSessionUser]의
+/// 에러-우선 분기)를 검증하기 위한 계측이다.
+class _ErrorThenHangAuthRepository implements AuthRepository {
+  int watchCalls = 0;
+
+  @override
+  Stream<User?> watchCurrentUser() {
+    watchCalls++;
+    if (watchCalls == 1) {
+      return Stream<User?>.error(StateError('session down'));
+    }
+    return StreamController<User?>().stream; // 재시도 결과 미정 상태를 유지.
+  }
+
+  @override
+  User? get currentUser => null;
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) =>
+      throw UnimplementedError('이 테스트가 쓰지 않는 계약 메서드: ${invocation.memberName}');
+}
+
 /// 공유 시트(`showShareGifticonSheet`)를 여는 최소 호스트 — 시트는 함수형 API라
 /// 위젯을 직접 pump할 수 없어 진입점 버튼을 둔다.
 class _SheetHost extends StatelessWidget {
@@ -199,6 +256,10 @@ void main() {
   late InMemoryShareRepository inner;
   late _FlakyShareRepository repo;
 
+  /// `authRepositoryProvider`에 주입할 세션 구현. 기본은 계약 mock([auth])이고,
+  /// 순단 재현 테스트만 [_SessionBlipAuthRepository]로 갈아끼운다.
+  late AuthRepository sessionAuth;
+
   /// 방장 1명(=현재 사용자)만 있는 최소 유효 그룹(`Group`의 owner 불변식 충족).
   Group groupFixture({String id = 'g1', String name = '가족'}) => Group(
         id: id,
@@ -227,6 +288,7 @@ void main() {
       inner: inner,
       groups: <Group>[groupFixture()],
     );
+    sessionAuth = auth;
   });
 
   tearDown(() {
@@ -242,7 +304,7 @@ void main() {
     await tester.pumpWidget(
       ProviderScope(
         overrides: <Override>[
-          authRepositoryProvider.overrideWithValue(auth),
+          authRepositoryProvider.overrideWithValue(sessionAuth),
           gifticonRepositoryProvider.overrideWithValue(gifticons),
           shareRepositoryProvider.overrideWithValue(repo),
         ],
@@ -274,6 +336,7 @@ void main() {
       seed: false,
     );
     repo = _FlakyShareRepository(inner: inner, groups: <Group>[groupFixture()]);
+    sessionAuth = auth;
   }
 
   group('(a) 알림 읽음 가드 — 본 뒤에만 읽음 처리', () {
@@ -451,19 +514,56 @@ void main() {
     });
   });
 
-  group('재시도 불가 원인(내 그룹 목록)일 때는 버튼을 감춘다', () {
-    testWidgets('공유 상세 — 배너는 뜨되 "다시 시도" 버튼이 없다', (WidgetTester tester) async {
+  // v2.6 이전에는 이 4곳이 "재시도 불가"였다 — 그룹 목록 에러가 계약 정본의 private
+  // 체인에 캐시돼 페이지에서 되살릴 수 없었고(#13), 배너들은 `onRetry: null`로 버튼을
+  // 감췄다. 계약이 `retryMyGroups`(세션+그룹 중 **에러인 계층만** 재구독)를 제공하면서
+  // 그 강등이 전부 사라졌다 — 아래 그룹이 "버튼이 없다"는 옛 단언을 대체한다.
+  group('내 그룹 목록 에러도 재시도할 수 있다(계약 훅 retryMyGroups)', () {
+    testWidgets('share 메인 — 그룹 배너의 재시도가 watchGroups를 재구독하고 목록이 돌아온다',
+        (WidgetTester tester) async {
+      repo.groupsFail = true;
+
+      await pumpPage(tester, const SharePage());
+
+      expect(find.textContaining('그룹 목록을 불러오지 못했어요.'), findsOneWidget);
+      expect(find.text('다시 시도'), findsOneWidget,
+          reason: '되살릴 경로가 생겼으므로 그룹 배너도 버튼을 갖는다');
+      final int before = repo.groupSubscriptions;
+      expect(before, greaterThanOrEqualTo(1));
+
+      repo.groupsFail = false;
+      await tester.tap(find.text('다시 시도'));
+      await tester.pumpAndSettle();
+
+      expect(repo.groupSubscriptions, greaterThan(before),
+          reason: '정본의 그룹 스트림 인스턴스가 재구독돼야 한다');
+      expect(find.byType(ShareErrorBanner), findsNothing);
+      expect(find.text('가족'), findsOneWidget, reason: '회복되면 그룹 목록이 표시된다');
+    });
+
+    testWidgets('공유 상세 — 버튼이 있고, 회복되면 배너 대신 확정 안내가 뜬다',
+        (WidgetTester tester) async {
       repo.groupsFail = true;
 
       await pumpPage(tester, const SharedGifticonDetailPage(itemId: 'missing'));
 
       expect(find.byType(ShareErrorBanner), findsOneWidget);
       expect(find.text('기프티콘을 찾을 수 없어요.'), findsNothing);
-      expect(find.text('다시 시도'), findsNothing,
-          reason: 'myGroups 에러는 페이지에서 되살릴 수 없다 — 동작하지 않는 버튼을 두지 않는다');
+      expect(find.text('다시 시도'), findsOneWidget);
+      final int before = repo.groupSubscriptions;
+
+      repo.groupsFail = false;
+      await tester.tap(find.text('다시 시도'));
+      await tester.pumpAndSettle();
+
+      expect(repo.groupSubscriptions, greaterThan(before));
+      expect(find.byType(ShareErrorBanner), findsNothing);
+      // 조회 경로가 살아났고 항목은 실제로 없다 → 비로소 "없음"을 확정할 수 있다.
+      expect(find.text('기프티콘을 찾을 수 없어요.'), findsOneWidget);
     });
 
-    testWidgets('공유 시트 — 배너는 뜨되 "다시 시도" 버튼이 없다', (WidgetTester tester) async {
+    testWidgets('공유 시트 — 버튼이 있고, 누르면 그룹 스트림을 재구독한다',
+        (WidgetTester tester) async {
       repo.groupsFail = true;
 
       await pumpPage(tester, const _SheetHost(groupId: 'g1'));
@@ -471,19 +571,164 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byType(ShareErrorBanner), findsOneWidget);
-      expect(find.text('다시 시도'), findsNothing);
+      expect(find.text('다시 시도'), findsOneWidget);
+      final int before = repo.groupSubscriptions;
+
+      repo.groupsFail = false;
+      await tester.tap(find.text('다시 시도'));
+      await tester.pumpAndSettle();
+
+      expect(repo.groupSubscriptions, greaterThan(before),
+          reason: 'retryShareCandidates가 그룹 축(내 그룹 목록)도 되살려야 한다');
+      expect(find.byType(ShareErrorBanner), findsNothing);
     });
 
-    testWidgets('사용 이력 — 그룹 목록 사용 불가를 무음으로 넘기지 않는다(필터 소실 안내)',
-        (WidgetTester tester) async {
+    testWidgets('사용 이력 — 그룹 배너 재시도로 필터 칩이 돌아온다', (WidgetTester tester) async {
       repo.groupsFail = true;
 
       await pumpPage(tester, const UsageLogPage());
 
       expect(find.textContaining('그룹 목록을 불러오지 못했어요.'), findsOneWidget,
           reason: '그룹 필터가 사라지고 전체 폴백된 원인을 감사 화면이 알려야 한다');
-      expect(find.text('다시 시도'), findsNothing,
-          reason: '그룹 목록은 재시도 불가 원천이다(#13)');
+      expect(find.text('다시 시도'), findsOneWidget,
+          reason: '이력 스트림은 정상이므로 그룹 배너의 버튼 하나뿐이다');
+      final int before = repo.groupSubscriptions;
+
+      repo.groupsFail = false;
+      await tester.tap(find.text('다시 시도'));
+      await tester.pumpAndSettle();
+
+      expect(repo.groupSubscriptions, greaterThan(before));
+      expect(find.byType(ShareErrorBanner), findsNothing);
+      expect(find.text('가족'), findsOneWidget, reason: '그룹 필터 칩이 복구된다');
+    });
+
+    testWidgets('멀쩡한 그룹 스트림은 다른 축의 재시도로 재구독되지 않는다',
+        (WidgetTester tester) async {
+      // 스코프 원칙(에러인 계층만) — 공유 스트림만 실패한 상황에서 상세의 재시도가
+      // 정상인 그룹 스트림까지 되살리면 문서 읽기·과금이 늘고 화면이 깜빡인다.
+      repo.sharedFail = true;
+
+      await pumpPage(tester, const SharedGifticonDetailPage(itemId: 'missing'));
+      final int groupsBefore = repo.groupSubscriptions;
+      final int sharedBefore = repo.sharedSubscriptions;
+
+      await tester.tap(find.text('다시 시도'));
+      await tester.pumpAndSettle();
+
+      expect(repo.sharedSubscriptions, greaterThan(sharedBefore));
+      expect(repo.groupSubscriptions, groupsBefore,
+          reason: '에러가 아닌 그룹 스트림은 건드리지 않는다');
+    });
+  });
+
+  // QA [medium 1] 회귀 고정. 세션이 값을 방출한 뒤 순단하면 Riverpod은
+  // `copyWithPrevious`로 이전 user를 보존한다(hasError=true, valueOrNull=user).
+  // 계약 정본 `myGroupsProvider`는 그 보존 user로 그룹 스트림을 계속 반환하는데,
+  // share의 세 파생(`usageLogs`/`notifications`/`shareableGifticons`)은 `.when`으로
+  // 분기해 error 분기를 타는 바람에 **같은 순단에 정반대로** 목록을 버렸다. 폴딩을
+  // 정본과 동형(`_bySession` — `valueOrNull` 기반)으로 통일한 뒤의 동작을 고정한다.
+  group('세션 순단(보존 user) — 파생이 정본과 같은 방향으로 반응한다', () {
+    testWidgets('share 메인: 그룹도 사용 이력도 유지되고 배너가 없다',
+        (WidgetTester tester) async {
+      sessionAuth = _SessionBlipAuthRepository(auth);
+
+      await pumpPage(tester, const SharePage());
+
+      // 양성 대조(positive control): 순단이 실제로 재현됐는지 먼저 확인한다 —
+      // 이 단언이 없으면 아래 '배너 없음'류 단언은 완전히 건강한 세션에서도
+      // 통과하는 공허한 테스트가 된다(blip 배선이 끊겨도 영원히 green).
+      final ProviderContainer container =
+          ProviderScope.containerOf(tester.element(find.byType(SharePage)));
+      expect(container.read(sessionUserProvider).hasError, isTrue,
+          reason: '세션이 실제로 순단(에러) 상태여야 한다');
+      expect(container.read(sessionUserProvider).valueOrNull, isNotNull,
+          reason: '이전 user가 보존된 순단이어야 한다');
+
+      expect(find.text('가족'), findsOneWidget, reason: '정본 축(그룹)은 원래 유지된다');
+      // 이력 타일은 Text.rich라 textContaining으로 찾는다.
+      expect(find.textContaining('아메리카노'), findsWidgets,
+          reason: '같은 순단에 사용 이력만 사라지는 비대칭이 없어야 한다');
+      expect(find.text('사용 이력이 없어요.'), findsNothing);
+      expect(find.byType(ShareErrorBanner), findsNothing,
+          reason: '보존된 값으로 계속 표시 중이므로 실패를 알릴 이유가 없다');
+    });
+
+    testWidgets('알림 화면: 보고 있던 목록이 사라지지 않는다', (WidgetTester tester) async {
+      sessionAuth = _SessionBlipAuthRepository(auth);
+
+      await pumpPage(tester, const GroupNotificationsPage());
+
+      // 양성 대조 — 순단이 실제로 재현된 상태에서의 단언인지 확인.
+      final ProviderContainer container = ProviderScope.containerOf(
+          tester.element(find.byType(GroupNotificationsPage)));
+      expect(container.read(sessionUserProvider).hasError, isTrue);
+
+      expect(find.text('새 기프티콘'), findsOneWidget);
+      expect(find.byType(ShareErrorBanner), findsNothing);
+      expect(find.text('알림이 없어요.'), findsNothing);
+    });
+
+    testWidgets('공유 시트: 세션 순단만으로 배너가 뜨지 않는다', (WidgetTester tester) async {
+      // shareCandidatesHaveErrorProvider가 shareableGifticons의 에러를 포함하므로,
+      // 세션 순단이 곧바로 시트 배너로 새던 경로(QA [medium 1] ③).
+      sessionAuth = _SessionBlipAuthRepository(auth);
+
+      await pumpPage(tester, const _SheetHost(groupId: 'g1'));
+      await tester.tap(find.text('공유 시트 열기'));
+      await tester.pumpAndSettle();
+
+      // 양성 대조 — 순단이 실제로 재현된 상태에서의 단언인지 확인.
+      final ProviderContainer container =
+          ProviderScope.containerOf(tester.element(find.byType(_SheetHost)));
+      expect(container.read(sessionUserProvider).hasError, isTrue);
+
+      expect(find.byType(ShareErrorBanner), findsNothing);
+      expect(find.text('공유할 수 있는 기프티콘이 없어요.'), findsOneWidget,
+          reason: '후보 계산은 보존 user로 계속되고, 실제로 후보가 0개다');
+    });
+
+    testWidgets('값 없는 세션 에러 — 재시도 응답이 오기 전까지 배너가 유지된다(왕복 깜빡임 금지)',
+        (WidgetTester tester) async {
+      // invalidate(refresh)는 이전 에러를 보존한 로딩 상태를 만든다. 폴딩이 로딩을
+      // 에러보다 먼저 보면 재시도를 누르는 순간 배너가 사라졌다(스피너/빈 화면) 실패
+      // 시 재등장하는 왕복이 생긴다 — 정본 [foldSessionUser]의 에러-우선 분기가 구
+      // `.when(skipLoadingOnRefresh: true)`처럼 배너를 유지하는지 고정한다.
+      final _ErrorThenHangAuthRepository hangAuth =
+          _ErrorThenHangAuthRepository();
+      sessionAuth = hangAuth;
+
+      await pumpPage(tester, const SharePage());
+      expect(find.textContaining('그룹 목록을 불러오지 못했어요.'), findsOneWidget,
+          reason: '값 없는 세션 에러는 그룹 축 배너로 표면화된다');
+
+      // 그룹 배너의 '다시 시도'(목록 최상단)를 누른다 — 재시도 응답은 오지 않는다(행).
+      await tester.tap(find.text('다시 시도').first);
+      await tester.pump();
+      await tester.pump();
+
+      expect(hangAuth.watchCalls, 2, reason: '재시도가 실제로 세션을 재구독해야 한다');
+      expect(find.textContaining('그룹 목록을 불러오지 못했어요.'), findsOneWidget,
+          reason: '재시도 결과가 오기 전에 배너가 사라지는 왕복이 없어야 한다');
+    });
+  });
+
+  group('배너 위젯 규약 — onRetry가 null인 사이트는 share에 더 없다(규약은 휴면 유지)', () {
+    testWidgets('null이면 버튼 없이 복구 안내 접미가 붙는다', (WidgetTester tester) async {
+      // share의 모든 배너가 실제 재시도를 넘기게 되어 이 분기를 타는 화면이 없어졌다.
+      // 승격 대상(main·scan)에는 재시도 경로 없는 지점이 남아 있어 안전망으로 유지하며,
+      // 규약이 조용히 썩지 않도록 위젯 단위로 직접 고정한다.
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: Scaffold(body: ShareErrorBanner(message: '문제가 생겼어요.')),
+        ),
+      );
+
+      expect(find.text('다시 시도'), findsNothing);
+      expect(
+        find.text('문제가 생겼어요. ${ShareErrorBanner.retryUnavailableGuide}'),
+        findsOneWidget,
+      );
     });
   });
 
@@ -494,7 +739,7 @@ void main() {
 
       await pumpPage(tester, const SharePage());
 
-      // 그룹 섹션은 실패를 표시하고(재시도 불가라 버튼 없음),
+      // 그룹 섹션은 실패를 표시하고(재시도 버튼은 위 그룹에서 따로 고정),
       expect(find.textContaining('그룹 목록을 불러오지 못했어요.'), findsOneWidget);
       expect(
           find.text('아직 참여한 그룹이 없어요.\n그룹을 만들거나 초대코드로 참여해 보세요.'), findsNothing);
