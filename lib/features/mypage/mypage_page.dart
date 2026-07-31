@@ -1,6 +1,6 @@
 /// 마이(설정) 페이지 — KeepCon 틀 재디자인.
 ///
-/// 프로필(이름·이메일·이니셜)은 [mypageCurrentUserProvider](세션 스트림)를 반응형으로
+/// 프로필(이름·이메일·이니셜)은 세션 계약 정본 [sessionUserProvider]를 반응형으로
 /// 표시하고, 로그아웃은 [AuthRepository.signOut]으로 세션을 종료해 `AuthGate`가
 /// 로그인 화면으로 전환한다.
 ///
@@ -26,18 +26,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../shared/models/user.dart';
 import '../../shared/providers/repositories.dart';
+import '../../shared/providers/session_provider.dart';
 import '../../shared/providers/theme_mode_provider.dart';
 import '../../shared/repositories/auth_repository.dart';
 import '../../shared/theme/theme_tokens.dart';
 import '../auth/auth_error_message.dart';
 import '../share/pages/usage_log_page.dart';
-
-/// 마이페이지용 현재 사용자 스트림. SSOT [authRepositoryProvider]를 구독한다.
-/// (main의 `currentUserProvider`, share의 `shareCurrentUserProvider`와 동일 패턴 —
-/// 각 feature가 자기 래퍼를 선언하고 저장소 provider는 계약 정본을 소비한다.)
-final mypageCurrentUserProvider = StreamProvider<User?>((ref) {
-  return ref.watch(authRepositoryProvider).watchCurrentUser();
-});
 
 /// 마이(설정) 화면. themeModeProvider 소비를 위해 [ConsumerWidget].
 class MyPage extends ConsumerWidget {
@@ -52,8 +46,12 @@ class MyPage extends ConsumerWidget {
 
     // 현재 세션 사용자를 반응형으로 표시(로그인 상태에서만 진입) —
     // updateDisplayName 등 프로필 갱신 방출 시 자동 리빌드된다.
+    // 승격 전에는 이 파일이 watchCurrentUser()를 인라인으로 한 번 더 구독했다
+    // (매트릭스 #13 잔여 소비자) — 이제 계약 정본 [sessionUserProvider]를 직수입한다.
+    // 폴딩은 `.value`가 아니라 `valueOrNull`(#13): 순단 에러에 보존된 이전 사용자를
+    // 그대로 써서 프로필이 빈칸으로 튀지 않는다.
     // (스트림 첫 방출 전 첫 프레임은 동기 접근점으로 폴백해 깜빡임을 막는다.)
-    final User? user = ref.watch(mypageCurrentUserProvider).valueOrNull ??
+    final User? user = ref.watch(sessionUserProvider).valueOrNull ??
         ref.read(authRepositoryProvider).currentUser;
     final String name =
         (user?.displayName.isNotEmpty ?? false) ? user!.displayName : 'KeepCon';
@@ -215,7 +213,7 @@ class MyPage extends ConsumerWidget {
   /// 프로필 편집 — 표시 이름을 다이얼로그로 받아
   /// [AuthRepository.updateDisplayName]을 호출한다.
   ///
-  /// 성공 시 [mypageCurrentUserProvider]가 갱신된 사용자를 방출해 카드가
+  /// 성공 시 [sessionUserProvider]가 갱신된 사용자를 방출해 카드가
   /// 자동으로 새 이름을 표시한다. 실패([AuthException])는 스낵바로 안내한다.
   Future<void> _editProfile(
     BuildContext context,

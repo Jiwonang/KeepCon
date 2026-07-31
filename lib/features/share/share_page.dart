@@ -8,8 +8,7 @@
 ///   — Riverpod `ref.watch`.
 /// - 내 그룹 목록 = 계약 정본 [myGroupsProvider](`lib/shared/providers/my_groups_provider.dart`).
 ///   scan 페이지도 같은 정본을 보므로 `watchGroups` 구독이 하나로 합쳐진다.
-/// - 행위자/멤버 식별 = 세션 정본 `sessionUserProvider`를 통과시키는
-///   [shareCurrentUserProvider](share 별칭 — 자체 구독 없음).
+/// - 행위자/멤버 식별 = 세션 정본 [sessionUserProvider]를 직접 소비(페이지 별칭 없음).
 /// - 공유 후보(내 기프티콘)는 [GifticonRepository.watchGifticons]로 원본 [Gifticon]을 받는다.
 ///
 /// 색/폰트/라운드/그림자는 전부 `Theme.of(context)`에서 오고, 공유 기프티콘 카드의
@@ -24,6 +23,7 @@ import '../../shared/models/share.dart';
 import '../../shared/models/user.dart';
 import '../../shared/providers/my_groups_provider.dart'
     show myGroupsProvider, retryMyGroups;
+import '../../shared/providers/session_provider.dart';
 import '../../shared/theme/theme_tokens.dart';
 import 'pages/group_detail_page.dart';
 import 'pages/group_notifications_page.dart';
@@ -67,7 +67,10 @@ class SharePage extends ConsumerWidget {
     final bool logsHaveError = logsAsync.hasError;
     final bool logsPending = logsAsync.isLoading && !logsAsync.hasValue;
     final MemberNames names = ref.watch(memberNamesProvider);
-    final User? user = ref.watch(shareCurrentUserProvider).valueOrNull;
+    // 세션 정본 직접 소비 — 카드에 넘기는 값이 id 뿐이라 `select`로 좁힌다.
+    final String? uid = ref.watch(
+      sessionUserProvider.select((AsyncValue<User?> s) => s.valueOrNull?.id),
+    );
     final int unreadNotifications = ref.watch(unreadNotificationCountProvider);
 
     return Scaffold(
@@ -146,7 +149,7 @@ class SharePage extends ConsumerWidget {
                 SharedGifticonCard(
                   item: shared[i],
                   names: names,
-                  currentUserId: user?.id,
+                  currentUserId: uid,
                   onTap: () => _push(
                     context,
                     SharedGifticonDetailPage(itemId: shared[i].id),

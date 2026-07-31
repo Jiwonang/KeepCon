@@ -12,7 +12,9 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../shared/models/group.dart';
+import '../../../shared/models/user.dart';
 import '../../../shared/providers/repositories.dart';
+import '../../../shared/providers/session_provider.dart';
 import '../../../shared/util/korean_particle.dart';
 import '../state/share_providers.dart';
 import '../widgets/share_format.dart';
@@ -184,7 +186,10 @@ class _MemberInvitePageState extends ConsumerState<MemberInvitePage> {
 
   Widget _buildContent(BuildContext context, Group g) {
     final ThemeData theme = Theme.of(context);
-    final String? uid = ref.watch(shareCurrentUserProvider).valueOrNull?.id;
+    // 세션 정본 직접 소비 — 쓰는 값이 id 뿐이라 `select`로 좁힌다.
+    final String? uid = ref.watch(
+      sessionUserProvider.select((AsyncValue<User?> s) => s.valueOrNull?.id),
+    );
     final bool iAmOwner = uid != null && g.isOwnedBy(uid);
 
     return Scaffold(

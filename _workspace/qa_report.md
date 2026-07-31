@@ -565,3 +565,224 @@
 - **잔여 3곳(main·mypage·조립부) 전환 전까지** 세션 구독은 여전히 4개다. 계정 전환 프레임에서
   main과 share가 한 프레임 어긋날 수 있다(share↔그룹 목록 간 어긋남은 이번에 해소됨).
 - **별칭 제거 슬라이스**는 `minor 1`의 정정된 12곳을 기준으로 진행해야 한다.
+
+---
+
+# refactor/session-consumer-unify 검증 (2026-07-31, integration-qa)
+
+## 검증 대상
+`git diff develop`(03c7a14 분기, 전부 미커밋) + 신규 `test/features/main/main_session_consumer_test.dart`.
+수정 13파일 — `auth_gate.dart`(`authStateProvider` 삭제), `gifticon_list_providers.dart`(`currentUserProvider` 삭제)·
+`main_page.dart`, `mypage_page.dart`(인라인 구독 삭제), share 5파일(`shareCurrentUserProvider` 별칭 완전 제거 +
+`select` 보정 6곳), 계약 dartdoc 2파일(`session_provider.dart`·`my_groups_provider.dart`), `auth_flow_test.dart`(+2),
+매트릭스 v2.7.
+
+## 요약
+
+- 통과 10 / 이슈 4 (medium 2 · minor 2) / 미검증 0 — **차단 이슈 없음**
+- 기계 검증 4종 전부 green (테스트 **202** 전부 통과).
+- 이번 슬라이스의 핵심 주장 4개 — ①`watchCurrentUser()` 구독 정본 1개 ②삭제된 4선언 잔존 참조 0
+  ③`select` 6곳이 전부 id-only 지점 ④게이트 = autoDispose 정본의 수명 앵커 — 는 **전부 코드/실측으로 확인됨.**
+- 발견 이슈 2건(`medium 1`·`medium 2`)은 **이번 변경이 만든 회귀가 아니라**, 이번 변경이 세운 새 규약
+  (`select` 협소 구독 · "구독 수는 테스트가 고정한다")이 **자기 자신에는 적용되지 않은 구멍**이다.
+
+## 기계 검증
+
+| 항목 | 결과 |
+|------|------|
+| `bash tool/check_ssot.sh` | exit 0 — `SSOT guard: 위반 없음 ✓` |
+| `dart format --output=none --set-exit-if-changed lib test` | exit 0 — `Formatted 96 files (0 changed)` |
+| `flutter analyze` | exit 0 — `No issues found!` |
+| `flutter test` | exit 0 — **202개 전부 통과**(v2.6 최종 193 → +9) |
+
+## 경계면별 판정
+
+| # | 경계면 | 생산자 (왼쪽) | 소비자 (오른쪽) | 판정 |
+|---|--------|--------------|----------------|------|
+| 1 | 세션 구독 수렴 실증 | `session_provider.dart:97-100` | `grep -rn "watchCurrentUser" lib/` 전수 | **통과** — lib 내 **호출부 1곳뿐**(`session_provider.dart:99`). 나머지 히트는 계약 선언 1(`auth_repository.dart:68`)·구현 2(`firebase`:41 / `in_memory`:53)·dartdoc 12. 승격 전 4개 잔여 소비자 **전부 소멸** |
+| 2 | 삭제된 4선언 잔존 참조 | 삭제 커밋 | `grep` lib+test 전수 | **통과** — `authStateProvider`·`currentUserProvider`·`mypageCurrentUserProvider`·`shareCurrentUserProvider` 의 **코드 참조 0건**. 잔존 문자열 9건은 전부 회고 dartdoc/테스트 주석(`my_groups_provider.dart`·`session_provider.dart`·`share_providers.dart:36`·`gifticon_list_providers.dart:12`·`main_session_consumer_test.dart:5`) |
+| 3 | `select` 보정 정합(6곳) | `session_provider.dart:63-66`(규약) | 6개 소비 지점 실사 | **통과** — 6곳 전부 실제로 `user?.id`만 소비: `group_detail_page:71`(→`canInvite`/`isOwnedBy`/`isMe`/`currentUserId`/`_onLeave`/`_pickNewOwner`) · `member_invite_page:190`(→`iAmOwner`) · `shared_gifticon_detail_page:81`(→`actorId`/`reservedByMe`/`iShared`) · `share_page:71`(→`currentUserId`) · `notificationsReadAtProvider:155` · `memberNamesProvider:429`. **로그인/로그아웃 반응이 죽는 지점 0** — `uid`는 loading/error/미로그인에서 모두 `null`이라 폴딩 값이 교체 전과 동일 |
+| 4 | `select` 미적용 지점 역방향 감사 | 위 규약 | `sessionUserProvider` watch 전수 | **이슈** — 통째 `watch` 4곳 중 3곳은 정당(`auth_gate:32` `when` 3분기 / `main_page:40` `when` / `mypage:54` `displayName`·`email`), **`gifticon_list_providers.dart:42`만 id-only인데 미협소** → `medium 1` |
+| 5 | `ref.read` 3곳 | — | `share_providers` 345·363·412 | **통과** — `read`는 구독을 만들지 않아 `select` 대상이 아니다(적용해도 무의미). 전환 교훈으로 기록된 "함수 안 `read` 누락"은 재발 없음 |
+| 6 | 게이트 3분기 ↔ 정본 상태 규약 | `session_provider.dart:82-89` | `auth_gate.dart:32-41` | **통과** — `AsyncLoading`→스플래시 / `AsyncData(null)`→로그인 / `AsyncData(user)`→셸 / `AsyncError`→안내. 정본이 `AsyncValue`로 노출하는 이유(로딩≠미로그인)를 게이트가 정확히 소비. 테스트 2건이 **정본 override로** 고정(`auth_flow_test.dart:99-137`) — 게이트가 자체 구독으로 되돌아가면 실패하는 올바른 설계 |
+| 7 | main 로그아웃/순단 폴딩 | `foldSessionUser` 규약(`.value` 금지) | `gifticon_list_providers.dart:42` `valueOrNull` | **통과** — `main_session_consumer_test`가 3건 고정(구독 1회 / `data(null)`→빈 목록 / 순단 보존→목록 유지). `_CountingAuthRepository`가 `noSuchMethod`로 범위 밖 호출을 폭발시키는 설계도 적절 |
+| 8 | mypage 동기 폴백 | `AuthRepository.currentUser` | `mypage_page.dart:54` | **통과** — `valueOrNull ?? read(authRepositoryProvider).currentUser` 표현 무변경. 오히려 개선: 게이트가 정본을 미리 데워 두므로 첫 프레임에 이미 값이 있어 폴백 도달 빈도가 줄었다 |
+| 9 | share 파생 폴딩 무변경 | `foldSessionUser`(`session_provider.dart:128-145`) | `usageLogs`·`notifications`·`shareableGifticons` (121·138·188) | **통과** — 3곳 모두 세션 `AsyncValue` **전체**가 필요(순단/확정 분기)하므로 `select` 미적용이 정답. 인자만 별칭→정본으로 바뀌고 폴딩 로직 무변경 |
+| 10 | 수명 체인(앵커) | `sessionUserProvider` = `autoDispose` | `auth_gate` = `MaterialApp.home`(`main.dart:157`) | **통과** — 게이트는 `AsyncData(user)`에서도 `when`을 감싼 채 mount 유지되므로 로그인 후에도 watch가 끊기지 않는다. 승격 전 앵커(share 진입 후의 keepAlive 별칭)보다 **강해졌다**(share 미진입 상태에서도 구독 유지). family 인스턴스 누적(`_gifticonsByUserProvider` 등 non-autoDispose)은 이번 변경과 무관한 **기존 동작 그대로** — 회귀 없음 |
+
+### #3 보강 — `select`가 별칭의 `==` 필터를 실제로 대체하는가 (전제 검증)
+
+매트릭스 v2.7이 근거로 든 두 전제를 각각 확인했다.
+
+1. **삭제된 별칭이 정말 필터였는가** → `User`는 `operator ==`/`hashCode`를 구현한다
+   (`lib/shared/models/user.dart:48,57` — `id`·`email`·`displayName` 기준). `Provider`의
+   `updateShouldNotify`는 `previous != next`이고 `AsyncValue`는 `==`를 구현하므로, 별칭은 **값이
+   같은 재방출을 흡수하고 있었다**. 전제 성립.
+2. **정본이 필터가 없는가** → `StreamProvider`는 `handleUpdateShouldNotify`가 data→data에서
+   항상 `true`. 전제 성립.
+
+→ 따라서 `select` 없이 치환했다면 **실제 리빌드 회귀**였고, 6곳 보정은 필수 조치였다.
+특히 `memberNamesProvider`(반환 `MemberNames`에 `==` 없음 → 재계산 = 새 인스턴스 = 소비 위젯 리빌드)는
+보정이 없었으면 재방출마다 share 메인·그룹 상세의 카드가 통째로 리빌드됐다. **판단 정확.**
+
+`select`가 적용되지 않은 폴딩 3곳(#9)도 검증했다 — 재방출 시 `Provider` 본문은 재계산되지만
+반환값이 같은 family 인스턴스의 동일 `AsyncValue`라 `==`로 걸려 **dependents에 통지되지 않고,
+하위 스트림 재구독도 없다**. 비용은 무시 가능. 통과.
+
+## 발견 이슈 (심각도순 — 전부 비차단)
+
+### [medium 1] main `rawGifticonsProvider`만 id-only인데 `select` 미적용 — 세션 재방출마다 `watchGifticons` 재구독
+
+- **위치:** `lib/features/main/state/gifticon_list_providers.dart:42`
+
+```dart
+final User? user = ref.watch(sessionUserProvider).valueOrNull;   // ← id만 쓰는데 통째 watch
+...
+return repo.watchGifticons(user.id);
+```
+
+- **문제:** 이 provider가 세션에서 쓰는 값은 `user.id` 하나뿐인데 `AsyncValue<User?>` 전체를
+  구독한다. 정본은 `StreamProvider`라 **값이 같은 data→data 재방출도 무조건 통지**하므로(#3),
+  세션이 재방출될 때마다 `rawGifticonsProvider`의 create가 재실행되고 → `repo.watchGifticons(user.id)`가
+  **새 스트림으로 재구독**된다. share의 6곳은 재계산이 끝이지만(값이 `==`로 걸림), 이쪽은
+  **스트림 teardown/재수립**이라 비용의 성격이 다르다 — Firestore에서는 목록 리스너를 끊고 다시
+  붙이는 것이라 쿼리 전체가 다시 읽히고(과금) 목록이 잠깐 refresh-loading으로 들어간다
+  (`copyWithPrevious`로 값은 보존되어 화면이 비지는 않는다).
+- **구체 트리거(가설 아님):** ① Firebase `userChanges()`(`firebase_auth_repository.dart:41`)의
+  토큰 갱신(약 1시간 주기) ② **mypage 프로필 편집** — `updateDisplayName`이
+  `raw.updateDisplayName(name)` + `raw.reload()`를 호출해(`firebase_auth_repository.dart:144-146`)
+  `userChanges()`가 **같은 uid·다른 displayName**의 사용자를 재방출한다. ②는 `id` 기준 `select`라야
+  걸러진다 — 삭제된 별칭의 `==` 필터로도 못 걸렀을 경로다(`User.==`가 `displayName`을 보므로).
+  즉 이 지점은 **`select`가 별칭보다 엄격히 나은 유일한 자리**인데 적용되지 않았다.
+- **회귀 아님(중요):** 승격 전 `currentUserProvider`도 `StreamProvider`였으므로 통지 특성이 같다.
+  이번 변경이 만든 결함이 **아니며**, 매트릭스 `#13`(`_workspace/01_contract_dependency_matrix.md:334`)이
+  "main·mypage·앱 조립부는 통지 특성이 정본과 같아 이 항목이 해당 없다"고 적은 것도 *회귀 판정으로는*
+  정확하다. 다만 그 서술은 **"회귀가 없다"를 "협소화가 불필요하다"로 확장**하고 있고, 그 결론은
+  정본 dartdoc의 일반 규약(`session_provider.dart:63-66` — "일부 필드만 쓰는 소비자는 `select`로
+  좁혀 구독하라")과 어긋난다.
+- **수정:**
+
+```dart
+final String? uid = ref.watch(
+  sessionUserProvider.select((AsyncValue<User?> s) => s.valueOrNull?.id),
+);
+if (uid == null) return Stream<List<Gifticon>>.value(const <Gifticon>[]);
+final repo = ref.watch(gifticonRepositoryProvider);
+return repo.watchGifticons(uid);
+```
+
+  폴딩 의미는 완전히 동일하다(`valueOrNull == null` ⇔ `uid == null` — 로딩·미로그인 확정·값 없는
+  에러 3경우 모두 일치). `models/user.dart` import는 `select` 람다 타입 주석에 계속 쓰이므로
+  유지된다. 기존 3개 테스트는 무수정 통과해야 하며(동작 불변), 통과가 곧 이 수정의 안전 증거다.
+- **통지 대상:** `main-page-dev`(수정), `contract-architect`(매트릭스 `:334` 괄호 문장을
+  "회귀는 없으나 협소화 권고는 동일하게 적용된다"로 정정).
+
+### [medium 2] 이번 슬라이스의 가장 미묘한 조치(`select` 6곳)가 **테스트로 전혀 고정되지 않았다**
+
+- **위치:** `test/` 전체 (부재)
+- **문제:** `grep -rln "select(\|rebuild\|buildCount\|memberNamesProvider\|notificationsReadAtProvider" test/`
+  → **0건**. `test/features/share/state/` 디렉터리 자체가 없다. 즉 **6곳의 `select`를 전부 지워도
+  202개 테스트가 그대로 통과한다.** 지워진 상태는 #3에서 확인했듯 실제 리빌드 회귀
+  (`memberNamesProvider` 재계산 → `MemberNames`에 `==`가 없어 카드·목록 통째 리빌드)인데,
+  그것을 잡아낼 방어선이 **리뷰 하나뿐**이다.
+- **왜 medium인가:** 이번 슬라이스는 매트릭스에 **"구독 1개는 문서가 아니라 테스트가 고정한다"**를
+  자기 원칙으로 명시했고, 구독 수 축에서는 그 원칙을 정확히 지켰다
+  (`main_session_consumer_test`). 그런데 **리빌드 축에는 같은 원칙을 적용하지 않았다.** 규약을
+  세운 슬라이스가 그 규약의 절반만 기계화한 상태다. 다음 담당자가 "`select`가 왜 붙어 있지?"
+  하고 정리하면 조용히 되돌아간다(v2.5 후속에서 `.value` 변형이 재유입된 것과 같은 경로).
+- **수정:** `test/features/share/state/share_providers_test.dart` 신설 — 계측 `AuthRepository`로
+  **같은 값의 세션을 2회 방출**하고, `container.listen(memberNamesProvider, ...)` 콜백 호출 횟수가
+  **증가하지 않음**을 단언한다. 최소 2건 권장:
+  ① 같은 `User` 재방출 → `memberNamesProvider` 미통지
+  ② **같은 uid·다른 displayName** 재방출 → 미통지(= 별칭 `==` 필터로는 못 잡고 `select`만 잡는 경로.
+  `medium 1` 수정 후에는 `rawGifticonsProvider`에도 같은 단언을 걸어 `watchGifticons` 호출 수 1회를 고정)
+- **통지 대상:** `share-page-dev`(①②), `main-page-dev`(`medium 1` 수정과 함께 ②의 main판).
+
+### [minor 1] `_retrySessionIfFailed`의 `read`에 `Ref.exists` 가드가 없다 — 계약 정본의 대응 코드와 비대칭
+
+- **위치:** `lib/features/share/state/share_providers.dart:317`
+  (`if (ref.read(sessionUserProvider).hasError)`)
+- **문제:** 같은 일을 하는 계약 정본 쪽 코드는 `if (!_ref.exists(sessionUserProvider)) return;`로
+  가드한다(`lib/shared/providers/my_groups_provider.dart:189`). 그 가드의 근거는 v2.6 리뷰에 기록돼
+  있다 — **검사용 `read`가 미마운트 `autoDispose` 인스턴스를 새로 만들어 낭비 구독을 여는 부수효과**.
+  share 쪽에는 같은 가드가 없다.
+- **실해는 현재 없음:** 이 함수는 share 화면의 배너 콜백에서만 불리고, 그 시점엔 같은 파일의
+  keepAlive 파생들(`usageLogsProvider` 등)이 정본을 살려 두고 있다. 게다가 v2.7부터는 게이트가
+  루트에서 앵커라 앱 실행 중 정본이 미마운트일 수 없다. **이번 diff가 만든 것도 아니다**
+  (본문 무변경, dartdoc만 수정됨).
+- **왜 기록하는가:** 별칭이 사라져 이 `read`가 이제 **정본을 직접** 만진다. 같은 위험에 대해 계약
+  쪽은 가드하고 페이지 쪽은 안 하는 비대칭은, 앵커 전제가 바뀌는 날(예: 게이트 구조 변경) 한쪽만
+  살아남는 형태다.
+- **수정:** `_retrySessionIfFailed` 첫 줄에 `if (!ref.exists(sessionUserProvider)) return;` 추가
+  — 또는 그러지 않기로 한다면 "게이트 앵커가 있으므로 불필요"를 dartdoc에 근거로 남긴다
+  (둘 중 무엇이든 **두 파일의 판단이 같은 이유를 공유**하게 만드는 것이 요지).
+- **통지 대상:** `share-page-dev`, `contract-architect`(판정).
+
+### [minor 2] `main_session_consumer_test`의 구독 단언이 화면 소비자를 **대역**으로 세운다
+
+- **위치:** `test/features/main/main_session_consumer_test.dart:117-120`
+
+```dart
+container.listen<AsyncValue<List<Gifticon>>>(rawGifticonsProvider, (_, __) {});
+container.listen<AsyncValue<User?>>(sessionUserProvider, (_, __) {});  // ← "화면의 세션 직접 watch"
+```
+
+- **문제:** 주석은 두 번째 `listen`을 "화면의 세션 직접 watch(main_page)"라고 설명하지만, 실제
+  `main_page.dart:40`이 하는 일(`ref.watch(sessionUserProvider)`)을 **위젯 없이 재현한 대역**이다.
+  따라서 이 테스트는 "정본을 두 번 listen해도 구독 1회"(= Riverpod 자체 속성)를 고정할 뿐,
+  **`main_page.dart`가 실제로 정본을 보는지는 고정하지 않는다.** `main_page.dart:40`을 임의의 새
+  `StreamProvider`로 되돌려도 이 테스트는 통과한다.
+- **대비:** 같은 슬라이스의 게이트 테스트(`auth_flow_test.dart:99-137`)는 **정본만 override** 해서
+  "게이트가 자체 구독으로 되돌아가면 실패"하게 설계했다 — 올바른 형태다. main에는 그 짝이 없다.
+- **수정:** `main_page`(또는 `visibleGifticonsProvider`를 렌더하는 위젯)를 `pumpWidget` 하고
+  `sessionUserProvider`만 override하는 위젯 테스트를 1건 추가하거나, `_CountingAuthRepository`를
+  둔 채 **위젯을 실제로 띄워** `watchCalls == 1`을 단언한다. 현재 3건은 유지(폴딩 축은 유효).
+- **통지 대상:** `main-page-dev`.
+
+## 회귀 확인 (직전 리포트 `refactor/shared-session-retry` 지적 항목)
+
+| 이전 지적 | 상태 | 근거 |
+|---|---|---|
+| [medium 1] 세션 순단 시 share 파생이 정본과 정반대 동작(`.when` vs `valueOrNull`) | **회귀 없음** | `foldSessionUser` 3곳(121·138·188) 폴딩 로직 무변경 — 인자만 별칭→정본. 신규 `main_session_consumer_test` 3번째 케이스가 main 축에도 같은 규약을 추가로 고정 |
+| [minor 1] 별칭 소비처 수치(12곳) | **해소·종결** | 12곳 전수 치환 후 별칭 삭제, 코드 참조 0건(#2). 누락되기 쉽다고 경고된 "함수 안 `read` 3곳"도 전부 전환됨(#5) |
+| [minor 2] 별칭 수명 서술 | **해소(대상 소멸)** | 별칭 자체가 없어졌고, 수명 앵커가 게이트로 이관되어 서술이 더 단순·강해짐(#10) |
+| [minor 3] SSOT guard가 못 잡는 재선언 형태 | **미해소(의도된 한계)** | `check_ssot.sh` 무변경. 다만 그 한계를 정본 dartdoc(`session_provider.dart:68-69`)과 매트릭스에 **명시적으로 기록**해 "모르고 지나감"에서 "알고 감수함"으로 승격 — 적절한 처리 |
+| 읽음 가드 / 재시도 스코프 / false-empty / 왕복 깜빡임 (v2.6 이전) | **회귀 없음** | 관련 테스트 전부 통과(202/202). 의심 지점 코드 확인 — `share_page.dart:141-144` false-empty 4중 게이트 유지, `foldSessionUser`의 **에러 우선 분기**(`session_provider.dart:136`이 `:143` `hasValue`보다 앞) 유지 = 왕복 깜빡임 방어 유지 |
+
+## 문서 정합 (요청 #5)
+
+- **매트릭스 v2.7 ↔ 실코드:** 일치. "삭제된 5선언" 표·"구독 1개"·"12곳/6곳" 수치·"게이트가 앵커"
+  전부 실측과 맞다. 승격 전 5곳 중 4곳이 이번에, 1곳(`_currentUserProvider`)이 v2.6에 처리된 것도
+  정확히 구분해 적었다.
+- **share-page-dev ↔ contract-architect 문단 충돌:** **없음.** 두 사람이 각각 갱신한 `#13` 문단
+  (별칭 제거 부작용·`select` 근거 = share / 수렴 완료·CI 가드 한계 = 계약)은 서로 보완적이고
+  수치(12·6·1)가 일치한다. `session_provider.dart`와 `my_groups_provider.dart`의 회고 서술도
+  시점 표기(v2.5 이전 / v2.6 이전 / v2.7)를 붙여 서로 모순되지 않게 정리됐다.
+- **유일한 문면 충돌:** `medium 1`에 적은 매트릭스 `:334`의 "main·mypage·앱 조립부는 … 해당 없다"
+  ↔ 정본 dartdoc `:63-66`의 일반 `select` 권고. 정정 대상.
+
+## 통과 항목 (교차 비교 근거)
+
+- **세션 경계면 전수:** `watchCurrentUser()` 호출부 lib 전체 **1곳**(정본). 승격 전 5 → 1 수렴 실증.
+- **삭제 4선언:** 코드 참조 0건, 잔존은 회고 dartdoc뿐 — 컴파일 가능한 잔재 없음.
+- **게이트 분기 ↔ 정본 상태 규약:** 4분기 정확 대응 + 정본 override 테스트로 소비 자체를 고정.
+- **main 폴딩:** 로그아웃 비움 · 순단 보존 · 구독 1회 — 3건 테스트 고정.
+- **mypage 동기 폴백:** 표현·동작 불변, 앵커 덕에 폴백 의존도만 감소.
+- **share 폴딩 3곳:** `foldSessionUser` 무변경, `select` 미적용이 정답인 자리.
+- **`select` 6곳:** 전부 id-only 지점, 오적용 0.
+- **수명:** 게이트 앵커로 autoDispose 정본의 실효 수명 = 앱 수명. family 누적 = 기존 동작 유지.
+- **기계 검증:** 4종 green(202 테스트).
+
+## 남은 리스크
+
+- **`medium 1`(main 미협소)이 남는 한** "세션 재방출 → 목록 스트림 재구독"이 유지된다. 프로필 이름을
+  바꿀 때마다 main의 기프티콘 리스너가 재수립되므로, Firestore 전환 후에는 **눈에 보이는 비용**
+  (쿼리 재읽기)으로 나타난다. 승격 전에도 같았으므로 급하지 않으나, 이번 슬라이스가 그 정리를
+  "해당 없음"으로 닫아 버린 것이 문제다 — 닫기 전에 재판정 필요.
+- **`medium 2`(테스트 공백)가 남는 한** `select` 6곳은 리뷰로만 지켜진다. 이 슬라이스의 다른 축
+  (구독 수)은 테스트로 고정됐으므로, **같은 슬라이스 안에서 방어 강도가 두 배 차이** 난다.
+  다음 담당자가 `select`를 "불필요한 복잡도"로 오해하고 걷어낼 위험이 실재한다.
+- **이름 기반 CI 가드의 한계**(다른 이름으로 재조립한 세션 체인)는 여전히 미해결이며, 이제
+  **규약·리뷰가 유일한 방어선**이다. v2.7이 소비자를 1개로 줄여 놓았기 때문에, 앞으로 새 세션
+  구독이 하나라도 생기면 그것은 곧 "수렴 완료" 주장의 무효화다 — `medium 2`의 테스트가 이 축까지
+  덮도록 설계하면(구독 수 단언을 share에도 확장) 규약이 기계화된다.

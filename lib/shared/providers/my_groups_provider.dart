@@ -6,9 +6,10 @@
 ///
 /// ---
 /// ## 왜 계약(lib/shared)에 있어야 하는가 (중복 구독 방어)
-/// 승격 전에는 scan(`_scanCurrentUserProvider`/`_scanGroupsByUserProvider`)과
+/// 승격 전(v2.5 이전)에는 scan(`_scanCurrentUserProvider`/`_scanGroupsByUserProvider`)과
 /// share(`shareCurrentUserProvider`/`_groupsByUserProvider`)가 **본문이 사실상 동일한**
-/// 체인을 각자 선언했다. provider 인스턴스가 다르면 Riverpod은 두 스트림을 각각 열기
+/// 체인을 각자 선언했다(넷 다 지금은 없다 — 아래 "세션 스트림" 절 참조).
+/// provider 인스턴스가 다르면 Riverpod은 두 스트림을 각각 열기
 /// 때문에, 같은 사용자에 대해 [ShareRepository.watchGroups]가 **두 번 구독**됐다.
 /// in-memory 구현에서는 조용히 넘어가지만, Firestore에서는
 /// `where('memberIds', arrayContains: uid)` 리스너가 2개 붙어 **문서 읽기와 과금이
@@ -59,15 +60,16 @@
 /// ---
 /// ## 세션 스트림 = 계약 정본 소비 (v2.6)
 /// 이 파일은 세션을 더 이상 자기 안에서 조립하지 않고
-/// [sessionUserProvider](`session_provider.dart`)를 소비한다. 승격 전에는 내부
+/// [sessionUserProvider](`session_provider.dart`)를 소비한다. v2.6 이전에는 내부
 /// `_currentUserProvider`가 [AuthRepository.watchCurrentUser]의 **두 번째 구독**이었고,
-/// 그 결과 인증 스트림이 실패하면 **캐시된 에러가 두 곳**(share의
+/// 그 결과 인증 스트림이 실패하면 **캐시된 에러가 두 곳**(당시 share가 갖고 있던
 /// `shareCurrentUserProvider` + 이 파일 내부)에 생겨 페이지 재시도 훅이 절반만 되살릴
 /// 수 있었다(매트릭스 #13 / QA [minor 5]). 정본 소비로 그 절반이 사라지고, 남은 절반
 /// (그룹 스트림 계층)은 아래 [myGroupsRetryProvider]가 담당한다.
 ///
-/// 세션 정본의 소비 전환은 아직 진행 중이다(앱 조립부·main·mypage는 각자 구독 —
-/// `session_provider.dart`의 잔여 목록 참조).
+/// v2.7에서 **세션 소비 전환이 완결**됐다 — 앱 조립부·main·mypage·share의 세션 provider가
+/// 모두 삭제되고 정본을 직수입하므로, `watchCurrentUser()` 구독은 앱 전체에서 **정본 1개**다.
+/// 따라서 위 "캐시된 에러가 두 곳" 상황은 구조적으로 재현되지 않는다.
 ///
 /// ---
 /// ## 수동 재시도 훅

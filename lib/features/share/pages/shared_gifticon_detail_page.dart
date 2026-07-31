@@ -10,7 +10,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../shared/models/share.dart';
+import '../../../shared/models/user.dart';
 import '../../../shared/providers/repositories.dart';
+import '../../../shared/providers/session_provider.dart';
 import '../../../shared/theme/brand_palette.dart';
 import '../../../shared/theme/theme_tokens.dart';
 import '../../../shared/util/korean_particle.dart';
@@ -75,7 +77,10 @@ class _DetailBody extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
-    final String? uid = ref.watch(shareCurrentUserProvider).valueOrNull?.id;
+    // 세션 정본 직접 소비 — 쓰는 값이 id 뿐이라 `select`로 좁힌다.
+    final String? uid = ref.watch(
+      sessionUserProvider.select((AsyncValue<User?> s) => s.valueOrNull?.id),
+    );
     final MemberNames names = ref.watch(memberNamesProvider);
     final String actorId = uid ?? '';
     final BrandStyle brand = BrandPalette.of(item.brand);

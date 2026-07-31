@@ -5,7 +5,7 @@
 /// (좌 브랜드 타일 + 정보 + 우 썸네일 + D-day 뱃지).
 ///
 /// 계약 소비:
-/// - AuthRepository.watchCurrentUser() → 현재 사용자([currentUserProvider]).
+/// - 현재 사용자 = 세션 계약 정본 [sessionUserProvider](main은 자체 세션 구독 없음).
 /// - GifticonRepository.watchGifticons(ownerId) → 원천 목록([rawGifticonsProvider]).
 /// - 정렬([SortOption])·필터는 main에서 수행([visibleGifticonsProvider]).
 /// - 요약 통계는 원천 목록에서 계산([gifticonStatsProvider]).
@@ -20,6 +20,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../shared/models/gifticon.dart';
 import '../../shared/models/user.dart';
+import '../../shared/providers/session_provider.dart';
 import '../../shared/theme/brand_palette.dart';
 import '../../shared/theme/theme_tokens.dart';
 import 'state/gifticon_list_providers.dart';
@@ -36,7 +37,7 @@ class MainPage extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final AsyncValue<User?> userAsync = ref.watch(currentUserProvider);
+    final AsyncValue<User?> userAsync = ref.watch(sessionUserProvider);
 
     return Scaffold(
       body: SafeArea(
