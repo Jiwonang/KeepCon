@@ -35,6 +35,10 @@ class GifticonGridCard extends StatelessWidget {
     final bool soon = daysLeft <= _expirySoonDays;
     final Color dateColor = soon ? scheme.error : scheme.onSurfaceVariant;
 
+    // 금액 예외 처리 (null 이거나 0 이하일 경우 '-' 표기)
+    final bool hasPrice = gifticon.price != null && gifticon.price! > 0;
+    final String priceText = hasPrice ? '${formatWon(gifticon.price)}원' : '-';
+
     return Card(
       clipBehavior: Clip.antiAlias,
       child: InkWell(
@@ -79,9 +83,9 @@ class GifticonGridCard extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                   ),
                   const SizedBox(height: 8),
-                  // 가격(볼드, 원).
+                  // 가격(볼드, 금액 없으면 '-').
                   Text(
-                    '${formatWon(gifticon.price)}원',
+                    priceText,
                     style: theme.textTheme.titleLarge,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,

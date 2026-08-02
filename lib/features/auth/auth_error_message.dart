@@ -7,6 +7,9 @@ import '../../shared/repositories/auth_repository.dart';
 
 /// [AuthException]의 [AuthErrorCode]를 사용자 표시용 한국어 문구로 변환한다.
 String authErrorMessage(AuthException e) {
+  // 디버깅을 위한 원본 에러 정보 콘솔 출력
+  print('🔥 AuthException 발생 - Code: ${e.code}, Message: ${e.message}');
+
   switch (e.code) {
     case AuthErrorCode.emailInUse:
       return '이미 가입된 이메일이에요.';
