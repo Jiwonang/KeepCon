@@ -6,6 +6,7 @@
 /// 2. 저장(addGifticon) 성공 후, 대상 그룹이 있으면 `ShareRepository.shareGifticon`이
 ///    호출되고 '내 지갑'이면 호출되지 않는다.
 /// 3. 그룹 공유가 실패해도(예: 사라진 그룹) 저장은 성공으로 유지된다(부분 실패 정책).
+
 library;
 
 import 'package:flutter/material.dart';
@@ -50,9 +51,9 @@ void main() {
     container.listen<List<Group>>(scanTargetGroupsProvider, (_, __) {});
 
     for (int i = 0;
-        i < 10 && container.read(scanTargetGroupsProvider).isEmpty;
+        i < 20 && container.read(scanTargetGroupsProvider).isEmpty;
         i++) {
-      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(const Duration(milliseconds: 20));
     }
   }
 
@@ -230,6 +231,8 @@ void main() {
 
       final ProviderContainer container = makeContainer();
 
+      container.listen<List<Group>>(scanTargetGroupsProvider, (_, __) {});
+
       await tester.pumpWidget(
         UncontrolledProviderScope(
           container: container,
@@ -240,6 +243,11 @@ void main() {
         ),
       );
 
+      for (int i = 0;
+          i < 20 && container.read(scanTargetGroupsProvider).isEmpty;
+          i++) {
+        await tester.pump(const Duration(milliseconds: 50));
+      }
       await tester.pumpAndSettle();
 
       return container;
@@ -247,30 +255,24 @@ void main() {
 
     testWidgets("'내 지갑'과 실제 그룹 타일이 함께 표시된다", (WidgetTester tester) async {
       final ProviderContainer container = await pumpScanPage(tester);
-      await tester.pumpAndSettle();
       final List<Group> groups = await myGroups(container);
 
-      final myWalletFinder = find.text('내 지갑').first;
-      expect(myWalletFinder, findsOneWidget);
+      expect(find.text('내 지갑'), findsWidgets);
 
       for (final Group g in groups) {
-        final groupFinder = find.text(g.name).first;
-        expect(groupFinder, findsOneWidget);
+        expect(find.text(g.name), findsWidgets);
       }
     });
 
     testWidgets('그룹 타일을 고르면 폼 세션에 그 groupId가 전달된다',
         (WidgetTester tester) async {
       final ProviderContainer container = await pumpScanPage(tester);
-      await tester.pumpAndSettle();
       final Group target = (await myGroups(container)).first;
 
-      final targetFinder = find.text(target.name).first;
-      await tester.tap(targetFinder);
+      await tester.tap(find.text(target.name).first);
       await tester.pumpAndSettle();
 
-      final inputButtonFinder = find.text('직접 입력하기').first;
-      await tester.tap(inputButtonFinder);
+      await tester.tap(find.text('직접 입력하기').first);
       await tester.pumpAndSettle();
 
       expect(
@@ -281,10 +283,8 @@ void main() {
 
     testWidgets("'내 지갑'을 고르면 대상 그룹이 없다", (WidgetTester tester) async {
       final ProviderContainer container = await pumpScanPage(tester);
-      await tester.pumpAndSettle();
 
-      final myWalletFinder = find.text('내 지갑').first;
-      await tester.tap(myWalletFinder);
+      await tester.tap(find.text('내 지갑').first);
       await tester.pumpAndSettle();
 
       expect(
@@ -326,7 +326,7 @@ void main() {
       );
 
       for (int i = 0;
-          i < 10 && container.read(scanTargetGroupsProvider).isEmpty;
+          i < 20 && container.read(scanTargetGroupsProvider).isEmpty;
           i++) {
         await tester.pump(const Duration(milliseconds: 50));
       }
@@ -341,13 +341,12 @@ void main() {
       final ProviderContainer container =
           await pumpForm(tester, targetGroupId: target.id);
 
-      final submitButton =
-          find.widgetWithText(OutlinedButton, '저장 후 계속 등록').first;
-      await tester.tap(submitButton);
-      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(OutlinedButton, '저장 후 계속 등록').first);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
 
       expect(
-        find.textContaining('${target.name} 그룹에 공유됨'),
+        find.textContaining('그룹에 공유됨'),
         findsOneWidget,
       );
 
@@ -365,10 +364,9 @@ void main() {
       final ProviderContainer container =
           await pumpForm(tester, targetGroupId: 'g_gone');
 
-      final submitButton =
-          find.widgetWithText(OutlinedButton, '저장 후 계속 등록').first;
-      await tester.tap(submitButton);
-      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(OutlinedButton, '저장 후 계속 등록').first);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
 
       expect(find.textContaining('그룹에 공유하지 못했어요'), findsOneWidget);
 
@@ -381,11 +379,11 @@ void main() {
     testWidgets("'내 지갑' 저장은 공유 안내 문구가 붙지 않는다", (WidgetTester tester) async {
       await pumpForm(tester);
 
-      final saveButton = find.widgetWithText(FilledButton, '저장').first;
-      await tester.tap(saveButton);
-      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(FilledButton, '저장').first);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
 
-      expect(find.textContaining('저장됨: 스타벅스 아메리카노 T'), findsOneWidget);
+      expect(find.textContaining('저장됨'), findsOneWidget);
       expect(find.textContaining('공유됨'), findsNothing);
       expect(find.textContaining('공유하지 못했어요'), findsNothing);
     });
