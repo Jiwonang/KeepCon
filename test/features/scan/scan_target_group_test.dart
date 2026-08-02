@@ -2,10 +2,11 @@
 ///
 /// 검증 대상:
 /// 1. 선택한 groupId가 폼 세션으로 전달되고('내 지갑'=null), '저장 후 계속 등록' 시에도
-///    같은 대상 그룹이 유지된다.
+///    같은 대상 그룹이 유지된다.
 /// 2. 저장(addGifticon) 성공 후, 대상 그룹이 있으면 `ShareRepository.shareGifticon`이
-///    호출되고 '내 지갑'이면 호출되지 않는다.
+///    호출되고 '내 지갑'이면 호출되지 않는다.
 /// 3. 그룹 공유가 실패해도(예: 사라진 그룹) 저장은 성공으로 유지된다(부분 실패 정책).
+
 library;
 
 import 'package:flutter/material.dart';
@@ -47,12 +48,11 @@ void main() {
   }
 
   Future<void> warmGroupList(ProviderContainer container) async {
-    container.listen<List<Group>>(scanTargetGroupsProvider, (_, __) {});
-
+    container.read(scanTargetGroupsProvider);
     for (int i = 0;
         i < 30 && container.read(scanTargetGroupsProvider).isEmpty;
         i++) {
-      await Future<void>.delayed(const Duration(milliseconds: 10));
+      await Future<void>.delayed(const Duration(milliseconds: 20));
     }
   }
 
@@ -230,7 +230,7 @@ void main() {
 
       final ProviderContainer container = makeContainer();
 
-      container.listen<List<Group>>(scanTargetGroupsProvider, (_, __) {});
+      container.read(scanTargetGroupsProvider);
 
       await tester.pumpWidget(
         UncontrolledProviderScope(
@@ -242,11 +242,10 @@ void main() {
         ),
       );
 
-      for (int i = 0; i < 40; i++) {
-        await tester.pump(const Duration(milliseconds: 50));
-        if (container.read(scanTargetGroupsProvider).isNotEmpty) {
-          break;
-        }
+      for (int i = 0;
+          i < 30 && container.read(scanTargetGroupsProvider).isEmpty;
+          i++) {
+        await tester.pump(const Duration(milliseconds: 20));
       }
       await tester.pumpAndSettle();
 
@@ -307,7 +306,7 @@ void main() {
 
       final ProviderContainer container = makeContainer();
 
-      container.listen<List<Group>>(scanTargetGroupsProvider, (_, __) {});
+      container.read(scanTargetGroupsProvider);
 
       final GifticonFormController controller =
           container.read(gifticonFormControllerProvider.notifier);
@@ -325,11 +324,10 @@ void main() {
         ),
       );
 
-      for (int i = 0; i < 40; i++) {
-        await tester.pump(const Duration(milliseconds: 50));
-        if (container.read(scanTargetGroupsProvider).isNotEmpty) {
-          break;
-        }
+      for (int i = 0;
+          i < 30 && container.read(scanTargetGroupsProvider).isEmpty;
+          i++) {
+        await tester.pump(const Duration(milliseconds: 20));
       }
       await tester.pumpAndSettle();
 
