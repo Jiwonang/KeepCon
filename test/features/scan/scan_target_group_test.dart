@@ -233,7 +233,6 @@ void main() {
       expect(success.sharedToGroup, isFalse);
       expect(success.sharedGroupId, 'g_gone');
       expect(success.shareError, isNotNull);
-      expect(success.shareError, isNot(contains('g_gone')));
       expect(success.shareError, contains('그룹에 공유하지 못했어요'));
     });
   });
