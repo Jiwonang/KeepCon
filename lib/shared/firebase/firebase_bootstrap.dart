@@ -111,8 +111,19 @@ enum FirebaseTarget {
 ///
 /// [target]이 [FirebaseTarget.emulator]면 초기화 직후 Auth/Firestore를 로컬
 /// 에뮬레이터에 연결한다(실제 프로젝트도 계정도 불필요). 나머지 둘은 실제 백엔드에
-/// 붙으며, **web·android가 구성돼 있다** — iOS에서는 아직 [UnsupportedError]가 난다
-/// (macOS에서 `flutterfire configure --platforms=ios`를 두 프로젝트에 각각 돌려야 한다).
+/// 붙으며, **web·android가 구성돼 있다** — iOS에서는 아직 [UnsupportedError]가 난다.
+///
+/// iOS를 추가하려면 macOS에서 **프로젝트별로 `--out`을 명시해** 두 번 돌린다.
+/// `--out`을 빼면 CLI가 기본값(`lib/firebase_options.dart` = 실서비스)에 쓰므로,
+/// dev를 재생성한 한 번으로 실서비스 옵션이 dev 값으로 덮여 쓰인다:
+/// ```bash
+/// flutterfire configure --project=keepcon-dev    --platforms=android,ios,web \
+///   --android-package-name=com.keepcon.app --ios-bundle-id=com.keepcon.app \
+///   --out=lib/firebase_options_dev.dart
+/// flutterfire configure --project=keepcon-ab660  --platforms=android,ios,web \
+///   --android-package-name=com.keepcon.app --ios-bundle-id=com.keepcon.app \
+///   --out=lib/firebase_options.dart
+/// ```
 ///
 /// [emulatorHost]를 주면 에뮬레이터 호스트를 직접 지정한다(기본값은 플랫폼별 자동 판정 —
 /// [resolveEmulatorHost] 참조).
@@ -167,10 +178,12 @@ Future<void> connectToEmulators({String? host}) async {
 /// Android 에뮬레이터의 `localhost`는 **에뮬레이터 자신**을 가리키므로, 호스트 PC는
 /// 특수 주소 `10.0.2.2`로 접근해야 한다. 그 외(web/데스크톱/iOS 시뮬레이터)는 `localhost`.
 ///
-/// ⚠️ **USB로 연결한 Android 실기기는 이 기본값으로 닿지 않는다.** `10.0.2.2`는 AVD의
-/// 가상 라우팅이라 실기기에는 그런 주소가 없다. 실기기로 로컬 에뮬레이터에 붙으려면
-/// 같은 네트워크에 있는 PC의 사설 IP를 [connectToEmulators]의 `host`로 직접 넘겨라
-/// (실기기 시연은 dev 프로젝트가 간단하다 — 네트워크 설정이 필요 없다).
+/// ⚠️ **USB로 연결한 Android 실기기는 이 기본값으로 닿지 않으며, 그 조합은 지원하지 않는다.**
+/// `10.0.2.2`는 AVD의 가상 라우팅이라 실기기에는 그런 주소가 없다. [connectToEmulators]의
+/// `host`에 PC 사설 IP를 넘겨 우회하려면 ①에뮬레이터를 LAN에 바인딩(`firebase.json`의
+/// `emulators.*.host`) ②PC 방화벽 인바운드 허용 ③에뮬레이터가 평문 HTTP라
+/// `networkSecurityConfig`로 cleartext 허용 — 셋을 다 손봐야 한다.
+/// **실기기 시연은 dev 프로젝트를 써라**(`--dart-define=USE_FIREBASE=true`) — 설정이 없다.
 String resolveEmulatorHost() {
   if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
     return '10.0.2.2';

@@ -33,6 +33,8 @@ android {
     defaultConfig {
         // Firebase 콘솔(keepcon-dev·keepcon-ab660)에 등록된 Android 앱 패키지명과
         // **반드시 일치해야 한다** — 바꾸면 두 프로젝트 모두 앱을 재등록해야 한다.
+        // 템플릿 기본값 `com.example.*`을 쓰지 않는 이유: Google이 게시용으로 쓰지 말라고
+        // 못박은 예시 네임스페이스라, 소유 도메인 기반 고유 식별자를 써야 한다.
         applicationId = "com.keepcon.app"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
