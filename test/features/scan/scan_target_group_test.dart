@@ -279,7 +279,8 @@ void main() {
       }
     });
 
-    testWidgets('그룹 타일을 고르면 폼 세션에 그 groupId가 전달된다', (WidgetTester tester) async {
+    testWidgets('그룹 타일을 고르면 폼 세션에 그 groupId가 전달된다',
+        (WidgetTester tester) async {
       final ProviderContainer container = await pumpScanPage(tester);
       final Group target = (await myGroups(container)).first;
 
