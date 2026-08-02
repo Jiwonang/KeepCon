@@ -23,7 +23,6 @@
 ///
 /// ## 화면 진입
 /// `home`은 [AuthGate] — 세션 유무에 따라 로그인/앱 셸을 라우팅한다.
-/// 로그인·회원가입·로그아웃은 세션만 바꾸면 게이트가 화면을 전환한다.
 library;
 
 import 'package:flutter/material.dart';
@@ -49,15 +48,19 @@ const bool _useProd = bool.fromEnvironment('USE_FIREBASE_PROD');
 /// (플래그 두 개를 같이 넘길 필요 없음).
 const bool _useEmulator = bool.fromEnvironment('USE_FIREBASE_EMULATOR');
 
-/// 플래그 조합에서 백엔드를 결정한다. 플래그가 하나도 없으면 `null`(= in-memory 데모).
+/// 플래그 조합에서 백엔드를 결정한다.
 ///
 /// 우선순위는 **안전한 쪽이 이긴다** — 여러 플래그를 같이 넘긴 실수 상황에서
 /// 실서비스가 선택되는 일이 없도록 emulator > dev > prod 순으로 판정한다.
+///
+/// 별도의 실행 플래그가 지정되지 않은 경우(기본 실행) 팀 개발 프로젝트(dev)로 기본 연결된다.
 FirebaseTarget? _resolveTarget() {
   if (_useEmulator) return FirebaseTarget.emulator;
   if (_useFirebase) return FirebaseTarget.dev;
   if (_useProd) return FirebaseTarget.prod;
-  return null;
+
+  // 별도 플래그 없이 실행하더라도 팀원 요청에 따라 Firebase dev DB로 기본 연동
+  return FirebaseTarget.dev;
 }
 
 Future<void> main() async {
@@ -65,7 +68,7 @@ Future<void> main() async {
 
   final FirebaseTarget? target = _resolveTarget();
   final List<Override> overrides = target == null
-      ? _inMemoryOverrides() // 기본: in-memory 데모
+      ? _inMemoryOverrides() // null인 경우 fallback: in-memory 데모
       : await initFirebaseAndBuildOverrides(target: target);
 
   runApp(ProviderScope(overrides: overrides, child: const KeepConApp()));

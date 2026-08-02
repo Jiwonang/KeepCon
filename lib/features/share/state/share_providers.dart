@@ -464,3 +464,11 @@ class MemberNames {
     return _byId[userId] ?? fallback;
   }
 }
+
+/// Scan 페이지에서 저장 대상 그룹 목록 선택 시 소비하는 프로바이더.
+///
+/// 계약 정본인 [myGroupsProvider]를 watch하여 AsyncValue 내의 [Group] 리스트를 추출한다.
+/// 로딩 중이거나 에러 발생 시 빈 리스트를 반환하여 UI 안전성을 보장한다.
+final scanTargetGroupsProvider = Provider<List<Group>>((ref) {
+  return ref.watch(myGroupsProvider).valueOrNull ?? const <Group>[];
+});

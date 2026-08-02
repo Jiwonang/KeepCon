@@ -75,22 +75,25 @@ class _KeepConShellState extends ConsumerState<KeepConShell> {
         // 좁은 높이에서 아이콘+라벨 컬럼이 2px 넘치던 것을 해소한다.
         padding: EdgeInsets.zero,
         child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: <Widget>[
-            _NavItem(
-              icon: Icons.home_outlined,
-              selectedIcon: Icons.home,
-              label: '홈',
-              selected: _index == 0,
-              onTap: () => setState(() => _index = 0),
+            Expanded(
+              child: _NavItem(
+                icon: Icons.home_outlined,
+                selectedIcon: Icons.home,
+                label: '홈',
+                selected: _index == 0,
+                onTap: () => setState(() => _index = 0),
+              ),
             ),
             const SizedBox(width: 48), // 중앙 FAB 노치 공간
-            _NavItem(
-              icon: Icons.group_outlined,
-              selectedIcon: Icons.group,
-              label: '공유',
-              selected: _index == 1,
-              onTap: () => setState(() => _index = 1),
+            Expanded(
+              child: _NavItem(
+                icon: Icons.group_outlined,
+                selectedIcon: Icons.group,
+                label: '공유',
+                selected: _index == 1,
+                onTap: () => setState(() => _index = 1),
+              ),
             ),
           ],
         ),
@@ -119,25 +122,24 @@ class _NavItem extends StatelessWidget {
   Widget build(BuildContext context) {
     final ColorScheme scheme = Theme.of(context).colorScheme;
     final Color color = selected ? scheme.primary : scheme.onSurfaceVariant;
-    return Expanded(
-      child: InkWell(
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 8),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: <Widget>[
-              Icon(selected ? selectedIcon : icon, color: color, size: 24),
-              const SizedBox(height: 2),
-              Text(
-                label,
-                style: Theme.of(context)
-                    .textTheme
-                    .labelSmall
-                    ?.copyWith(color: color),
-              ),
-            ],
-          ),
+
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Icon(selected ? selectedIcon : icon, color: color, size: 24),
+            const SizedBox(height: 2),
+            Text(
+              label,
+              style: Theme.of(context)
+                  .textTheme
+                  .labelSmall
+                  ?.copyWith(color: color),
+            ),
+          ],
         ),
       ),
     );

@@ -13,6 +13,7 @@ library;
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart' as fb;
+import 'package:flutter/foundation.dart';
 
 import '../../../models/user.dart';
 import '../../auth_repository.dart';
@@ -201,6 +202,9 @@ class FirebaseAuthRepository implements AuthRepository {
 
   /// [fb.FirebaseAuthException.code]를 도메인 [AuthException]으로 매핑한다.
   AuthException _mapException(fb.FirebaseAuthException e) {
+    debugPrint('🔥 [Firebase 원본 에러 코드]: ${e.code}');
+    debugPrint('🔥 [Firebase 원본 에러 메시지]: ${e.message}');
+
     switch (e.code) {
       case 'email-already-in-use':
         return AuthException(AuthErrorCode.emailInUse, e.message);

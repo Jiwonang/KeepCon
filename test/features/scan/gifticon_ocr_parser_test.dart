@@ -22,6 +22,14 @@ void main() {
       expect(result.expiryDate, DateTime(2026, 12, 31));
     });
 
+    test('2자리 연도 포맷(YY.MM.DD) 유효기간을 정상 파싱한다', () {
+      final GifticonOcrResult result = parser.parse(
+        '스타벅스\n아메리카노 T\n26.08.01\n4500원',
+      );
+
+      expect(result.expiryDate, DateTime(2026, 8, 1));
+    });
+
     test('콤마 없는 "4500원" 줄도 금액으로 인식해 브랜드/상품명 후보에서 제외한다', () {
       final GifticonOcrResult result = parser.parse(
         '스타벅스\n4500원\n아메리카노 T',

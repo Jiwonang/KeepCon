@@ -60,7 +60,7 @@ class DefaultFirebaseOptions {
 
   static const FirebaseOptions android = FirebaseOptions(
     apiKey: 'AIzaSyAKRsQIvrOWpwIHK49xSXXE0CRVu6ccV7g',
-    appId: '1:412731641511:android:ccbd679e458b6a213ad582',
+    appId: '1:412731641511:android:00edcf3890f605de3ad582',
     messagingSenderId: '412731641511',
     projectId: 'keepcon-dev',
     storageBucket: 'keepcon-dev.firebasestorage.app',

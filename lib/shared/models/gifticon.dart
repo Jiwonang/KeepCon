@@ -130,6 +130,10 @@ class Gifticon {
   /// 이미지 없이 등록 가능하므로 없을 수 있다.
   final String? imagePath;
 
+  /// 저장될 그룹 ID. **nullable** — 개인 지갑(내 지갑)에 저장되는 경우 null,
+  /// 특정 공유 그룹에 저장되는 경우 해당 그룹의 ID.
+  final String? targetGroupId;
+
   /// Gifticon 인스턴스를 생성한다.
   const Gifticon({
     required this.id,
@@ -143,11 +147,12 @@ class Gifticon {
     required this.registeredAt,
     this.status = GifticonStatus.available,
     this.imagePath,
+    this.targetGroupId,
   });
 
   /// 일부 필드만 교체한 새 인스턴스를 반환한다.
   ///
-  /// nullable 필드([barcode], [imagePath])를 명시적으로 null로 지우는 것은 이 계약에서
+  /// nullable 필드([barcode], [imagePath], [targetGroupId])를 명시적으로 null로 지우는 것은 이 계약에서
   /// 지원하지 않는다(값 유지 또는 새 값 설정만). 필요 시 후속 계약에서 확장.
   Gifticon copyWith({
     String? id,
@@ -161,6 +166,7 @@ class Gifticon {
     DateTime? registeredAt,
     GifticonStatus? status,
     String? imagePath,
+    String? targetGroupId,
   }) {
     return Gifticon(
       id: id ?? this.id,
@@ -174,6 +180,7 @@ class Gifticon {
       registeredAt: registeredAt ?? this.registeredAt,
       status: status ?? this.status,
       imagePath: imagePath ?? this.imagePath,
+      targetGroupId: targetGroupId ?? this.targetGroupId,
     );
   }
 
@@ -192,7 +199,8 @@ class Gifticon {
           expiryDate == other.expiryDate &&
           registeredAt == other.registeredAt &&
           status == other.status &&
-          imagePath == other.imagePath;
+          imagePath == other.imagePath &&
+          targetGroupId == other.targetGroupId;
 
   @override
   int get hashCode => Object.hash(
@@ -207,10 +215,11 @@ class Gifticon {
         registeredAt,
         status,
         imagePath,
+        targetGroupId,
       );
 
   @override
   String toString() => 'Gifticon(id: $id, ownerId: $ownerId, brand: $brand, '
       'productName: $productName, price: $price, category: $category, '
-      'expiryDate: $expiryDate, status: $status)';
+      'expiryDate: $expiryDate, status: $status, targetGroupId: $targetGroupId)';
 }

@@ -29,7 +29,7 @@
         "lib/firebase_options_dev.dart": {
           "projectId": "keepcon-dev",
           "configurations": {
-            "android": "1:412731641511:android:ccbd679e458b6a213ad582",
+            "android": "1:412731641511:android:00edcf3890f605de3ad582",
             "web": "1:412731641511:web:90038e5af07ac1a43ad582"
           }
         }

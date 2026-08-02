@@ -3,16 +3,6 @@
 /// 레이아웃(위→아래): 인사 헤더 → 검색바+필터 → 만료 알림 배너 →
 /// 요약 통계 3카드 → 섹션 헤더(전체 N개 / 정렬) → 기프티콘 세로 리치 카드 리스트
 /// (좌 브랜드 타일 + 정보 + 우 썸네일 + D-day 뱃지).
-///
-/// 계약 소비:
-/// - 현재 사용자 = 세션 계약 정본 [sessionUserProvider](main은 자체 세션 구독 없음).
-/// - GifticonRepository.watchGifticons(ownerId) → 원천 목록([rawGifticonsProvider]).
-/// - 정렬([SortOption])·필터는 main에서 수행([visibleGifticonsProvider]).
-/// - 요약 통계는 원천 목록에서 계산([gifticonStatsProvider]).
-/// - 설정(다크모드)은 공유 [themeModeProvider]를 설정 시트에서 소비.
-///
-/// 색/폰트/라운드는 전부 `Theme.of(context)`/공유 팔레트 어댑터. 하드코딩 색 없음.
-/// 이 재디자인은 '디자인 스캐폴드' — 검색/필터 동작 일부는 정적 자리표시다.
 library;
 
 import 'package:flutter/material.dart';
@@ -23,13 +13,14 @@ import '../../shared/models/user.dart';
 import '../../shared/providers/session_provider.dart';
 import '../../shared/theme/brand_palette.dart';
 import '../../shared/theme/theme_tokens.dart';
-import 'state/gifticon_list_providers.dart';
-import 'state/gifticon_stats.dart';
 import '../../shared/util/date_format.dart' show formatYmdDot;
 import '../../shared/util/money_format.dart' show formatWon;
+import '../mypage/mypage_page.dart';
+import '../scan/scan_page.dart';
+import 'state/gifticon_list_providers.dart';
+import 'state/gifticon_stats.dart';
 import 'widgets/format.dart';
 import 'widgets/gifticon_status_label.dart';
-import '../mypage/mypage_page.dart';
 
 /// 메인(홈) 화면. [AppRoutes.main]에 등록해 사용한다.
 class MainPage extends ConsumerWidget {
@@ -62,8 +53,6 @@ class _HomeBody extends ConsumerWidget {
     final GifticonStats stats = ref.watch(gifticonStatsProvider);
     final SortOption sort = ref.watch(sortOptionProvider);
 
-    // valueOrNull: .value는 이전 값 없는 AsyncError에서 rethrow하므로
-    // 첫 방출이 에러면 홈 전체가 에러 화면이 된다(계약 매트릭스 #13 규약).
     final List<Gifticon> list = visibleAsync.valueOrNull ?? const <Gifticon>[];
 
     return CustomScrollView(
@@ -76,7 +65,7 @@ class _HomeBody extends ConsumerWidget {
               const SizedBox(height: 20),
               const _SearchRow(),
               const SizedBox(height: 16),
-              const _ExpiryBanner(),
+              _ExpiryBanner(stats: stats, gifticons: list),
               const SizedBox(height: 16),
               _StatsRow(stats: stats),
               const SizedBox(height: 20),
@@ -103,8 +92,9 @@ class _GreetingHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
-    final String initial = (user?.displayName.isNotEmpty ?? false)
-        ? user!.displayName.characters.first.toUpperCase()
+    final String displayName = user?.displayName ?? '';
+    final String initial = displayName.isNotEmpty
+        ? displayName.characters.first.toUpperCase()
         : 'K';
 
     return Row(
@@ -123,10 +113,18 @@ class _GreetingHeader extends StatelessWidget {
             ],
           ),
         ),
-        // 알림 벨 + 초록 뱃지 점.
-        _NotificationBell(),
+        IconButton(
+          onPressed: () async {
+            await Navigator.of(context).push(
+              MaterialPageRoute<void>(builder: (_) => const ScanPage()),
+            );
+          },
+          icon: const Icon(Icons.add_circle_outline),
+          tooltip: '기프티콘 추가',
+        ),
+        const SizedBox(width: 4),
+        const _NotificationBell(),
         const SizedBox(width: 8),
-        // 아바타(다크서피스 배경, 이니셜).
         Container(
           width: 40,
           height: 40,
@@ -144,11 +142,12 @@ class _GreetingHeader extends StatelessWidget {
           ),
         ),
         const SizedBox(width: 4),
-        // 설정 기어 — 마이 페이지(프로필·다크모드·로그아웃) 진입점.
         IconButton(
-          onPressed: () => Navigator.of(context).push(
-            MaterialPageRoute<void>(builder: (_) => const MyPage()),
-          ),
+          onPressed: () async {
+            await Navigator.of(context).push(
+              MaterialPageRoute<void>(builder: (_) => const MyPage()),
+            );
+          },
           icon: const Icon(Icons.settings_outlined),
           tooltip: '마이',
         ),
@@ -158,6 +157,8 @@ class _GreetingHeader extends StatelessWidget {
 }
 
 class _NotificationBell extends StatelessWidget {
+  const _NotificationBell();
+
   @override
   Widget build(BuildContext context) {
     final ColorScheme scheme = Theme.of(context).colorScheme;
@@ -197,7 +198,6 @@ class _SearchRow extends StatelessWidget {
     final ColorScheme scheme = Theme.of(context).colorScheme;
     return Row(
       children: [
-        // 검색바(회색 pill) — 동작은 정적 자리표시.
         Expanded(
           child: TextField(
             enabled: false,
@@ -208,7 +208,6 @@ class _SearchRow extends StatelessWidget {
           ),
         ),
         const SizedBox(width: 12),
-        // 필터 버튼(다크 원, 슬라이더 아이콘) — 정적 자리표시.
         InkResponse(
           onTap: () {},
           radius: 28,
@@ -231,12 +230,41 @@ class _SearchRow extends StatelessWidget {
 // ─────────────────────── 3. 만료 알림 배너 ───────────────────────
 
 class _ExpiryBanner extends StatelessWidget {
-  const _ExpiryBanner();
+  final GifticonStats stats;
+  final List<Gifticon> gifticons;
+
+  const _ExpiryBanner({
+    required this.stats,
+    required this.gifticons,
+  });
 
   @override
   Widget build(BuildContext context) {
     final ColorScheme scheme = Theme.of(context).colorScheme;
     final Color onDark = context.onDarkSurface;
+
+    final bool hasExpiring = stats.expiringSoonCount > 0;
+
+    Gifticon? soonItem;
+    final DateTime now = DateTime.now();
+    final DateTime today = DateTime(now.year, now.month, now.day);
+
+    for (final g in gifticons) {
+      final DateTime exp =
+          DateTime(g.expiryDate.year, g.expiryDate.month, g.expiryDate.day);
+      final int days = exp.difference(today).inDays;
+      if (days >= 0 && days <= 7 && g.status == GifticonStatus.available) {
+        soonItem = g;
+        break;
+      }
+    }
+
+    // 브랜드 명칭 추출 조건 수정 (Null-Safety 경고 방지)
+    final String brandName = soonItem != null ? soonItem.brand : '기프티콘';
+    final String title = hasExpiring ? '$brandName 곧 만료!' : '만료 임박 기프티콘 없음';
+    final String subTitle = hasExpiring
+        ? '${stats.expiringSoonCount}개의 기프티콘이 7일 내 만료됩니다'
+        : '모든 기프티콘의 유효기간이 여유롭습니다';
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -246,7 +274,6 @@ class _ExpiryBanner extends StatelessWidget {
       ),
       child: Row(
         children: [
-          // 초록 시계 아이콘.
           Container(
             width: 44,
             height: 44,
@@ -263,7 +290,7 @@ class _ExpiryBanner extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  '올리브영 곧 만료!',
+                  title,
                   style: TextStyle(
                     color: onDark,
                     fontWeight: FontWeight.w700,
@@ -272,7 +299,7 @@ class _ExpiryBanner extends StatelessWidget {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  '1개의 기프티콘이 7일 내 만료됩니다',
+                  subTitle,
                   style: TextStyle(
                     color: onDark.withValues(alpha: 0.7),
                     fontSize: 12,
@@ -282,7 +309,6 @@ class _ExpiryBanner extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 8),
-          // 확인 pill(초록).
           _ConfirmPill(onTap: () {}),
         ],
       ),
@@ -327,6 +353,9 @@ class _StatsRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final bool hasPrice = stats.totalPrice > 0;
+    final String priceText = hasPrice ? '${formatWon(stats.totalPrice)}원' : '-';
+
     return Row(
       children: [
         Expanded(
@@ -342,14 +371,14 @@ class _StatsRow extends StatelessWidget {
             label: '만료 임박',
             value: '${stats.expiringSoonCount}',
             icon: Icons.schedule,
-            emphasize: true,
+            emphasize: stats.expiringSoonCount > 0,
           ),
         ),
         const SizedBox(width: 12),
         Expanded(
           child: _StatCard(
             label: '총금액',
-            value: '${formatWon(stats.totalPrice)}원',
+            value: priceText,
             icon: Icons.account_balance_wallet_outlined,
           ),
         ),
@@ -414,7 +443,6 @@ class _SectionHeader extends StatelessWidget {
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
         Text('전체 $count개', style: theme.textTheme.titleMedium),
-        // 정렬 라벨(초록). 계약 SortOption enum 라벨을 표시(자리표시 — 정적).
         Row(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -467,7 +495,6 @@ class _RichGifticonCard extends StatelessWidget {
     final ColorScheme scheme = theme.colorScheme;
     final BrandStyle brand = BrandPalette.of(gifticon.brand);
 
-    // D-day는 날짜(자정) 기준으로 계산 — 시:분:초가 섞이면 하루 오차가 난다.
     final DateTime nowDate = DateTime.now();
     final DateTime today = DateTime(nowDate.year, nowDate.month, nowDate.day);
     final DateTime expDate = DateTime(gifticon.expiryDate.year,
@@ -477,6 +504,9 @@ class _RichGifticonCard extends StatelessWidget {
     final bool expired =
         gifticon.status == GifticonStatus.expired || daysLeft < 0;
 
+    final bool hasPrice = gifticon.price > 0;
+    final String priceText = hasPrice ? '${formatWon(gifticon.price)}원' : '-';
+
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: AppDecorations.softCard(scheme, shadowOpacity: 0.05),
@@ -485,7 +515,6 @@ class _RichGifticonCard extends StatelessWidget {
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // 좌: 브랜드 로고 타일.
               Container(
                 width: 64,
                 height: 84,
@@ -504,7 +533,6 @@ class _RichGifticonCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 14),
-              // 중앙: 브랜드·상품·가격·만료.
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -522,7 +550,7 @@ class _RichGifticonCard extends StatelessWidget {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      '${formatWon(gifticon.price)}원',
+                      priceText,
                       style: context.rowTitleStyle,
                     ),
                     const SizedBox(height: 10),
@@ -551,7 +579,6 @@ class _RichGifticonCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 10),
-              // 우: 기프티콘 썸네일(플레이스홀더 — 실제 이미지는 후속).
               Container(
                 width: 56,
                 height: 68,
@@ -565,7 +592,6 @@ class _RichGifticonCard extends StatelessWidget {
               ),
             ],
           ),
-          // 우상단: D-day 뱃지.
           Positioned(
             top: 0,
             right: 0,
