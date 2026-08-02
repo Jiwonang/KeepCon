@@ -137,9 +137,9 @@ class _GifticonFormState extends ConsumerState<GifticonForm> {
     final int? parsed = int.tryParse(clean);
     if (parsed == null) return raw;
     return parsed.toString().replaceAllMapped(
-      RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'),
-      (Match m) => '${m[1]},',
-    );
+          RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'),
+          (Match m) => '${m[1]},',
+        );
   }
 
   @override
@@ -161,7 +161,8 @@ class _GifticonFormState extends ConsumerState<GifticonForm> {
     // 외부(OCR 등)에서 프리필 값이 변경되었을 때 텍스트 컨트롤러 동기화
     ref.listen<GifticonFormState>(gifticonFormControllerProvider,
         (GifticonFormState? previous, GifticonFormState next) {
-      if (previous?.brand != next.brand && _brandController.text != next.brand) {
+      if (previous?.brand != next.brand &&
+          _brandController.text != next.brand) {
         _brandController.text = next.brand;
       }
       if (previous?.productName != next.productName &&

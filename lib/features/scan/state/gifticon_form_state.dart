@@ -282,7 +282,7 @@ class GifticonFormController extends StateNotifier<GifticonFormState> {
       if (saved.targetGroupId != null) {
         try {
           final shareRepo = _ref.read(shareRepositoryProvider);
-          
+
           // 계약 인터페이스 적용
           await shareRepo.shareGifticon(
             groupId: saved.targetGroupId!,
