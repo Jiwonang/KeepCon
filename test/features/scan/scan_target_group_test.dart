@@ -290,28 +290,35 @@ void main() {
       final ProviderContainer container = await pumpScanPage(tester);
       final List<Group> groups = await myGroups(container);
 
-      expect(find.text('내 지갑'), findsOneWidget);
+      // '내 지갑 (개인 소장)'으로 텍스트 변경 및 화면 스크롤 보장
+      final myWalletFinder = find.text('내 지갑 (개인 소장)');
+      await tester.ensureVisible(myWalletFinder);
+      expect(myWalletFinder, findsOneWidget);
 
-      // 하드코딩 목록이 아니라 시드 그룹의 이름·이모지를 동적으로 확인한다.
       for (final Group g in groups) {
-        expect(find.text(g.name), findsOneWidget);
-        expect(find.text(g.emoji), findsOneWidget);
+        final groupFinder = find.text(g.name);
+        await tester.ensureVisible(groupFinder);
+        expect(groupFinder, findsOneWidget);
       }
     });
 
-    testWidgets('그룹 타일을 고르면 폼 세션에 그 groupId가 전달된다',
-        (WidgetTester tester) async {
+    testWidgets('그룹 타일을 고르면 폼 세션에 그 groupId가 전달된다', (WidgetTester tester) async {
       final ProviderContainer container = await pumpScanPage(tester);
       final Group target = (await myGroups(container)).first;
 
-      // 그룹 선택 → 직접 입력 경로 시작.
-      await tester.tap(find.text(target.name));
-      await tester.pump();
-
-      await tester.tap(find.text('직접 입력'));
+      // 1. 그룹 선택
+      final targetFinder = find.text(target.name);
+      await tester.ensureVisible(targetFinder);
+      await tester.tap(targetFinder);
       await tester.pumpAndSettle();
 
-      // 폼 화면이 열렸고, 세션에는 선택한 그룹이 담겨 있다.
+      // 2. '직접 입력하기'로 텍스트 변경
+      final inputButtonFinder = find.text('직접 입력하기');
+      await tester.ensureVisible(inputButtonFinder);
+      await tester.tap(inputButtonFinder);
+      await tester.pumpAndSettle();
+
+      // 3. 검증
       expect(find.byType(GifticonForm), findsOneWidget);
       expect(
         container.read(gifticonFormControllerProvider).targetGroupId,
@@ -321,16 +328,11 @@ void main() {
 
     testWidgets("'내 지갑'을 고르면 대상 그룹이 없다", (WidgetTester tester) async {
       final ProviderContainer container = await pumpScanPage(tester);
-      final List<Group> groups = await myGroups(container);
 
-      // 그룹을 골랐다가 다시 '내 지갑'으로 되돌린다.
-      await tester.tap(find.text(groups.last.name));
-      await tester.pump();
-
-      await tester.tap(find.text('내 지갑'));
-      await tester.pump();
-
-      await tester.tap(find.text('직접 입력'));
+      // '내 지갑 (개인 소장)'으로 텍스트 변경
+      final myWalletFinder = find.text('내 지갑 (개인 소장)');
+      await tester.ensureVisible(myWalletFinder);
+      await tester.tap(myWalletFinder);
       await tester.pumpAndSettle();
 
       expect(

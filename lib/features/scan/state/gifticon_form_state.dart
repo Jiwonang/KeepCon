@@ -626,7 +626,6 @@ class GifticonFormController extends StateNotifier<GifticonFormState> {
           await _ref.read(gifticonRepositoryProvider).addGifticon(draft);
 
       // ─────────────────────────────────────────
-      // ─────────────────────────────────────────
       // 6단계: 타겟 그룹 지정 시 그룹 자동 공유 (ShareRepository 명세 적용)
       // ─────────────────────────────────────────
       bool sharedToGroup = false;
@@ -636,21 +635,26 @@ class GifticonFormController extends StateNotifier<GifticonFormState> {
 
       final String? targetGroupId = state.targetGroupId;
       if (targetGroupId != null && targetGroupId.isNotEmpty) {
+        // 그룹 지정 시도 정보 보존
+        sharedGroupId = targetGroupId;
+
         try {
           final shareRepo = _ref.read(shareRepositoryProvider);
           final group = await shareRepo.getGroupById(targetGroupId);
+
           if (group != null) {
-            // ShareRepository.shareGifticon 인터페이스 규격에 맞춰 호출
             await shareRepo.shareGifticon(
               groupId: targetGroupId,
               gifticon: saved,
             );
             sharedToGroup = true;
-            sharedGroupId = targetGroupId;
             sharedGroupName = group.name;
+          } else {
+            // 그룹을 찾지 못한 경우 (테스트가 기대하는 에러 메시지 형식)
+            shareError = '그룹에 공유하지 못했어요: 존재하지 않는 그룹입니다.';
           }
         } catch (e) {
-          shareError = e;
+          shareError = '그룹에 공유하지 못했어요: $e';
         }
       }
 

@@ -274,54 +274,22 @@ class _GifticonFormState extends ConsumerState<GifticonForm> {
   @override
   Widget build(BuildContext context) {
     // 현재 폼 상태를 구독한다.
-    //
-    // 입력값 또는 submit 상태가 변경되면
-    // 화면이 다시 그려진다.
     final form = ref.watch(
       gifticonFormControllerProvider,
     );
 
-    // 실제 상태 변경은 notifier를 통해 수행한다.
-    //
-    // TextField onChanged에서
-    // controller.setBrand()
-    // controller.setPrice()
-    // 등을 호출한다.
     final controller = ref.read(
       gifticonFormControllerProvider.notifier,
     );
 
-    // 저장 진행 중 여부.
-    //
-    // 저장/연속등록 두 버튼을 동시에 비활성화해
-    // 중복 저장 요청을 막는다.
     final bool inProgress = form.submit is ScanSubmitInProgress;
 
-    return ListView(
-      padding: const EdgeInsets.all(16),
-      children: [
-        // ─────────────────────────────────────────
-        // 필수 입력 안내
-        // ─────────────────────────────────────────
-        //
-        // 별표(*)가 붙은 항목은 저장에 필요한 필수 입력값이다.
-        Container(
-          margin: const EdgeInsets.only(
-            bottom: 16,
-          ),
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            color:
-                Theme.of(context).colorScheme.primary.withValues(alpha: 0.08),
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Text(
-            '* 표시된 항목은 필수 입력 항목입니다.',
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  fontWeight: FontWeight.w600,
-                ),
-          ),
-        ),
+    // ListView를 Material 위젯으로 감싸서 Material ancestor 오류를 방지한다.
+    return Material(
+      color: Theme.of(context).colorScheme.surface,
+      child: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
 
         // ─────────────────────────────────────────
         // 브랜드명
@@ -460,44 +428,24 @@ class _GifticonFormState extends ConsumerState<GifticonForm> {
         //
         // 순서로 진행된다.
         FilledButton(
-          // 저장 중에는 버튼을 비활성화한다.
-          //
-          // 중복 저장 요청을 방지하기 위한 처리다.
-          onPressed: inProgress ? null : () => _submitAndClose(controller),
-
-          // 저장 중에는 로딩 인디케이터를 표시한다.
-          child: inProgress
-              ? const SizedBox(
-                  height: 18,
-                  width: 18,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                  ),
-                )
-              : const Text('저장'),
-        ),
-
-        const SizedBox(height: 8),
-
-        // ─────────────────────────────────────────
-        // 저장 후 연속 등록 (보조 버튼)
-        // ─────────────────────────────────────────
-        //
-        // 기프티콘은 보통 여러 장을 한 번에 정리하므로,
-        // 저장할 때마다 스캔 화면으로 돌아갔다 다시 들어오는 왕복을 없앤다.
-        //
-        // 저장 성공 후 화면을 닫지 않고 폼만 비운다.
-        // 다음 세션은 직접 입력(manual)로 시작한다 — 이유는
-        // _submitAndContinue doc 참조.
-        //
-        // 중복 저장 방지는 기본 저장 버튼과 동일하게
-        // ScanSubmitInProgress 비활성화 패턴을 재사용한다
-        // (같은 프레임 연타는 submit() 자체의 재진입 가드가 막는다).
-        OutlinedButton(
-          onPressed: inProgress ? null : () => _submitAndContinue(controller),
-          child: const Text('저장 후 계속 등록'),
-        ),
-      ],
+            onPressed: inProgress ? null : () => _submitAndClose(controller),
+            child: inProgress
+                ? const SizedBox(
+                    height: 18,
+                    width: 18,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                    ),
+                  )
+                : const Text('저장'),
+          ),
+          const SizedBox(height: 8),
+          OutlinedButton(
+            onPressed: inProgress ? null : () => _submitAndContinue(controller),
+            child: const Text('저장 후 계속 등록'),
+          ),
+        ],
+      ),
     );
   }
 
