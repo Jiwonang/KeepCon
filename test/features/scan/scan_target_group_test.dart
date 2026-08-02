@@ -23,7 +23,16 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:keepcon/features/scan/scan_page.dart';
 import 'package:keepcon/features/scan/state/gifticon_form_state.dart';
 import 'package:keepcon/features/scan/state/scan_target_group_state.dart';
-import 'package:keepcon/features/scan/widgets/gifticon_form.dart';
+import 'package:keepcon/features/scan/widgets/gifticon_form.dart'
+    hide
+        GifticonFormController,
+        gifticonFormControllerProvider,
+        ScanSource,
+        GifticonFormState,
+        ScanSubmitState,
+        ScanSubmitSuccess,
+        ScanSubmitIdle,
+        ScanSubmitFailure;
 import 'package:keepcon/shared/models/gifticon.dart';
 import 'package:keepcon/shared/models/group.dart';
 import 'package:keepcon/shared/models/share.dart';

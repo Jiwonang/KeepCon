@@ -13,8 +13,11 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+// State 및 Controller 심볼 정의 파일 import
 import 'package:keepcon/features/scan/state/gifticon_form_state.dart';
-import 'package:keepcon/features/scan/util/expiry_quick_pick.dart';
+
+// UI 위젯 파일 import
 import 'package:keepcon/features/scan/widgets/gifticon_form.dart';
 
 void main() {
