@@ -240,22 +240,22 @@ class _ExpiryBanner extends StatelessWidget {
     final Color onDark = context.onDarkSurface;
 
     final bool hasExpiring = stats.expiringSoonCount > 0;
-    
+
     final Gifticon? soonItem = gifticons.cast<Gifticon?>().firstWhere(
       (g) {
         if (g == null) return false;
         final DateTime now = DateTime.now();
         final DateTime today = DateTime(now.year, now.month, now.day);
-        final DateTime exp = DateTime(g.expiryDate.year, g.expiryDate.month, g.expiryDate.day);
+        final DateTime exp =
+            DateTime(g.expiryDate.year, g.expiryDate.month, g.expiryDate.day);
         final int days = exp.difference(today).inDays;
         return days >= 0 && days <= 7 && g.status == GifticonStatus.available;
       },
       orElse: () => null,
     );
 
-    final String title = hasExpiring
-        ? '${soonItem?.brand ?? '기프티콘'} 곧 만료!'
-        : '만료 임박 기프티콘 없음';
+    final String title =
+        hasExpiring ? '${soonItem?.brand ?? '기프티콘'} 곧 만료!' : '만료 임박 기프티콘 없음';
     final String subTitle = hasExpiring
         ? '${stats.expiringSoonCount}개의 기프티콘이 7일 내 만료됩니다'
         : '모든 기프티콘의 유효기간이 여유롭습니다';
