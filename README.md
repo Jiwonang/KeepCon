@@ -150,13 +150,15 @@ flutter run -d chrome --dart-define=USE_FIREBASE=true
 # 실서비스 — 시연·배포 확인 전용
 flutter run -d chrome --dart-define=USE_FIREBASE_PROD=true
 
-# 모바일로 실행하려면 플랫폼 폴더 생성 후 — 플래그는 위와 동일하게 붙인다.
-# (플래그를 빼면 여기서도 데모 모드로 뜬다)
-flutter create . --platforms=android,ios
-flutter run --dart-define=USE_FIREBASE=true
+# Android 실기기 — USB로 연결하고 개발자 옵션 > USB 디버깅을 켠 뒤,
+# 위와 같은 플래그를 그대로 붙인다. `-d chrome` 만 빼면 된다.
+flutter devices                                   # 기기가 보이는지 먼저 확인
+flutter run --dart-define=USE_FIREBASE=true       # dev 서버에 붙어 실기기 데모
 ```
 
-> 모바일에서 dev·실서비스에 붙으려면 **`flutterfire configure`를 다시 돌려야 합니다.** 현재 두 프로젝트 모두 web만 구성돼 있어, android/ios에서는 초기화가 `UnsupportedError`로 실패합니다. 에뮬레이터 모드는 그대로 동작합니다.
+> **Android는 dev·실서비스 모두 구성돼 있습니다**(패키지명 `com.keepcon.app`). 실기기를 USB로 연결하고 위 명령을 그대로 쓰면 됩니다. **iOS는 아직 미구성입니다** — [재구성 절차](#flutterfire-configure를-다시-돌려야-할-때) 참조.
+>
+> ⚠️ **실기기 + 로컬 에뮬레이터 조합은 지원하지 않습니다.** `10.0.2.2` 자동 전환은 Android 스튜디오 에뮬레이터 전용이라 USB 실기기에서는 닿지 않고, 사설 IP로 우회하려면 에뮬레이터 LAN 바인딩(`firebase.json`의 `host`) · 방화벽 인바운드 허용 · cleartext HTTP 허용(`networkSecurityConfig`)까지 전부 손봐야 합니다. **실기기는 dev 서버(`USE_FIREBASE=true`)를 쓰세요** — 설정이 필요 없습니다.
 >
 > ⚠️ **플래그를 깜빡해도 앱은 멀쩡히 뜹니다.** 플래그 없이 실행하면 데모 모드로 시작하는데, 로그인도 돼 있고 기프티콘 목록도 보여서 겉보기엔 정상입니다. 그래서 **"왜 팀원이 만든 그룹이 안 보이지?"** 로 한참 헤매기 쉽습니다. 팀 작업 중이라면 아래 콘솔 출력부터 확인하세요.
 
@@ -334,7 +336,7 @@ flutter run -d chrome --dart-define=USE_FIREBASE=true
 - 포트: Auth `9099` · Firestore `8080` · **Emulator UI `http://localhost:4000`**
 - 앱 콘솔에 `KeepCon: Firebase 에뮬레이터 연결됨 …` 이 찍히면 연결된 것입니다.
 - 저장된 계정·문서는 Emulator UI에서 눈으로 확인할 수 있고, 앱에서 만든 데이터가 즉시 반영됩니다.
-- Android 실기기/에뮬레이터는 접속 호스트를 `10.0.2.2`로 자동 전환합니다(`resolveEmulatorHost()`).
+- Android에서는 접속 호스트가 `10.0.2.2`로 자동 전환됩니다(`resolveEmulatorHost()`). 단 **이 주소는 Android 스튜디오 에뮬레이터에서만 호스트 PC를 가리킵니다** — USB로 연결한 실기기에서는 닿지 않습니다. **실기기는 로컬 에뮬레이터 대신 dev 서버를 쓰세요**(사설 IP 우회는 LAN 바인딩·방화벽·cleartext 허용까지 필요해 권하지 않습니다).
 - 프로젝트 id `demo-keepcon`의 **`demo-` 접두사**는 "에뮬레이터 전용"이라는 Firebase 규약입니다 — 실제 Google 백엔드로 나가는 요청이 차단되므로, `lib/shared/firebase/demo_firebase_options.dart`의 더미 키는 노출될 비밀이 아닙니다.
 - ⚠️ Firestore가 **8080 포트**를 씁니다. 로컬 웹 서버를 띄울 때 이 포트를 피하세요.
 - ⚠️ **맨손으로 `firebase emulators:start`를 치지 마세요.** [`.firebaserc`](.firebaserc)의 `default`는 `keepcon-dev`라, 프로젝트를 지정하지 않으면 에뮬레이터가 그 id로 뜹니다(로컬이라 실제 데이터가 손상되지는 않지만 시드 import가 어긋납니다). `tool/emulators.sh`·`tool\emulators.cmd`는 `--project demo-keepcon`을 명시하므로 안전합니다 — **항상 이 스크립트로 띄우세요.** 직접 치겠다면 `firebase emulators:start -P emulator`.
@@ -395,7 +397,27 @@ tool\verify_firestore_rules.cmd
 | 데이터 | 팀 공유. 언제든 밀어도 됨 | 실서비스. 함부로 건드리지 말 것 |
 | 리셋 | `tool/reset_dev.sh` | 없음 (의도적) |
 
-두 프로젝트 모두 Firestore `(default)` · **Standard** 에디션 · **Native** 모드 · `asia-northeast3`(서울)이고, [`firestore.rules`](firestore.rules) · [`firestore.indexes.json`](firestore.indexes.json)이 배포돼 있습니다. 구성된 플랫폼은 **web만** 입니다(`android`/`ios` 디렉토리가 생기면 두 프로젝트 모두 재구성 필요).
+두 프로젝트 모두 Firestore `(default)` · **Standard** 에디션 · **Native** 모드 · `asia-northeast3`(서울)이고, [`firestore.rules`](firestore.rules) · [`firestore.indexes.json`](firestore.indexes.json)이 배포돼 있습니다. 구성된 플랫폼은 **web · android** 입니다(Android 패키지명 `com.keepcon.app`). **iOS는 미구성**입니다.
+
+#### `flutterfire configure`를 다시 돌려야 할 때
+
+**프로젝트가 둘이라 명령도 둘입니다.** `--project`와 `--out`을 **반드시 함께** 넘기세요 — `--out`을 빼면 CLI가 기본값인 `lib/firebase_options.dart`(= 실서비스)에 쓰기 때문에, dev 재생성 한 번으로 실서비스 옵션이 dev 값으로 덮여 씁니다. `--platforms`도 매번 전체를 나열해야 합니다(빠진 플랫폼은 생성물에서 사라집니다).
+
+```bash
+# dev — 팀 개발
+flutterfire configure --project=keepcon-dev --platforms=android,web \
+  --android-package-name=com.keepcon.app --out=lib/firebase_options_dev.dart
+
+# 실서비스
+flutterfire configure --project=keepcon-ab660 --platforms=android,web \
+  --android-package-name=com.keepcon.app --out=lib/firebase_options.dart
+```
+
+iOS를 추가하려면 **macOS에서** 위 두 명령의 `--platforms`에 `ios`를 더하고 `--ios-bundle-id=com.keepcon.app`을 넘기면 됩니다(Windows에서는 Xcode 프로젝트를 만들 수 없습니다).
+
+> ℹ️ **Android는 `google-services.json`을 쓰지 않습니다.** 그 파일은 백엔드를 하나로 고정해버리는데, KeepCon은 emulator·dev·prod를 실행 시 고르기 때문입니다(파일이 있으면 나머지 둘이 `[core/duplicate-app]`으로 죽습니다). web과 똑같이 **생성된 Dart 옵션만** 씁니다 — 자세한 근거는 [`android/app/build.gradle.kts`](android/app/build.gradle.kts) 주석에 있습니다.
+>
+> ⚠️ 그래서 **위 명령을 돌린 뒤에는 되돌릴 것이 있습니다.** CLI가 `google-services.json`과 `com.google.gms.google-services` 플러그인 선언([`android/app/build.gradle.kts`](android/app/build.gradle.kts) · [`android/settings.gradle.kts`](android/settings.gradle.kts))을 되살려 놓으므로, 셋 다 지우고 커밋하세요(json은 `.gitignore`에 등록돼 있습니다).
 
 > ⚠️ **Firestore 에디션은 반드시 Standard입니다.** Enterprise는 MongoDB 호환 API용이라 `cloud_firestore` SDK도 `request.auth.uid` 기반 보안 규칙도 동작하지 않습니다. 콘솔에서 DB를 새로 만들 일이 있으면 Standard/Native를 고르세요.
 >

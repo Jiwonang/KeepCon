@@ -1,4 +1,4 @@
-package com.example.keepcon
+package com.keepcon.app
 
 import io.flutter.embedding.android.FlutterActivity
 

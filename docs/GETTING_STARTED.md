@@ -225,14 +225,16 @@ flutter run -d chrome --dart-define=USE_FIREBASE=true
 
 **`--dart-define`은 앱을 재시작해야 바뀝니다.** 실행 중에 `r`(핫 리로드)을 눌러도 백엔드는 안 바뀝니다. 모드를 바꾸려면 `Ctrl+C`로 끄고 다시 실행하세요.
 
-**모바일로 띄우려면** 플랫폼 폴더를 먼저 만들어야 합니다(현재 저장소엔 웹만 있습니다):
+**Android 실기기로 띄우려면** 기기를 USB로 연결하고 *개발자 옵션 › USB 디버깅*을 켠 뒤, `-d chrome`만 빼고 실행하면 됩니다. 별도 설정은 없습니다(dev·실서비스 모두 Android가 구성돼 있습니다):
 
 ```bash
-flutter create . --platforms=android,ios
-flutter run --dart-define=USE_FIREBASE_EMULATOR=true
+flutter devices                                 # 기기가 목록에 보이는지 먼저 확인
+flutter run --dart-define=USE_FIREBASE=true     # dev 서버에 붙어 실기기로 시연
 ```
 
-안드로이드 에뮬레이터에서는 접속 주소가 자동으로 `10.0.2.2`로 바뀝니다. 따로 설정할 것 없습니다.
+**실기기 + 로컬 에뮬레이터 조합은 지원하지 않습니다.** `10.0.2.2` 자동 전환은 Android 스튜디오 에뮬레이터에만 해당하고, USB 실기기에는 그 주소가 없습니다. 사설 IP로 우회하려면 에뮬레이터 LAN 바인딩 · PC 방화벽 · cleartext HTTP 허용까지 전부 손봐야 하니, **실기기는 위처럼 dev 서버를 쓰세요.**
+
+**iOS는 아직 미구성입니다.** 구성 절차(`flutterfire configure`를 프로젝트별로 어떻게 돌리는지)는 [README](../README.md)의 "🔥 Firebase 연동" 절에 정리돼 있습니다. macOS가 필요합니다.
 
 ---
 

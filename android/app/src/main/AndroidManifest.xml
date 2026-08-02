@@ -1,6 +1,11 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Firebase(Auth·Firestore) 통신에 필요하다. debug/profile 매니페스트는 핫 리로드용으로
+         이미 선언하지만 그건 그 두 빌드 타입에만 적용되므로, release APK에서도 켜지려면
+         여기에 있어야 한다. 카메라 권한은 mobile_scanner 플러그인 매니페스트가 선언한다. -->
+    <uses-permission android:name="android.permission.INTERNET"/>
+
     <application
-        android:label="keepcon"
+        android:label="KeepCon"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity
