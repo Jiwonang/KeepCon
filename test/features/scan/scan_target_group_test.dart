@@ -6,15 +6,6 @@
 /// 2. 저장(addGifticon) 성공 후, 대상 그룹이 있으면 `ShareRepository.shareGifticon`이
 ///    호출되고 '내 지갑'이면 호출되지 않는다.
 /// 3. 그룹 공유가 실패해도(예: 사라진 그룹) 저장은 성공으로 유지된다(부분 실패 정책).
-///
-/// 계약 소비만으로 검증한다 — 리포지토리는 `lib/shared`의 InMemory 구현 조합
-/// (기본 provider = 같은 인스턴스 공유)을 쓰고, 페이지는 계약을 재정의하지 않는다.
-///
-/// **시드 상수에 하드 결합하지 않는다.** 시드(그룹 id·이름·이모지)는 share 소유의
-/// 데모 데이터일 뿐 계약이 아니므로, 테스트는 [myGroups]로 현재 사용자의 그룹을
-/// **동적으로 읽어** 그 id·이름을 사용한다 — share 담당이 시드를 바꿔도 이 테스트는
-/// 깨지지 않는다. 유일한 전제는 "기본 사용자가 둘 이상의 그룹에 속한다"이며,
-/// 전제가 깨지면 reason 메시지로 원인이 바로 드러난다.
 library;
 
 import 'package:flutter/material.dart';
@@ -23,7 +14,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:keepcon/features/scan/scan_page.dart';
 import 'package:keepcon/features/scan/state/gifticon_form_state.dart';
 import 'package:keepcon/features/scan/state/scan_target_group_state.dart';
-// GifticonForm 위젯 명시적 import (이름 충돌 방지를 위해 필요한 클래스만 선택)
 import 'package:keepcon/features/scan/widgets/gifticon_form.dart';
 import 'package:keepcon/shared/models/gifticon.dart';
 import 'package:keepcon/shared/models/group.dart';
@@ -35,7 +25,6 @@ import 'package:keepcon/shared/theme/app_theme.dart';
 void main() {
   final String myId = InMemoryAuthRepository.defaultUser.id;
 
-  /// 현재 사용자의 시드 그룹을 동적으로 읽는다(시드 상수 비결합 — 파일 doc 참조).
   Future<List<Group>> myGroups(ProviderContainer container) async {
     final List<Group> groups =
         await container.read(shareRepositoryProvider).getGroups(myId);
@@ -43,15 +32,12 @@ void main() {
     expect(
       groups.length,
       greaterThanOrEqualTo(2),
-      reason: '테스트 전제: 기본 사용자가 둘 이상의 시드 그룹에 속해야 한다 — '
-          'InMemoryShareRepository 시드에서 기본 사용자의 그룹 소속이 줄었다면 '
-          '이 전제부터 확인할 것',
+      reason: '테스트 전제: 기본 사용자가 둘 이상의 시드 그룹에 속해야 한다',
     );
 
     return groups;
   }
 
-  /// 폼을 유효한 상태로 채운다(계약 필수 필드).
   void fillValidForm(GifticonFormController controller) {
     controller.setBrand('스타벅스');
     controller.setProductName('아메리카노 T');
@@ -60,7 +46,6 @@ void main() {
     controller.setExpiryDate(DateTime(2027, 1, 31));
   }
 
-  /// 선택 목록 provider를 실제 화면처럼 "떠 있는 상태"로 만든다.
   Future<void> warmGroupList(ProviderContainer container) async {
     container.listen<List<Group>>(scanTargetGroupsProvider, (_, __) {});
 
@@ -71,7 +56,6 @@ void main() {
     }
   }
 
-  /// 대상 그룹을 지정해 한 건 저장한다. 반환값은 [GifticonFormController.submit] 결과.
   Future<Gifticon?> saveOnce(
     ProviderContainer container, {
     String? targetGroupId,
@@ -266,14 +250,11 @@ void main() {
       await tester.pumpAndSettle();
       final List<Group> groups = await myGroups(container);
 
-      // scan_page.dart UI의 실제 텍스트 '내 지갑'으로 검색
-      final myWalletFinder = find.text('내 지갑');
-      await tester.scrollUntilVisible(myWalletFinder, 100);
+      final myWalletFinder = find.text('내 지갑').first;
       expect(myWalletFinder, findsOneWidget);
 
       for (final Group g in groups) {
-        final groupFinder = find.text(g.name);
-        await tester.scrollUntilVisible(groupFinder, 100);
+        final groupFinder = find.text(g.name).first;
         expect(groupFinder, findsOneWidget);
       }
     });
@@ -284,13 +265,11 @@ void main() {
       await tester.pumpAndSettle();
       final Group target = (await myGroups(container)).first;
 
-      final targetFinder = find.text(target.name);
-      await tester.scrollUntilVisible(targetFinder, 100);
+      final targetFinder = find.text(target.name).first;
       await tester.tap(targetFinder);
       await tester.pumpAndSettle();
 
-      final inputButtonFinder = find.text('직접 입력하기');
-      await tester.scrollUntilVisible(inputButtonFinder, 100);
+      final inputButtonFinder = find.text('직접 입력하기').first;
       await tester.tap(inputButtonFinder);
       await tester.pumpAndSettle();
 
@@ -304,8 +283,7 @@ void main() {
       final ProviderContainer container = await pumpScanPage(tester);
       await tester.pumpAndSettle();
 
-      final myWalletFinder = find.text('내 지갑');
-      await tester.scrollUntilVisible(myWalletFinder, 100);
+      final myWalletFinder = find.text('내 지갑').first;
       await tester.tap(myWalletFinder);
       await tester.pumpAndSettle();
 
@@ -363,8 +341,8 @@ void main() {
       final ProviderContainer container =
           await pumpForm(tester, targetGroupId: target.id);
 
-      final submitButton = find.widgetWithText(OutlinedButton, '저장 후 계속 등록');
-      await tester.scrollUntilVisible(submitButton, 100);
+      final submitButton =
+          find.widgetWithText(OutlinedButton, '저장 후 계속 등록').first;
       await tester.tap(submitButton);
       await tester.pumpAndSettle();
 
@@ -387,8 +365,8 @@ void main() {
       final ProviderContainer container =
           await pumpForm(tester, targetGroupId: 'g_gone');
 
-      final submitButton = find.widgetWithText(OutlinedButton, '저장 후 계속 등록');
-      await tester.scrollUntilVisible(submitButton, 100);
+      final submitButton =
+          find.widgetWithText(OutlinedButton, '저장 후 계속 등록').first;
       await tester.tap(submitButton);
       await tester.pumpAndSettle();
 
@@ -403,8 +381,7 @@ void main() {
     testWidgets("'내 지갑' 저장은 공유 안내 문구가 붙지 않는다", (WidgetTester tester) async {
       await pumpForm(tester);
 
-      final saveButton = find.widgetWithText(FilledButton, '저장');
-      await tester.scrollUntilVisible(saveButton, 100);
+      final saveButton = find.widgetWithText(FilledButton, '저장').first;
       await tester.tap(saveButton);
       await tester.pumpAndSettle();
 
