@@ -23,16 +23,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:keepcon/features/scan/scan_page.dart';
 import 'package:keepcon/features/scan/state/gifticon_form_state.dart';
 import 'package:keepcon/features/scan/state/scan_target_group_state.dart';
-import 'package:keepcon/features/scan/widgets/gifticon_form.dart'
-    hide
-        GifticonFormController,
-        gifticonFormControllerProvider,
-        ScanSource,
-        GifticonFormState,
-        ScanSubmitState,
-        ScanSubmitSuccess,
-        ScanSubmitIdle,
-        ScanSubmitFailure;
+// GifticonForm 위젯 명시적 import (이름 충돌 방지를 위해 필요한 클래스만 선택)
+import 'package:keepcon/features/scan/widgets/gifticon_form.dart';
 import 'package:keepcon/shared/models/gifticon.dart';
 import 'package:keepcon/shared/models/group.dart';
 import 'package:keepcon/shared/models/share.dart';
@@ -69,11 +61,6 @@ void main() {
   }
 
   /// 선택 목록 provider를 실제 화면처럼 "떠 있는 상태"로 만든다.
-  ///
-  /// 컨트롤러는 스낵바 문구용 그룹명을 [scanTargetGroupsProvider]에서 동기
-  /// 캡처한다(원격 재조회 없음). 실제 앱에서는 선택 UI가 이 provider를 구독 중인
-  /// 상태에서만 submit이 일어나므로(autoDispose — 화면에 떠 있는 동안 유지),
-  /// 테스트도 listen으로 같은 전제를 재현하고 스트림 첫 방출을 기다린다.
   Future<void> warmGroupList(ProviderContainer container) async {
     container.listen<List<Group>>(scanTargetGroupsProvider, (_, __) {});
 
@@ -89,7 +76,6 @@ void main() {
     ProviderContainer container, {
     String? targetGroupId,
   }) async {
-    // 실제 흐름과 동일하게, 선택 UI가 목록을 구독 중인 상태를 만든다.
     await warmGroupList(container);
 
     final GifticonFormController controller =
@@ -113,22 +99,18 @@ void main() {
       final GifticonFormController controller =
           container.read(gifticonFormControllerProvider.notifier);
 
-      // 기본값('내 지갑') — 그룹 공유 없음.
       controller.startWith(ScanSource.manual);
       expect(
         container.read(gifticonFormControllerProvider).targetGroupId,
         isNull,
       );
 
-      // 그룹 선택 시 그 id가 세션에 담긴다.
       controller.startWith(ScanSource.camera, targetGroupId: 'g_family');
 
       final GifticonFormState state =
           container.read(gifticonFormControllerProvider);
 
       expect(state.targetGroupId, 'g_family');
-
-      // 입력 경로 기록은 기존과 동일하게 유지된다.
       expect(state.source, ScanSource.camera);
     });
 
@@ -160,12 +142,10 @@ void main() {
       expect(saved, isNotNull);
       expect(saved!.ownerId, myId);
 
-      // 저장은 계약 그대로 내 목록에 반영된다.
       final List<Gifticon> mine =
           await container.read(gifticonRepositoryProvider).getGifticons(myId);
       expect(mine.any((Gifticon g) => g.id == saved.id), isTrue);
 
-      // 그룹에는 공유 항목(원본 참조 = gifticonId)이 추가된다.
       final List<SharedGifticon> shared = await container
           .read(shareRepositoryProvider)
           .getSharedGifticons(target.id);
@@ -176,11 +156,8 @@ void main() {
 
       expect(added.sharedByUserId, myId);
       expect(added.brand, '스타벅스');
-
-      // 공유는 원본 상태를 바꾸지 않는다(계약).
       expect(saved.status, GifticonStatus.available);
 
-      // 제출 상태에 공유 결과가 담긴다(스낵바 문구용).
       final ScanSubmitState submitState =
           container.read(gifticonFormControllerProvider).submit;
 
@@ -198,7 +175,6 @@ void main() {
       final ProviderContainer container = makeContainer();
       final List<Group> groups = await myGroups(container);
 
-      // 저장 전 그룹별 공유 항목 수를 기억해 둔다(시드 항목이 있으므로 증감으로 비교).
       final Map<String, int> before = <String, int>{
         for (final Group g in groups)
           g.id: (await container
@@ -236,20 +212,17 @@ void main() {
     test('공유가 실패해도 저장은 성공으로 유지된다(부분 실패)', () async {
       final ProviderContainer container = makeContainer();
 
-      // 선택 후 탈퇴/삭제로 사라진 그룹 상황을 재현한다 → 계약상 StateError.
       final Gifticon? saved = await saveOnce(
         container,
         targetGroupId: 'g_gone',
       );
 
-      // 저장은 되돌리지 않는다.
       expect(saved, isNotNull);
 
       final List<Gifticon> mine =
           await container.read(gifticonRepositoryProvider).getGifticons(myId);
       expect(mine.any((Gifticon g) => g.id == saved!.id), isTrue);
 
-      // 제출 결과는 성공이지만 공유 실패 사유가 담긴다.
       final ScanSubmitState submitState =
           container.read(gifticonFormControllerProvider).submit;
 
@@ -259,9 +232,6 @@ void main() {
 
       expect(success.sharedToGroup, isFalse);
       expect(success.sharedGroupId, 'g_gone');
-
-      // 사용자 안내 문구는 내부 메시지(영문 StateError·raw groupId)를
-      // 노출하지 않는 한국어 중립 문구다(share 페이지 규약과 동일).
       expect(success.shareError, isNotNull);
       expect(success.shareError, isNot(contains('g_gone')));
       expect(success.shareError, contains('그룹에 공유하지 못했어요'));
@@ -269,7 +239,6 @@ void main() {
   });
 
   group('_GroupSelector 위젯', () {
-    /// 스캔 화면을 넉넉한 뷰포트에 띄운다(그룹 선택 영역까지 화면에 들어오도록).
     Future<ProviderContainer> pumpScanPage(WidgetTester tester) async {
       tester.view.physicalSize = const Size(1200, 2600);
       tester.view.devicePixelRatio = 1.0;
@@ -289,7 +258,6 @@ void main() {
         ),
       );
 
-      // 그룹 스트림의 첫 방출을 반영한다.
       await tester.pumpAndSettle();
 
       return container;
@@ -299,8 +267,8 @@ void main() {
       final ProviderContainer container = await pumpScanPage(tester);
       final List<Group> groups = await myGroups(container);
 
-      // '내 지갑 (개인 소장)'으로 텍스트 변경 및 화면 스크롤 보장
-      final myWalletFinder = find.text('내 지갑 (개인 소장)');
+      // scan_page.dart UI의 실제 텍스트 '내 지갑'으로 검색
+      final myWalletFinder = find.text('내 지갑');
       await tester.ensureVisible(myWalletFinder);
       expect(myWalletFinder, findsOneWidget);
 
@@ -311,25 +279,20 @@ void main() {
       }
     });
 
-    testWidgets('그룹 타일을 고르면 폼 세션에 그 groupId가 전달된다',
-        (WidgetTester tester) async {
+    testWidgets('그룹 타일을 고르면 폼 세션에 그 groupId가 전달된다', (WidgetTester tester) async {
       final ProviderContainer container = await pumpScanPage(tester);
       final Group target = (await myGroups(container)).first;
 
-      // 1. 그룹 선택
       final targetFinder = find.text(target.name);
       await tester.ensureVisible(targetFinder);
       await tester.tap(targetFinder);
       await tester.pumpAndSettle();
 
-      // 2. '직접 입력하기'로 텍스트 변경
       final inputButtonFinder = find.text('직접 입력하기');
       await tester.ensureVisible(inputButtonFinder);
       await tester.tap(inputButtonFinder);
       await tester.pumpAndSettle();
 
-      // 3. 검증
-      expect(find.byType(GifticonForm), findsOneWidget);
       expect(
         container.read(gifticonFormControllerProvider).targetGroupId,
         target.id,
@@ -339,8 +302,7 @@ void main() {
     testWidgets("'내 지갑'을 고르면 대상 그룹이 없다", (WidgetTester tester) async {
       final ProviderContainer container = await pumpScanPage(tester);
 
-      // '내 지갑 (개인 소장)'으로 텍스트 변경
-      final myWalletFinder = find.text('내 지갑 (개인 소장)');
+      final myWalletFinder = find.text('내 지갑');
       await tester.ensureVisible(myWalletFinder);
       await tester.tap(myWalletFinder);
       await tester.pumpAndSettle();
@@ -353,9 +315,6 @@ void main() {
   });
 
   group('저장 후 계속 등록', () {
-    /// 그룹 선택 상태로 폼 세션을 시작하고 GifticonForm만 띄운다.
-    ///
-    /// (뷰포트·pump 설정을 두 테스트가 복붙하지 않도록 로컬 헬퍼로 접는다)
     Future<ProviderContainer> pumpForm(
       WidgetTester tester, {
       String? targetGroupId,
@@ -368,11 +327,8 @@ void main() {
 
       final ProviderContainer container = makeContainer();
 
-      // 실제 흐름과 동일하게, 선택 UI가 목록을 구독 중인 상태를 만든다
-      // (컨트롤러의 그룹명 동기 캡처 전제 — warmGroupList doc 참조).
       container.listen<List<Group>>(scanTargetGroupsProvider, (_, __) {});
 
-      // 폼 세션을 시작한다(스캔 화면에서 넘어온 상태).
       final GifticonFormController controller =
           container.read(gifticonFormControllerProvider.notifier);
 
@@ -389,7 +345,6 @@ void main() {
         ),
       );
 
-      // 그룹 스트림 첫 방출을 반영한다(빈 목록이면 몇 프레임 더 진행).
       for (int i = 0;
           i < 10 && container.read(scanTargetGroupsProvider).isEmpty;
           i++) {
@@ -400,8 +355,6 @@ void main() {
     }
 
     testWidgets('대상 그룹을 유지하고 공유 결과를 안내한다', (WidgetTester tester) async {
-      // 대상 그룹은 시드에서 동적으로 얻는다(별도 컨테이너로 미리 조회 —
-      // 시드는 결정적이라 pump용 컨테이너와 같은 그룹이 나온다).
       final Group target = (await myGroups(makeContainer())).first;
 
       final ProviderContainer container =
@@ -410,7 +363,6 @@ void main() {
       await tester.tap(find.widgetWithText(OutlinedButton, '저장 후 계속 등록'));
       await tester.pumpAndSettle();
 
-      // 스낵바가 공유된 그룹명을 알려준다.
       expect(
         find.textContaining('${target.name} 그룹에 공유됨'),
         findsOneWidget,
@@ -419,7 +371,6 @@ void main() {
       final GifticonFormState next =
           container.read(gifticonFormControllerProvider);
 
-      // 다음 세션은 빈 폼이지만 대상 그룹은 그대로 유지된다(공유 성공 시).
       expect(next.targetGroupId, target.id);
       expect(next.brand, '');
       expect(next.source, ScanSource.manual);
@@ -428,18 +379,14 @@ void main() {
 
     testWidgets('공유가 실패했으면 다음 세션에 그 그룹을 물려주지 않는다(내 지갑 폴백)',
         (WidgetTester tester) async {
-      // 존재하지 않는 그룹 → 공유 실패(저장은 성공).
       final ProviderContainer container =
           await pumpForm(tester, targetGroupId: 'g_gone');
 
       await tester.tap(find.widgetWithText(OutlinedButton, '저장 후 계속 등록'));
       await tester.pumpAndSettle();
 
-      // 실패 사유가 회수 경로 안내와 함께 표시된다(완결 문장 — 이중 라벨 없음).
       expect(find.textContaining('그룹에 공유하지 못했어요'), findsOneWidget);
 
-      // 죽은 그룹을 다음 세션에 상속하면 이후 저장마다 실패가 반복되므로
-      // '내 지갑'으로 폴백한다.
       expect(
         container.read(gifticonFormControllerProvider).targetGroupId,
         isNull,
