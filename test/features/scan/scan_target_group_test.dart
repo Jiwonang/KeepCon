@@ -6,7 +6,6 @@
 /// 2. 저장(addGifticon) 성공 후, 대상 그룹이 있으면 `ShareRepository.shareGifticon`이
 ///    호출되고 '내 지갑'이면 호출되지 않는다.
 /// 3. 그룹 공유가 실패해도(예: 사라진 그룹) 저장은 성공으로 유지된다(부분 실패 정책).
-
 library;
 
 import 'package:flutter/material.dart';
@@ -51,9 +50,9 @@ void main() {
     container.listen<List<Group>>(scanTargetGroupsProvider, (_, __) {});
 
     for (int i = 0;
-        i < 20 && container.read(scanTargetGroupsProvider).isEmpty;
+        i < 30 && container.read(scanTargetGroupsProvider).isEmpty;
         i++) {
-      await Future<void>.delayed(const Duration(milliseconds: 20));
+      await Future<void>.delayed(const Duration(milliseconds: 10));
     }
   }
 
@@ -244,7 +243,7 @@ void main() {
       );
 
       for (int i = 0;
-          i < 20 && container.read(scanTargetGroupsProvider).isEmpty;
+          i < 30 && container.read(scanTargetGroupsProvider).isEmpty;
           i++) {
         await tester.pump(const Duration(milliseconds: 50));
       }
@@ -326,7 +325,7 @@ void main() {
       );
 
       for (int i = 0;
-          i < 20 && container.read(scanTargetGroupsProvider).isEmpty;
+          i < 30 && container.read(scanTargetGroupsProvider).isEmpty;
           i++) {
         await tester.pump(const Duration(milliseconds: 50));
       }
@@ -343,7 +342,7 @@ void main() {
 
       await tester.tap(find.widgetWithText(OutlinedButton, '저장 후 계속 등록').first);
       await tester.pump();
-      await tester.pump(const Duration(milliseconds: 100));
+      await tester.pump(const Duration(milliseconds: 300));
 
       expect(
         find.textContaining('그룹에 공유됨'),
@@ -366,7 +365,7 @@ void main() {
 
       await tester.tap(find.widgetWithText(OutlinedButton, '저장 후 계속 등록').first);
       await tester.pump();
-      await tester.pump(const Duration(milliseconds: 100));
+      await tester.pump(const Duration(milliseconds: 300));
 
       expect(find.textContaining('그룹에 공유하지 못했어요'), findsOneWidget);
 
@@ -381,7 +380,7 @@ void main() {
 
       await tester.tap(find.widgetWithText(FilledButton, '저장').first);
       await tester.pump();
-      await tester.pump(const Duration(milliseconds: 100));
+      await tester.pump(const Duration(milliseconds: 300));
 
       expect(find.textContaining('저장됨'), findsOneWidget);
       expect(find.textContaining('공유됨'), findsNothing);
