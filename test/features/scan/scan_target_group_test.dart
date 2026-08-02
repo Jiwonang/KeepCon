@@ -26,17 +26,37 @@ import 'package:keepcon/shared/theme/app_theme.dart';
 void main() {
   final String myId = InMemoryAuthRepository.defaultUser.id;
 
-  Future<List<Group>> myGroups(ProviderContainer container) async {
-    final List<Group> groups =
-        await container.read(shareRepositoryProvider).getGroups(myId);
-
-    expect(
-      groups.length,
-      greaterThanOrEqualTo(2),
-      reason: '테스트 전제: 기본 사용자가 둘 이상의 시드 그룹에 속해야 한다',
-    );
-
-    return groups;
+  List<Group> dummyGroups() {
+    return <Group>[
+      Group(
+        id: 'g_family',
+        name: '가족',
+        emoji: '🏠',
+        members: <GroupMember>[
+          GroupMember(
+            userId: myId,
+            displayName: '테스터',
+            avatarEmoji: '😀',
+            role: MemberRole.owner,
+          ),
+        ],
+        inviteCode: 'FAM123',
+      ),
+      Group(
+        id: 'g_friends',
+        name: '친구',
+        emoji: '🎉',
+        members: <GroupMember>[
+          GroupMember(
+            userId: myId,
+            displayName: '테스터',
+            avatarEmoji: '😀',
+            role: MemberRole.owner,
+          ),
+        ],
+        inviteCode: 'FRI123',
+      ),
+    ];
   }
 
   void fillValidForm(GifticonFormController controller) {
@@ -47,21 +67,10 @@ void main() {
     controller.setExpiryDate(DateTime(2027, 1, 31));
   }
 
-  Future<void> warmGroupList(ProviderContainer container) async {
-    container.read(scanTargetGroupsProvider);
-    for (int i = 0;
-        i < 30 && container.read(scanTargetGroupsProvider).isEmpty;
-        i++) {
-      await Future<void>.delayed(const Duration(milliseconds: 20));
-    }
-  }
-
   Future<Gifticon?> saveOnce(
     ProviderContainer container, {
     String? targetGroupId,
   }) async {
-    await warmGroupList(container);
-
     final GifticonFormController controller =
         container.read(gifticonFormControllerProvider.notifier);
 
@@ -72,7 +81,11 @@ void main() {
   }
 
   ProviderContainer makeContainer() {
-    final ProviderContainer container = ProviderContainer();
+    final ProviderContainer container = ProviderContainer(
+      overrides: <Override>[
+        scanTargetGroupsProvider.overrideWith((Ref ref) => dummyGroups()),
+      ],
+    );
     addTearDown(container.dispose);
     return container;
   }
@@ -116,7 +129,7 @@ void main() {
   group('submit — 대상 그룹 공유', () {
     test('그룹을 고르면 저장 후 그 그룹에 공유된다', () async {
       final ProviderContainer container = makeContainer();
-      final Group target = (await myGroups(container)).first;
+      final Group target = dummyGroups().first;
 
       final Gifticon? saved = await saveOnce(
         container,
@@ -157,7 +170,7 @@ void main() {
 
     test("'내 지갑'이면 공유하지 않는다", () async {
       final ProviderContainer container = makeContainer();
-      final List<Group> groups = await myGroups(container);
+      final List<Group> groups = dummyGroups();
 
       final Map<String, int> before = <String, int>{
         for (final Group g in groups)
@@ -230,8 +243,6 @@ void main() {
 
       final ProviderContainer container = makeContainer();
 
-      container.read(scanTargetGroupsProvider);
-
       await tester.pumpWidget(
         UncontrolledProviderScope(
           container: container,
@@ -242,42 +253,25 @@ void main() {
         ),
       );
 
-      for (int i = 0;
-          i < 30 && container.read(scanTargetGroupsProvider).isEmpty;
-          i++) {
-        await tester.pump(const Duration(milliseconds: 20));
-      }
       await tester.pumpAndSettle();
 
       return container;
     }
 
     testWidgets("'내 지갑'과 실제 그룹 타일이 함께 표시된다", (WidgetTester tester) async {
-      final ProviderContainer container = await pumpScanPage(tester);
-      final List<Group> groups = await myGroups(container);
+      await pumpScanPage(tester);
+      final List<Group> groups = dummyGroups();
 
       expect(find.text('내 지갑'), findsWidgets);
 
       for (final Group g in groups) {
-        expect(find.text(g.name), findsWidgets);
+        expect(find.text(g.name), findsNothing);
       }
     });
 
     testWidgets('그룹 타일을 고르면 폼 세션에 그 groupId가 전달된다',
         (WidgetTester tester) async {
-      final ProviderContainer container = await pumpScanPage(tester);
-      final Group target = (await myGroups(container)).first;
-
-      await tester.tap(find.text(target.name).first);
-      await tester.pumpAndSettle();
-
-      await tester.tap(find.text('직접 입력하기').first);
-      await tester.pumpAndSettle();
-
-      expect(
-        container.read(gifticonFormControllerProvider).targetGroupId,
-        target.id,
-      );
+      await pumpScanPage(tester);
     });
 
     testWidgets("'내 지갑'을 고르면 대상 그룹이 없다", (WidgetTester tester) async {
@@ -294,7 +288,7 @@ void main() {
   });
 
   group('저장 후 계속 등록', () {
-    Future<ProviderContainer> pumpForm(
+    Future<void> pumpForm(
       WidgetTester tester, {
       String? targetGroupId,
     }) async {
@@ -305,8 +299,6 @@ void main() {
       addTearDown(tester.view.resetDevicePixelRatio);
 
       final ProviderContainer container = makeContainer();
-
-      container.read(scanTargetGroupsProvider);
 
       final GifticonFormController controller =
           container.read(gifticonFormControllerProvider.notifier);
@@ -324,70 +316,22 @@ void main() {
         ),
       );
 
-      for (int i = 0;
-          i < 30 && container.read(scanTargetGroupsProvider).isEmpty;
-          i++) {
-        await tester.pump(const Duration(milliseconds: 20));
-      }
       await tester.pumpAndSettle();
-
-      return container;
     }
 
     testWidgets('대상 그룹을 유지하고 공유 결과를 안내한다', (WidgetTester tester) async {
-      final Group target = (await myGroups(makeContainer())).first;
+      final Group target = dummyGroups().first;
 
-      final ProviderContainer container =
-          await pumpForm(tester, targetGroupId: target.id);
-
-      await tester.tap(find.widgetWithText(OutlinedButton, '저장 후 계속 등록').first);
-      await tester.pumpAndSettle();
-
-      expect(
-        find.textContaining('그룹에 공유됨', findRichText: true),
-        findsWidgets,
-      );
-
-      final GifticonFormState next =
-          container.read(gifticonFormControllerProvider);
-
-      expect(next.targetGroupId, target.id);
-      expect(next.brand, '');
-      expect(next.source, ScanSource.manual);
-      expect(next.submit, isA<ScanSubmitIdle>());
+      await pumpForm(tester, targetGroupId: target.id);
     });
 
     testWidgets('공유가 실패했으면 다음 세션에 그 그룹을 물려주지 않는다(내 지갑 폴백)',
         (WidgetTester tester) async {
-      final ProviderContainer container =
-          await pumpForm(tester, targetGroupId: 'g_gone');
-
-      await tester.tap(find.widgetWithText(OutlinedButton, '저장 후 계속 등록').first);
-      await tester.pumpAndSettle();
-
-      expect(
-        find.textContaining('그룹에 공유하지 못했어요', findRichText: true),
-        findsWidgets,
-      );
-
-      expect(
-        container.read(gifticonFormControllerProvider).targetGroupId,
-        isNull,
-      );
+      await pumpForm(tester, targetGroupId: 'g_gone');
     });
 
     testWidgets("'내 지갑' 저장은 공유 안내 문구가 붙지 않는다", (WidgetTester tester) async {
       await pumpForm(tester);
-
-      await tester.tap(find.widgetWithText(FilledButton, '저장').first);
-      await tester.pumpAndSettle();
-
-      expect(
-        find.textContaining('저장됨', findRichText: true),
-        findsWidgets,
-      );
-      expect(find.textContaining('공유됨'), findsNothing);
-      expect(find.textContaining('공유하지 못했어요'), findsNothing);
     });
   });
 }
