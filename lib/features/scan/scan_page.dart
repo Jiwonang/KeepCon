@@ -54,11 +54,10 @@ class ThousandsSeparatorInputFormatter extends TextInputFormatter {
     }
 
     final parsedNumber = int.tryParse(cleanText) ?? 0;
-    
+
     // 정규식으로 천 단위 쉼표 추가
-    final formattedText = parsedNumber
-        .toString()
-        .replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]},');
+    final formattedText = parsedNumber.toString().replaceAllMapped(
+        RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]},');
 
     return TextEditingValue(
       text: formattedText,
@@ -564,9 +563,8 @@ class __GifticonFormScreenState extends ConsumerState<_GifticonFormScreen> {
       final clean = initialPrice.replaceAll(RegExp(r'[^0-9]'), '');
       if (clean.isNotEmpty) {
         final numVal = int.tryParse(clean) ?? 0;
-        initialPrice = numVal
-            .toString()
-            .replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]},');
+        initialPrice = numVal.toString().replaceAllMapped(
+            RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]},');
       }
     }
 

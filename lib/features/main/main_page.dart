@@ -261,8 +261,7 @@ class _ExpiryBanner extends StatelessWidget {
 
     // 브랜드 명칭 추출 조건 수정 (Null-Safety 경고 방지)
     final String brandName = soonItem != null ? soonItem.brand : '기프티콘';
-    final String title =
-        hasExpiring ? '$brandName 곧 만료!' : '만료 임박 기프티콘 없음';
+    final String title = hasExpiring ? '$brandName 곧 만료!' : '만료 임박 기프티콘 없음';
     final String subTitle = hasExpiring
         ? '${stats.expiringSoonCount}개의 기프티콘이 7일 내 만료됩니다'
         : '모든 기프티콘의 유효기간이 여유롭습니다';
