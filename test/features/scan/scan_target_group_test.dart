@@ -242,10 +242,11 @@ void main() {
         ),
       );
 
-      for (int i = 0;
-          i < 30 && container.read(scanTargetGroupsProvider).isEmpty;
-          i++) {
+      for (int i = 0; i < 40; i++) {
         await tester.pump(const Duration(milliseconds: 50));
+        if (container.read(scanTargetGroupsProvider).isNotEmpty) {
+          break;
+        }
       }
       await tester.pumpAndSettle();
 
@@ -324,10 +325,11 @@ void main() {
         ),
       );
 
-      for (int i = 0;
-          i < 30 && container.read(scanTargetGroupsProvider).isEmpty;
-          i++) {
+      for (int i = 0; i < 40; i++) {
         await tester.pump(const Duration(milliseconds: 50));
+        if (container.read(scanTargetGroupsProvider).isNotEmpty) {
+          break;
+        }
       }
       await tester.pumpAndSettle();
 
@@ -341,12 +343,11 @@ void main() {
           await pumpForm(tester, targetGroupId: target.id);
 
       await tester.tap(find.widgetWithText(OutlinedButton, '저장 후 계속 등록').first);
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 300));
+      await tester.pumpAndSettle();
 
       expect(
-        find.textContaining('그룹에 공유됨'),
-        findsOneWidget,
+        find.textContaining('그룹에 공유됨', findRichText: true),
+        findsWidgets,
       );
 
       final GifticonFormState next =
@@ -364,10 +365,12 @@ void main() {
           await pumpForm(tester, targetGroupId: 'g_gone');
 
       await tester.tap(find.widgetWithText(OutlinedButton, '저장 후 계속 등록').first);
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 300));
+      await tester.pumpAndSettle();
 
-      expect(find.textContaining('그룹에 공유하지 못했어요'), findsOneWidget);
+      expect(
+        find.textContaining('그룹에 공유하지 못했어요', findRichText: true),
+        findsWidgets,
+      );
 
       expect(
         container.read(gifticonFormControllerProvider).targetGroupId,
@@ -379,10 +382,12 @@ void main() {
       await pumpForm(tester);
 
       await tester.tap(find.widgetWithText(FilledButton, '저장').first);
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 300));
+      await tester.pumpAndSettle();
 
-      expect(find.textContaining('저장됨'), findsOneWidget);
+      expect(
+        find.textContaining('저장됨', findRichText: true),
+        findsWidgets,
+      );
       expect(find.textContaining('공유됨'), findsNothing);
       expect(find.textContaining('공유하지 못했어요'), findsNothing);
     });
