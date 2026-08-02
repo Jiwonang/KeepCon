@@ -13,14 +13,14 @@ import '../../shared/models/user.dart';
 import '../../shared/providers/session_provider.dart';
 import '../../shared/theme/brand_palette.dart';
 import '../../shared/theme/theme_tokens.dart';
+import '../../shared/util/date_format.dart' show formatYmdDot;
+import '../../shared/util/money_format.dart' show formatWon;
+import '../mypage/mypage_page.dart';
 import '../scan/scan_page.dart';
 import 'state/gifticon_list_providers.dart';
 import 'state/gifticon_stats.dart';
-import '../../shared/util/date_format.dart' show formatYmdDot;
-import '../../shared/util/money_format.dart' show formatWon;
 import 'widgets/format.dart';
 import 'widgets/gifticon_status_label.dart';
-import '../mypage/mypage_page.dart';
 
 /// 메인(홈) 화면. [AppRoutes.main]에 등록해 사용한다.
 class MainPage extends ConsumerWidget {
@@ -92,8 +92,9 @@ class _GreetingHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
-    final String initial = (user?.displayName.isNotEmpty ?? false)
-        ? user!.displayName.characters.first.toUpperCase()
+    final String displayName = user?.displayName ?? '';
+    final String initial = displayName.isNotEmpty
+        ? displayName.characters.first.toUpperCase()
         : 'K';
 
     return Row(
@@ -112,10 +113,9 @@ class _GreetingHeader extends StatelessWidget {
             ],
           ),
         ),
-        // 기프티콘 추가 버튼 (상단 헤더에 배치)
         IconButton(
-          onPressed: () {
-            Navigator.of(context).push(
+          onPressed: () async {
+            await Navigator.of(context).push(
               MaterialPageRoute<void>(builder: (_) => const ScanPage()),
             );
           },
@@ -123,7 +123,7 @@ class _GreetingHeader extends StatelessWidget {
           tooltip: '기프티콘 추가',
         ),
         const SizedBox(width: 4),
-        _NotificationBell(),
+        const _NotificationBell(),
         const SizedBox(width: 8),
         Container(
           width: 40,
@@ -143,9 +143,11 @@ class _GreetingHeader extends StatelessWidget {
         ),
         const SizedBox(width: 4),
         IconButton(
-          onPressed: () => Navigator.of(context).push(
-            MaterialPageRoute<void>(builder: (_) => const MyPage()),
-          ),
+          onPressed: () async {
+            await Navigator.of(context).push(
+              MaterialPageRoute<void>(builder: (_) => const MyPage()),
+            );
+          },
           icon: const Icon(Icons.settings_outlined),
           tooltip: '마이',
         ),
@@ -155,6 +157,8 @@ class _GreetingHeader extends StatelessWidget {
 }
 
 class _NotificationBell extends StatelessWidget {
+  const _NotificationBell();
+
   @override
   Widget build(BuildContext context) {
     final ColorScheme scheme = Theme.of(context).colorScheme;
@@ -241,21 +245,24 @@ class _ExpiryBanner extends StatelessWidget {
 
     final bool hasExpiring = stats.expiringSoonCount > 0;
 
-    final Gifticon? soonItem = gifticons.cast<Gifticon?>().firstWhere(
-      (g) {
-        if (g == null) return false;
-        final DateTime now = DateTime.now();
-        final DateTime today = DateTime(now.year, now.month, now.day);
-        final DateTime exp =
-            DateTime(g.expiryDate.year, g.expiryDate.month, g.expiryDate.day);
-        final int days = exp.difference(today).inDays;
-        return days >= 0 && days <= 7 && g.status == GifticonStatus.available;
-      },
-      orElse: () => null,
-    );
+    Gifticon? soonItem;
+    final DateTime now = DateTime.now();
+    final DateTime today = DateTime(now.year, now.month, now.day);
 
+    for (final g in gifticons) {
+      final DateTime exp =
+          DateTime(g.expiryDate.year, g.expiryDate.month, g.expiryDate.day);
+      final int days = exp.difference(today).inDays;
+      if (days >= 0 && days <= 7 && g.status == GifticonStatus.available) {
+        soonItem = g;
+        break;
+      }
+    }
+
+    // 브랜드 명칭 추출 조건 수정 (Null-Safety 경고 방지)
+    final String brandName = soonItem != null ? soonItem.brand : '기프티콘';
     final String title =
-        hasExpiring ? '${soonItem?.brand ?? '기프티콘'} 곧 만료!' : '만료 임박 기프티콘 없음';
+        hasExpiring ? '$brandName 곧 만료!' : '만료 임박 기프티콘 없음';
     final String subTitle = hasExpiring
         ? '${stats.expiringSoonCount}개의 기프티콘이 7일 내 만료됩니다'
         : '모든 기프티콘의 유효기간이 여유롭습니다';
@@ -498,7 +505,7 @@ class _RichGifticonCard extends StatelessWidget {
     final bool expired =
         gifticon.status == GifticonStatus.expired || daysLeft < 0;
 
-    final bool hasPrice = gifticon.price != null && gifticon.price! > 0;
+    final bool hasPrice = gifticon.price > 0;
     final String priceText = hasPrice ? '${formatWon(gifticon.price)}원' : '-';
 
     return Container(

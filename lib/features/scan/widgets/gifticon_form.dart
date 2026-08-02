@@ -73,7 +73,7 @@ const List<String> kScanCategoryPresets = <String>[
 /// 공유 실패는 **저장 실패가 아니다** — 기프티콘은 이미 내 목록에 저장돼 있고
 /// 그룹 공유만 안 된 상태다(부분 실패 정책 — [GifticonFormController.submit] 참조).
 String _shareNote(ScanSubmitSuccess success) {
-  final String? error = success.shareError;
+  final String? error = success.shareError?.toString();
 
   if (error != null) {
     return ' — $error';

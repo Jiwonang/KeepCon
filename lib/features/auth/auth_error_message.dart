@@ -3,12 +3,14 @@
 /// 페이지가 백엔드 예외가 아니라 계약 [AuthErrorCode]로 분기해 메시지를 정한다.
 library;
 
+import 'package:flutter/foundation.dart';
+
 import '../../shared/repositories/auth_repository.dart';
 
 /// [AuthException]의 [AuthErrorCode]를 사용자 표시용 한국어 문구로 변환한다.
 String authErrorMessage(AuthException e) {
   // 디버깅을 위한 원본 에러 정보 콘솔 출력
-  print('🔥 AuthException 발생 - Code: ${e.code}, Message: ${e.message}');
+  debugPrint('🔥 AuthException 발생 - Code: ${e.code}, Message: ${e.message}');
 
   switch (e.code) {
     case AuthErrorCode.emailInUse:

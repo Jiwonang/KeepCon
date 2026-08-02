@@ -110,9 +110,19 @@ class ScanSubmitInProgress extends ScanSubmitState {
 /// Repository가 id/registeredAt 등을 발급한다면
 /// 그 결과가 [saved]에 들어온다.
 class ScanSubmitSuccess extends ScanSubmitState {
-  const ScanSubmitSuccess(this.saved);
+  const ScanSubmitSuccess(
+    this.saved, {
+    this.sharedToGroup = false,
+    this.sharedGroupId,
+    this.sharedGroupName,
+    this.shareError,
+  });
 
   final Gifticon saved;
+  final bool sharedToGroup;
+  final String? sharedGroupId;
+  final String? sharedGroupName;
+  final Object? shareError;
 }
 
 /// 제출 실패.
@@ -145,6 +155,7 @@ class GifticonFormState {
     this.category = '',
     this.expiryDate,
     this.imagePath,
+    this.targetGroupId,
     this.submit = const ScanSubmitIdle(),
   });
 
@@ -197,6 +208,9 @@ class GifticonFormState {
   /// 직접 입력에서는 null일 수 있다.
   final String? imagePath;
 
+  /// 등록 시 공유할 대상 그룹 ID (옵션).
+  final String? targetGroupId;
+
   /// 현재 제출 상태.
   ///
   /// Idle / InProgress / Success / Failure 중 하나다.
@@ -216,6 +230,7 @@ class GifticonFormState {
     String? category,
     DateTime? expiryDate,
     String? imagePath,
+    String? targetGroupId,
     ScanSubmitState? submit,
   }) {
     return GifticonFormState(
@@ -227,6 +242,7 @@ class GifticonFormState {
       category: category ?? this.category,
       expiryDate: expiryDate ?? this.expiryDate,
       imagePath: imagePath ?? this.imagePath,
+      targetGroupId: targetGroupId ?? this.targetGroupId,
       submit: submit ?? this.submit,
     );
   }
@@ -344,9 +360,10 @@ class GifticonFormController extends StateNotifier<GifticonFormState> {
   ///
   /// 현재 카메라는 플러그인 미연동 상태이므로
   /// 이후 직접 입력으로 폴백할 수 있다.
-  void startWith(ScanSource source) {
+  void startWith(ScanSource source, {String? targetGroupId}) {
     state = GifticonFormState(
       source: source,
+      targetGroupId: targetGroupId,
     );
   }
 
@@ -463,6 +480,13 @@ class GifticonFormController extends StateNotifier<GifticonFormState> {
     );
   }
 
+  /// 타겟 그룹 ID 변경.
+  void setTargetGroupId(String? v) {
+    state = state.copyWith(
+      targetGroupId: v,
+    );
+  }
+
   /// 폼을 초기화한다.
   ///
   /// 추가 흐름 종료, 취소 또는 예외 발생 시 상태를 초기 상태로 비운다.
@@ -479,8 +503,9 @@ class GifticonFormController extends StateNotifier<GifticonFormState> {
   /// 3. 제출 상태 → InProgress
   /// 4. FormState → Gifticon 변환
   /// 5. Repository.addGifticon() 호출
-  /// 6. 성공 → ScanSubmitSuccess
-  /// 7. 실패 → ScanSubmitFailure
+  /// 6. 타겟 그룹 지정 시 ShareRepository를 통해 그룹 자동 공유
+  /// 7. 성공 → ScanSubmitSuccess
+  /// 8. 실패 → ScanSubmitFailure
   ///
   /// 계약 메서드:
   ///
@@ -601,18 +626,53 @@ class GifticonFormController extends StateNotifier<GifticonFormState> {
           await _ref.read(gifticonRepositoryProvider).addGifticon(draft);
 
       // ─────────────────────────────────────────
-      // 6단계: 저장 성공
+      // ─────────────────────────────────────────
+      // 6단계: 타겟 그룹 지정 시 그룹 자동 공유 (ShareRepository 명세 적용)
+      // ─────────────────────────────────────────
+      bool sharedToGroup = false;
+      String? sharedGroupId;
+      String? sharedGroupName;
+      Object? shareError;
+
+      final String? targetGroupId = state.targetGroupId;
+      if (targetGroupId != null && targetGroupId.isNotEmpty) {
+        try {
+          final shareRepo = _ref.read(shareRepositoryProvider);
+          final group = await shareRepo.getGroupById(targetGroupId);
+          if (group != null) {
+            // ShareRepository.shareGifticon 인터페이스 규격에 맞춰 호출
+            await shareRepo.shareGifticon(
+              groupId: targetGroupId,
+              gifticon: saved,
+            );
+            sharedToGroup = true;
+            sharedGroupId = targetGroupId;
+            sharedGroupName = group.name;
+          }
+        } catch (e) {
+          shareError = e;
+        }
+      }
+
+      // ─────────────────────────────────────────
+      // 7단계: 저장 성공
       // ─────────────────────────────────────────
       //
       // Repository가 반환한 최종 Gifticon을 상태에 저장한다.
       state = state.copyWith(
-        submit: ScanSubmitSuccess(saved),
+        submit: ScanSubmitSuccess(
+          saved,
+          sharedToGroup: sharedToGroup,
+          sharedGroupId: sharedGroupId,
+          sharedGroupName: sharedGroupName,
+          shareError: shareError,
+        ),
       );
 
       return saved;
     } catch (e) {
       // ─────────────────────────────────────────
-      // 7단계: 저장 실패
+      // 8단계: 저장 실패
       // ─────────────────────────────────────────
       //
       // Repository에서 발생한 예외를 사용자에게

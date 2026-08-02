@@ -31,13 +31,23 @@ class GifticonGridCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
-    final int daysLeft = gifticon.expiryDate.difference(DateTime.now()).inDays;
+
+    final DateTime now = DateTime.now();
+    final DateTime today = DateTime(now.year, now.month, now.day);
+    final DateTime expDate = DateTime(
+      gifticon.expiryDate.year,
+      gifticon.expiryDate.month,
+      gifticon.expiryDate.day,
+    );
+    final int daysLeft = expDate.difference(today).inDays;
+
     final bool soon = daysLeft <= _expirySoonDays;
     final Color dateColor = soon ? scheme.error : scheme.onSurfaceVariant;
 
-    // 금액 예외 처리 (null 이거나 0 이하일 경우 '-' 표기)
-    final bool hasPrice = gifticon.price != null && gifticon.price! > 0;
-    final String priceText = hasPrice ? '${formatWon(gifticon.price)}원' : '-';
+    // 가격 예외 처리 (0 이하일 경우 '-' 표기, 불필요한 null 비교 제거)
+    final int price = gifticon.price;
+    final bool hasPrice = price > 0;
+    final String priceText = hasPrice ? '${formatWon(price)}원' : '-';
 
     return Card(
       clipBehavior: Clip.antiAlias,
@@ -130,11 +140,13 @@ class _CardImage extends StatelessWidget {
     final ColorScheme scheme = Theme.of(context).colorScheme;
     final String? path = gifticon.imagePath;
     if (path != null && path.isNotEmpty) {
-      return Image.network(
-        path,
-        fit: BoxFit.cover,
-        errorBuilder: (_, __, ___) => _placeholder(scheme),
-      );
+      if (path.startsWith('http://') || path.startsWith('https://')) {
+        return Image.network(
+          path,
+          fit: BoxFit.cover,
+          errorBuilder: (_, __, ___) => _placeholder(scheme),
+        );
+      }
     }
     return _placeholder(scheme);
   }

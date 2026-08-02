@@ -36,6 +36,37 @@ enum _GifticonGroup {
   final IconData? icon;
 }
 
+/// 정규식을 활용한 천 단위 쉼표(,) 자동 포맷터 (intl 패키지 불필요)
+class ThousandsSeparatorInputFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    if (newValue.text.isEmpty) {
+      return newValue;
+    }
+
+    // 숫자만 추출
+    final cleanText = newValue.text.replaceAll(RegExp(r'[^0-9]'), '');
+    if (cleanText.isEmpty) {
+      return const TextEditingValue(text: '');
+    }
+
+    final parsedNumber = int.tryParse(cleanText) ?? 0;
+    
+    // 정규식으로 천 단위 쉼표 추가
+    final formattedText = parsedNumber
+        .toString()
+        .replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]},');
+
+    return TextEditingValue(
+      text: formattedText,
+      selection: TextSelection.collapsed(offset: formattedText.length),
+    );
+  }
+}
+
 class ScanPage extends ConsumerStatefulWidget {
   const ScanPage({super.key});
 
@@ -81,6 +112,11 @@ class _ScanPageState extends ConsumerState<ScanPage> {
       );
 
       if (file == null) {
+        if (mounted) {
+          setState(() {
+            _busy = false;
+          });
+        }
         return;
       }
 
@@ -228,6 +264,57 @@ class _ScanPageState extends ConsumerState<ScanPage> {
                       },
                     );
                   },
+                ),
+                const SizedBox(height: 28),
+                Text(
+                  '저장할 그룹 선택',
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: scheme.primary,
+                      width: 2,
+                    ),
+                    color: scheme.surfaceContainerHigh,
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 40,
+                        height: 40,
+                        decoration: BoxDecoration(
+                          color: scheme.primary.withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Icon(
+                          Icons.account_balance_wallet_rounded,
+                          color: scheme.primary,
+                          size: 22,
+                        ),
+                      ),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Text(
+                          '내 지갑',
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w700,
+                            color: scheme.primary,
+                          ),
+                        ),
+                      ),
+                      Icon(
+                        Icons.check_circle_rounded,
+                        color: scheme.primary,
+                        size: 22,
+                      ),
+                    ],
+                  ),
                 ),
                 const SizedBox(height: 20),
               ],
@@ -471,12 +558,23 @@ class __GifticonFormScreenState extends ConsumerState<_GifticonFormScreen> {
     super.initState();
     final initialState = ref.read(gifticonFormControllerProvider);
 
-    _brandController = TextEditingController(text: initialState.brand ?? '');
+    // 초기 가격에 쉼표 포맷 적용
+    String initialPrice = initialState.price;
+    if (initialPrice.isNotEmpty) {
+      final clean = initialPrice.replaceAll(RegExp(r'[^0-9]'), '');
+      if (clean.isNotEmpty) {
+        final numVal = int.tryParse(clean) ?? 0;
+        initialPrice = numVal
+            .toString()
+            .replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]},');
+      }
+    }
+
+    _brandController = TextEditingController(text: initialState.brand);
     _productNameController =
-        TextEditingController(text: initialState.productName ?? '');
-    _priceController = TextEditingController(text: initialState.price ?? '');
-    _barcodeController =
-        TextEditingController(text: initialState.barcode ?? '');
+        TextEditingController(text: initialState.productName);
+    _priceController = TextEditingController(text: initialPrice);
+    _barcodeController = TextEditingController(text: initialState.barcode);
   }
 
   @override
@@ -512,22 +610,25 @@ class __GifticonFormScreenState extends ConsumerState<_GifticonFormScreen> {
 
     final notifier = ref.read(gifticonFormControllerProvider.notifier);
 
+    // 저장 시 가격의 쉼표 제거 후 전달
+    final rawPrice = _priceController.text.replaceAll(',', '');
+
     notifier.setBrand(_brandController.text.trim());
     notifier.setProductName(_productNameController.text.trim());
-    notifier.setPrice(_priceController.text.trim());
+    notifier.setPrice(rawPrice);
     notifier.setBarcode(_barcodeController.text.trim());
 
     notifier.submit();
+
+    if (!mounted) return;
 
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('기프티콘이 성공적으로 저장되었습니다.')),
     );
 
-    // 1. 현재 입력 폼 화면 닫기
-    Navigator.of(context).pop();
-
-    // 2. 바텀 네비게이션을 첫 번째 탭(홈)으로 이동 (스택 전체를 메인으로 복귀)
-    Navigator.of(context).popUntil((route) => route.isFirst);
+    final navigator = Navigator.of(context);
+    navigator.pop();
+    navigator.popUntil((route) => route.isFirst);
   }
 
   @override
@@ -553,10 +654,9 @@ class __GifticonFormScreenState extends ConsumerState<_GifticonFormScreen> {
                   formState.imagePath!.isNotEmpty) ...[
                 ClipRRect(
                   borderRadius: BorderRadius.circular(12),
-                  child: Container(
+                  child: SizedBox(
                     height: 200,
                     width: double.infinity,
-                    color: theme.colorScheme.surfaceContainerHigh,
                     child: Image.file(
                       File(formState.imagePath!),
                       fit: BoxFit.cover,
@@ -622,9 +722,12 @@ class __GifticonFormScreenState extends ConsumerState<_GifticonFormScreen> {
               TextFormField(
                 controller: _priceController,
                 keyboardType: TextInputType.number,
+                inputFormatters: [
+                  ThousandsSeparatorInputFormatter(),
+                ],
                 decoration: const InputDecoration(
                   labelText: '금액 / 금액권 잔액 (선택)',
-                  hintText: '예: 10000',
+                  hintText: '예: 10,000',
                   border: OutlineInputBorder(),
                 ),
               ),
