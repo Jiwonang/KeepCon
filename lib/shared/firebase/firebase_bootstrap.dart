@@ -43,6 +43,10 @@
 ///
 /// # 기본(플래그 없음) = in-memory 데모
 /// flutter run -d chrome
+///
+/// # Android 실기기 시연 — USB 연결 + USB 디버깅을 켜고 `-d chrome`만 빼면 된다.
+/// # (에뮬레이터 대신 dev를 쓰는 이유는 [resolveEmulatorHost] 주석 참조)
+/// flutter run --dart-define=USE_FIREBASE=true
 /// ```
 library;
 
@@ -107,8 +111,8 @@ enum FirebaseTarget {
 ///
 /// [target]이 [FirebaseTarget.emulator]면 초기화 직후 Auth/Firestore를 로컬
 /// 에뮬레이터에 연결한다(실제 프로젝트도 계정도 불필요). 나머지 둘은 실제 백엔드에
-/// 붙으며, **web만 구성돼 있어** 다른 플랫폼에서는 [UnsupportedError]가 난다
-/// (`android`/`ios` 폴더를 만들었다면 `flutterfire configure`를 다시 돌려야 한다).
+/// 붙으며, **web·android가 구성돼 있다** — iOS에서는 아직 [UnsupportedError]가 난다
+/// (macOS에서 `flutterfire configure --platforms=ios`를 두 프로젝트에 각각 돌려야 한다).
 ///
 /// [emulatorHost]를 주면 에뮬레이터 호스트를 직접 지정한다(기본값은 플랫폼별 자동 판정 —
 /// [resolveEmulatorHost] 참조).
@@ -162,6 +166,11 @@ Future<void> connectToEmulators({String? host}) async {
 ///
 /// Android 에뮬레이터의 `localhost`는 **에뮬레이터 자신**을 가리키므로, 호스트 PC는
 /// 특수 주소 `10.0.2.2`로 접근해야 한다. 그 외(web/데스크톱/iOS 시뮬레이터)는 `localhost`.
+///
+/// ⚠️ **USB로 연결한 Android 실기기는 이 기본값으로 닿지 않는다.** `10.0.2.2`는 AVD의
+/// 가상 라우팅이라 실기기에는 그런 주소가 없다. 실기기로 로컬 에뮬레이터에 붙으려면
+/// 같은 네트워크에 있는 PC의 사설 IP를 [connectToEmulators]의 `host`로 직접 넘겨라
+/// (실기기 시연은 dev 프로젝트가 간단하다 — 네트워크 설정이 필요 없다).
 String resolveEmulatorHost() {
   if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
     return '10.0.2.2';
