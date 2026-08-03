@@ -403,13 +403,23 @@ tool\verify_firestore_rules.cmd
 
 #### `flutterfire configure`를 다시 돌려야 할 때
 
-**프로젝트가 둘이라 명령도 둘입니다.** 아래 4개 플래그를 **매번 전부** 넘기세요. 하나라도 빠지면 조용히 잘못된 결과가 나옵니다:
+**언제 돌려야 하는지부터**가 중요합니다. 플랫폼을 추가할 때 말고도, **패키지명·번들 id를 바꾸는 PR이 머지되면 그때 열려 있던 브랜치는 전부 다시 돌려야 합니다.**
+
+> ⚠️ **실제로 겪은 사고입니다.** `applicationId`를 `com.example.keepcon` → `com.keepcon.app`으로 바꾼 PR이 머지되기 27분 전에 다른 브랜치가 `configure`를 돌렸습니다(그 시점엔 옛 이름이 정상 값이라 CLI가 그 이름으로 **Firebase에 Android 앱을 새로 등록**). 이후 그 브랜치가 develop을 머지해 `build.gradle.kts`는 새 이름이 됐지만, **거기서 생성되는 `firebase_options_dev.dart`는 재생성하지 않아** 옛 앱을 가리킨 채 머지됐습니다. 소스와 생성물이 **서로 다른 파일이라 git 충돌도 나지 않습니다** — 사람이 알고 챙기지 않으면 아무도 못 봅니다. `keepcon-dev`에 남아 있는 중복 Android 앱이 그 흔적입니다.
+
+**프로젝트가 둘이라 명령도 둘입니다.** 아래 플래그를 **매번 전부** 넘기세요. 하나라도 빠지면 조용히 잘못된 결과가 나옵니다:
 
 | 빠뜨리면 | 생기는 일 |
 |---|---|
 | `--out` | CLI가 기본값 `lib/firebase_options.dart`(= **실서비스**)에 씁니다. dev 재생성 한 번으로 실서비스 옵션이 dev 값으로 덮여 씁니다. |
 | `--platforms` (전체 나열) | 빠진 플랫폼이 생성물에서 **사라집니다.** |
-| `--android-package-name` / `--ios-bundle-id` | CLI가 패키지명을 추측합니다. 어긋나면 **같은 이름의 앱을 하나 더 만들어** Firebase에 중복 등록하고, 옵션 파일이 그 새 앱을 가리킵니다(실제로 `keepcon-dev`에 `com.example.keepcon`용 Android 앱이 이렇게 하나 더 생겼습니다). |
+| `--android-package-name` / `--ios-bundle-id` | CLI가 프로젝트 파일에서 패키지명을 추측합니다. 명시하면 최소한 **내가 어떤 이름으로 등록하는지 커밋에 남습니다** — 위 사고처럼 브랜치 상태에 따라 값이 조용히 달라지는 걸 리뷰에서 잡을 수 있습니다. |
+
+돌린 뒤에는 **생성된 appId가 실제 `applicationId`/번들 id로 등록된 앱인지** 확인하세요:
+
+```bash
+firebase apps:sdkconfig ANDROID --project keepcon-dev   # package_name 이 com.keepcon.app 인지
+```
 
 ```bash
 # dev — 팀 개발
