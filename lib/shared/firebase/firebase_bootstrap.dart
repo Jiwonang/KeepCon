@@ -111,9 +111,9 @@ enum FirebaseTarget {
 ///
 /// [target]이 [FirebaseTarget.emulator]면 초기화 직후 Auth/Firestore를 로컬
 /// 에뮬레이터에 연결한다(실제 프로젝트도 계정도 불필요). 나머지 둘은 실제 백엔드에
-/// 붙으며, **web·android가 구성돼 있다** — iOS에서는 아직 [UnsupportedError]가 난다.
+/// 붙으며, **web·android·ios가 구성돼 있다**(데스크톱은 미구성 — [UnsupportedError]).
 ///
-/// iOS를 추가하려면 macOS에서 **프로젝트별로 `--out`을 명시해** 두 번 돌린다.
+/// 재생성할 일이 있으면 **프로젝트별로 `--out`을 명시해** 두 번 돌린다.
 /// `--out`을 빼면 CLI가 기본값(`lib/firebase_options.dart` = 실서비스)에 쓰므로,
 /// dev를 재생성한 한 번으로 실서비스 옵션이 dev 값으로 덮여 쓰인다:
 /// ```bash
@@ -124,6 +124,12 @@ enum FirebaseTarget {
 ///   --android-package-name=com.keepcon.app --ios-bundle-id=com.keepcon.app \
 ///   --out=lib/firebase_options.dart
 /// ```
+///
+/// ⚠️ **iOS도 `GoogleService-Info.plist`를 쓰지 않는다** — android의 `google-services.json`과
+/// 같은 이유다(네이티브가 [DEFAULT] FirebaseApp을 먼저 만들어 백엔드를 하나로 고정하면
+/// 나머지 둘이 `[core/duplicate-app]`으로 죽는다). 세 플랫폼 모두 생성된 Dart 옵션만 쓴다.
+/// macOS에서 `flutterfire configure`를 돌리면 CLI가 plist를 만들어 Xcode 타깃에 넣으므로,
+/// **그때는 plist와 Xcode 참조를 함께 지워야 한다**(Windows에서 돌리면 애초에 만들지 않는다).
 ///
 /// [emulatorHost]를 주면 에뮬레이터 호스트를 직접 지정한다(기본값은 플랫폼별 자동 판정 —
 /// [resolveEmulatorHost] 참조).
