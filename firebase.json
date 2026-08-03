@@ -23,13 +23,15 @@
           "projectId": "keepcon-ab660",
           "configurations": {
             "android": "1:1084555870987:android:415fba5bceb43efd25980e",
+            "ios": "1:1084555870987:ios:0b8e7fefa9e4795325980e",
             "web": "1:1084555870987:web:61a280ceaa34bc6c25980e"
           }
         },
         "lib/firebase_options_dev.dart": {
           "projectId": "keepcon-dev",
           "configurations": {
-            "android": "1:412731641511:android:00edcf3890f605de3ad582",
+            "android": "1:412731641511:android:ccbd679e458b6a213ad582",
+            "ios": "1:412731641511:ios:b8b20d62c057df373ad582",
             "web": "1:412731641511:web:90038e5af07ac1a43ad582"
           }
         }

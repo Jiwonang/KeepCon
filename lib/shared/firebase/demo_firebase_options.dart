@@ -84,6 +84,8 @@ class DemoFirebaseOptions {
     messagingSenderId: '000000000000',
     projectId: projectId,
     storageBucket: '$projectId.appspot.com',
-    iosBundleId: 'com.example.keepcon',
+    // 실제 프로젝트에 등록된 번들 id와 같게 둔다 — 에뮬레이터 값이 더미라도
+    // 번들 id가 어긋나면 "어느 앱 얘기인지" 헷갈리는 디버깅을 만든다.
+    iosBundleId: 'com.keepcon.app',
   );
 }

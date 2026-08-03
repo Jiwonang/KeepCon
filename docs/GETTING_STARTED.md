@@ -234,7 +234,7 @@ flutter run --dart-define=USE_FIREBASE=true     # dev 서버에 붙어 실기기
 
 **실기기 + 로컬 에뮬레이터 조합은 지원하지 않습니다.** `10.0.2.2` 자동 전환은 Android 스튜디오 에뮬레이터에만 해당하고, USB 실기기에는 그 주소가 없습니다. 사설 IP로 우회하려면 에뮬레이터 LAN 바인딩 · PC 방화벽 · cleartext HTTP 허용까지 전부 손봐야 하니, **실기기는 위처럼 dev 서버를 쓰세요.**
 
-**iOS는 아직 미구성입니다.** 구성 절차(`flutterfire configure`를 프로젝트별로 어떻게 돌리는지)는 [README](../README.md)의 "🔥 Firebase 연동" 절에 정리돼 있습니다. macOS가 필요합니다.
+**iOS도 dev·실서비스 모두 구성돼 있습니다**(번들 id `com.keepcon.app`). 다만 **빌드는 macOS + Xcode에서만** 됩니다 — Windows에서는 `flutter devices`에 iPhone이 잡히지 않습니다. macOS에서 처음 열 때 Xcode › Runner › Signing & Capabilities에서 개인 Apple ID로 팀을 지정해야 실기기에 설치됩니다.
 
 ---
 
