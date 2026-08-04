@@ -132,23 +132,30 @@ PowerShell에서는 앞에 `.\`를 붙입니다 — `.\tool\emulators.cmd`
 
 | 명령 | 데이터가 어디에 | 껐다 켜면 | 사전 준비 | 로그인 |
 |------|----------------|-----------|-----------|--------|
-| `flutter run -d chrome` | **앱 메모리** (Firebase 미접속) | **사라짐** | 없음 | 이미 로그인된 상태로 시작 |
-| `… --dart-define=USE_FIREBASE_EMULATOR=true` | **내 PC**의 가짜 Firebase | 시드 상태로 리셋 | **별도 터미널에서 에뮬레이터를 띄워둬야 함** | 커밋된 [공용 계정](#공용-테스트-계정-clone하면-바로-로그인) |
+| **`flutter run -d chrome`** (기본) | **내 PC**의 로컬 Firebase 에뮬레이터 | **남아 있음** (`.emulator-local/`) | **별도 터미널에서 에뮬레이터를 띄워둬야 함** | 처음엔 [공용 계정](#공용-테스트-계정-clone하면-바로-로그인), 이후 내가 만든 계정도 유지 |
 | `… --dart-define=USE_FIREBASE=true` | **dev 서버** `keepcon-dev` — **팀 공유** | 남아 있음 | 없음 (인터넷 필요) | 각자 회원가입 |
 | `… --dart-define=USE_FIREBASE_PROD=true` | 실서비스 `keepcon-ab660` | 남아 있음 | 없음 (인터넷 필요) | 각자 회원가입 |
+| `… --dart-define=USE_DEMO=true` | **앱 메모리** (Firebase 미접속) | **사라짐** | 없음 | 이미 로그인된 상태로 시작 |
+
+> ⚠️ **기본 실행에는 터미널이 2개 필요합니다.** 에뮬레이터는 자동으로 뜨지 않습니다 — 안 띄운 채 실행하면 앱이 **무엇을 해야 하는지 안내하는 화면**을 보여주고 멈춥니다. `Java`와 `Firebase CLI`가 필요합니다([준비물](#-1-준비물-설치)).
+>
+> **기본이 dev(팀 공유)가 아니라 에뮬레이터인 이유** — 기본값은 "아무것도 정하지 않았을 때 일어나는 일"이고 그건 대개 실수입니다. 그룹 삭제·공유 취소 같은 파괴적 테스트를 하려다 플래그를 깜빡하면 **남의 작업이 함께 사라집니다**(Firestore에는 롤백이 없습니다). 그래서 기본은 남의 데이터에 닿을 수 없는 쪽으로 둡니다. 팀 공유가 필요한 순간에는 **의도해서** 플래그를 붙이세요.
 
 ```bash
-# 데모 — 백엔드 없이 즉시 실행. 화면·UI 작업용
+# 터미널 A — 에뮬레이터를 먼저 띄운다 (cmd·PowerShell은 tool\emulators.cmd)
+bash tool/emulators.sh
+
+# 터미널 B — 기본 실행. 플래그 없이 위 에뮬레이터에 붙는다
 flutter run -d chrome
 
-# 에뮬레이터 — 터미널 A에서 tool/emulators.sh 를 먼저 띄운 뒤, 새 터미널에서
-flutter run -d chrome --dart-define=USE_FIREBASE_EMULATOR=true
-
-# dev 서버 — 팀원과 같은 그룹에 들어가는 공유 시나리오 테스트
+# dev 서버 — 팀원과 같은 그룹에 들어가는 공유 시나리오 테스트 (화면에 '공유 dev' 배지)
 flutter run -d chrome --dart-define=USE_FIREBASE=true
 
-# 실서비스 — 시연·배포 확인 전용
+# 실서비스 — 시연·배포 확인 전용 (화면에 '실서비스' 배지)
 flutter run -d chrome --dart-define=USE_FIREBASE_PROD=true
+
+# 데모 — 백엔드 없이 즉시 실행. 화면·UI 작업용(그룹 공유는 검증 불가)
+flutter run -d chrome --dart-define=USE_DEMO=true
 
 # 실기기(Android·iOS) — 기기를 연결하고 `-d chrome` 만 빼면 된다.
 # Android는 개발자 옵션 > USB 디버깅, iOS는 Xcode에서 서명 팀 설정이 먼저 필요하다.
@@ -162,7 +169,7 @@ flutter run --dart-define=USE_FIREBASE=true       # dev 서버에 붙어 실기�
 >
 > ⚠️ **실기기 + 로컬 에뮬레이터 조합은 지원하지 않습니다.** `10.0.2.2` 자동 전환은 Android 스튜디오 에뮬레이터 전용이라 USB 실기기에서는 닿지 않고, 사설 IP로 우회하려면 에뮬레이터 LAN 바인딩(`firebase.json`의 `host`) · 방화벽 인바운드 허용 · cleartext HTTP 허용(`networkSecurityConfig`)까지 전부 손봐야 합니다. **실기기는 dev 서버(`USE_FIREBASE=true`)를 쓰세요** — 설정이 필요 없습니다.
 >
-> ⚠️ **플래그를 깜빡해도 앱은 멀쩡히 뜹니다.** 플래그 없이 실행하면 데모 모드로 시작하는데, 로그인도 돼 있고 기프티콘 목록도 보여서 겉보기엔 정상입니다. 그래서 **"왜 팀원이 만든 그룹이 안 보이지?"** 로 한참 헤매기 쉽습니다. 팀 작업 중이라면 아래 콘솔 출력부터 확인하세요.
+> ⚠️ **팀원 그룹이 안 보인다면 플래그를 확인하세요.** 기본 실행은 **내 PC 에뮬레이터**라, 팀원이 만든 그룹은 보이지 않는 게 정상입니다(각자 PC에 격리돼 있습니다). 같은 그룹에 들어가려면 양쪽 다 `--dart-define=USE_FIREBASE=true` 로 띄워야 합니다. 어디에 붙었는지는 **화면 배지**와 아래 콘솔 출력으로 확인하세요.
 
 **어디에 붙었는지는 콘솔에 찍힙니다** — 헤매기 전에 여기부터 보세요:
 
@@ -296,7 +303,7 @@ gh api -X POST repos/Jiwonang/KeepCon/rulesets --input ruleset.json
 | 경로 | 실행 | 언제 쓰나 |
 |------|------|-----------|
 | in-memory 데모 | `flutter run` | 화면·UI 작업. 시드 데이터로 즉시 시연 |
-| Firebase 에뮬레이터 | `flutter run --dart-define=USE_FIREBASE_EMULATOR=true` | 혼자 하는 작업, **파괴적 테스트**, 보안 규칙 검증 |
+| Firebase 에뮬레이터 | `flutter run` (기본 — 플래그 불필요) | 혼자 하는 작업, **파괴적 테스트**, 보안 규칙 검증 |
 | **dev 프로젝트** (`keepcon-dev`) | `flutter run --dart-define=USE_FIREBASE=true` | **팀 개발 기본** — 여럿이 같은 그룹에 들어가는 공유 시나리오 |
 | 실서비스 (`keepcon-ab660`) | `flutter run --dart-define=USE_FIREBASE_PROD=true` | 시연·배포 확인 **전용** |
 

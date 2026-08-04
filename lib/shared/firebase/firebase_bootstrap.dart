@@ -1,7 +1,7 @@
 /// KeepCon 공유 계약 — Firebase 부트스트랩 / provider 전환.
 ///
 /// 이 파일은 "Firebase 백엔드로 전환하는 방법"을 함수+문서로 제공한다.
-/// **기본 실행 경로에서 호출하지 마라.** 기본은 in-memory 유지가 계약이다.
+/// 조립부(`lib/main.dart`)만 호출한다 — 페이지는 Repository 인터페이스만 본다.
 ///
 /// ---
 /// ## 계약의 가치 시연
@@ -14,8 +14,8 @@
 ///
 /// | 경로 | 언제 | 프로젝트 | 데이터 |
 /// |------|------|----------|--------|
-/// | [FirebaseTarget.emulator] | 혼자 하는 UI·로직 작업, 파괴적 테스트, 규칙 검증 | `demo-keepcon`(로컬) | 재시작하면 시드로 리셋 |
-/// | [FirebaseTarget.dev] | **팀 개발 기본** — 여러 사람이 같은 그룹에 들어가는 공유 시나리오 | `keepcon-dev` | 팀 공유. 언제든 통째로 밀어도 됨 |
+/// | [FirebaseTarget.emulator] | **기본** — 혼자 하는 UI·로직 작업, 파괴적 테스트, 규칙 검증 | `demo-keepcon`(로컬) | 내 PC에 유지(`.emulator-local/`) |
+/// | [FirebaseTarget.dev] | 여러 사람이 같은 그룹에 들어가는 **공유 시나리오** | `keepcon-dev` | 팀 공유. 언제든 통째로 밀어도 됨 |
 /// | [FirebaseTarget.prod] | 시연·배포 확인 **전용** | `keepcon-ab660` | 실서비스. 함부로 건드리지 말 것 |
 ///
 /// **에뮬레이터와 dev는 대체재가 아니라 역할이 다르다.**
@@ -31,8 +31,8 @@
 /// ---
 /// ## 실행 방법 (조립부는 `lib/main.dart`가 dart-define으로 분기)
 /// ```bash
-/// # 1) 에뮬레이터 (터미널 A: bash tool/emulators.sh, 터미널 B:)
-/// flutter run -d chrome --dart-define=USE_FIREBASE_EMULATOR=true
+/// # 기본(플래그 없음) = 에뮬레이터. 터미널 A에서 `bash tool/emulators.sh`를 먼저 띄운다.
+/// flutter run -d chrome
 ///
 /// # 팀 개발 — dev 프로젝트(keepcon-dev)
 /// flutter run -d chrome --dart-define=USE_FIREBASE=true
@@ -41,8 +41,8 @@
 /// # 실서비스 데이터를 건드리지 않게 하기 위해서다.
 /// flutter run -d chrome --dart-define=USE_FIREBASE_PROD=true
 ///
-/// # 기본(플래그 없음) = in-memory 데모
-/// flutter run -d chrome
+/// # 백엔드 없는 in-memory 데모 (그룹 공유는 검증 불가)
+/// flutter run -d chrome --dart-define=USE_DEMO=true
 ///
 /// # Android 실기기 시연 — USB 연결 + USB 디버깅을 켜고 `-d chrome`만 빼면 된다.
 /// # (에뮬레이터 대신 dev를 쓰는 이유는 [resolveEmulatorHost] 주석 참조)
@@ -176,6 +176,33 @@ Future<void> connectToEmulators({String? host}) async {
     // 실패하며 드러나므로, 여기서 앱을 죽이지 않고 경고만 남긴다.
     _emulatorConnected = true;
     debugPrint('KeepCon: 에뮬레이터 연결 건너뜀(이미 연결되었거나 실패): $e');
+  }
+}
+
+/// 에뮬레이터가 **실제로 떠 있는지** 확인한다.
+///
+/// [connectToEmulators]는 "요청을 이 주소로 보내라"고 SDK 설정만 바꿀 뿐, 그 주소에
+/// 무언가 떠 있는지는 보지 않는다. 그래서 에뮬레이터를 띄우지 않은 채 실행하면 앱은
+/// 멀쩡히 뜨고 **화면만 영원히 로딩 상태**가 된다 — 원인을 찾기 어려운 침묵 실패다.
+/// 조립부가 이 함수로 먼저 확인해 안내 화면을 띄운다.
+///
+/// [GetOptions]에 `Source.server`를 주어 **캐시로 성공한 척하는 것을 막는다.**
+/// `permission-denied`는 **연결 성공으로 친다** — 보안 규칙이 평가됐다는 건
+/// 에뮬레이터가 요청을 받고 응답했다는 뜻이기 때문이다.
+Future<bool> isEmulatorReachable({
+  Duration timeout = const Duration(seconds: 5),
+}) async {
+  try {
+    await FirebaseFirestore.instance
+        .doc('__health__/probe')
+        .get(const GetOptions(source: Source.server))
+        .timeout(timeout);
+    return true;
+  } on FirebaseException catch (e) {
+    return e.code == 'permission-denied';
+  } catch (_) {
+    // 타임아웃·연결 거부 등. 에뮬레이터가 없다고 본다.
+    return false;
   }
 }
 
