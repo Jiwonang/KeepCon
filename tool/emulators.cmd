@@ -34,7 +34,12 @@ cd /d "%~dp0.." || exit /b 1
 
 if not defined FIRESTORE_PROJECT set "FIRESTORE_PROJECT=demo-keepcon"
 if not defined SEED_DIR set "SEED_DIR=emulator-seed"
-if not defined LOCAL_DIR set "LOCAL_DIR=.emulator-local"
+
+rem LOCAL_DIR is FIXED on purpose - it is NOT read from the environment.
+rem --fresh deletes this directory outright, so allowing an override would let
+rem   set LOCAL_DIR=emulator-seed && tool\emulators.cmd --fresh
+rem wipe the committed seed. There is no reason to relocate the personal export.
+set "LOCAL_DIR=.emulator-local"
 
 where firebase >nul 2>&1
 if errorlevel 1 (
@@ -52,6 +57,14 @@ exit /b 2
 :fresh
 if exist "%LOCAL_DIR%\" (
   rmdir /s /q "%LOCAL_DIR%"
+  rem Do not trust rmdir's exit code alone - re-check. If the emulator is still
+  rem running it holds the files open, and swallowing that would print "Removed"
+  rem and then import the very data --fresh was asked to discard.
+  if exist "%LOCAL_DIR%\" (
+    echo [KeepCon] ERROR: could not remove "%LOCAL_DIR%".
+    echo [KeepCon] Make sure the emulator is not still running, then retry.
+    exit /b 1
+  )
   echo [KeepCon] Removed "%LOCAL_DIR%" - starting from the committed seed.
 ) else (
   echo [KeepCon] "%LOCAL_DIR%" not found - already at seed state.

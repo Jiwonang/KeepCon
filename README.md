@@ -312,7 +312,8 @@ gh api -X POST repos/Jiwonang/KeepCon/rulesets --input ruleset.json
 |---|---|---|
 | 팀원과 같은 그룹 | ❌ 불가 | ✅ |
 | 파괴적 테스트 | ✅ 자유 | ⚠️ 남의 데이터도 날아감 |
-| 리셋 | 재시작하면 자동 | `tool/reset_dev.sh` 수동 |
+| 데이터 지속 | ✅ 내 PC에 유지(`.emulator-local/`) | ✅ 서버에 유지 |
+| 리셋 | `tool/emulators.sh --fresh` | `tool/reset_dev.sh` |
 | 시드 계정 | ✅ 커밋돼 있음 | ❌ 각자 회원가입 |
 | 오프라인 | ✅ | ❌ |
 
@@ -372,7 +373,7 @@ flutter run -d chrome --dart-define=USE_FIREBASE=true
 
 만료임박·여유·만료를 섞어 둬서 D-day 뱃지와 정렬·필터를 바로 확인할 수 있습니다. 유효기간은 **시드를 만든 시점 기준 상대 날짜**라, 시간이 지나 날짜가 어긋나면 시드 재생성 스크립트를 다시 돌려 갱신하세요(아래 참고).
 
-- 에뮬레이터를 **끄면 그동안 만든 데이터는 사라지고**, 다시 켜면 위 시드 상태로 돌아갑니다. 의도된 동작입니다 — 각자 만든 임시 데이터가 커밋된 시드를 오염시키지 않게 자동 내보내기를 켜지 않았습니다.
+- 위 시드 계정은 **맨 처음 실행할 때** 들어옵니다. 그 뒤로 만든 데이터는 `Ctrl+C` 종료 시 개인 폴더 `.emulator-local/`에 저장되고 다음 실행 때 이어집니다 — **커밋된 `emulator-seed/`는 덮어쓰지 않습니다**(내보내는 곳이 분리돼 있습니다). 시드 상태로 되돌리려면 `bash tool/emulators.sh --fresh`.
 - 시드 자체를 바꾸려면(계정 추가 등) 에뮬레이터가 떠 있는 상태에서 `bash tool/seed_emulator.sh`(cmd·PowerShell은 `tool\seed_emulator.cmd`)를 실행하고 `emulator-seed/`를 커밋하세요.
 - ⚠️ 이 비밀번호는 공개 저장소에 그대로 적힌 **테스트 전용 값**입니다. 에뮬레이터는 실제 Google 백엔드와 연결되지 않으므로 노출 위험이 없지만, **실제 계정에는 절대 재사용하지 마세요.**
 
