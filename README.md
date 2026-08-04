@@ -338,6 +338,10 @@ flutter run -d chrome --dart-define=USE_FIREBASE=true
 - 포트: Auth `9099` · Firestore `8080` · **Emulator UI `http://localhost:4000`**
 - 앱 콘솔에 `KeepCon: Firebase 에뮬레이터 연결됨 …` 이 찍히면 연결된 것입니다.
 - 저장된 계정·문서는 Emulator UI에서 눈으로 확인할 수 있고, 앱에서 만든 데이터가 즉시 반영됩니다.
+- **내가 만든 계정·데이터는 내 PC에 유지됩니다.** `Ctrl+C`로 끄면 `.emulator-local/`(gitignore)에 저장되고 다음 실행 때 이어서 시작합니다 — 매번 회원가입할 필요가 없습니다. 맨 처음 한 번만 커밋된 `emulator-seed/`(공용 계정)에서 시작합니다.
+  - 처음 상태로 되돌리기: `bash tool/emulators.sh --fresh` (cmd는 `tool\emulators.cmd --fresh`)
+  - ⚠️ **`Ctrl+C`로 끄세요.** 창을 그냥 닫으면 저장 신호가 가지 않아 그 세션 데이터가 사라집니다.
+  - 커밋된 `emulator-seed/`는 이 저장에 **영향받지 않습니다** — 내보내는 곳이 개인 폴더로 분리돼 있습니다. 시드를 바꾸려면 `tool/seed_emulator.sh`를 의도적으로 실행하세요.
 - Android에서는 접속 호스트가 `10.0.2.2`로 자동 전환됩니다(`resolveEmulatorHost()`). 단 **이 주소는 Android 스튜디오 에뮬레이터에서만 호스트 PC를 가리킵니다** — USB로 연결한 실기기에서는 닿지 않습니다. **실기기는 로컬 에뮬레이터 대신 dev 서버를 쓰세요**(사설 IP 우회는 LAN 바인딩·방화벽·cleartext 허용까지 필요해 권하지 않습니다).
 - 프로젝트 id `demo-keepcon`의 **`demo-` 접두사**는 "에뮬레이터 전용"이라는 Firebase 규약입니다 — 실제 Google 백엔드로 나가는 요청이 차단되므로, `lib/shared/firebase/demo_firebase_options.dart`의 더미 키는 노출될 비밀이 아닙니다.
 - ⚠️ Firestore가 **8080 포트**를 씁니다. 로컬 웹 서버를 띄울 때 이 포트를 피하세요.
