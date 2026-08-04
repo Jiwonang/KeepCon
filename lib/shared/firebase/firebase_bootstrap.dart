@@ -179,6 +179,33 @@ Future<void> connectToEmulators({String? host}) async {
   }
 }
 
+/// 에뮬레이터가 **실제로 떠 있는지** 확인한다.
+///
+/// [connectToEmulators]는 "요청을 이 주소로 보내라"고 SDK 설정만 바꿀 뿐, 그 주소에
+/// 무언가 떠 있는지는 보지 않는다. 그래서 에뮬레이터를 띄우지 않은 채 실행하면 앱은
+/// 멀쩡히 뜨고 **화면만 영원히 로딩 상태**가 된다 — 원인을 찾기 어려운 침묵 실패다.
+/// 조립부가 이 함수로 먼저 확인해 안내 화면을 띄운다.
+///
+/// [GetOptions]에 `Source.server`를 주어 **캐시로 성공한 척하는 것을 막는다.**
+/// `permission-denied`는 **연결 성공으로 친다** — 보안 규칙이 평가됐다는 건
+/// 에뮬레이터가 요청을 받고 응답했다는 뜻이기 때문이다.
+Future<bool> isEmulatorReachable({
+  Duration timeout = const Duration(seconds: 5),
+}) async {
+  try {
+    await FirebaseFirestore.instance
+        .doc('__health__/probe')
+        .get(const GetOptions(source: Source.server))
+        .timeout(timeout);
+    return true;
+  } on FirebaseException catch (e) {
+    return e.code == 'permission-denied';
+  } catch (_) {
+    // 타임아웃·연결 거부 등. 에뮬레이터가 없다고 본다.
+    return false;
+  }
+}
+
 /// 플랫폼별 에뮬레이터 호스트를 판정한다.
 ///
 /// Android 에뮬레이터의 `localhost`는 **에뮬레이터 자신**을 가리키므로, 호스트 PC는
