@@ -43,11 +43,20 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 
 PROJECT="${FIRESTORE_PROJECT:-demo-keepcon}"
 SEED_DIR="${SEED_DIR:-emulator-seed}"
-LOCAL_DIR="${LOCAL_DIR:-.emulator-local}"
+
+# ⚠️ 환경변수로 바꿀 수 없게 **고정**한다. `--fresh`가 이 경로를 통째로 지우므로,
+# 재정의를 허용하면 `LOCAL_DIR=emulator-seed bash tool/emulators.sh --fresh` 한 줄로
+# **커밋된 시드가 삭제된다.** 개인 내보내기 경로를 바꿔야 할 이유도 없다.
+readonly LOCAL_DIR=".emulator-local"
 
 if [[ "${1:-}" == "--fresh" ]]; then
   if [[ -d "${LOCAL_DIR}" ]]; then
-    rm -rf "${LOCAL_DIR}"
+    # 삭제 실패를 삼키면 "지웠습니다"를 찍어 놓고 옛 데이터를 그대로 다시 불러온다
+    # (Windows에서 에뮬레이터가 아직 파일을 잡고 있으면 실제로 일어난다).
+    if ! rm -rf "${LOCAL_DIR}"; then
+      echo "❌ ${LOCAL_DIR}/ 를 지우지 못했습니다. 에뮬레이터가 아직 떠 있지 않은지 확인하세요." >&2
+      exit 1
+    fi
     echo "🧹 ${LOCAL_DIR}/ 를 지웠습니다 — 커밋된 시드에서 다시 시작합니다."
   else
     echo "🧹 ${LOCAL_DIR}/ 가 없습니다 — 이미 시드 상태입니다."
