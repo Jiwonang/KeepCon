@@ -79,6 +79,9 @@ SSOT_FUNCTIONS="retryMyGroups|foldSessionUser|daysUntilExpiry|isExpiringSoon|isE
 #      제어 키워드는 타입 후보에 없어 호출문이 매칭되지 않는다(내장 타입 키워드가
 #      호출문 앞에 오는 문법은 없다).
 #  3b) 반환 타입을 생략한 선언 — 이름으로 시작해 파라미터 뒤 `{`/`=>`로 이어지는 줄.
+#      선택적 `static`을 허용한다: `static isExpiringSoon(...) {`처럼 **static이면서
+#      반환 타입도 생략한** 클래스 멤버는 3a(타입이 있어야 매칭)와 이 규칙 사이로
+#      빠져나간다. 최상위 함수에는 static을 붙일 수 없으므로 이 조합은 클래스 멤버뿐이다.
 #      들여쓰기를 **0~2칸으로 제한**한다(최상위 함수 0칸·클래스 멤버 2칸). CI가
 #      `dart format`을 강제하므로 이 들여쓰기는 신뢰할 수 있는 불변식이다.
 #      제한이 없으면 여러 줄에 걸친 **호출**이 선언으로 오인된다 — 예를 들어
@@ -89,7 +92,7 @@ SSOT_FUNCTIONS="retryMyGroups|foldSessionUser|daysUntilExpiry|isExpiringSoon|isE
 # ⚠️ 한계: 파라미터가 여러 줄에 걸친 선언·클래스 내부의 들여쓰기 없는 특수 배치는
 # 줄 단위 정규식 밖이다 — 완전 강제가 아니라 흔한 실수 형태의 백스톱이다.
 fns_typed=$(scan "^[[:space:]]*(static[[:space:]]+)?(void|dynamic|bool|int|double|num|String|Object|Future<[^>]*>|Stream<[^>]*>|[A-Z][A-Za-z0-9_<>,.? ]*)\??[[:space:]]+_?(${SSOT_FUNCTIONS})(<[^>]*>)?[[:space:]]*\(") || exit 1
-fns_untyped=$(scan "^[[:space:]]{0,2}_?(${SSOT_FUNCTIONS})(<[^>]*>)?[[:space:]]*\([^;]*\)[[:space:]]*(async[[:space:]]*)?(\{|=>)") || exit 1
+fns_untyped=$(scan "^[[:space:]]{0,2}(static[[:space:]]+)?_?(${SSOT_FUNCTIONS})(<[^>]*>)?[[:space:]]*\([^;]*\)[[:space:]]*(async[[:space:]]*)?(\{|=>)") || exit 1
 fns="${fns_typed}${fns_untyped:+
 $fns_untyped}"
 if [ -n "$fns" ]; then
