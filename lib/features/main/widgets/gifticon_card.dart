@@ -12,11 +12,9 @@ import 'package:flutter/material.dart';
 import '../../../shared/models/gifticon.dart';
 import '../../../shared/theme/theme_tokens.dart';
 import '../../../shared/util/date_format.dart' show formatYmdDot;
+import '../../../shared/util/expiry_policy.dart';
 import '../../../shared/util/money_format.dart' show formatWon;
 import 'format.dart';
-
-/// 만료 임박 기준(일). 이 일수 이하로 남으면 만료일 텍스트를 danger로.
-const int _expirySoonDays = 7;
 
 /// 2열 그리드에 놓이는 기프티콘 카드.
 class GifticonGridCard extends StatelessWidget {
@@ -33,15 +31,11 @@ class GifticonGridCard extends StatelessWidget {
     final ColorScheme scheme = theme.colorScheme;
 
     final DateTime now = DateTime.now();
-    final DateTime today = DateTime(now.year, now.month, now.day);
-    final DateTime expDate = DateTime(
-      gifticon.expiryDate.year,
-      gifticon.expiryDate.month,
-      gifticon.expiryDate.day,
-    );
-    final int daysLeft = expDate.difference(today).inDays;
+    final int daysLeft = daysUntilExpiry(gifticon.expiryDate, now: now);
 
-    final bool soon = daysLeft <= _expirySoonDays;
+    // 만료됐거나 임박했으면 만료일 텍스트를 danger로. 이미 지난 것도 빨갛게 두는 게
+    // 자연스러우므로 [isExpiringSoon](하한 0)이 아니라 상한만 본다.
+    final bool soon = daysLeft <= expirySoonDays;
     final Color dateColor = soon ? scheme.error : scheme.onSurfaceVariant;
 
     // 가격 예외 처리 (0 이하일 경우 '-' 표기, 불필요한 null 비교 제거)

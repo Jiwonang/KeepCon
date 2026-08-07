@@ -14,6 +14,7 @@ import '../../shared/providers/session_provider.dart';
 import '../../shared/theme/brand_palette.dart';
 import '../../shared/theme/theme_tokens.dart';
 import '../../shared/util/date_format.dart' show formatYmdDot;
+import '../../shared/util/expiry_policy.dart';
 import '../../shared/util/money_format.dart' show formatWon;
 import '../mypage/mypage_page.dart';
 import '../scan/scan_page.dart';
@@ -247,13 +248,10 @@ class _ExpiryBanner extends StatelessWidget {
 
     Gifticon? soonItem;
     final DateTime now = DateTime.now();
-    final DateTime today = DateTime(now.year, now.month, now.day);
 
     for (final g in gifticons) {
-      final DateTime exp =
-          DateTime(g.expiryDate.year, g.expiryDate.month, g.expiryDate.day);
-      final int days = exp.difference(today).inDays;
-      if (days >= 0 && days <= 7 && g.status == GifticonStatus.available) {
+      if (g.status == GifticonStatus.available &&
+          isExpiringSoon(g.expiryDate, now: now)) {
         soonItem = g;
         break;
       }
@@ -263,7 +261,7 @@ class _ExpiryBanner extends StatelessWidget {
     final String brandName = soonItem != null ? soonItem.brand : '기프티콘';
     final String title = hasExpiring ? '$brandName 곧 만료!' : '만료 임박 기프티콘 없음';
     final String subTitle = hasExpiring
-        ? '${stats.expiringSoonCount}개의 기프티콘이 7일 내 만료됩니다'
+        ? '${stats.expiringSoonCount}개의 기프티콘이 $expirySoonDays일 내 만료됩니다'
         : '모든 기프티콘의 유효기간이 여유롭습니다';
 
     return Container(
@@ -496,13 +494,10 @@ class _RichGifticonCard extends StatelessWidget {
     final BrandStyle brand = BrandPalette.of(gifticon.brand);
 
     final DateTime nowDate = DateTime.now();
-    final DateTime today = DateTime(nowDate.year, nowDate.month, nowDate.day);
-    final DateTime expDate = DateTime(gifticon.expiryDate.year,
-        gifticon.expiryDate.month, gifticon.expiryDate.day);
-    final int daysLeft = expDate.difference(today).inDays;
+    final int daysLeft = daysUntilExpiry(gifticon.expiryDate, now: nowDate);
     final bool used = gifticon.status == GifticonStatus.used;
-    final bool expired =
-        gifticon.status == GifticonStatus.expired || daysLeft < 0;
+    final bool expired = gifticon.status == GifticonStatus.expired ||
+        isExpiredByDate(gifticon.expiryDate, now: nowDate);
 
     final bool hasPrice = gifticon.price > 0;
     final String priceText = hasPrice ? '${formatWon(gifticon.price)}원' : '-';
