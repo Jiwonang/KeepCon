@@ -17,6 +17,7 @@ import '../../../shared/util/expiry_policy.dart';
 import 'gifticon_filter.dart';
 import 'gifticon_list_providers.dart';
 import 'gifticon_sorter.dart';
+import 'now_provider.dart';
 
 /// 홈 요약 통계 값 객체.
 class GifticonStats {
@@ -61,7 +62,9 @@ class GifticonStats {
 final expiringSoonGifticonsProvider = Provider<List<Gifticon>>((ref) {
   final List<Gifticon> raw =
       ref.watch(rawGifticonsProvider).valueOrNull ?? const [];
-  final DateTime now = DateTime.now();
+  // 시각도 [nowProvider] 하나에서 받는다 — 술어만 통일하고 시계를 각자 읽으면
+  // 자정을 넘긴 뒤 배너와 표시 목록이 서로 다른 "오늘"로 판정한다.
+  final DateTime now = ref.watch(nowProvider);
 
   final List<Gifticon> soon = <Gifticon>[
     for (final Gifticon g in raw)

@@ -21,6 +21,7 @@ import 'package:keepcon/features/main/main_page.dart';
 import 'package:keepcon/features/main/state/gifticon_filter.dart';
 import 'package:keepcon/features/main/state/gifticon_list_providers.dart';
 import 'package:keepcon/features/main/state/gifticon_stats.dart';
+import 'package:keepcon/features/main/state/now_provider.dart';
 import 'package:keepcon/shared/models/gifticon.dart';
 import 'package:keepcon/shared/models/user.dart';
 import 'package:keepcon/shared/providers/repositories.dart';
@@ -34,7 +35,14 @@ void main() {
     displayName: '나',
   );
 
-  final DateTime now = DateTime.now();
+  /// 고정 기준 시각. **실제 시계를 쓰지 않는다** — 픽스처를 `DateTime.now()`로 만들고
+  /// 프로덕션도 자기 시계를 읽으면, 실행이 로컬 자정을 넘기는 순간 모든 픽스처가 하루씩
+  /// 밀려 경계 테스트가 통째로 깨진다(재현 불가능한 red CI).
+  ///
+  /// 실제 오늘과 한참 떨어진 날짜인 것도 의도다: 프로덕션 코드 어딘가가 [nowProvider]를
+  /// 안 거치고 `DateTime.now()`를 직접 읽으면 D-day가 수천 일로 튀어 **테스트가 즉시
+  /// 실패한다**. 오늘과 가까운 값이면 그 실수가 조용히 통과한다.
+  final DateTime fixedNow = DateTime(2030, 5, 15, 10, 0);
 
   /// 만료까지 [daysLeft]일 남은 기프티콘. 음수면 이미 만료된 것.
   Gifticon g(
@@ -51,17 +59,19 @@ void main() {
         productName: productName,
         category: '카페',
         price: 4500,
-        expiryDate: now.add(Duration(days: daysLeft)),
-        registeredAt: now,
+        expiryDate: fixedNow.add(Duration(days: daysLeft)),
+        registeredAt: fixedNow,
         status: status,
       );
 
-  ProviderContainer containerWith(List<Gifticon> seed) {
+  /// [now]를 주면 그 시각으로 화면을 구성한다(날짜 경과 시뮬레이션). 기본은 [fixedNow].
+  ProviderContainer containerWith(List<Gifticon> seed, {DateTime? now}) {
     final ProviderContainer container = ProviderContainer(
       overrides: <Override>[
         gifticonRepositoryProvider
             .overrideWithValue(InMemoryGifticonRepository(seed: seed)),
         sessionUserProvider.overrideWith((_) => Stream<User?>.value(me)),
+        nowProvider.overrideWithValue(now ?? fixedNow),
       ],
     );
     addTearDown(container.dispose);
@@ -78,12 +88,19 @@ void main() {
         .toList();
   }
 
+  List<String> visibleIds(ProviderContainer container) =>
+      (container.read(visibleGifticonsProvider).valueOrNull ??
+              const <Gifticon>[])
+          .map((Gifticon x) => x.id)
+          .toList();
+
   /// [seed]를 담은 홈 화면을 띄운다. 반환된 container로 필터 상태를 검사한다.
   Future<ProviderContainer> pumpHome(
     WidgetTester tester,
-    List<Gifticon> seed,
-  ) async {
-    final ProviderContainer container = containerWith(seed);
+    List<Gifticon> seed, {
+    DateTime? now,
+  }) async {
+    final ProviderContainer container = containerWith(seed, now: now);
     await tester.pumpWidget(
       UncontrolledProviderScope(
         container: container,
@@ -196,13 +213,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(container.read(filterProvider).expiringSoonOnly, isTrue);
-      expect(
-        container
-            .read(visibleGifticonsProvider)
-            .valueOrNull
-            ?.map((Gifticon x) => x.id),
-        <String>['soon'],
-      );
+      expect(visibleIds(container), <String>['soon']);
       expect(find.text('만료 임박 1개'), findsOneWidget,
           reason: '걸러진 목록을 "전체"라고 부르면 기프티콘이 사라졌다고 읽힌다');
     });
@@ -226,14 +237,37 @@ void main() {
           .read(expiringSoonGifticonsProvider)
           .map((Gifticon x) => x.id)
           .toList();
-      final List<String> visibleIds =
-          (container.read(visibleGifticonsProvider).valueOrNull ??
-                  const <Gifticon>[])
-              .map((Gifticon x) => x.id)
-              .toList();
-
       expect(bannerIds, <String>['d1', 'd7']);
-      expect(visibleIds, bannerIds);
+      expect(visibleIds(container), bannerIds);
+    });
+
+    testWidgets('날짜가 하루 지나도 배너와 필터가 같은 시계를 본다', (WidgetTester tester) async {
+      // 회귀 방지: 배너 목록과 표시 목록이 각자 `DateTime.now()`를 읽던 시절, 두
+      // provider는 **무효화 트리거도 달랐다** — 배너 목록은 원천이 바뀔 때만, 표시
+      // 목록은 필터가 바뀔 때도 재계산됐다. 그래서 자정을 넘긴 뒤 확인을 누르면 배너는
+      // 어제 기준, 목록은 오늘 기준으로 판정해 개수가 갈렸다. 술어를 하나로 합쳐도
+      // 시계가 갈리면 답은 그대로 갈린다.
+      //
+      // D-8 항목은 기준일엔 임박이 아니지만 하루 뒤엔 D-7이라 임박이 된다 — 두 소비자가
+      // 같은 시각을 봐야만 둘 다 "임박"으로 답한다.
+      final ProviderContainer container = await pumpHome(
+        tester,
+        <Gifticon>[g('d8', daysLeft: 8), g('far', daysLeft: 40)],
+        now: fixedNow.add(const Duration(days: 1)),
+      );
+
+      expect(
+        container.read(expiringSoonGifticonsProvider).map((Gifticon x) => x.id),
+        <String>['d8'],
+        reason: '하루 지났으므로 D-8이던 것이 D-7이 되어 임박이다',
+      );
+
+      await tester.tap(find.text('확인'));
+      await tester.pumpAndSettle();
+
+      expect(visibleIds(container), <String>['d8'],
+          reason: '필터도 같은 시각으로 판정해야 배너가 센 것과 일치한다');
+      expect(find.text('만료 임박 1개'), findsOneWidget);
     });
 
     testWidgets('필터가 걸려도 배너는 원천 기준을 유지한다', (WidgetTester tester) async {

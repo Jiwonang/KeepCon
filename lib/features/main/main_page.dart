@@ -21,6 +21,7 @@ import '../scan/scan_page.dart';
 import 'state/gifticon_filter.dart';
 import 'state/gifticon_list_providers.dart';
 import 'state/gifticon_stats.dart';
+import 'state/now_provider.dart';
 import 'widgets/format.dart';
 import 'widgets/gifticon_status_label.dart';
 
@@ -262,17 +263,23 @@ class _ExpiryBanner extends ConsumerWidget {
 
     final GifticonFilter filter = ref.watch(filterProvider);
     final bool isFiltered = filter.expiringSoonOnly;
+    final DateTime now = ref.watch(nowProvider);
 
     // 목록은 만료 임박순 정렬본이므로 first가 "가장 급한 것"이다.
     final Gifticon soonest = expiringSoon.first;
     final int others = expiringSoon.length - 1;
-    final int daysLeft = daysUntilExpiry(soonest.expiryDate);
+
+    // 이 항목을 목록에 넣은 판정과 **같은 시각**으로 D-day를 센다. 여기서 시계를 새로
+    // 읽으면(`now:` 생략) 자정 직후 리빌드에서 "-1일 뒤 만료"처럼 목록 판정과 어긋난
+    // 값이 찍힌다. `<= 0` 하한도 그 방어의 일부다.
+    final int daysLeft = daysUntilExpiry(soonest.expiryDate, now: now);
+    final String whenLabel = daysLeft <= 0 ? '오늘 만료' : '$daysLeft일 뒤 만료';
 
     final String title = others == 0
         ? '${soonest.brand} 곧 만료!'
         : '${soonest.brand} 외 $others개 곧 만료!';
     final String subTitle = others == 0
-        ? '${soonest.productName} · ${daysLeft == 0 ? '오늘 만료' : '$daysLeft일 뒤 만료'}'
+        ? '${soonest.productName} · $whenLabel'
         : '${expiringSoon.length}개의 기프티콘이 $expirySoonDays일 내 만료됩니다';
 
     return Container(
