@@ -90,8 +90,12 @@ final visibleGifticonsProvider = Provider<AsyncValue<List<Gifticon>>>((ref) {
   final SortOption sort = ref.watch(sortOptionProvider);
 
   return rawAsync.whenData((List<Gifticon> raw) {
-    final List<Gifticon> filtered =
-        raw.where(filter.matches).toList(growable: false);
+    // 시각은 목록당 한 번만 읽는다 — 만료 임박 필터가 날짜 경계로 판정하므로, 항목마다
+    // 새로 읽으면 자정을 넘기는 순간 같은 목록 안에서 "오늘"이 갈린다.
+    final DateTime now = DateTime.now();
+    final List<Gifticon> filtered = raw
+        .where((Gifticon g) => filter.matches(g, now: now))
+        .toList(growable: false);
     return sortGifticons(filtered, sort);
   });
 });

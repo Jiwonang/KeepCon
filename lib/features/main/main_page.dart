@@ -18,6 +18,7 @@ import '../../shared/util/expiry_policy.dart';
 import '../../shared/util/money_format.dart' show formatWon;
 import '../mypage/mypage_page.dart';
 import '../scan/scan_page.dart';
+import 'state/gifticon_filter.dart';
 import 'state/gifticon_list_providers.dart';
 import 'state/gifticon_stats.dart';
 import 'widgets/format.dart';
@@ -53,6 +54,12 @@ class _HomeBody extends ConsumerWidget {
         ref.watch(visibleGifticonsProvider);
     final GifticonStats stats = ref.watch(gifticonStatsProvider);
     final SortOption sort = ref.watch(sortOptionProvider);
+    final GifticonFilter filter = ref.watch(filterProvider);
+
+    // 배너용 목록은 **원천 기준**(필터 무관)이다 — 필터를 걸었다고 "곧 만료되는 것이
+    // 없다"고 알리면 안 된다.
+    final List<Gifticon> expiringSoon =
+        ref.watch(expiringSoonGifticonsProvider);
 
     final List<Gifticon> list = visibleAsync.valueOrNull ?? const <Gifticon>[];
 
@@ -66,11 +73,15 @@ class _HomeBody extends ConsumerWidget {
               const SizedBox(height: 20),
               const _SearchRow(),
               const SizedBox(height: 16),
-              _ExpiryBanner(stats: stats, gifticons: list),
-              const SizedBox(height: 16),
+              // 임박한 것이 없으면 배너째로 뺀다. 뒤따르는 간격도 함께 빼야
+              // 빈 자리가 남지 않는다.
+              if (expiringSoon.isNotEmpty) ...<Widget>[
+                _ExpiryBanner(expiringSoon: expiringSoon),
+                const SizedBox(height: 16),
+              ],
               _StatsRow(stats: stats),
               const SizedBox(height: 20),
-              _SectionHeader(count: list.length, sort: sort),
+              _SectionHeader(count: list.length, sort: sort, filter: filter),
               const SizedBox(height: 12),
             ],
           ),
@@ -230,39 +241,39 @@ class _SearchRow extends StatelessWidget {
 
 // ─────────────────────── 3. 만료 알림 배너 ───────────────────────
 
-class _ExpiryBanner extends StatelessWidget {
-  final GifticonStats stats;
-  final List<Gifticon> gifticons;
+/// 만료 임박 알림 배너.
+///
+/// [expiringSoon]은 **비어 있지 않다고 가정한다** — 0개일 때 이 위젯은 아예 만들어지지
+/// 않는다(호출부 [_HomeBody]에서 걸러낸다). "임박 없음" 상태를 배너로 알리지 않는 것은
+/// 의도된 선택이다: 알릴 것이 없을 때 자리를 차지하지 않는 편이 낫다.
+///
+/// 개수·대표 항목을 **한 목록에서** 파생시킨다. 예전에는 개수를 원천 통계에서, 대표
+/// 브랜드를 화면 표시 목록(필터·정렬 적용본)에서 각각 가져와, 필터를 걸면 "3개 만료"인데
+/// 제목은 폴백 '기프티콘'이 뜨는 불일치가 났다.
+class _ExpiryBanner extends ConsumerWidget {
+  final List<Gifticon> expiringSoon;
 
-  const _ExpiryBanner({
-    required this.stats,
-    required this.gifticons,
-  });
+  const _ExpiryBanner({required this.expiringSoon});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final ColorScheme scheme = Theme.of(context).colorScheme;
     final Color onDark = context.onDarkSurface;
 
-    final bool hasExpiring = stats.expiringSoonCount > 0;
+    final GifticonFilter filter = ref.watch(filterProvider);
+    final bool isFiltered = filter.expiringSoonOnly;
 
-    Gifticon? soonItem;
-    final DateTime now = DateTime.now();
+    // 목록은 만료 임박순 정렬본이므로 first가 "가장 급한 것"이다.
+    final Gifticon soonest = expiringSoon.first;
+    final int others = expiringSoon.length - 1;
+    final int daysLeft = daysUntilExpiry(soonest.expiryDate);
 
-    for (final g in gifticons) {
-      if (g.status == GifticonStatus.available &&
-          isExpiringSoon(g.expiryDate, now: now)) {
-        soonItem = g;
-        break;
-      }
-    }
-
-    // 브랜드 명칭 추출 조건 수정 (Null-Safety 경고 방지)
-    final String brandName = soonItem != null ? soonItem.brand : '기프티콘';
-    final String title = hasExpiring ? '$brandName 곧 만료!' : '만료 임박 기프티콘 없음';
-    final String subTitle = hasExpiring
-        ? '${stats.expiringSoonCount}개의 기프티콘이 $expirySoonDays일 내 만료됩니다'
-        : '모든 기프티콘의 유효기간이 여유롭습니다';
+    final String title = others == 0
+        ? '${soonest.brand} 곧 만료!'
+        : '${soonest.brand} 외 $others개 곧 만료!';
+    final String subTitle = others == 0
+        ? '${soonest.productName} · ${daysLeft == 0 ? '오늘 만료' : '$daysLeft일 뒤 만료'}'
+        : '${expiringSoon.length}개의 기프티콘이 $expirySoonDays일 내 만료됩니다';
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -307,7 +318,15 @@ class _ExpiryBanner extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 8),
-          _ConfirmPill(onTap: () {}),
+          _ConfirmPill(
+            // 토글이다 — 적용만 되고 풀 방법이 없으면 목록이 잠긴 것처럼 보인다.
+            // (홈에는 아직 필터 컨트롤 UI가 없어 이 버튼이 유일한 해제 수단이다.)
+            label: isFiltered ? '해제' : '확인',
+            onTap: () {
+              ref.read(filterProvider.notifier).state =
+                  filter.withExpiringSoonOnly(!isFiltered);
+            },
+          ),
         ],
       ),
     );
@@ -315,8 +334,9 @@ class _ExpiryBanner extends StatelessWidget {
 }
 
 class _ConfirmPill extends StatelessWidget {
+  final String label;
   final VoidCallback onTap;
-  const _ConfirmPill({required this.onTap});
+  const _ConfirmPill({required this.label, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -330,7 +350,7 @@ class _ConfirmPill extends StatelessWidget {
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           child: Text(
-            '확인',
+            label,
             style: TextStyle(
               color: scheme.onPrimary,
               fontWeight: FontWeight.w700,
@@ -428,19 +448,64 @@ class _StatCard extends StatelessWidget {
 
 // ─────────────────────── 5. 섹션 헤더 ───────────────────────
 
-class _SectionHeader extends StatelessWidget {
+/// 목록 섹션 헤더 — 표시 개수 + 활성 필터 표시 + 정렬.
+///
+/// 필터가 걸려 있으면 "전체"라고 쓰지 않는다. 걸러진 목록을 전체라고 부르면 사용자는
+/// 기프티콘이 사라졌다고 읽는다 — 특히 만료 임박 필터는 배너 버튼 한 번으로 켜지므로
+/// 어디서 켜졌는지 모른 채 마주치기 쉽다.
+class _SectionHeader extends ConsumerWidget {
   final int count;
   final SortOption sort;
-  const _SectionHeader({required this.count, required this.sort});
+  final GifticonFilter filter;
+  const _SectionHeader({
+    required this.count,
+    required this.sort,
+    required this.filter,
+  });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
+
+    final String countLabel = filter.expiringSoonOnly
+        ? '만료 임박 $count개'
+        : (filter.isAnyActive ? '$count개 · 필터 적용' : '전체 $count개');
+
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Text('전체 $count개', style: theme.textTheme.titleMedium),
+        Flexible(
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Flexible(
+                child: Text(
+                  countLabel,
+                  style: theme.textTheme.titleMedium,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              if (filter.isAnyActive) ...<Widget>[
+                const SizedBox(width: 6),
+                InkResponse(
+                  onTap: () => ref.read(filterProvider.notifier).state =
+                      GifticonFilter.none,
+                  radius: 18,
+                  child: Padding(
+                    padding: const EdgeInsets.all(4),
+                    child: Icon(
+                      Icons.close,
+                      size: 16,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
         Row(
           mainAxisSize: MainAxisSize.min,
           children: [
