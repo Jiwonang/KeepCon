@@ -21,6 +21,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../features/auth/login_page.dart';
 import '../shared/models/user.dart';
 import '../shared/providers/session_provider.dart';
+import 'expiry_notification_sync.dart';
 import 'keepcon_shell.dart';
 
 /// 인증 게이트. 앱의 `home`으로 사용한다.
@@ -30,8 +31,11 @@ class AuthGate extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return ref.watch(sessionUserProvider).when(
-          data: (User? user) =>
-              user == null ? const LoginPage() : const KeepConShell(),
+          data: (User? user) => user == null
+              ? const LoginPage()
+              // 만료 임박 알림 예약은 로그인 상태에서만 유지된다 — 로그아웃하면
+              // 이 위젯이 dispose되며 예약을 전부 지운다.
+              : const ExpiryNotificationSync(child: KeepConShell()),
           loading: () => const Scaffold(
             body: Center(child: CircularProgressIndicator()),
           ),

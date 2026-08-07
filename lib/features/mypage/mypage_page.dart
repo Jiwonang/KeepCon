@@ -32,6 +32,7 @@ import '../../shared/repositories/auth_repository.dart';
 import '../../shared/theme/theme_tokens.dart';
 import '../auth/auth_error_message.dart';
 import '../share/pages/usage_log_page.dart';
+import 'notification_settings_page.dart';
 
 /// 마이(설정) 화면. themeModeProvider 소비를 위해 [ConsumerWidget].
 class MyPage extends ConsumerWidget {
@@ -130,7 +131,11 @@ class MyPage extends ConsumerWidget {
                     icon: Icons.notifications_none,
                     showDot: true,
                     title: '알림 설정',
-                    onTap: () => _placeholder(context, '알림 설정'),
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => const NotificationSettingsPage(),
+                      ),
+                    ),
                   ),
                   const _RowDivider(),
                   _SettingsRow(
