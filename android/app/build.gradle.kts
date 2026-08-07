@@ -29,6 +29,10 @@ android {
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
+        // flutter_local_notifications가 **필수로 요구한다.** 예약 알림이 java.time API를
+        // 쓰는데, 이걸 켜지 않으면 구형 Android에서 클래스가 없어 런타임에 죽는다
+        // (플러그인 문서: 예약을 쓰지 않더라도 켜야 한다).
+        isCoreLibraryDesugaringEnabled = true
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
@@ -71,6 +75,11 @@ dependencies {
     // (`lib/features/scan/services/ml_kit_service.dart`) — 그래서 한국어만 넣는다.
     // 스크립트를 바꾸면 여기도 같이 바꿔야 한다.
     implementation("com.google.mlkit:text-recognition-korean:16.0.1")
+
+    // core library desugaring 런타임. `isCoreLibraryDesugaringEnabled = true`와 짝이며
+    // 버전은 flutter_local_notifications가 요구하는 값에 맞춘다
+    // (플러그인 android/build.gradle의 coreLibraryDesugaring 선언과 동일해야 한다).
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
 }
 
 kotlin {
@@ -81,8 +90,4 @@ kotlin {
 
 flutter {
     source = "../.."
-}
-
-dependencies {
-    implementation("com.google.mlkit:text-recognition-korean:16.0.1")
 }

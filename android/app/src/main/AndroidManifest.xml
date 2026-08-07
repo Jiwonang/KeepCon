@@ -4,6 +4,20 @@
          여기에 있어야 한다. 카메라 권한은 mobile_scanner 플러그인 매니페스트가 선언한다. -->
     <uses-permission android:name="android.permission.INTERNET"/>
 
+    <!-- 만료 임박 로컬 알림(flutter_local_notifications).
+
+         POST_NOTIFICATIONS: Android 13(API 33)부터 알림은 런타임 권한이다. 선언만으로는
+           부족하고 앱이 실행 중에 요청해야 한다(ExpiryNotificationSync가 로그인 직후 1회).
+         RECEIVE_BOOT_COMPLETED: 예약 알람은 **재부팅하면 전부 사라진다.** 아래 부팅
+           리시버가 이 권한으로 깨어나 예약을 복원한다. 없으면 사용자가 폰을 한 번 껐다
+           켜는 것만으로 알림이 조용히 멈춘다.
+
+         SCHEDULE_EXACT_ALARM은 **일부러 선언하지 않는다.** Android 12+에서 별도 권한
+         화면을 거쳐야 하는데, "만료 3일 전 오전 9시"가 Doze로 수십 분 밀리는 것은
+         무해하다(스케줄러가 inexactAllowWhileIdle을 쓴다). -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
+
     <application
         android:label="KeepCon"
         android:name="${applicationName}"
@@ -30,6 +44,26 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+        <!-- 만료 임박 알림 수신부(flutter_local_notifications).
+
+             ScheduledNotificationReceiver: 예약 시각에 깨어나 알림을 실제로 띄운다.
+             ScheduledNotificationBootReceiver: 재부팅·앱 업데이트 후 예약을 복원한다.
+               android:exported="false" — 외부 앱이 이 리시버를 호출해 가짜 알림을
+               띄우지 못하게 막는다(시스템 브로드캐스트만 받으면 된다). -->
+        <receiver
+            android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver"
+            android:exported="false"/>
+        <receiver
+            android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationBootReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED"/>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED"/>
+                <action android:name="android.intent.action.QUICKBOOT_POWERON"/>
+                <action android:name="com.htc.intent.action.QUICKBOOT_POWERON"/>
+            </intent-filter>
+        </receiver>
+
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data
