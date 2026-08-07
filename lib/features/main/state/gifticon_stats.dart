@@ -3,24 +3,25 @@
 /// 통계는 **소비자(main)** 가 원천 목록에서 직접 계산한다(계약 매트릭스: 통계는 소비자 계산).
 /// 계약 [Gifticon] 필드만 참조한다:
 /// - 보유중  : [GifticonStatus.available] 개수
-/// - 만료임박: available 이면서 [Gifticon.expiryDate]가 [expirySoonDays]일 이내
+/// - 만료임박: available 이면서 [isExpiringSoon] 판정을 통과한 개수
 /// - 총금액  : available 기프티콘 [Gifticon.price] 합(원, KRW)
+///
+/// 만료 판정은 계약(`shared/util/expiry_policy.dart`)에 위임한다 — 카드·알림과 같은
+/// 답을 내야 하므로 이 파일이 자체 기준을 갖지 않는다.
 library;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../shared/models/gifticon.dart';
+import '../../../shared/util/expiry_policy.dart';
 import 'gifticon_list_providers.dart';
-
-/// 만료 임박 기준(일). 이 일수 이하로 남으면 임박으로 센다.
-const int expirySoonDays = 7;
 
 /// 홈 요약 통계 값 객체.
 class GifticonStats {
   /// 보유중(사용가능) 개수.
   final int holdingCount;
 
-  /// 만료 임박(사용가능 & 7일 이내) 개수.
+  /// 만료 임박(사용가능 & [expirySoonDays]일 이내) 개수. 이미 만료된 것은 빠진다.
   final int expiringSoonCount;
 
   /// 보유중 기프티콘의 액면가 합(원).
@@ -54,8 +55,7 @@ final gifticonStatsProvider = Provider<GifticonStats>((ref) {
     if (g.status != GifticonStatus.available) continue;
     holding += 1;
     total += g.price;
-    final int daysLeft = g.expiryDate.difference(now).inDays;
-    if (daysLeft <= expirySoonDays) soon += 1;
+    if (isExpiringSoon(g.expiryDate, now: now)) soon += 1;
   }
   return GifticonStats(
     holdingCount: holding,

@@ -63,7 +63,13 @@ if [ -n "$prov" ]; then
 fi
 
 # 3) SSOT 함수(계약 API) 재정의 금지 — 호출은 허용, 선언은 금지
-SSOT_FUNCTIONS="retryMyGroups|foldSessionUser"
+#
+# `daysUntilExpiry|isExpiringSoon|isExpiredByDate`를 넣은 근거: 승격 전 이 계산이
+# lib/features 안에 **네 벌** 있었고(통계·그리드 카드·리치 카드·홈 배너), 그중 하나는
+# 시분초를 절삭해 같은 기프티콘을 두고 화면과 통계가 다른 답을 냈다. 가정이 아니라
+# 이미 발생한 재발이라 기계적 가드에 넣는다. 만료 임박 알림이 이 판정 위에 올라가므로
+# 재분기하면 알림까지 어긋난다.
+SSOT_FUNCTIONS="retryMyGroups|foldSessionUser|daysUntilExpiry|isExpiringSoon|isExpiredByDate"
 
 # 선언 형태 두 갈래를 잡는다(호출 `retryMyGroups(ref);`·`return foldSessionUser<...>(...)`는
 # 둘 다 통과):
@@ -73,16 +79,39 @@ SSOT_FUNCTIONS="retryMyGroups|foldSessionUser"
 #      제어 키워드는 타입 후보에 없어 호출문이 매칭되지 않는다(내장 타입 키워드가
 #      호출문 앞에 오는 문법은 없다).
 #  3b) 반환 타입을 생략한 선언 — 이름으로 시작해 파라미터 뒤 `{`/`=>`로 이어지는 줄.
-#      호출문은 `);`로 끝나 매칭되지 않는다.
+#      선택적 `static`을 허용한다: `static isExpiringSoon(...) {`처럼 **static이면서
+#      반환 타입도 생략한** 클래스 멤버는 3a(타입이 있어야 매칭)와 이 규칙 사이로
+#      빠져나간다. 최상위 함수에는 static을 붙일 수 없으므로 이 조합은 클래스 멤버뿐이다.
+#      들여쓰기를 **0~2칸으로 제한**한다(최상위 함수 0칸·클래스 멤버 2칸). CI가
+#      `dart format`을 강제하므로 이 들여쓰기는 신뢰할 수 있는 불변식이다.
+#      제한이 없으면 여러 줄에 걸친 **호출**이 선언으로 오인된다 — 예를 들어
+#        if (g.status == GifticonStatus.available &&
+#            isExpiringSoon(g.expiryDate, now: now)) {
+#      의 둘째 줄은 `이름(...) {` 형태라 규칙에 걸리지만 선언이 아니다(닫는 괄호가
+#      하나 더 있다 = 바깥 `if (`의 것). 깊은 들여쓰기라 이 제한으로 걸러진다.
 # ⚠️ 한계: 파라미터가 여러 줄에 걸친 선언·클래스 내부의 들여쓰기 없는 특수 배치는
 # 줄 단위 정규식 밖이다 — 완전 강제가 아니라 흔한 실수 형태의 백스톱이다.
 fns_typed=$(scan "^[[:space:]]*(static[[:space:]]+)?(void|dynamic|bool|int|double|num|String|Object|Future<[^>]*>|Stream<[^>]*>|[A-Z][A-Za-z0-9_<>,.? ]*)\??[[:space:]]+_?(${SSOT_FUNCTIONS})(<[^>]*>)?[[:space:]]*\(") || exit 1
-fns_untyped=$(scan "^[[:space:]]*_?(${SSOT_FUNCTIONS})(<[^>]*>)?[[:space:]]*\([^;]*\)[[:space:]]*(async[[:space:]]*)?(\{|=>)") || exit 1
+fns_untyped=$(scan "^[[:space:]]{0,2}(static[[:space:]]+)?_?(${SSOT_FUNCTIONS})(<[^>]*>)?[[:space:]]*\([^;]*\)[[:space:]]*(async[[:space:]]*)?(\{|=>)") || exit 1
 fns="${fns_typed}${fns_untyped:+
 $fns_untyped}"
 if [ -n "$fns" ]; then
   echo "::error::[SSOT] 계약 함수를 lib/features에서 재정의했습니다. lib/shared 정본을 import해 호출만 하세요:"
   echo "$fns"
+  fail=1
+fi
+
+# 4) SSOT 상수 재선언 금지 — 임계값 사본이 정본과 갈라지는 것을 막는다.
+#
+# `expirySoonDays`는 승격 전 `gifticon_stats.dart`(공개)와 `gifticon_card.dart`
+# (`_expirySoonDays` 사본)에 이중으로 있었다. 상수는 재정의해도 컴파일되고 값이 같으면
+# 티도 안 나다가, 한쪽만 바뀌는 순간 조용히 갈라진다.
+SSOT_CONSTANTS="expirySoonDays"
+
+consts=$(scan "^[[:space:]]*(static[[:space:]]+)?const[[:space:]]+([A-Za-z0-9_<>,.? ]+[[:space:]]+)?_?(${SSOT_CONSTANTS})[[:space:]]*=") || exit 1
+if [ -n "$consts" ]; then
+  echo "::error::[SSOT] 계약 상수를 lib/features에서 재선언했습니다. lib/shared 정본을 import해 참조만 하세요:"
+  echo "$consts"
   fail=1
 fi
 
