@@ -44,6 +44,13 @@ class _ExpiryNotificationSyncState
   /// 권한 요청은 세션당 한 번만 — 거부한 사용자에게 목록이 바뀔 때마다 다시 묻지 않는다.
   bool _permissionAsked = false;
 
+  /// 이 위젯이 폐기됐는지(로그아웃/계정 전환).
+  ///
+  /// 없으면 이런 순서가 가능하다: 예약이 진행 중 → 로그아웃 → [dispose]가 취소를 걸음
+  /// → 진행 중이던 예약이 끝나며 대기열([_queued])로 **다시 예약** → 결국 이전 사용자의
+  /// 기프티콘 이름이 알림에 뜬다. 폐기 후에는 어떤 예약도 새로 시작하지 않는다.
+  bool _disposed = false;
+
   /// 스케줄러를 미리 붙잡아 둔다.
   ///
   /// [dispose]에서 `ref.read`를 부르면 riverpod이 "Cannot use ref after the widget was
@@ -96,6 +103,7 @@ class _ExpiryNotificationSyncState
   }
 
   Future<void> _sync(List<Gifticon> gifticons) async {
+    if (_disposed) return;
     if (_syncing) {
       _queued = gifticons;
       return;
@@ -106,16 +114,20 @@ class _ExpiryNotificationSyncState
     } finally {
       _syncing = false;
       final List<Gifticon>? next = _queued;
-      if (next != null) {
-        _queued = null;
-        unawaited(_sync(next));
-      }
+      _queued = null;
+      if (next != null && !_disposed) unawaited(_sync(next));
     }
   }
 
   @override
   void dispose() {
     // 로그아웃/계정 전환 — 이전 사용자의 기프티콘 알림이 남으면 안 된다.
+    //
+    // 순서가 중요하다: 먼저 재진입을 막고 대기열을 비운 **뒤에** 취소를 건다. 스케줄러가
+    // sync·cancelAll을 직렬 큐로 처리하므로, 진행 중인 예약이 있어도 취소가 그 뒤에
+    // 실행된다(= 취소가 마지막 상태로 남는다).
+    _disposed = true;
+    _queued = null;
     unawaited(_guard('취소', _scheduler.cancelAll));
     super.dispose();
   }

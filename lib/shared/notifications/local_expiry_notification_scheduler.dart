@@ -8,6 +8,8 @@
 /// 앱에 전달하는 것이라 중계 서버가 있어야 한다. 두 알림은 요구사항이 다르므로 분리한다.
 library;
 
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_timezone/flutter_timezone.dart';
@@ -117,48 +119,90 @@ class LocalExpiryNotificationScheduler implements ExpiryNotificationScheduler {
         : NotificationPermissionStatus.denied;
   }
 
-  @override
-  Future<int> sync(List<Gifticon> gifticons) async {
-    await _ensureInitialized();
+  /// 예약을 바꾸는 작업의 직렬 큐(마지막 작업의 완료 future).
+  ///
+  /// [sync]는 "전량 취소 → 순차 예약"이라 **중간 상태가 비어 있다.** 두 호출이 겹치면
+  /// 뒤 호출의 취소가 앞 호출이 이미 예약한 것을 지우고, 앞 호출은 남은 항목을 계속
+  /// 예약해 두 배치가 섞인다(반환 건수도 실제와 달라진다). 로그아웃의 [cancelAll]이
+  /// 진행 중인 [sync]와 겹치면 **취소한 뒤에 다시 예약되는** 더 나쁜 경우가 된다.
+  ///
+  /// 호출부 규율(위젯의 재진입 방지)에 기대지 않고 이 계층에서 직렬화한다 — 예약 상태의
+  /// 정합성은 스케줄러가 지켜야 할 불변식이지 호출부가 조심해서 얻을 것이 아니다.
+  Future<void> _queue = Future<void>.value();
 
-    // 권한이 없으면 예약해도 뜨지 않는다. 조용히 빠져나가되 기존 예약은 정리한다
-    // (사용자가 설정에서 알림을 끈 경우 잔여 예약을 남겨둘 이유가 없다).
-    if (await currentPermission() != NotificationPermissionStatus.granted) {
-      await cancelAll();
-      return 0;
-    }
-
-    final List<ScheduledExpiryNotification> plan =
-        planExpiryNotifications(gifticons);
-
-    await cancelAll();
-    for (final ScheduledExpiryNotification n in plan) {
-      await _plugin.zonedSchedule(
-        id: n.id,
-        title: n.title,
-        body: n.body,
-        scheduledDate: tz.TZDateTime.from(n.scheduledAt, tz.local),
-        notificationDetails: const NotificationDetails(
-          android: AndroidNotificationDetails(
-            expiryChannelId,
-            expiryChannelName,
-            channelDescription: expiryChannelDescription,
-            importance: Importance.defaultImportance,
-            priority: Priority.defaultPriority,
-          ),
-        ),
-        // 정확 알람(setExactAndAllowWhileIdle)을 쓰지 않는 이유: Android 12+에서
-        // `SCHEDULE_EXACT_ALARM` 특별 권한 화면을 따로 거쳐야 하는데, "만료 3일 전
-        // 오전 9시"가 Doze로 수십 분 밀리는 것은 무해하다. 권한 마찰을 살 이유가 없다.
-        androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
-        payload: n.gifticonId,
-      );
-    }
-    return plan.length;
+  /// [op]를 앞선 작업들이 끝난 뒤에 실행한다. 실패해도 큐는 계속 흐른다.
+  Future<T> _serialized<T>(Future<T> Function() op) {
+    final Completer<T> done = Completer<T>();
+    _queue = _queue.then((_) async {
+      try {
+        done.complete(await op());
+      } catch (e, s) {
+        done.completeError(e, s);
+      }
+    });
+    return done.future;
   }
 
   @override
-  Future<void> cancelAll() async {
+  Future<int> sync(List<Gifticon> gifticons) => _serialized(() async {
+        await _ensureInitialized();
+
+        // 권한이 없으면 예약해도 뜨지 않는다. 조용히 빠져나가되 기존 예약은 정리한다
+        // (사용자가 설정에서 알림을 끈 경우 잔여 예약을 남겨둘 이유가 없다).
+        if (await currentPermission() != NotificationPermissionStatus.granted) {
+          await _cancelAllUnqueued();
+          return 0;
+        }
+
+        final List<ScheduledExpiryNotification> plan =
+            planExpiryNotifications(gifticons);
+
+        await _cancelAllUnqueued();
+
+        int scheduled = 0;
+        for (final ScheduledExpiryNotification n in plan) {
+          try {
+            await _plugin.zonedSchedule(
+              id: n.id,
+              title: n.title,
+              body: n.body,
+              scheduledDate: tz.TZDateTime.from(n.scheduledAt, tz.local),
+              notificationDetails: const NotificationDetails(
+                android: AndroidNotificationDetails(
+                  expiryChannelId,
+                  expiryChannelName,
+                  channelDescription: expiryChannelDescription,
+                  importance: Importance.defaultImportance,
+                  priority: Priority.defaultPriority,
+                ),
+              ),
+              // 정확 알람(setExactAndAllowWhileIdle)을 쓰지 않는 이유: Android 12+에서
+              // `SCHEDULE_EXACT_ALARM` 특별 권한 화면을 따로 거쳐야 하는데, "만료 3일 전
+              // 오전 9시"가 Doze로 수십 분 밀리는 것은 무해하다. 권한 마찰을 살 이유가 없다.
+              androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+              payload: n.gifticonId,
+            );
+            scheduled += 1;
+          } catch (e) {
+            // 한 건이 실패해도 나머지는 예약한다. 여기서 통째로 중단하면 **이미 전량
+            // 취소한 뒤**라 알림이 대부분 사라진 채로 남는다.
+            debugPrint('KeepCon: 알림 예약 실패(id=${n.id}) — $e');
+          }
+        }
+        return scheduled;
+      });
+
+  @override
+  Future<void> cancelAll() => _serialized(_cancelAllUnqueued);
+
+  /// 큐를 거치지 않는 취소. **이미 큐 안에서 실행 중일 때만** 호출한다
+  /// ([cancelAll]을 직접 부르면 자기 자신을 기다리며 교착한다).
+  ///
+  /// ⚠️ `_plugin.cancelAll()`은 채널과 무관하게 이 앱의 알림을 **전부** 지운다. 지금은
+  /// 알림 종류가 만료 임박 하나뿐이라 문제가 없다. 그룹 이벤트 알림처럼 다른 종류를
+  /// 추가하는 시점에는, 만료 알림이 쓰는 id 범위
+  /// (0 ~ [maxScheduledExpiryNotifications] - 1)만 골라 취소하도록 좁혀야 한다.
+  Future<void> _cancelAllUnqueued() async {
     await _ensureInitialized();
     await _plugin.cancelAll();
   }
