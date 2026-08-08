@@ -189,12 +189,17 @@ Future<void> connectToEmulators({String? host}) async {
 /// [GetOptions]에 `Source.server`를 주어 **캐시로 성공한 척하는 것을 막는다.**
 /// `permission-denied`는 **연결 성공으로 친다** — 보안 규칙이 평가됐다는 건
 /// 에뮬레이터가 요청을 받고 응답했다는 뜻이기 때문이다.
+///
+/// ⚠️ 프로브 경로에 `__...__` 형태를 쓰면 안 된다. Firestore는 그 패턴을 예약어로
+/// 금지하므로 응답이 `permission-denied`가 아니라 `invalid-argument`로 오고, 에뮬레이터가
+/// 멀쩡히 떠 있는데도 "안 떠 있다"고 판정한다(에뮬레이터 응답: `Collection id
+/// "__health__" is invalid because it is reserved.`). 규칙이 기본 차단하는 평범한 이름을 쓴다.
 Future<bool> isEmulatorReachable({
   Duration timeout = const Duration(seconds: 5),
 }) async {
   try {
     await FirebaseFirestore.instance
-        .doc('__health__/probe')
+        .doc('healthProbe/probe')
         .get(const GetOptions(source: Source.server))
         .timeout(timeout);
     return true;
