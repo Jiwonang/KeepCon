@@ -16,8 +16,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../features/main/state/gifticon_list_providers.dart';
+import '../shared/deeplink/app_destination.dart';
 import '../shared/models/gifticon.dart';
 import '../shared/notifications/expiry_notification_scheduler.dart';
+import '../shared/providers/deep_link_providers.dart';
 import '../shared/providers/notification_providers.dart';
 
 /// 기프티콘 목록 변화를 만료 임박 알림 예약에 반영하는 래퍼.
@@ -58,6 +60,9 @@ class _ExpiryNotificationSyncState
   /// provider는 앱 수명 동안 같은 인스턴스를 주므로 미리 읽어 두는 것이 안전하다.
   late final ExpiryNotificationScheduler _scheduler;
 
+  /// 알림 탭 구독. 앱이 떠 있을 때 탭한 경우를 받는다.
+  StreamSubscription<String>? _tapSubscription;
+
   @override
   void initState() {
     super.initState();
@@ -65,6 +70,29 @@ class _ExpiryNotificationSyncState
     // 첫 프레임 이후에 묻는다. 로그인 직후 화면이 그려지기도 전에 시스템 권한
     // 다이얼로그가 뜨면 사용자가 맥락 없이 거부하기 쉽다.
     WidgetsBinding.instance.addPostFrameCallback((_) => _askPermissionOnce());
+
+    // 알림 탭 → 목적지 버스. 딥링크와 **같은 통로**를 쓴다 — 수신 경로마다 화면을
+    // 직접 조작하면 어느 경로로 들어왔느냐에 따라 동작이 갈린다.
+    _tapSubscription = _scheduler.notificationTaps.listen(
+      _publishTap,
+      onError: (Object e) => debugPrint('KeepCon: 알림 탭 수신 오류 — $e'),
+    );
+    unawaited(_consumeLaunchPayload());
+  }
+
+  /// 앱이 알림으로 처음 열린 경우(콜드 스타트). 스트림이 구독되기 전에 이벤트가
+  /// 지나가므로 따로 받아야 한다 — 딥링크의 `getInitialLink`와 같은 구조다.
+  Future<void> _consumeLaunchPayload() async {
+    await _guard('실행 payload 확인', () async {
+      final String? gifticonId = await _scheduler.takeLaunchPayload();
+      if (gifticonId != null) _publishTap(gifticonId);
+    });
+  }
+
+  void _publishTap(String gifticonId) {
+    if (!mounted) return;
+    ref.read(pendingDestinationProvider.notifier).state =
+        GifticonHighlightDestination(gifticonId);
   }
 
   /// 알림 관련 호출을 감싸 실패를 삼킨다.
@@ -128,6 +156,7 @@ class _ExpiryNotificationSyncState
     // 실행된다(= 취소가 마지막 상태로 남는다).
     _disposed = true;
     _queued = null;
+    unawaited(_tapSubscription?.cancel());
     unawaited(_guard('취소', _scheduler.cancelAll));
     super.dispose();
   }

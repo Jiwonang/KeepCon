@@ -44,6 +44,19 @@ abstract class ExpiryNotificationScheduler {
   /// 예약된 알림을 모두 취소한다. 로그아웃 시 호출한다 — 계정을 바꿨는데 이전 사용자의
   /// 기프티콘 알림이 뜨면 안 된다.
   Future<void> cancelAll();
+
+  /// 사용자가 알림을 탭할 때마다 그 알림의 [Gifticon.id]를 방출한다.
+  ///
+  /// **앱이 이미 떠 있을 때** 탭한 경우를 위한 것이다. 앱이 알림으로 처음 뜬 경우는
+  /// 이 스트림이 구독되기 전에 이벤트가 지나가므로 [takeLaunchPayload]로 따로 받는다
+  /// (딥링크의 웜 스타트/콜드 스타트와 같은 구조다).
+  Stream<String> get notificationTaps;
+
+  /// 앱을 띄운 알림의 [Gifticon.id]. 알림으로 열린 것이 아니면 `null`.
+  ///
+  /// **1회성** — 한 번 읽으면 비워진다. 비우지 않으면 로그아웃 후 다시 로그인할 때마다
+  /// 같은 기프티콘으로 다시 끌려간다.
+  Future<String?> takeLaunchPayload();
 }
 
 /// 아무것도 하지 않는 구현. 웹·데스크톱과 위젯 테스트에서 쓴다.
@@ -67,4 +80,10 @@ class NoopExpiryNotificationScheduler implements ExpiryNotificationScheduler {
 
   @override
   Future<void> cancelAll() async {}
+
+  @override
+  Stream<String> get notificationTaps => const Stream<String>.empty();
+
+  @override
+  Future<String?> takeLaunchPayload() async => null;
 }
