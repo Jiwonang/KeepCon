@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>KeepCon 그룹 초대</title>
+    <style>
+      :root { color-scheme: light dark; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo",
+          "Malgun Gothic", sans-serif;
+        background: #fafafa;
+        color: #1a1a1a;
+      }
+      @media (prefers-color-scheme: dark) {
+        body { background: #131313; color: #f0f0f0; }
+        .card { background: #1e1e1e; }
+        .code { background: #2a2a2a; }
+      }
+      .card {
+        max-width: 22rem;
+        margin: 1.5rem;
+        padding: 2rem 1.75rem;
+        border-radius: 1rem;
+        background: #fff;
+        box-shadow: 0 1px 3px rgb(0 0 0 / 0.08);
+        text-align: center;
+      }
+      h1 { font-size: 1.25rem; margin: 0 0 0.75rem; }
+      p { margin: 0 0 1rem; line-height: 1.6; font-size: 0.95rem; opacity: 0.8; }
+      .code {
+        display: inline-block;
+        padding: 0.6rem 1.1rem;
+        border-radius: 0.5rem;
+        background: #f0f0f0;
+        font-size: 1.4rem;
+        font-weight: 700;
+        letter-spacing: 0.12em;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      }
+      .hint { font-size: 0.85rem; opacity: 0.6; margin-top: 1.25rem; }
+    </style>
+  </head>
+  <body>
+    <main class="card">
+      <h1>KeepCon 그룹 초대</h1>
+      <p>KeepCon 앱에서 아래 초대코드로 참여할 수 있어요.</p>
+      <div class="code" id="code">—</div>
+      <p class="hint">
+        앱이 설치돼 있으면 이 링크를 휴대폰에서 열었을 때 바로 참여 화면이 열립니다.
+      </p>
+    </main>
+    <script>
+      // 경로(/invite/<code>) 또는 쿼리(?invite=<code>)에서 코드를 꺼낸다.
+      // 앱의 parseInviteCode와 **같은 규약**이어야 한다: 쿼리가 경로보다 우선하되,
+      // 공백뿐인 값은 없는 것으로 보고 경로로 넘어간다(trim을 나중에 하면 "%20"이
+      // truthy라 경로 코드를 가로채고 빈칸을 보여준다).
+      (function () {
+        var params = new URLSearchParams(location.search);
+        var code = (params.get("invite") || "").trim();
+        if (!code) {
+          var parts = location.pathname.split("/").filter(Boolean);
+          var i = parts.indexOf("invite");
+          if (i >= 0 && i + 1 < parts.length) code = parts[i + 1].trim();
+        }
+        if (code) document.getElementById("code").textContent = code;
+      })();
+    </script>
+  </body>
+</html>

@@ -187,8 +187,21 @@ class Group {
   /// 전이는 만들어지지 않는다(참여 가드가 유일한 증가 경로).
   final int maxMembers;
 
+  /// 초대 링크가 걸리는 도메인.
+  ///
+  /// **`keepcon.app`이 아니라 Firebase Hosting 도메인인 이유:** 안드로이드 App Links는
+  /// 그 도메인 루트의 `/.well-known/assetlinks.json`을 시스템이 직접 받아 앱 서명과
+  /// 대조해야 링크가 앱으로 온다. `keepcon.app`은 소유하지 않은 도메인이라 그 파일을
+  /// 올릴 수 없고, 그래서 링크를 눌러도 브라우저만 열렸다. 이미 가진 Firebase 프로젝트의
+  /// 호스팅 도메인은 추가 비용 없이 검증을 통과시킬 수 있다.
+  ///
+  /// 바꾸려면 `android/app/src/main/AndroidManifest.xml`의 인텐트 필터 host와
+  /// `firebase.json`의 hosting 설정을 **함께** 바꿔야 한다(셋 중 하나만 바뀌면 링크가
+  /// 조용히 브라우저로 샌다).
+  static const String inviteHost = 'keepcon-ab660.web.app';
+
   /// 초대 URL(초대코드 기반 조립).
-  String get inviteUrl => 'https://keepcon.app/invite/$inviteCode';
+  String get inviteUrl => 'https://$inviteHost/invite/$inviteCode';
 
   /// 정원이 찼는지(멤버 수 ≥ [maxMembers]). 참여 가능 여부 판정의 단일 진입점.
   bool get isFull => memberCount >= maxMembers;

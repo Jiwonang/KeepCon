@@ -26,8 +26,7 @@ String? parseInviteCode(Uri uri) {
   return null;
 }
 
-/// 현재 플랫폼의 진입 URL([Uri.base])에서 대기 중 초대코드를 추출한다.
-///
-/// 웹에서 초대 링크로 앱을 열면 [Uri.base]에 경로/쿼리가 실려 있어 코드를 얻는다.
-/// 진입 URL이 초대 링크가 아니면(대부분의 일반 실행) `null`.
-String? pendingInviteCodeFromPlatform() => parseInviteCode(Uri.base);
+// `pendingInviteCodeFromPlatform()`은 제거됐다 — 진입 URL에서 목적지를 뽑는 일은
+// `shared/deeplink/deep_link_parser.dart`의 `destinationFromPlatformUrl()`이 맡는다.
+// 초대는 이제 여러 목적지 중 하나이고, 진입 URL 해석을 두 곳에 두면 새 목적지를
+// 추가할 때 한쪽만 고쳐 갈라진다.

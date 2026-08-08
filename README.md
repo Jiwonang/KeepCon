@@ -499,6 +499,48 @@ tool\deploy_rules.cmd all
 
 ---
 
+## 🔗 초대 딥링크 (Android App Links)
+
+초대 링크(`https://keepcon-ab660.web.app/invite/<code>`)를 휴대폰에서 누르면 **앱의 그룹 참여 시트가 바로 열립니다.** 브라우저로 새지 않게 하려면 세 곳이 맞아야 하고, 하나라도 어긋나면 **에러 없이 조용히 브라우저가 열립니다.**
+
+| 위치 | 내용 |
+|------|------|
+| [`lib/shared/models/group.dart`](lib/shared/models/group.dart) | `Group.inviteHost` — 링크를 만드는 쪽 |
+| [`android/app/src/main/AndroidManifest.xml`](android/app/src/main/AndroidManifest.xml) | `<data android:host=...>` — 링크를 받는 쪽 |
+| [`public/.well-known/assetlinks.json`](public/.well-known/assetlinks.json) | 도메인이 이 앱을 인증하는 쪽 |
+
+### 배포 (한 번만)
+
+```bash
+firebase deploy --only hosting --project keepcon-ab660
+```
+
+배포 후 `https://keepcon-ab660.web.app/.well-known/assetlinks.json`이 열리는지 확인하세요. 404면 App Links는 **절대** 검증되지 않습니다.
+
+> ⚠️ `firebase.json`의 hosting `ignore`에서 기본 패턴 `**/.*`를 **일부러 뺐습니다.** 그 패턴은 `.well-known` 디렉터리째 배포에서 제외해, 설정이 전부 맞는데도 검증만 실패하는 상태를 만듭니다.
+
+### 팀원 지문 추가 (필수)
+
+`assetlinks.json`에는 **앱 서명 키의 SHA-256 지문**이 들어갑니다. 현재 release 빌드는 각자의 **debug 키**로 서명되므로(`build.gradle.kts` 참조) **개발자마다 지문이 다릅니다.** 등록되지 않은 지문으로 빌드하면 그 사람 기기에서만 링크가 안 열립니다.
+
+본인 지문 확인:
+
+```bash
+keytool -list -v -keystore ~/.android/debug.keystore -alias androiddebugkey -storepass android -keypass android
+```
+
+출력의 `SHA256:` 값을 `sha256_cert_fingerprints` 배열에 **추가**(교체 아님)하고 다시 배포하세요. 배열은 여러 지문을 허용합니다. 릴리스용 키스토어를 도입하면 그 지문도 함께 넣어야 합니다.
+
+### 검증이 됐는지 확인
+
+```bash
+adb shell pm get-app-links com.keepcon.app
+```
+
+`verified`로 나와야 정상입니다. `legacy_failure`면 지문이나 배포를 다시 확인하세요. 앱을 재설치하면 검증이 다시 시도됩니다.
+
+---
+
 ## 🧭 개발 하네스 (`.claude/`)
 
 이 저장소에는 **페이지별 개발 팀 하네스**가 포함되어 있습니다. Claude Code에서 KeepCon 개발을 요청하면 `keepcon-orchestrator`가 계약 설계자·페이지 담당·통합 QA 에이전트를 조율합니다.

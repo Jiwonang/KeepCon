@@ -14,8 +14,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../features/main/main_page.dart';
 import '../features/scan/scan_page.dart';
 import '../features/share/share_page.dart';
-import '../features/share/state/share_providers.dart';
 import '../features/share/widgets/share_sheets.dart';
+import '../shared/deeplink/app_destination.dart';
+import '../shared/providers/deep_link_providers.dart';
 
 /// 하단 내비게이션 셸. 앱의 홈으로 사용한다.
 class KeepConShell extends ConsumerStatefulWidget {
@@ -37,18 +38,26 @@ class _KeepConShellState extends ConsumerState<KeepConShell> {
   @override
   void initState() {
     super.initState();
-    // 로그인 후 셸이 뜨는 시점에 딥링크 초대코드가 있으면 참여 흐름을 연다.
-    WidgetsBinding.instance.addPostFrameCallback((_) => _handlePendingInvite());
+    // 로그인 후 셸이 뜨는 시점에 대기 중인 딥링크 목적지가 있으면 처리한다.
+    WidgetsBinding.instance
+        .addPostFrameCallback((_) => _consumePendingDestination());
   }
 
-  /// 딥링크로 진입한 초대코드가 있으면 공유 탭으로 전환하고 참여 시트를 미리 채워 연다.
-  /// 1회성 — 소비 즉시 provider를 비워 재진입 시 중복 실행을 막는다.
-  void _handlePendingInvite() {
-    final String? code = ref.read(pendingInviteCodeProvider);
-    if (code == null || !mounted) return;
-    ref.read(pendingInviteCodeProvider.notifier).state = null;
-    setState(() => _index = 1); // 공유 탭.
-    showJoinGroupSheet(context, initialCode: code);
+  /// 대기 중인 목적지를 소비해 해당 화면으로 이동한다.
+  ///
+  /// 1회성 — 소비 즉시 버스를 비워 탭을 오갈 때 같은 시트가 다시 뜨는 것을 막는다.
+  /// `switch`가 [AppDestination]에 대해 **exhaustive**라, 목적지가 추가되면 여기서
+  /// 컴파일 에러가 난다(처리를 빠뜨려 조용히 아무 일도 안 일어나는 것을 막는다).
+  void _consumePendingDestination() {
+    final AppDestination? destination = ref.read(pendingDestinationProvider);
+    if (destination == null || !mounted) return;
+    ref.read(pendingDestinationProvider.notifier).state = null;
+
+    switch (destination) {
+      case InviteDestination(:final String inviteCode):
+        setState(() => _index = 1); // 공유 탭.
+        showJoinGroupSheet(context, initialCode: inviteCode);
+    }
   }
 
   Future<void> _openAdd() async {
@@ -60,6 +69,18 @@ class _KeepConShellState extends ConsumerState<KeepConShell> {
 
   @override
   Widget build(BuildContext context) {
+    // 앱이 **이미 떠 있을 때** 도착한 링크(웜 스타트)도 소비한다. initState의 post-frame
+    // 한 번만으로는 그 경우가 통째로 죽는다 — 버스에는 목적지가 쌓이는데 읽는 사람이
+    // 없어, 링크를 눌러 앱이 앞으로 나와도 아무 일도 일어나지 않는다.
+    ref.listen<AppDestination?>(pendingDestinationProvider,
+        (AppDestination? previous, AppDestination? next) {
+      // 소비 직후 버스를 비우면서 오는 null 통지는 무시한다.
+      if (next == null) return;
+      // 빌드 중에는 시트를 열 수 없으므로 프레임 뒤로 미룬다.
+      WidgetsBinding.instance
+          .addPostFrameCallback((_) => _consumePendingDestination());
+    });
+
     return Scaffold(
       body: IndexedStack(index: _index, children: _tabs),
       floatingActionButton: FloatingActionButton(
