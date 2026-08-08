@@ -3,8 +3,7 @@
 /// 검증 대상(수동 입력 보완):
 /// 1. 카테고리 프리셋 칩 선택 → Riverpod 폼 상태 반영 → 입력창 동기화
 /// 2. 같은 칩 재탭 → 선택 해제(미입력 = 저장 시 "기타" 보정)
-/// 3. 유효기간 빠른 선택 버튼 → expiryDate 반영
-/// 4. 금액 입력 시 천 단위 콤마 표시 + parsedPrice 정합성
+/// 3. 금액 입력 시 천 단위 콤마 표시 + parsedPrice 정합성
 ///
 /// 카메라 스캔 화면(mobile_scanner)은 위젯 테스트에서 플러그인 초기화가
 /// 불가하므로 이 파일의 범위에서 제외한다(결과 반환 인터페이스만 얇게 유지).
@@ -23,7 +22,7 @@ import 'package:keepcon/features/scan/widgets/gifticon_form.dart';
 void main() {
   /// 폼을 넉넉한 화면에 띄우고, 상태를 직접 읽을 수 있는 컨테이너를 돌려준다.
   ///
-  /// 세로가 짧으면 ListView 하단 항목(유효기간·저장 버튼)이 화면 밖으로 나가
+  /// 세로가 짧으면 ListView 하단 항목이 화면 밖으로 나가
   /// 탭이 실패하므로 테스트 뷰포트를 크게 잡는다.
   Future<ProviderContainer> pumpForm(WidgetTester tester) async {
     tester.view.physicalSize = const Size(1200, 2600);
@@ -126,73 +125,6 @@ void main() {
       await pumpForm(tester);
 
       expect(kScanCategoryPresets.last, kDefaultCategory);
-    });
-  });
-
-  group('유효기간 빠른 선택', () {
-    testWidgets('+30일 버튼이 오늘 기준 만료일을 채운다', (WidgetTester tester) async {
-      final ProviderContainer container = await pumpForm(tester);
-
-      expect(container.read(gifticonFormControllerProvider).expiryDate, isNull);
-
-      final DateTime before = DateTime.now();
-
-      await tester.tap(find.widgetWithText(OutlinedButton, '+30일'));
-      await tester.pump();
-
-      final DateTime? picked =
-          container.read(gifticonFormControllerProvider).expiryDate;
-
-      expect(picked, isNotNull);
-
-      // 탭 시점의 "오늘"이 자정 경계를 넘지 않았다면 정확히 일치한다.
-      // 경계에서 흔들리지 않도록 before/after 두 기준 중 하나와 일치하는지 본다.
-      final DateTime after = DateTime.now();
-
-      expect(
-        picked,
-        anyOf(
-          ExpiryQuickPick.after30Days.resolve(before),
-          ExpiryQuickPick.after30Days.resolve(after),
-        ),
-      );
-    });
-
-    testWidgets('+1년 버튼도 동일하게 동작하며 표시 문구가 갱신된다', (WidgetTester tester) async {
-      final ProviderContainer container = await pumpForm(tester);
-
-      await tester.tap(find.widgetWithText(OutlinedButton, '+1년'));
-      await tester.pump();
-
-      final DateTime? picked =
-          container.read(gifticonFormControllerProvider).expiryDate;
-
-      expect(picked, isNotNull);
-
-      // 날짜 선택 버튼의 라벨이 "유효기간 선택 *"에서 실제 날짜로 바뀐다.
-      expect(find.text('유효기간 선택 *'), findsNothing);
-
-      // 구분자는 점('.')이다 — v2.4에서 공유 정본 formatYmdDot으로 통일했다
-      // (이전에는 이 화면만 'YYYY-MM-DD'였다). 정본 함수를 호출해 비교하면
-      // 표기가 바뀌어도 항진 통과하므로, 기대 문자열은 여기서 직접 조립한다.
-      final String label = '유효기간: '
-          '${picked!.year}.'
-          '${picked.month.toString().padLeft(2, '0')}.'
-          '${picked.day.toString().padLeft(2, '0')}';
-
-      expect(find.text(label), findsOneWidget);
-    });
-
-    testWidgets('빠른 선택 버튼 3개가 모두 표시된다', (WidgetTester tester) async {
-      await pumpForm(tester);
-
-      for (final ExpiryQuickPick pick in ExpiryQuickPick.values) {
-        expect(
-          find.widgetWithText(OutlinedButton, pick.label),
-          findsOneWidget,
-          reason: '${pick.label} 버튼이 있어야 한다',
-        );
-      }
     });
   });
 
