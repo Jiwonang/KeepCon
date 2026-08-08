@@ -39,7 +39,7 @@ lib/
 ├── shared/                        # ⭐ 공유 계약 (SSOT) — 모든 페이지가 참조 · CODEOWNERS 보호
 │   ├── models/                    # User, Gifticon, Group/GroupMember, SharedGifticon, UsageLog, GroupNotification (+ enum·상태전이)
 │   ├── repositories/              # AuthRepository, GifticonRepository, ShareRepository (abstract 인터페이스)
-│   │   └── impl/                  # in_memory_* (기본) · firebase/* (백엔드)
+│   │   └── impl/                  # in_memory_* (USE_DEMO) · firebase/* (기본 — 에뮬레이터·dev·prod)
 │   ├── providers/                 # repositories(DI), theme_mode_provider
 │   ├── theme/                     # app_colors, app_theme (라이트/다크 ThemeData)
 │   ├── util/                      # korean_particle(조사 유틸) 등 도메인 무관 범용 유틸
