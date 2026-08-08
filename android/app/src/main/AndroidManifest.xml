@@ -21,7 +21,8 @@
     <application
         android:label="KeepCon"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/ic_launcher"
+        android:usesCleartextTraffic="true"> //로컬 에뮬레이터(10.0.2.2) 및 HTTP 통신 허용을 위한 설정
         <activity
             android:name=".MainActivity"
             android:exported="true"
