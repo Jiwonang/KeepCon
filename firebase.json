@@ -3,6 +3,18 @@
     "rules": "firestore.rules",
     "indexes": "firestore.indexes.json"
   },
+  "hosting": {
+    "public": "public",
+    "_comment_ignore": "기본값의 '**/.*'를 일부러 뺐다 — 그 패턴은 .well-known 디렉터리까지 제외해 assetlinks.json이 배포되지 않고, App Links 검증이 '설정은 맞는데 이유 없이 실패'하는 형태로 조용히 깨진다.",
+    "ignore": ["firebase.json", "**/node_modules/**"],
+    "headers": [
+      {
+        "source": "/.well-known/assetlinks.json",
+        "headers": [{ "key": "Content-Type", "value": "application/json" }]
+      }
+    ],
+    "rewrites": [{ "source": "/invite/**", "destination": "/index.html" }]
+  },
   "emulators": {
     "auth": {
       "port": 9099

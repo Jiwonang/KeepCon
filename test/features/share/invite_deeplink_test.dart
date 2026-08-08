@@ -1,6 +1,6 @@
 // 초대 딥링크 진입 → 참여 시트 자동 오픈 위젯 테스트 (P3).
 //
-// pendingInviteCodeProvider에 초대코드가 있으면, 로그인된 셸이 뜰 때
+// pendingDestinationProvider에 InviteDestination이 있으면, 로그인된 셸이 뜰 때
 // 공유 탭으로 전환하고 참여 바텀시트를 코드로 미리 채워 연다.
 // 기본 세션(InMemoryAuthRepository.defaultUser)은 로그인 상태라 셸이 바로 렌더된다.
 
@@ -9,14 +9,16 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:keepcon/app/keepcon_shell.dart';
-import 'package:keepcon/features/share/state/share_providers.dart';
+import 'package:keepcon/shared/deeplink/app_destination.dart';
+import 'package:keepcon/shared/providers/deep_link_providers.dart';
 
 void main() {
   testWidgets('딥링크 초대코드가 있으면 참여 시트가 코드와 함께 열린다', (WidgetTester tester) async {
     await tester.pumpWidget(
       ProviderScope(
         overrides: <Override>[
-          pendingInviteCodeProvider.overrideWith((ref) => 'ABC123'),
+          pendingDestinationProvider
+              .overrideWith((ref) => const InviteDestination('ABC123')),
         ],
         child: const MaterialApp(home: KeepConShell()),
       ),
@@ -33,7 +35,7 @@ void main() {
     await tester.pumpWidget(
       ProviderScope(
         overrides: <Override>[
-          pendingInviteCodeProvider.overrideWith((ref) => null),
+          pendingDestinationProvider.overrideWith((ref) => null),
         ],
         child: const MaterialApp(home: KeepConShell()),
       ),
