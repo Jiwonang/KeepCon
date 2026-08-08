@@ -24,7 +24,7 @@
 - **Flutter** (Dart, Material 3) — 크로스플랫폼
 - **Riverpod** (`flutter_riverpod`) — 상태 관리 (프로젝트 전역 표준)
 - **Firebase** (`firebase_auth`, `cloud_firestore`) — 백엔드 데이터 계층 *(구현 완료. 로컬 에뮬레이터로 계정 없이 실행 가능 — [Firebase 연동](#-firebase-연동-백엔드-활성화))*
-- 기본 실행은 **in-memory mock** 저장소 — 백엔드 설정 없이 바로 실행/개발 가능
+- 기본 실행은 **로컬 Firebase 에뮬레이터** — 계정·인터넷 없이 진짜 Firebase 동작으로 개발 (별도 터미널에서 에뮬레이터 기동 필요). 준비물 없이 바로 띄우려면 **in-memory mock**(`--dart-define=USE_DEMO=true`)
 
 ---
 
@@ -39,7 +39,7 @@ lib/
 ├── shared/                        # ⭐ 공유 계약 (SSOT) — 모든 페이지가 참조 · CODEOWNERS 보호
 │   ├── models/                    # User, Gifticon, Group/GroupMember, SharedGifticon, UsageLog, GroupNotification (+ enum·상태전이)
 │   ├── repositories/              # AuthRepository, GifticonRepository, ShareRepository (abstract 인터페이스)
-│   │   └── impl/                  # in_memory_* (기본) · firebase/* (백엔드)
+│   │   └── impl/                  # in_memory_* (USE_DEMO) · firebase/* (기본 — 에뮬레이터·dev·prod)
 │   ├── providers/                 # repositories(DI), theme_mode_provider
 │   ├── theme/                     # app_colors, app_theme (라이트/다크 ThemeData)
 │   ├── util/                      # korean_particle(조사 유틸) 등 도메인 무관 범용 유틸
@@ -302,7 +302,7 @@ gh api -X POST repos/Jiwonang/KeepCon/rulesets --input ruleset.json
 
 | 경로 | 실행 | 언제 쓰나 |
 |------|------|-----------|
-| in-memory 데모 | `flutter run` | 화면·UI 작업. 시드 데이터로 즉시 시연 |
+| in-memory 데모 | `flutter run --dart-define=USE_DEMO=true` | 화면·UI 작업. 시드 데이터로 즉시 시연 |
 | Firebase 에뮬레이터 | `flutter run` (기본 — 플래그 불필요) | 혼자 하는 작업, **파괴적 테스트**, 보안 규칙 검증 |
 | **dev 프로젝트** (`keepcon-dev`) | `flutter run --dart-define=USE_FIREBASE=true` | **팀 개발 기본** — 여럿이 같은 그룹에 들어가는 공유 시나리오 |
 | 실서비스 (`keepcon-ab660`) | `flutter run --dart-define=USE_FIREBASE_PROD=true` | 시연·배포 확인 **전용** |

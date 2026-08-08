@@ -101,18 +101,23 @@ Future<void> main() async {
   final List<Override> overrides =
       await initFirebaseAndBuildOverrides(target: target);
 
+  void startApp() => runApp(ProviderScope(
+        overrides: overrides,
+        child: KeepConApp(target: target),
+      ));
+
   // 에뮬레이터는 사람이 별도 터미널에서 띄워야 한다. 안 띄운 채 실행하면 SDK는 요청을
   // localhost로 보내고 아무도 응답하지 않아 **화면이 영원히 로딩**이 된다. 앱은 멀쩡히
   // 뜨는데 아무것도 안 되는 상태라 원인을 찾기 어려우므로, 여기서 먼저 확인해 안내한다.
+  //
+  // 안내 화면에 재확인 버튼을 넘기는 이유는, 이 분기에 걸리는 흔한 경우가 "안 띄웠다"가
+  // 아니라 **"띄웠는데 아직 부팅 중"** 이기 때문이다. 닿는 순간 [startApp]으로 교체한다.
   if (target == FirebaseTarget.emulator && !await isEmulatorReachable()) {
-    runApp(const EmulatorUnavailableApp());
+    runApp(EmulatorUnavailableApp(onRetrySucceeded: startApp));
     return;
   }
 
-  runApp(ProviderScope(
-    overrides: overrides,
-    child: KeepConApp(target: target),
-  ));
+  startApp();
 }
 
 /// in-memory 데모 조립 — 시드 기프티콘(user-1 소유)으로 홈의 통계·정렬·카드를 바로 시연.
