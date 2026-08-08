@@ -92,6 +92,15 @@ void main() {
     });
   });
 
+  test('공백뿐인 쿼리는 없는 것으로 보고 경로 코드를 쓴다', () {
+    // 랜딩 페이지(public/index.html)의 JS와 **같은 규약**이어야 한다. 그쪽에서 trim을
+    // 나중에 하면 "%20"이 truthy라 경로 코드를 가로채고 빈칸을 보여준다(CodeRabbit 지적).
+    expect(
+      parseDeepLink(Uri.parse('https://example.com/invite/482913?invite=%20')),
+      const InviteDestination('482913'),
+    );
+  });
+
   test('목적지 값 동등성 — 같은 코드면 같은 목적지', () {
     // 버스에 실린 목적지를 비교/중복 제거할 때 값 동등성이 필요하다.
     expect(const InviteDestination('A'), const InviteDestination('A'));

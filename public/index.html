@@ -56,16 +56,18 @@
     </main>
     <script>
       // 경로(/invite/<code>) 또는 쿼리(?invite=<code>)에서 코드를 꺼낸다.
-      // 앱의 parseInviteCode와 같은 두 형태를 지원한다.
+      // 앱의 parseInviteCode와 **같은 규약**이어야 한다: 쿼리가 경로보다 우선하되,
+      // 공백뿐인 값은 없는 것으로 보고 경로로 넘어간다(trim을 나중에 하면 "%20"이
+      // truthy라 경로 코드를 가로채고 빈칸을 보여준다).
       (function () {
         var params = new URLSearchParams(location.search);
-        var code = params.get("invite");
+        var code = (params.get("invite") || "").trim();
         if (!code) {
           var parts = location.pathname.split("/").filter(Boolean);
           var i = parts.indexOf("invite");
-          if (i >= 0 && i + 1 < parts.length) code = parts[i + 1];
+          if (i >= 0 && i + 1 < parts.length) code = parts[i + 1].trim();
         }
-        if (code) document.getElementById("code").textContent = code.trim();
+        if (code) document.getElementById("code").textContent = code;
       })();
     </script>
   </body>

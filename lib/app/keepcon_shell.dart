@@ -69,6 +69,18 @@ class _KeepConShellState extends ConsumerState<KeepConShell> {
 
   @override
   Widget build(BuildContext context) {
+    // 앱이 **이미 떠 있을 때** 도착한 링크(웜 스타트)도 소비한다. initState의 post-frame
+    // 한 번만으로는 그 경우가 통째로 죽는다 — 버스에는 목적지가 쌓이는데 읽는 사람이
+    // 없어, 링크를 눌러 앱이 앞으로 나와도 아무 일도 일어나지 않는다.
+    ref.listen<AppDestination?>(pendingDestinationProvider,
+        (AppDestination? previous, AppDestination? next) {
+      // 소비 직후 버스를 비우면서 오는 null 통지는 무시한다.
+      if (next == null) return;
+      // 빌드 중에는 시트를 열 수 없으므로 프레임 뒤로 미룬다.
+      WidgetsBinding.instance
+          .addPostFrameCallback((_) => _consumePendingDestination());
+    });
+
     return Scaffold(
       body: IndexedStack(index: _index, children: _tabs),
       floatingActionButton: FloatingActionButton(

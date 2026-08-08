@@ -45,4 +45,28 @@ void main() {
     // 참여 시트가 열리지 않았어야 한다(시트 고유 CTA 부재로 검증).
     expect(find.widgetWithText(ElevatedButton, '참여하기'), findsNothing);
   });
+
+  testWidgets('앱이 떠 있는 중에 도착한 링크도 참여 시트를 연다', (WidgetTester tester) async {
+    // 웜 스타트 경로. initState의 post-frame 한 번만으로는 이 경우가 통째로 죽는다 —
+    // 버스에 목적지가 실려도 읽는 사람이 없어 아무 일도 일어나지 않는다.
+    final ProviderContainer container = ProviderContainer();
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(home: KeepConShell()),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(ElevatedButton, '참여하기'), findsNothing);
+
+    // 앱이 이미 떠 있는 상태에서 딥링크가 도착한다.
+    container.read(pendingDestinationProvider.notifier).state =
+        const InviteDestination('LATE99');
+    await tester.pumpAndSettle();
+
+    expect(find.widgetWithText(ElevatedButton, '참여하기'), findsOneWidget);
+    expect(find.text('LATE99'), findsOneWidget);
+  });
 }
