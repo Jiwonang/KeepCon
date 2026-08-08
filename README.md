@@ -24,7 +24,7 @@
 - **Flutter** (Dart, Material 3) — 크로스플랫폼
 - **Riverpod** (`flutter_riverpod`) — 상태 관리 (프로젝트 전역 표준)
 - **Firebase** (`firebase_auth`, `cloud_firestore`) — 백엔드 데이터 계층 *(구현 완료. 로컬 에뮬레이터로 계정 없이 실행 가능 — [Firebase 연동](#-firebase-연동-백엔드-활성화))*
-- 기본 실행은 **in-memory mock** 저장소 — 백엔드 설정 없이 바로 실행/개발 가능
+- 기본 실행은 **로컬 Firebase 에뮬레이터** — 계정·인터넷 없이 진짜 Firebase 동작으로 개발 (별도 터미널에서 에뮬레이터 기동 필요). 준비물 없이 바로 띄우려면 **in-memory mock**(`--dart-define=USE_DEMO=true`)
 
 ---
 
