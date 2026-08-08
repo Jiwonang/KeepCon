@@ -43,6 +43,27 @@
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
+
+            <!-- 초대 링크(App Links). 이게 없으면 링크가 브라우저로 새고 앱은 열리지 않는다.
+
+                 android:autoVerify="true" — 설치 시 시스템이
+                 https://<host>/.well-known/assetlinks.json 을 받아 이 앱의 서명 지문과
+                 대조한다. 통과해야 "확인된 링크"가 되어 선택 다이얼로그 없이 바로 열린다.
+                 ⚠️ 검증에 실패하면 조용히 브라우저로 열린다 — 지문이 맞는지는
+                 `adb shell pm get-app-links com.keepcon.app`으로 확인한다.
+
+                 host는 Group.inviteHost·firebase.json의 hosting과 **셋이 같아야** 한다.
+                 pathPrefix로 /invite만 받는다(호스팅의 다른 페이지까지 앱이 가로채지
+                 않도록). -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data
+                    android:scheme="https"
+                    android:host="keepcon-ab660.web.app"
+                    android:pathPrefix="/invite"/>
+            </intent-filter>
         </activity>
         <!-- 만료 임박 알림 수신부(flutter_local_notifications).
 

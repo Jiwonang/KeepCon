@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.keepcon.app",
+      "sha256_cert_fingerprints": [
+        "E2:1A:9C:F0:D0:A2:6A:F2:DF:94:E3:58:2F:9E:88:49:CF:02:B4:10:22:8C:9B:12:B7:3F:B7:C0:78:A4:C1:F1"
+      ]
+    }
+  }
+]

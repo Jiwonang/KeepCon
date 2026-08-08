@@ -36,6 +36,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'app/auth_gate.dart';
+import 'app/deep_link_listener.dart';
 import 'app/emulator_unavailable_page.dart';
 import 'shared/firebase/firebase_bootstrap.dart';
 import 'shared/models/gifticon.dart';
@@ -204,7 +205,9 @@ class KeepConApp extends ConsumerWidget {
       themeMode: mode,
       builder: (BuildContext context, Widget? child) =>
           _backendBanner(child, target),
-      home: const AuthGate(),
+      // 딥링크 수신은 **인증 게이트 바깥**에 둔다 — 초대 링크로 앱을 처음 여는 사용자는
+      // 아직 로그인 전이다. 목적지를 버스에 실어 두면 로그인 후 셸이 소비한다.
+      home: const DeepLinkListener(child: AuthGate()),
     );
   }
 }

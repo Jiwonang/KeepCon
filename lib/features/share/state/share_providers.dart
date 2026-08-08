@@ -30,7 +30,6 @@ import '../../../shared/models/user.dart';
 import '../../../shared/providers/my_groups_provider.dart';
 import '../../../shared/providers/repositories.dart';
 import '../../../shared/providers/session_provider.dart';
-import '../../../shared/util/invite_link.dart';
 
 // 세션은 계약 정본 [sessionUserProvider]를 각 파생·화면이 직접 `watch` 한다(경과 조치였던
 // 페이지 별칭 `shareCurrentUserProvider`는 제거됨 — 매트릭스 #13).
@@ -48,13 +47,11 @@ import '../../../shared/util/invite_link.dart';
 // `.when`을 쓰지 않는 이유·분기 순서(에러를 로딩보다 먼저 — 재시도 중 배너 유지)·
 // 미로그인 확정 = AsyncData(빈 값) 보존(알림 읽음 가드가 의존)은 정본 dartdoc이 규정한다.
 
-/// 딥링크로 진입한 대기 중 초대코드(1회성).
-///
-/// 앱 시작 시 진입 URL([Uri.base])에서 시드된다([pendingInviteCodeFromPlatform]).
-/// 셸이 로그인 후 이 코드를 소비해 참여 시트를 열고 `null`로 비운다(재진입 시 재실행 방지).
-/// 테스트/조립부에서 override로 주입할 수 있다.
-final pendingInviteCodeProvider =
-    StateProvider<String?>((ref) => pendingInviteCodeFromPlatform());
+// 대기 중 초대코드(`pendingInviteCodeProvider`)는 계약 정본
+// `shared/providers/deep_link_providers.dart`의 `pendingDestinationProvider`로 승격됐다.
+// 초대는 이제 목적지 하나의 형태(`InviteDestination`)이며, 알림 탭 등 다른 신호와 같은
+// 통로를 쓴다. 별칭(재export shim)은 남기지 않는다 — 두 이름이 살아 있으면 수신부마다
+// 다른 쪽에 쓰게 되어 인스턴스가 갈린다(매트릭스 #13 규약).
 
 /// id로 내 그룹 단건 조회. 로딩은 로딩으로 전파하고, data(null)은 "그룹 없음"
 /// (나가기/삭제/이전으로 멤버십이 사라진 경우 포함)을 뜻한다. 소비 페이지는 로딩과
