@@ -12,6 +12,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../features/main/main_page.dart';
+import '../features/main/state/highlighted_gifticon.dart';
 import '../features/scan/scan_page.dart';
 import '../features/share/share_page.dart';
 import '../features/share/widgets/share_sheets.dart';
@@ -57,6 +58,11 @@ class _KeepConShellState extends ConsumerState<KeepConShell> {
       case InviteDestination(:final String inviteCode):
         setState(() => _index = 1); // 공유 탭.
         showJoinGroupSheet(context, initialCode: inviteCode);
+
+      case GifticonHighlightDestination(:final String gifticonId):
+        setState(() => _index = 0); // 홈 탭.
+        // 강조를 어떻게 보이고 언제 거둘지는 main 페이지의 상태가 정한다.
+        ref.read(highlightedGifticonIdProvider.notifier).highlight(gifticonId);
     }
   }
 

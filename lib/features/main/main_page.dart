@@ -5,6 +5,8 @@
 /// (좌 브랜드 타일 + 정보 + 우 썸네일 + D-day 뱃지).
 library;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -20,6 +22,7 @@ import '../mypage/mypage_page.dart';
 import '../scan/scan_page.dart';
 import 'state/gifticon_list_providers.dart';
 import 'state/gifticon_stats.dart';
+import 'state/highlighted_gifticon.dart';
 import 'widgets/format.dart';
 import 'widgets/gifticon_status_label.dart';
 
@@ -461,13 +464,54 @@ class _SectionHeader extends StatelessWidget {
 
 // ─────────────────────── 6. 기프티콘 세로 리치 카드 리스트 ───────────────────────
 
-class _GifticonList extends StatelessWidget {
+class _GifticonList extends ConsumerStatefulWidget {
   final List<Gifticon> gifticons;
   const _GifticonList({required this.gifticons});
 
   @override
+  ConsumerState<_GifticonList> createState() => _GifticonListState();
+}
+
+class _GifticonListState extends ConsumerState<_GifticonList> {
+  /// 강조 대상 카드에 붙이는 키. 스크롤해 보여주려면 그 카드의 [BuildContext]가 필요하다.
+  final GlobalKey _highlightKey = GlobalKey();
+
+  /// 강조 대상이 생기면 화면 안으로 스크롤한다.
+  ///
+  /// 강조를 **거두는** 일은 하지 않는다 — 그건 상태(HighlightedGifticonController)가
+  /// 스스로 한다. 목록이 화면에 없을 때 탭한 경우에도 같은 시간에 끝나야 하기 때문이다.
+  void _scrollToHighlighted(String? id) {
+    if (id == null) return;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      // 대상 카드가 아직 만들어지지 않았을 수 있다. 두 경우다:
+      //  ① 필터가 걸려 목록에서 아예 빠졌다(예: 상태 필터).
+      //  ② [SliverList]가 지연 생성이라 화면에서 멀리 떨어진 항목은 빌드되지 않았다.
+      // 둘 다 키의 currentContext가 null이므로 스크롤은 건너뛴다 — 홈 탭으로 오는
+      // 것까지는 이미 됐으니 아무 일도 안 일어난 것은 아니다.
+      //
+      // ②가 실무에서 잘 안 걸리는 이유: 기본 정렬이 만료임박순([SortOption.expiryAsc])
+      // 이라 알림이 온 기프티콘은 대개 목록 맨 앞에 있다.
+      final BuildContext? target = _highlightKey.currentContext;
+      if (target == null) return;
+      unawaited(Scrollable.ensureVisible(
+        target,
+        duration: const Duration(milliseconds: 350),
+        curve: Curves.easeOut,
+        alignment: 0.2,
+      ));
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
-    if (gifticons.isEmpty) {
+    final String? highlightedId = ref.watch(highlightedGifticonIdProvider);
+    ref.listen<String?>(
+      highlightedGifticonIdProvider,
+      (String? previous, String? next) => _scrollToHighlighted(next),
+    );
+
+    if (widget.gifticons.isEmpty) {
       return const SliverToBoxAdapter(
         child: _CenterMessage(
           text: '표시할 기프티콘이 없습니다.\n새 기프티콘을 추가해 보세요.',
@@ -475,9 +519,17 @@ class _GifticonList extends StatelessWidget {
       );
     }
     return SliverList.separated(
-      itemCount: gifticons.length,
+      itemCount: widget.gifticons.length,
       separatorBuilder: (_, __) => const SizedBox(height: 14),
-      itemBuilder: (context, i) => _RichGifticonCard(gifticon: gifticons[i]),
+      itemBuilder: (BuildContext context, int i) {
+        final Gifticon g = widget.gifticons[i];
+        final bool highlighted = g.id == highlightedId;
+        return _RichGifticonCard(
+          key: highlighted ? _highlightKey : null,
+          gifticon: g,
+          highlighted: highlighted,
+        );
+      },
     );
   }
 }
@@ -485,7 +537,15 @@ class _GifticonList extends StatelessWidget {
 /// 기프티콘 한 장 — 좌 브랜드 타일 + 중앙 정보 + 우 썸네일 + 우상단 D-day 뱃지.
 class _RichGifticonCard extends StatelessWidget {
   final Gifticon gifticon;
-  const _RichGifticonCard({required this.gifticon});
+
+  /// 알림을 타고 들어와 잠시 짚어 보여주는 중인지. 테두리로 표시한다.
+  final bool highlighted;
+
+  const _RichGifticonCard({
+    super.key,
+    required this.gifticon,
+    this.highlighted = false,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -502,9 +562,19 @@ class _RichGifticonCard extends StatelessWidget {
     final bool hasPrice = gifticon.price > 0;
     final String priceText = hasPrice ? '${formatWon(gifticon.price)}원' : '-';
 
-    return Container(
+    // 강조는 **테두리만** 더한다. 배경색을 바꾸면 브랜드 색·D-day 뱃지와 경쟁해
+    // 오히려 무엇을 봐야 할지 흐려진다.
+    final BoxDecoration base =
+        AppDecorations.softCard(scheme, shadowOpacity: 0.05);
+
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 250),
       padding: const EdgeInsets.all(16),
-      decoration: AppDecorations.softCard(scheme, shadowOpacity: 0.05),
+      decoration: highlighted
+          ? base.copyWith(
+              border: Border.all(color: scheme.primary, width: 2),
+            )
+          : base,
       child: Stack(
         children: [
           Row(

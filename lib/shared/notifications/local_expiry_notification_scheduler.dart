@@ -37,6 +37,13 @@ class LocalExpiryNotificationScheduler implements ExpiryNotificationScheduler {
 
   final FlutterLocalNotificationsPlugin _plugin;
 
+  /// 알림 탭 이벤트. broadcast인 이유는 구독자가 붙기 전/후 어느 쪽이든 앱이 죽지
+  /// 않아야 하고, 구독이 끊겼다 다시 붙을 수 있어야 하기 때문이다.
+  final StreamController<String> _taps = StreamController<String>.broadcast();
+
+  /// 앱을 띄운 알림의 payload를 이미 읽었는지. [takeLaunchPayload]의 1회성을 보장한다.
+  bool _launchPayloadTaken = false;
+
   /// 진행 중이거나 완료된 초기화. 동시 호출을 하나로 합친다.
   ///
   /// `bool _initialized` 플래그만 두면, 설정 화면의 권한 조회와 목록 변화에 따른 예약이
@@ -78,6 +85,13 @@ class LocalExpiryNotificationScheduler implements ExpiryNotificationScheduler {
       settings: const InitializationSettings(
         android: AndroidInitializationSettings('@mipmap/ic_launcher'),
       ),
+      // 앱이 떠 있을 때(또는 백그라운드에서) 알림을 탭한 경우. payload에는 예약할 때
+      // 실어 둔 Gifticon.id가 들어 있다.
+      onDidReceiveNotificationResponse: (NotificationResponse response) {
+        final String? payload = response.payload;
+        if (payload == null || payload.isEmpty) return;
+        if (!_taps.isClosed) _taps.add(payload);
+      },
     );
 
     await _android?.createNotificationChannel(
@@ -205,5 +219,22 @@ class LocalExpiryNotificationScheduler implements ExpiryNotificationScheduler {
   Future<void> _cancelAllUnqueued() async {
     await _ensureInitialized();
     await _plugin.cancelAll();
+  }
+
+  @override
+  Stream<String> get notificationTaps => _taps.stream;
+
+  @override
+  Future<String?> takeLaunchPayload() async {
+    if (_launchPayloadTaken) return null;
+    _launchPayloadTaken = true;
+
+    await _ensureInitialized();
+    final NotificationAppLaunchDetails? details =
+        await _plugin.getNotificationAppLaunchDetails();
+    if (details == null || !details.didNotificationLaunchApp) return null;
+
+    final String? payload = details.notificationResponse?.payload;
+    return (payload == null || payload.isEmpty) ? null : payload;
   }
 }
