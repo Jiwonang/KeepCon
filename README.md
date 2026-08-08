@@ -302,7 +302,7 @@ gh api -X POST repos/Jiwonang/KeepCon/rulesets --input ruleset.json
 
 | 경로 | 실행 | 언제 쓰나 |
 |------|------|-----------|
-| in-memory 데모 | `flutter run` | 화면·UI 작업. 시드 데이터로 즉시 시연 |
+| in-memory 데모 | `flutter run --dart-define=USE_DEMO=true` | 화면·UI 작업. 시드 데이터로 즉시 시연 |
 | Firebase 에뮬레이터 | `flutter run` (기본 — 플래그 불필요) | 혼자 하는 작업, **파괴적 테스트**, 보안 규칙 검증 |
 | **dev 프로젝트** (`keepcon-dev`) | `flutter run --dart-define=USE_FIREBASE=true` | **팀 개발 기본** — 여럿이 같은 그룹에 들어가는 공유 시나리오 |
 | 실서비스 (`keepcon-ab660`) | `flutter run --dart-define=USE_FIREBASE_PROD=true` | 시연·배포 확인 **전용** |
