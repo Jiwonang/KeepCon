@@ -73,6 +73,13 @@ const int kAuthEmulatorPort = 9099;
 /// Firestore 에뮬레이터 포트. **`firebase.json`의 `emulators.firestore.port`와 일치해야 한다.**
 const int kFirestoreEmulatorPort = 8080;
 
+/// [isEmulatorReachable]이 두드려 보는 문서 경로. 실제로 존재할 필요는 없다 —
+/// 에뮬레이터가 **응답을 하는지**만 본다(보안 규칙이 막아 주는 편이 오히려 정상).
+///
+/// 컬렉션 id에 `__이름__`(앞뒤 밑줄 두 개)을 쓰면 Firestore가 내부 예약어로 거부하므로
+/// 절대 그 형태로 바꾸지 마라 — 자세한 사정은 [isEmulatorReachable] 문서 참조.
+const String kHealthProbePath = 'health_probe/probe';
+
 /// 에뮬레이터 연결을 이미 수행했는지. 중복 연결 시도(핫 리스타트)를 막는다.
 bool _emulatorConnected = false;
 
@@ -189,19 +196,35 @@ Future<void> connectToEmulators({String? host}) async {
 /// [GetOptions]에 `Source.server`를 주어 **캐시로 성공한 척하는 것을 막는다.**
 /// `permission-denied`는 **연결 성공으로 친다** — 보안 규칙이 평가됐다는 건
 /// 에뮬레이터가 요청을 받고 응답했다는 뜻이기 때문이다.
+///
+/// ⚠️ **프로브 경로에 `__이름__` 형태를 쓰지 마라.** Firestore는 앞뒤로 밑줄 두 개인
+/// 컬렉션 id를 내부 예약어로 막아 두어(`invalid-argument: Collection id "__health__" is
+/// invalid because it is reserved.`), 에뮬레이터가 멀쩡히 떠 있어도 요청이 거부된다.
+/// 예전 경로 `__health__/probe`가 정확히 그랬고, 그래서 이 체크는 **항상 실패해**
+/// 안내 화면이 늘 떴다. 실패를 통째로 삼키고 있었던 탓에 원인이 오래 안 보였다.
+///
+/// 실패하면 **사유를 반드시 로그로 남긴다.** 예전에는 `catch (_)`로 통째로 삼켜서,
+/// 안내 화면이 떴을 때 "에뮬레이터가 정말 없는지, 요청 자체가 잘못됐는지"를 코드를
+/// 고쳐 보기 전에는 구분할 수 없었다 — 위의 예약어 버그가 오래 숨어 있던 이유다.
+/// 판정을 바꾸는 코드가 아니라 **틀렸을 때 그 사실이 드러나게 하는 코드**다.
 Future<bool> isEmulatorReachable({
   Duration timeout = const Duration(seconds: 5),
 }) async {
   try {
     await FirebaseFirestore.instance
-        .doc('__health__/probe')
+        .doc(kHealthProbePath)
         .get(const GetOptions(source: Source.server))
         .timeout(timeout);
     return true;
   } on FirebaseException catch (e) {
-    return e.code == 'permission-denied';
-  } catch (_) {
+    if (e.code == 'permission-denied') return true;
+    debugPrint(
+      'KeepCon: 에뮬레이터 확인 실패 — FirebaseException(${e.code}): ${e.message}',
+    );
+    return false;
+  } catch (e) {
     // 타임아웃·연결 거부 등. 에뮬레이터가 없다고 본다.
+    debugPrint('KeepCon: 에뮬레이터 확인 실패 — $e');
     return false;
   }
 }
@@ -209,7 +232,14 @@ Future<bool> isEmulatorReachable({
 /// 플랫폼별 에뮬레이터 호스트를 판정한다.
 ///
 /// Android 에뮬레이터의 `localhost`는 **에뮬레이터 자신**을 가리키므로, 호스트 PC는
-/// 특수 주소 `10.0.2.2`로 접근해야 한다. 그 외(web/데스크톱/iOS 시뮬레이터)는 `localhost`.
+/// 특수 주소 `10.0.2.2`로 접근해야 한다. 그 외(web/데스크톱/iOS 시뮬레이터)는 루프백.
+///
+/// ## 왜 `localhost`가 아니라 `127.0.0.1`인가
+/// 에뮬레이터는 **IPv4 루프백에만 바인딩한다**(`firebase.json`에 `emulators.*.host`가
+/// 없을 때의 기본값 — `[::1]:8080`은 연결 자체가 거부된다). 그런데 Windows에서
+/// `localhost`는 IPv6 `::1`로 먼저 해석되므로, 브라우저가 매 요청마다 IPv6를 시도했다가
+/// 실패하고 IPv4로 되돌아온다. 실측으로 같은 요청이 `localhost` 327ms / `127.0.0.1` 12ms였다.
+/// 동작은 하지만 부팅 직후처럼 빠듯한 구간에서 [isEmulatorReachable]의 여유를 갉아먹는다.
 ///
 /// ⚠️ **USB로 연결한 Android 실기기는 이 기본값으로 닿지 않으며, 그 조합은 지원하지 않는다.**
 /// `10.0.2.2`는 AVD의 가상 라우팅이라 실기기에는 그런 주소가 없다. [connectToEmulators]의
@@ -221,7 +251,7 @@ String resolveEmulatorHost() {
   if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
     return '10.0.2.2';
   }
-  return 'localhost';
+  return '127.0.0.1';
 }
 
 /// 이미 [Firebase.initializeApp]이 완료된 상태에서, provider override만 만든다.

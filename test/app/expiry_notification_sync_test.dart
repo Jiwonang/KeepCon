@@ -15,8 +15,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:keepcon/app/expiry_notification_sync.dart';
 import 'package:keepcon/features/main/state/gifticon_list_providers.dart';
+import 'package:keepcon/shared/deeplink/app_destination.dart';
 import 'package:keepcon/shared/models/gifticon.dart';
 import 'package:keepcon/shared/notifications/expiry_notification_scheduler.dart';
+import 'package:keepcon/shared/providers/deep_link_providers.dart';
 import 'package:keepcon/shared/providers/notification_providers.dart';
 
 /// 호출을 기록하고, 필요하면 [gate]로 예약을 붙잡아 두는 스케줄러 대역.
@@ -29,6 +31,22 @@ class _FakeScheduler implements ExpiryNotificationScheduler {
 
   /// 열려 있으면 [sync]가 완료되지 않고 대기한다(동시성 상황 재현용).
   Completer<void>? gate;
+
+  /// 알림 탭 이벤트를 밀어 넣는 통로.
+  final StreamController<String> taps = StreamController<String>.broadcast();
+
+  /// 앱을 띄운 알림의 payload(콜드 스타트 재현용). 1회성으로 소비된다.
+  String? launchPayload;
+
+  @override
+  Stream<String> get notificationTaps => taps.stream;
+
+  @override
+  Future<String?> takeLaunchPayload() async {
+    final String? p = launchPayload;
+    launchPayload = null;
+    return p;
+  }
 
   @override
   Future<int> sync(List<Gifticon> gifticons) async {
@@ -71,7 +89,10 @@ void main() {
     scheduler = _FakeScheduler();
   });
 
-  tearDown(() => lists.close());
+  tearDown(() {
+    lists.close();
+    scheduler.taps.close();
+  });
 
   Future<void> mount(WidgetTester tester, {required Widget child}) {
     return tester.pumpWidget(
@@ -106,6 +127,65 @@ void main() {
     await tester.pump();
 
     expect(scheduler.cancelAllCalls, 1);
+  });
+
+  group('알림 탭 → 목적지 버스', () {
+    testWidgets('앱이 떠 있을 때 탭하면 강조 목적지가 실린다', (WidgetTester tester) async {
+      final ProviderContainer container = ProviderContainer(
+        overrides: <Override>[
+          rawGifticonsProvider.overrideWith((_) => lists.stream),
+          expiryNotificationSchedulerProvider.overrideWithValue(scheduler),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const MaterialApp(
+            home: ExpiryNotificationSync(child: SizedBox()),
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(container.read(pendingDestinationProvider), isNull);
+
+      scheduler.taps.add('gifticon-42');
+      await tester.pump();
+
+      expect(
+        container.read(pendingDestinationProvider),
+        const GifticonHighlightDestination('gifticon-42'),
+      );
+    });
+
+    testWidgets('알림으로 앱이 처음 열린 경우(콜드 스타트)도 실린다', (WidgetTester tester) async {
+      // 스트림이 구독되기 전에 이벤트가 지나가므로 launch payload로 따로 받아야 한다.
+      scheduler.launchPayload = 'gifticon-cold';
+
+      final ProviderContainer container = ProviderContainer(
+        overrides: <Override>[
+          rawGifticonsProvider.overrideWith((_) => lists.stream),
+          expiryNotificationSchedulerProvider.overrideWithValue(scheduler),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const MaterialApp(
+            home: ExpiryNotificationSync(child: SizedBox()),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        container.read(pendingDestinationProvider),
+        const GifticonHighlightDestination('gifticon-cold'),
+      );
+    });
   });
 
   testWidgets('폐기 뒤에는 대기열이 되살아나지 않는다', (WidgetTester tester) async {

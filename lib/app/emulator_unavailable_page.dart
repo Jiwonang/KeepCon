@@ -7,18 +7,31 @@
 ///
 /// 그래서 조립부가 `isEmulatorReachable()`로 먼저 확인하고, 닿지 않으면 앱 대신
 /// 이 화면을 띄운다. **무엇을 해야 하는지 화면에서 바로 알 수 있어야** 한다.
+///
+/// ## 화면에서 다시 확인할 수 있어야 하는 이유
+/// 이 화면이 뜨는 가장 흔한 상황은 "에뮬레이터를 아직 안 띄웠다"가 아니라
+/// **"띄웠는데 아직 다 안 떴다"** 이다 — Firestore 에뮬레이터는 별도 Java 프로세스라
+/// CLI가 뜬 뒤에도 수십 초 더 걸린다. 재확인 수단이 없으면 그 사이에 실행한 사람은
+/// 앱을 통째로 다시 띄우는 수밖에 없고, 콜드 빌드가 붙으면 그게 제일 비싼 단계가 된다.
 library;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../shared/firebase/firebase_bootstrap.dart';
 import '../shared/theme/app_theme.dart';
 
 /// 에뮬레이터에 닿지 못했을 때 앱 대신 실행하는 최소 앱.
 ///
 /// Repository provider를 조립하지 않는다 — 백엔드가 없는 상태이므로 화면 하나만 띄운다.
 class EmulatorUnavailableApp extends StatelessWidget {
-  const EmulatorUnavailableApp({super.key});
+  const EmulatorUnavailableApp({super.key, required this.onRetrySucceeded});
+
+  /// 재확인에서 에뮬레이터에 닿았을 때 호출한다. 조립부가 본 앱으로 교체한다.
+  ///
+  /// 이 화면이 직접 본 앱을 띄우지 않는 이유는 provider override 목록을 조립부만
+  /// 알고 있기 때문이다 — 화면은 "닿았다"는 사실만 알리고 조립은 조립부에 맡긴다.
+  final VoidCallback onRetrySucceeded;
 
   @override
   Widget build(BuildContext context) {
@@ -27,20 +40,47 @@ class EmulatorUnavailableApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: AppTheme.light,
       darkTheme: AppTheme.dark,
-      home: const _EmulatorUnavailablePage(),
+      home: _EmulatorUnavailablePage(onRetrySucceeded: onRetrySucceeded),
     );
   }
 }
 
-class _EmulatorUnavailablePage extends StatelessWidget {
-  const _EmulatorUnavailablePage();
+class _EmulatorUnavailablePage extends StatefulWidget {
+  const _EmulatorUnavailablePage({required this.onRetrySucceeded});
 
+  final VoidCallback onRetrySucceeded;
+
+  @override
+  State<_EmulatorUnavailablePage> createState() =>
+      _EmulatorUnavailablePageState();
+}
+
+class _EmulatorUnavailablePageState extends State<_EmulatorUnavailablePage> {
   /// 셸별 실행 명령. cmd/PowerShell에서 `bash tool/emulators.sh`를 치면 Git Bash가
   /// 아니라 WSL이 실행되어 실패하므로, 두 명령을 나란히 보여 준다.
   static const List<(String, String)> _commands = <(String, String)>[
     ('Git Bash · macOS · Linux', 'bash tool/emulators.sh'),
     ('cmd · PowerShell', 'tool\\emulators.cmd'),
   ];
+
+  /// 재확인이 진행 중인지. 버튼 연타로 프로브가 겹치는 것을 막는다.
+  bool _checking = false;
+
+  Future<void> _recheck() async {
+    setState(() => _checking = true);
+    final bool reachable = await isEmulatorReachable();
+    if (!mounted) return;
+    if (reachable) {
+      widget.onRetrySucceeded();
+      return;
+    }
+    setState(() => _checking = false);
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('아직 닿지 않습니다. 터미널에 All emulators ready! 가 뜬 뒤 다시 눌러 보세요.'),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -76,8 +116,20 @@ class _EmulatorUnavailablePage extends StatelessWidget {
                   _CommandTile(shell: shell, command: command),
                 const SizedBox(height: 20),
                 Text(
-                  '띄운 뒤 이 앱을 다시 실행하세요.',
+                  '띄운 뒤 아래 버튼을 누르면 앱을 다시 실행하지 않아도 됩니다.',
                   style: theme.textTheme.bodyMedium,
+                ),
+                const SizedBox(height: 12),
+                FilledButton.icon(
+                  onPressed: _checking ? null : _recheck,
+                  icon: _checking
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.refresh),
+                  label: Text(_checking ? '확인 중…' : '다시 확인'),
                 ),
                 const SizedBox(height: 20),
                 Divider(color: theme.dividerColor),

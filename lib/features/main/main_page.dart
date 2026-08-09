@@ -5,6 +5,8 @@
 /// (좌 브랜드 타일 + 정보 + 우 썸네일 + D-day 뱃지).
 library;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -21,6 +23,7 @@ import '../scan/scan_page.dart';
 import 'state/gifticon_filter.dart';
 import 'state/gifticon_list_providers.dart';
 import 'state/gifticon_stats.dart';
+import 'state/highlighted_gifticon.dart';
 import 'state/now_provider.dart';
 import 'widgets/format.dart';
 import 'widgets/gifticon_status_label.dart';
@@ -475,9 +478,14 @@ class _SectionHeader extends ConsumerWidget {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
 
-    final String countLabel = filter.expiringSoonOnly
-        ? '만료 임박 $count개'
-        : (filter.isAnyActive ? '$count개 · 필터 적용' : '전체 $count개');
+    // 만료 임박과 상태·카테고리 필터는 AND로 결합한다. 그래서 둘이 겹치면 count는
+    // "임박한 것 전부"가 아니라 그 교집합이다 — "만료 임박 N개"라고만 쓰면 더 좁은
+    // 숫자를 임박 전체인 것처럼 보여주고, 다른 필터가 걸려 있다는 사실도 숨긴다.
+    final String base =
+        filter.expiringSoonOnly ? '만료 임박 $count개' : '전체 $count개';
+    final String countLabel = filter.hasOptionFilter
+        ? (filter.expiringSoonOnly ? '$base · 필터 적용' : '$count개 · 필터 적용')
+        : base;
 
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -533,13 +541,71 @@ class _SectionHeader extends ConsumerWidget {
 
 // ─────────────────────── 6. 기프티콘 세로 리치 카드 리스트 ───────────────────────
 
-class _GifticonList extends StatelessWidget {
+class _GifticonList extends ConsumerStatefulWidget {
   final List<Gifticon> gifticons;
   const _GifticonList({required this.gifticons});
 
   @override
+  ConsumerState<_GifticonList> createState() => _GifticonListState();
+}
+
+class _GifticonListState extends ConsumerState<_GifticonList> {
+  /// 강조 대상 카드에 붙이는 키. 스크롤해 보여주려면 그 카드의 [BuildContext]가 필요하다.
+  final GlobalKey _highlightKey = GlobalKey();
+
+  /// 이미 스크롤을 마친 강조 id. 같은 강조에 대해 두 번 움직이지 않기 위함이다.
+  String? _scrolledFor;
+
+  /// 강조 대상이 생기면 화면 안으로 스크롤한다. 성공할 때까지 빌드마다 재시도한다.
+  ///
+  /// 강조를 **거두는** 일은 하지 않는다 — 그건 상태(HighlightedGifticonController)가
+  /// 스스로 한다. 목록이 화면에 없을 때 탭한 경우에도 같은 시간에 끝나야 하기 때문이다.
+  void _scrollToHighlighted(String? id) {
+    if (id == null || id == _scrolledFor) return;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      // 대상 카드가 아직 만들어지지 않았을 수 있다. 세 경우다:
+      //  ① 목록이 아직 도착하지 않았다(위 didUpdateWidget이 다시 시도한다).
+      //  ② 필터가 걸려 목록에서 아예 빠졌다(예: 상태 필터).
+      //  ③ [SliverList]가 지연 생성이라 화면에서 멀리 떨어진 항목은 빌드되지 않았다.
+      // 셋 다 키의 currentContext가 null이다. **여기서 _scrolledFor를 세우지 않는 것이
+      // 핵심** — 세워 버리면 ①에서 목록이 도착해도 재시도가 막힌다.
+      //
+      // ③의 도달 범위는 넓지 않다. 헤더(인사·검색·배너·통계)가 화면을 많이 차지해
+      // 한 화면에 만들어지는 카드가 몇 장뿐이고, 그보다 아래 항목은 스크롤 대상이 되지
+      // 못한다. 기본 정렬이 만료임박순([SortOption.expiryAsc])이라 알림이 온 기프티콘이
+      // 대개 앞쪽에 오는 것으로 상당 부분 상쇄되지만, **먼 항목은 강조만 되고 스크롤은
+      // 되지 않는다.** 이걸 제대로 풀려면 인덱스 기반 스크롤(예: scrollable_positioned_list)
+      // 이 필요한데, 홈 화면 전체를 sliver 구조에서 들어내야 해서 이득보다 비용이 크다.
+      final BuildContext? target = _highlightKey.currentContext;
+      if (target == null) return;
+
+      _scrolledFor = id;
+      unawaited(Scrollable.ensureVisible(
+        target,
+        duration: const Duration(milliseconds: 350),
+        curve: Curves.easeOut,
+        alignment: 0.2,
+      ));
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
-    if (gifticons.isEmpty) {
+    final String? highlightedId = ref.watch(highlightedGifticonIdProvider);
+
+    // 강조가 거둬지면 다음 강조가 다시 스크롤할 수 있게 기록을 비운다.
+    if (highlightedId == null) _scrolledFor = null;
+
+    // **빌드마다 시도한다**(성공하면 `_scrolledFor`가 막는다). `ref.listen`으로 강조가
+    // 바뀌는 순간에만 시도하면 **강조가 목록보다 먼저 걸리는 경우**가 빠진다 — 알림으로
+    // 앱이 열리면 강조가 먼저 걸리고 목록은 저장소에서 나중에 오는데, 그때 이 위젯은
+    // 아직 마운트되지도 않았거나 대상 카드가 없어 스크롤을 건너뛴다. 강조 id는 그대로라
+    // 리스너는 다시 울리지 않고, 카드는 강조된 채 화면 밖에 남는다.
+    _scrollToHighlighted(highlightedId);
+
+    if (widget.gifticons.isEmpty) {
       return const SliverToBoxAdapter(
         child: _CenterMessage(
           text: '표시할 기프티콘이 없습니다.\n새 기프티콘을 추가해 보세요.',
@@ -547,9 +613,17 @@ class _GifticonList extends StatelessWidget {
       );
     }
     return SliverList.separated(
-      itemCount: gifticons.length,
+      itemCount: widget.gifticons.length,
       separatorBuilder: (_, __) => const SizedBox(height: 14),
-      itemBuilder: (context, i) => _RichGifticonCard(gifticon: gifticons[i]),
+      itemBuilder: (BuildContext context, int i) {
+        final Gifticon g = widget.gifticons[i];
+        final bool highlighted = g.id == highlightedId;
+        return _RichGifticonCard(
+          key: highlighted ? _highlightKey : null,
+          gifticon: g,
+          highlighted: highlighted,
+        );
+      },
     );
   }
 }
@@ -557,7 +631,15 @@ class _GifticonList extends StatelessWidget {
 /// 기프티콘 한 장 — 좌 브랜드 타일 + 중앙 정보 + 우 썸네일 + 우상단 D-day 뱃지.
 class _RichGifticonCard extends StatelessWidget {
   final Gifticon gifticon;
-  const _RichGifticonCard({required this.gifticon});
+
+  /// 알림을 타고 들어와 잠시 짚어 보여주는 중인지. 테두리로 표시한다.
+  final bool highlighted;
+
+  const _RichGifticonCard({
+    super.key,
+    required this.gifticon,
+    this.highlighted = false,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -574,9 +656,19 @@ class _RichGifticonCard extends StatelessWidget {
     final bool hasPrice = gifticon.price > 0;
     final String priceText = hasPrice ? '${formatWon(gifticon.price)}원' : '-';
 
-    return Container(
+    // 강조는 **테두리만** 더한다. 배경색을 바꾸면 브랜드 색·D-day 뱃지와 경쟁해
+    // 오히려 무엇을 봐야 할지 흐려진다.
+    final BoxDecoration base =
+        AppDecorations.softCard(scheme, shadowOpacity: 0.05);
+
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 250),
       padding: const EdgeInsets.all(16),
-      decoration: AppDecorations.softCard(scheme, shadowOpacity: 0.05),
+      decoration: highlighted
+          ? base.copyWith(
+              border: Border.all(color: scheme.primary, width: 2),
+            )
+          : base,
       child: Stack(
         children: [
           Row(

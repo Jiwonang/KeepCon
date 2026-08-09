@@ -46,3 +46,29 @@ final class InviteDestination extends AppDestination {
   @override
   String toString() => 'InviteDestination($inviteCode)';
 }
+
+/// 홈 목록에서 특정 기프티콘을 짚어 보여준다(만료 임박 알림을 탭했을 때).
+///
+/// **상세 화면으로 보내지 않는 이유:** 개인 기프티콘 상세 화면이 아직 없다. 목록에서
+/// 해당 카드를 강조해 스크롤해 주는 것만으로도 "어느 것 때문에 알림이 왔는가"라는
+/// 물음에는 답이 된다. 상세 화면이 생기면 이 목적지의 처리부만 바꾸면 된다.
+final class GifticonHighlightDestination extends AppDestination {
+  /// GifticonHighlightDestination 인스턴스를 생성한다.
+  const GifticonHighlightDestination(this.gifticonId);
+
+  /// 강조할 [Gifticon.id]. 알림 payload로 실려 온다.
+  final String gifticonId;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is GifticonHighlightDestination &&
+          runtimeType == other.runtimeType &&
+          gifticonId == other.gifticonId;
+
+  @override
+  int get hashCode => gifticonId.hashCode;
+
+  @override
+  String toString() => 'GifticonHighlightDestination($gifticonId)';
+}
