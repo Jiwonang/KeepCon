@@ -170,9 +170,9 @@ class MyPage extends ConsumerWidget {
                   ),
                   const _RowDivider(),
                   _SettingsRow(
-                    icon: Icons.settings_outlined,
-                    title: '설정',
-                    onTap: () => _placeholder(context, '설정'),
+                    icon: Icons.info_outline,
+                    title: '앱 정보',
+                    onTap: () => _showAppInfo(context),
                   ),
                 ],
               ),
@@ -209,9 +209,20 @@ class MyPage extends ConsumerWidget {
     );
   }
 
-  void _placeholder(BuildContext context, String label) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('$label 은(는) 준비 중입니다.')),
+  /// 앱 정보 — 버전과 오픈소스 라이선스.
+  ///
+  /// [showAboutDialog]는 Flutter 기본 제공이라 별도 화면 없이 버전 표기와
+  /// 라이선스 페이지([LicensePage]) 진입 버튼을 함께 준다. 예전 이 자리에 있던
+  /// '설정' 행은 설정 카드 안에 다시 '설정'이 있어 계층이 무너졌고 내용도 없는
+  /// placeholder였다 — 실제 내용이 있는 '앱 정보'로 교체했다.
+  void _showAppInfo(BuildContext context) {
+    showAboutDialog(
+      context: context,
+      applicationName: 'KeepCon',
+      // pubspec.yaml의 version과 수동 동기화. 버전이 실제로 움직이기 시작하면
+      // package_info_plus 런타임 조회로 바꾼다.
+      applicationVersion: '0.1.0',
+      applicationLegalese: '흩어진 기프티콘을 한 곳에서 관리·보관·공유합니다.',
     );
   }
 
