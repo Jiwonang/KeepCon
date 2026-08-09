@@ -51,13 +51,14 @@ void main() {
     GifticonStatus status = GifticonStatus.available,
     String brand = '스타벅스',
     String productName = '아메리카노 T',
+    String category = '카페',
   }) =>
       Gifticon(
         id: id,
         ownerId: me.id,
         brand: brand,
         productName: productName,
-        category: '카페',
+        category: category,
         price: 4500,
         expiryDate: fixedNow.add(Duration(days: daysLeft)),
         registeredAt: fixedNow,
@@ -300,6 +301,32 @@ void main() {
       expect(container.read(filterProvider), GifticonFilter.none);
       expect(find.text('전체 2개'), findsOneWidget);
       expect(find.text('확인'), findsOneWidget);
+    });
+
+    testWidgets('다른 필터가 함께 걸리면 헤더가 그 사실도 알린다', (WidgetTester tester) async {
+      // CodeRabbit 지적 반영: 필터는 AND로 결합하므로 카테고리가 함께 걸리면 count는
+      // "임박한 것 전부"가 아니라 교집합이다. '만료 임박 N개'라고만 쓰면 더 좁은 숫자를
+      // 임박 전체인 것처럼 보여주고, 카테고리 필터가 걸려 있다는 사실도 숨긴다.
+      final ProviderContainer container = await pumpHome(tester, <Gifticon>[
+        g('cafe', daysLeft: 2, category: '카페'),
+        g('conv', daysLeft: 3, category: '편의점'),
+      ]);
+
+      container.read(filterProvider.notifier).state =
+          container.read(filterProvider).withCategory('카페');
+      await tester.pumpAndSettle();
+
+      // 카테고리만 걸린 상태 — 임박 라벨을 쓰면 안 된다.
+      expect(find.text('1개 · 필터 적용'), findsOneWidget);
+
+      await tester.tap(find.text('확인'));
+      await tester.pumpAndSettle();
+
+      // 배너는 원천 기준이라 여전히 2건을 말하는데, 목록은 카페 1건뿐이다.
+      expect(container.read(expiringSoonGifticonsProvider).length, 2);
+      expect(visibleIds(container), <String>['cafe']);
+      expect(find.text('만료 임박 1개 · 필터 적용'), findsOneWidget,
+          reason: '교집합 개수를 임박 전체인 것처럼 보여주면 안 된다');
     });
 
     testWidgets('섹션 헤더의 X로도 필터를 풀 수 있다', (WidgetTester tester) async {

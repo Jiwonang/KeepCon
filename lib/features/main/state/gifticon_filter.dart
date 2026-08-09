@@ -57,12 +57,18 @@ class GifticonFilter {
   /// 필터가 하나도 걸려 있지 않은 초기 상태.
   static const GifticonFilter none = GifticonFilter();
 
+  /// 계약 [FilterOption]으로 표현되는 필터(상태·카테고리)가 하나라도 걸려 있는지.
+  ///
+  /// [expiringSoonOnly]와 구분해서 물을 수 있어야 하는 이유: 헤더가 "만료 임박 N개"라고
+  /// 쓸 때 그 N이 **만료 임박 조건만** 적용한 개수인지, 카테고리까지 함께 걸린 개수인지
+  /// 알려야 한다. 모든 필터는 AND로 결합하므로 후자면 N은 임박 전체보다 작다.
+  bool get hasOptionFilter => statusFilter != null || categoryFilter != null;
+
   /// 어떤 종류든 필터가 하나라도 걸려 있는지.
   ///
   /// 목록 헤더가 "전체 N개"와 "걸러진 N개"를 구분해 보여주는 데 쓴다 — 필터가 켜진 걸
   /// 모르면 사용자는 기프티콘이 사라졌다고 읽는다.
-  bool get isAnyActive =>
-      statusFilter != null || categoryFilter != null || expiringSoonOnly;
+  bool get isAnyActive => hasOptionFilter || expiringSoonOnly;
 
   /// 이 필터에서 특정 [option] 종류가 활성인지.
   bool isActive(FilterOption option) {
