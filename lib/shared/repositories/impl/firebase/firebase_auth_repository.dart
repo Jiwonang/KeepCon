@@ -159,11 +159,14 @@ class FirebaseAuthRepository implements AuthRepository {
 
     // 프로필 저장(계약) — 최초 로그인 시 생성, 이후엔 merge로 무해.
     // 실패해도 로그인은 이미 성립했으므로 signUp과 같은 이유로 도메인 예외로 감싼다.
+    // ⚠️ createdAt은 여기서 쓰지 않는다: signUp(1회 경로)과 달리 구글 로그인은
+    // 반복 호출되는 경로라, serverTimestamp를 merge로 매번 쓰면 로그인할 때마다
+    // 가입 시각이 갱신된다. (users.createdAt을 읽는 소비자는 현재 없음 —
+    // 가입 시각이 필요해지면 "문서 부재 시에만 기록"으로 붙일 것.)
     try {
       await _users.doc(user.id).set(<String, dynamic>{
         'email': user.email,
         'displayName': user.displayName,
-        'createdAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
     } on Object catch (e) {
       throw AuthException(
