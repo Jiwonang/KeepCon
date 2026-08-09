@@ -31,8 +31,23 @@ import '../../shared/providers/theme_mode_provider.dart';
 import '../../shared/repositories/auth_repository.dart';
 import '../../shared/theme/theme_tokens.dart';
 import '../auth/auth_error_message.dart';
+import '../share/pages/group_notifications_page.dart';
 import '../share/pages/usage_log_page.dart';
+import '../share/state/share_providers.dart';
 import 'notification_settings_page.dart';
+
+/// 현재 사용자의 구독 플랜(마이페이지 로컬 소비).
+///
+/// [sessionUserProvider]를 watch하므로 로그인/로그아웃/계정 전환 시 자동으로
+/// 재구독한다([AuthRepository.watchPlan]의 "세션 전환은 소비자 재구독" 계약).
+/// 다른 파트(스캔/홈/공유)가 무료 제한 강제로 소비하게 되면 그때
+/// lib/shared/providers로 승격한다(늦은 승격 규칙).
+final AutoDisposeStreamProvider<UserPlan> _planProvider =
+    StreamProvider.autoDispose<UserPlan>((ref) {
+  final User? user = ref.watch(sessionUserProvider).valueOrNull;
+  if (user == null) return Stream<UserPlan>.value(UserPlan.free);
+  return ref.watch(authRepositoryProvider).watchPlan();
+});
 
 /// 마이(설정) 화면. themeModeProvider 소비를 위해 [ConsumerWidget].
 class MyPage extends ConsumerWidget {
@@ -128,8 +143,32 @@ class MyPage extends ConsumerWidget {
               child: Column(
                 children: <Widget>[
                   _SettingsRow(
+                    icon: Icons.workspace_premium_outlined,
+                    title: '프리미엄',
+                    subtitle: switch (
+                        ref.watch(_planProvider).valueOrNull ?? UserPlan.free) {
+                      UserPlan.premium => '프리미엄 이용 중',
+                      UserPlan.free => '무료 플랜 이용 중',
+                    },
+                    onTap: () => _managePlan(context, ref),
+                  ),
+                  const _RowDivider(),
+                  // 알림 — 그룹 알림 목록으로 진입(share 소유 화면 재사용).
+                  // 점은 하드코딩이 아니라 안읽음 정본(#55) 실연동: 목록에 들어가
+                  // 읽음 처리되면 자동으로 꺼진다.
+                  _SettingsRow(
                     icon: Icons.notifications_none,
-                    showDot: true,
+                    showDot: ref.watch(unreadNotificationCountProvider) > 0,
+                    title: '알림',
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => const GroupNotificationsPage(),
+                      ),
+                    ),
+                  ),
+                  const _RowDivider(),
+                  _SettingsRow(
+                    icon: Icons.edit_notifications_outlined,
                     title: '알림 설정',
                     onTap: () => Navigator.of(context).push(
                       MaterialPageRoute<void>(
@@ -224,6 +263,58 @@ class MyPage extends ConsumerWidget {
       applicationVersion: '0.1.0',
       applicationLegalese: '흩어진 기프티콘을 한 곳에서 관리·보관·공유합니다.',
     );
+  }
+
+  /// 프리미엄 — 현재 플랜 확인 + 전환 다이얼로그.
+  ///
+  /// 전환은 [AuthRepository.updatePlan]을 호출한다. 실백엔드에서는 보안 규칙이
+  /// `plan` 쓰기를 차단해(자가 승격 방지) 실패하는 것이 정상이며, 그 경우
+  /// "결제 연동 준비 중" 안내로 접는다. 데모(in-memory)에서는 실동작한다.
+  Future<void> _managePlan(BuildContext context, WidgetRef ref) async {
+    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
+    final UserPlan current =
+        ref.read(_planProvider).valueOrNull ?? UserPlan.free;
+    final bool isPremium = current == UserPlan.premium;
+
+    final bool? switchPlan = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext ctx) => AlertDialog(
+        title: const Text('프리미엄'),
+        content: Text(
+          isPremium
+              ? '현재 프리미엄 플랜 이용 중입니다.\n무제한 저장 · 가족 공유 · 광고 제거'
+              : '현재 무료 플랜 이용 중입니다.\n저장 10개 · 공유 불가\n\n'
+                  '프리미엄: 무제한 저장 · 가족 공유(최대 10명) · 광고 제거',
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('닫기'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: Text(isPremium ? '무료 플랜으로 전환' : '프리미엄으로 업그레이드'),
+          ),
+        ],
+      ),
+    );
+    if (switchPlan != true) return;
+
+    try {
+      await ref.read(authRepositoryProvider).updatePlan(
+            plan: isPremium ? UserPlan.free : UserPlan.premium,
+          );
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(isPremium ? '무료 플랜으로 전환했어요.' : '프리미엄으로 업그레이드했어요.'),
+        ),
+      );
+    } on AuthException {
+      // 실백엔드: 규칙이 plan 쓰기를 차단(의도된 동작 — 결제 검증 경로 전까지).
+      messenger.showSnackBar(
+        const SnackBar(content: Text('아직 결제 연동 준비 중이에요. 조금만 기다려 주세요.')),
+      );
+    }
   }
 
   /// 프로필 편집 — 표시 이름을 다이얼로그로 받아
@@ -413,23 +504,32 @@ class _DeleteAccountDialogState extends State<_DeleteAccountDialog> {
   }
 }
 
-/// 알림 벨 아이콘 + 초록 뱃지 점(정적).
-class _BellIcon extends StatelessWidget {
+/// 알림 벨 아이콘 — 탭하면 그룹 알림 목록, 점은 안읽음 실연동.
+///
+/// 예전에는 장식(탭 불가·점 상시 켜짐)이었다. 안읽음 정본
+/// [unreadNotificationCountProvider](#55)를 소비해 실제 안읽음이 있을 때만
+/// 점을 켜고, 탭하면 [GroupNotificationsPage]로 들어가 읽음 처리로 점이 꺼진다.
+class _BellIcon extends ConsumerWidget {
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final ColorScheme scheme = Theme.of(context).colorScheme;
-    return SizedBox(
-      width: 40,
-      height: 40,
-      child: Stack(
-        alignment: Alignment.center,
+    final bool hasUnread = ref.watch(unreadNotificationCountProvider) > 0;
+    return IconButton(
+      onPressed: () => Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => const GroupNotificationsPage(),
+        ),
+      ),
+      icon: Stack(
+        clipBehavior: Clip.none,
         children: <Widget>[
           Icon(Icons.notifications_none, color: scheme.onSurface),
-          Positioned(
-            top: 8,
-            right: 8,
-            child: _GreenDot(border: scheme.surface),
-          ),
+          if (hasUnread)
+            Positioned(
+              top: -1,
+              right: -1,
+              child: _GreenDot(border: scheme.surface),
+            ),
         ],
       ),
     );

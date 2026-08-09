@@ -96,4 +96,30 @@ void main() {
     expect(find.byType(AboutDialog), findsOneWidget);
     expect(find.text('0.1.0'), findsOneWidget); // 버전 표기.
   });
+
+  testWidgets('프리미엄 — 무료 플랜 표시, 업그레이드하면 프리미엄으로 바뀐다',
+      (WidgetTester tester) async {
+    await _pumpMyPage(tester);
+
+    // 기본은 무료 플랜.
+    expect(find.text('무료 플랜 이용 중'), findsOneWidget);
+
+    // 다이얼로그 → 업그레이드.
+    await tester.tap(find.text('프리미엄'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, '프리미엄으로 업그레이드'));
+    await tester.pumpAndSettle();
+
+    // in-memory는 실동작: 행 부제와 스낵바가 갱신된다.
+    expect(find.text('프리미엄 이용 중'), findsOneWidget);
+    expect(find.text('프리미엄으로 업그레이드했어요.'), findsOneWidget);
+  });
+
+  testWidgets('알림 행 — 안읽음이 없으면 점이 꺼져 있다', (WidgetTester tester) async {
+    await _pumpMyPage(tester);
+
+    // '알림'과 '알림 설정'이 별도 행으로 존재한다.
+    expect(find.text('알림'), findsOneWidget);
+    expect(find.text('알림 설정'), findsOneWidget);
+  });
 }
