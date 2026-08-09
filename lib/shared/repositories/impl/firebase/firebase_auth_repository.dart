@@ -131,6 +131,51 @@ class FirebaseAuthRepository implements AuthRepository {
   }
 
   @override
+  Future<User> signInWithGoogle() async {
+    // 웹 전용: 브라우저 팝업(OAuth)으로 완결되어 추가 패키지가 필요 없다.
+    // Android/iOS는 google_sign_in + SHA-1 등록이 선행돼야 하므로 후속 범위.
+    if (!kIsWeb) {
+      throw const AuthException(
+          AuthErrorCode.unknown, 'google sign-in: web only for now');
+    }
+    final fb.UserCredential cred;
+    try {
+      cred = await _auth.signInWithPopup(fb.GoogleAuthProvider());
+    } on fb.FirebaseAuthException catch (e) {
+      // 팝업 닫기/중복 팝업 = 사용자 취소 — 오류가 아니라 cancelled로 매핑한다.
+      if (e.code == 'popup-closed-by-user' ||
+          e.code == 'cancelled-popup-request' ||
+          e.code == 'user-cancelled') {
+        throw AuthException(AuthErrorCode.cancelled, e.message);
+      }
+      throw _mapException(e);
+    }
+
+    final User? user = _mapUser(cred.user);
+    if (user == null) {
+      throw const AuthException(
+          AuthErrorCode.unknown, 'no user after google signIn');
+    }
+
+    // 프로필 저장(계약) — 최초 로그인 시 생성, 이후엔 merge로 무해.
+    // 실패해도 로그인은 이미 성립했으므로 signUp과 같은 이유로 도메인 예외로 감싼다.
+    // ⚠️ createdAt은 여기서 쓰지 않는다: signUp(1회 경로)과 달리 구글 로그인은
+    // 반복 호출되는 경로라, serverTimestamp를 merge로 매번 쓰면 로그인할 때마다
+    // 가입 시각이 갱신된다. (users.createdAt을 읽는 소비자는 현재 없음 —
+    // 가입 시각이 필요해지면 "문서 부재 시에만 기록"으로 붙일 것.)
+    try {
+      await _users.doc(user.id).set(<String, dynamic>{
+        'email': user.email,
+        'displayName': user.displayName,
+      }, SetOptions(merge: true));
+    } on Object catch (e) {
+      throw AuthException(
+          AuthErrorCode.unknown, 'google signIn post-step failed: $e');
+    }
+    return user;
+  }
+
+  @override
   Future<User> updateDisplayName({required String displayName}) async {
     final fb.User? raw = _auth.currentUser;
     if (raw == null) {
@@ -195,6 +240,41 @@ class FirebaseAuthRepository implements AuthRepository {
     } on Object catch (e) {
       // Firestore 문서 삭제 등 비-Auth 실패도 도메인 예외로 통일한다.
       throw AuthException(AuthErrorCode.unknown, 'deleteAccount failed: $e');
+    }
+  }
+
+  @override
+  Stream<UserPlan> watchPlan() {
+    final fb.User? raw = _auth.currentUser;
+    if (raw == null) return Stream<UserPlan>.value(UserPlan.free);
+    // users/{uid} 문서 스냅샷 → plan 필드(부재 = free). 세션 전환 추적은
+    // 소비자(provider)가 재구독하는 계약이므로 여기서는 현재 uid에 고정한다.
+    return _users.doc(raw.uid).snapshots().map(
+      (DocumentSnapshot<Map<String, dynamic>> doc) {
+        // 비문자열 값(수동 조작·타 클라이언트 오기록)도 free로 폴백 — cast로
+        // 스트림에 TypeError를 흘리지 않는다(모르는 값 = free 계약).
+        final Object? v = doc.data()?['plan'];
+        return UserPlan.fromName(v is String ? v : null);
+      },
+    );
+  }
+
+  @override
+  Future<void> updatePlan({required UserPlan plan}) async {
+    final fb.User? raw = _auth.currentUser;
+    if (raw == null) {
+      throw const AuthException(AuthErrorCode.unknown, 'not signed in');
+    }
+    try {
+      // ⚠️ firestore.rules가 users/{uid} 쓰기에서 plan 필드 변경을 차단한다
+      // (자가 승격 방지). 결제 검증 경로가 붙기 전까지 실백엔드에서는 여기서
+      // permission-denied로 실패하는 것이 **의도된 동작**이다.
+      await _users.doc(raw.uid).set(
+        <String, dynamic>{'plan': plan.name},
+        SetOptions(merge: true),
+      );
+    } on Object catch (e) {
+      throw AuthException(AuthErrorCode.unknown, 'updatePlan failed: $e');
     }
   }
 

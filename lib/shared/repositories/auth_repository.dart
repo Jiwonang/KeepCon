@@ -28,6 +28,9 @@ enum AuthErrorCode {
   /// 이메일 형식 오류.
   invalidEmail,
 
+  /// 사용자가 로그인 흐름을 스스로 취소함(팝업 닫기 등). 오류 표시 대상이 아니다.
+  cancelled,
+
   /// 위에 해당하지 않는 기타 실패(네트워크·내부 오류 등).
   unknown,
 }
@@ -105,6 +108,20 @@ abstract class AuthRepository {
   /// 처리할 수 있다(구현체 재량). 형식 오류 등은 [AuthException]을 던진다.
   Future<void> sendPasswordReset({required String email});
 
+  /// Google 계정으로 로그인한다.
+  ///
+  /// 성공 시 로그인 상태가 되고 [User]를 반환하며, 프로필을 영속 저장소에
+  /// 기록한다(계약: 프로필 저장 포함 — 최초 로그인 시 생성).
+  ///
+  /// **현재 웹 전용이다.** 웹은 브라우저 팝업(OAuth)으로 완결되어 추가 패키지·
+  /// 플랫폼 설정이 필요 없다. Android/iOS는 `google_sign_in` 패키지와 SHA-1
+  /// 등록이 선행돼야 하므로 후속 범위다 — 비웹 호출은
+  /// [AuthException]([AuthErrorCode.unknown])을 던진다.
+  ///
+  /// 사용자가 팝업을 닫아 취소하면 [AuthException]([AuthErrorCode.cancelled]) —
+  /// 페이지는 이 코드를 **오류로 표시하지 않는 것**을 계약으로 한다.
+  Future<User> signInWithGoogle();
+
   /// 현재 사용자의 표시 이름을 변경한다.
   ///
   /// 성공 시 갱신된 [User]를 반환하고, [watchCurrentUser]가 갱신된 사용자를
@@ -128,4 +145,21 @@ abstract class AuthRepository {
   /// 성공 시 계정과 영속 프로필이 삭제되고 로그아웃 상태가 되며,
   /// [watchCurrentUser]가 `null`을 방출한다.
   Future<void> deleteAccount({required String password});
+
+  /// 현재 사용자의 구독 플랜을 관찰한다.
+  ///
+  /// 구독 시점의 현재 사용자를 기준으로 하며, 미로그인 상태에서는
+  /// [UserPlan.free]를 방출한다. 세션이 바뀌면 소비자(provider)가 재구독하는
+  /// 것을 계약으로 한다 — 구현체는 세션 전환을 스스로 추적하지 않는다.
+  ///
+  /// 저장 위치는 `users/{uid}.plan`(필드 부재 = free). [UserPlan] 문서 참조.
+  Stream<UserPlan> watchPlan();
+
+  /// 현재 사용자의 구독 플랜을 변경한다.
+  ///
+  /// - 미로그인 상태 호출 → [AuthException]([AuthErrorCode.unknown])
+  /// - **실백엔드에서는 보안 규칙이 `plan` 필드 쓰기를 차단**하므로(자가 승격 방지,
+  ///   `firestore.rules` 참조) [AuthException]으로 실패한다. 결제 검증(서버/스토어
+  ///   영수증)이 붙으면 그 경로가 이 값을 쓴다. 데모(in-memory)에서는 실동작한다.
+  Future<void> updatePlan({required UserPlan plan});
 }

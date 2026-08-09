@@ -21,6 +21,10 @@ String authErrorMessage(AuthException e) {
       return '비밀번호는 6자 이상이어야 해요.';
     case AuthErrorCode.invalidEmail:
       return '이메일 형식을 확인해 주세요.';
+    case AuthErrorCode.cancelled:
+      // 사용자 취소는 오류가 아니다 — 페이지가 표시를 건너뛰는 것이 계약이지만,
+      // 실수로 표시해도 어색하지 않을 중립 문구를 둔다.
+      return '로그인이 취소됐어요.';
     case AuthErrorCode.unknown:
       return '문제가 발생했어요. 잠시 후 다시 시도해 주세요.';
   }

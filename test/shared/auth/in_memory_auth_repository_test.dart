@@ -230,4 +230,67 @@ void main() {
       );
     });
   });
+
+  group('plan (watchPlan / updatePlan)', () {
+    test('기본은 free — 가입 직후 watchPlan 첫 방출이 free다', () async {
+      await repo.signUp(
+          email: 'a@b.com', password: 'secret1', displayName: 'A');
+      expect(await repo.watchPlan().first, UserPlan.free);
+    });
+
+    test('updatePlan(premium) 후 watchPlan이 premium을 방출한다', () async {
+      await repo.signUp(
+          email: 'a@b.com', password: 'secret1', displayName: 'A');
+      final Future<UserPlan> next =
+          repo.watchPlan().firstWhere((UserPlan p) => p == UserPlan.premium);
+      await repo.updatePlan(plan: UserPlan.premium);
+      expect(await next, UserPlan.premium);
+      expect(await repo.watchPlan().first, UserPlan.premium);
+    });
+
+    test('플랜은 계정별로 유지된다 — 로그아웃/재로그인해도 premium', () async {
+      await repo.signUp(
+          email: 'a@b.com', password: 'secret1', displayName: 'A');
+      await repo.updatePlan(plan: UserPlan.premium);
+      await repo.signOut();
+      await repo.signIn(email: 'a@b.com', password: 'secret1');
+      expect(await repo.watchPlan().first, UserPlan.premium);
+    });
+
+    test('미로그인 watchPlan은 free, updatePlan은 unknown 예외', () async {
+      expect(await repo.watchPlan().first, UserPlan.free);
+      expect(
+        () => repo.updatePlan(plan: UserPlan.premium),
+        throwsA(isA<AuthException>()
+            .having((e) => e.code, 'code', AuthErrorCode.unknown)),
+      );
+    });
+
+    test('계정 삭제 후 같은 이메일로 재가입하면 free에서 시작한다', () async {
+      await repo.signUp(
+          email: 'a@b.com', password: 'secret1', displayName: 'A');
+      await repo.updatePlan(plan: UserPlan.premium);
+      await repo.deleteAccount(password: 'secret1');
+
+      await repo.signUp(
+          email: 'a@b.com', password: 'secret1', displayName: 'A2');
+      expect(await repo.watchPlan().first, UserPlan.free);
+    });
+  });
+
+  group('signInWithGoogle', () {
+    test('데모 Google 계정으로 로그인 상태가 된다', () async {
+      final User user = await repo.signInWithGoogle();
+      expect(user, InMemoryAuthRepository.googleDemoUser);
+      expect(repo.currentUser, InMemoryAuthRepository.googleDemoUser);
+    });
+
+    test('세션 스트림이 Google 사용자를 방출한다', () async {
+      final Future<User?> emitted = repo
+          .watchCurrentUser()
+          .firstWhere((User? u) => u?.id == 'google-user-1');
+      await repo.signInWithGoogle();
+      expect((await emitted)?.email, 'google.demo@keepcon.test');
+    });
+  });
 }

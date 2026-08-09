@@ -23,6 +23,13 @@ class InMemoryAuthRepository implements AuthRepository {
   /// 데모 기본 계정의 비밀번호(in-memory 로그인 플로우 시연/테스트용).
   static const String defaultPassword = 'keepcon';
 
+  /// Google 데모 사용자(웹 팝업 흐름의 in-memory 대응).
+  static const User googleDemoUser = User(
+    id: 'google-user-1',
+    email: 'google.demo@keepcon.test',
+    displayName: 'Google 데모',
+  );
+
   /// Firebase 기본 정책과 맞춘 최소 비밀번호 길이.
   static const int minPasswordLength = 6;
 
@@ -31,6 +38,14 @@ class InMemoryAuthRepository implements AuthRepository {
 
   /// 신규 가입 id 발급용 시퀀스(결정적 — 랜덤/시간 비의존).
   int _seq = 0;
+
+  /// 이메일(정규화) → 플랜. 부재 = [UserPlan.free] (Firestore 계약과 동형).
+  final Map<String, UserPlan> _plans = <String, UserPlan>{};
+
+  /// 플랜 변경 방출용. 사용자 전환은 소비자(provider) 재구독이 계약이므로
+  /// 여기서는 변경 이벤트만 흘린다.
+  final StreamController<UserPlan> _planController =
+      StreamController<UserPlan>.broadcast();
 
   User? _currentUser;
   final StreamController<User?> _controller =
@@ -113,6 +128,17 @@ class InMemoryAuthRepository implements AuthRepository {
   }
 
   @override
+  Future<User> signInWithGoogle() async {
+    // 팝업 UI가 없으므로 고정 데모 계정으로 즉시 성공 처리한다(취소 경로 없음).
+    _accounts.putIfAbsent(
+      _key(googleDemoUser.email),
+      () => const _Account(password: '', user: googleDemoUser),
+    );
+    _setCurrent(googleDemoUser);
+    return googleDemoUser;
+  }
+
+  @override
   Future<User> updateDisplayName({required String displayName}) async {
     final User? current = _currentUser;
     if (current == null) {
@@ -147,12 +173,35 @@ class InMemoryAuthRepository implements AuthRepository {
       throw const AuthException(AuthErrorCode.invalidCredential);
     }
     _accounts.remove(key);
+    // 플랜도 함께 삭제 — 남기면 같은 이메일로 재가입할 때 이전 계정의
+    // premium이 부활한다(새 계정은 free에서 시작하는 것이 계약).
+    _plans.remove(key);
     _setCurrent(null);
+  }
+
+  @override
+  Stream<UserPlan> watchPlan() async* {
+    final User? current = _currentUser;
+    yield current == null
+        ? UserPlan.free
+        : (_plans[_key(current.email)] ?? UserPlan.free);
+    yield* _planController.stream;
+  }
+
+  @override
+  Future<void> updatePlan({required UserPlan plan}) async {
+    final User? current = _currentUser;
+    if (current == null) {
+      throw const AuthException(AuthErrorCode.unknown, 'not signed in');
+    }
+    _plans[_key(current.email)] = plan;
+    _planController.add(plan);
   }
 
   /// 리소스 정리. 앱 종료/테스트 teardown 시 호출.
   void dispose() {
     _controller.close();
+    _planController.close();
   }
 
   // --- 내부 헬퍼 ---------------------------------------------------------
