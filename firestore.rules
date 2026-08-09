@@ -33,10 +33,21 @@ service cloud.firestore {
         && uid() in get(/databases/$(database)/documents/groups/$(groupId)).data.memberIds;
     }
 
-    // 사용자 프로필 — 본인만.
+    // 사용자 프로필 — 본인만. 단 `plan`(구독 플랜) 필드는 클라이언트가 쓸 수 없다:
+    // 본인 write를 전면 허용하면 사용자가 자기 문서에 plan: "premium"을 넣어
+    // 스스로 유료 승격할 수 있다. 결제 검증 경로(서버/스토어 영수증)가 붙기
+    // 전까지 plan은 읽기 전용이다. 필드 단위로 막는 이유: 전면 차단하면
+    // displayName 수정(프로필 편집) 같은 기존 기능이 함께 깨진다.
     match /users/{userId} {
-      allow read, write: if isSignedIn() && uid() == userId;
+      allow read: if isSignedIn() && uid() == userId;
+      allow create: if isSignedIn() && uid() == userId
+        && !request.resource.data.keys().hasAny(['plan']);
+      allow update: if isSignedIn() && uid() == userId
+        && !request.resource.data.diff(resource.data)
+            .affectedKeys().hasAny(['plan']);
+      allow delete: if isSignedIn() && uid() == userId;
     }
+
 
     // 개인 기프티콘 — 소유자만.
     match /gifticons/{id} {

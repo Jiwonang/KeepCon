@@ -7,26 +7,42 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:keepcon/features/mypage/mypage_page.dart';
+import 'package:keepcon/features/share/state/share_providers.dart';
 import 'package:keepcon/shared/providers/repositories.dart';
 import 'package:keepcon/shared/repositories/impl/in_memory_auth_repository.dart';
 
-Widget _app(InMemoryAuthRepository repo) => ProviderScope(
+Widget _app(InMemoryAuthRepository repo, {List<Override> extra = const []}) =>
+    ProviderScope(
       overrides: <Override>[
         authRepositoryProvider.overrideWithValue(repo),
+        ...extra,
       ],
       child: const MaterialApp(home: MyPage()),
     );
 
 /// 폰 크기 서피스로 페이지를 띄운다(기본 800x600은 UI에 좁아 오버플로).
-Future<InMemoryAuthRepository> _pumpMyPage(WidgetTester tester) async {
+Future<InMemoryAuthRepository> _pumpMyPage(
+  WidgetTester tester, {
+  List<Override> extra = const <Override>[],
+}) async {
   final InMemoryAuthRepository repo = InMemoryAuthRepository();
   addTearDown(repo.dispose);
   await tester.binding.setSurfaceSize(const Size(430, 932));
   addTearDown(() => tester.binding.setSurfaceSize(null));
-  await tester.pumpWidget(_app(repo));
+  await tester.pumpWidget(_app(repo, extra: extra));
   await tester.pumpAndSettle();
   return repo;
 }
+
+/// 안읽음 점(9×9 원형 Container) 파인더 — 헤더 벨·행 아이콘의 뱃지 점을 찾는다.
+/// (프로필 아바타도 원형이지만 60×60이라 크기 제약으로 구분된다.)
+Finder _unreadDot() => find.byWidgetPredicate(
+      (Widget w) =>
+          w is Container &&
+          w.constraints == const BoxConstraints.tightFor(width: 9, height: 9) &&
+          w.decoration is BoxDecoration &&
+          (w.decoration as BoxDecoration).shape == BoxShape.circle,
+    );
 
 void main() {
   testWidgets('프로필 카드가 현재 사용자 이름/이메일을 표시한다', (WidgetTester tester) async {
@@ -95,5 +111,43 @@ void main() {
 
     expect(find.byType(AboutDialog), findsOneWidget);
     expect(find.text('0.1.0'), findsOneWidget); // 버전 표기.
+  });
+
+  testWidgets('프리미엄 — 무료 플랜 표시, 업그레이드하면 프리미엄으로 바뀐다',
+      (WidgetTester tester) async {
+    await _pumpMyPage(tester);
+
+    // 기본은 무료 플랜.
+    expect(find.text('무료 플랜 이용 중'), findsOneWidget);
+
+    // 다이얼로그 → 업그레이드.
+    await tester.tap(find.text('프리미엄'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, '프리미엄으로 업그레이드'));
+    await tester.pumpAndSettle();
+
+    // in-memory는 실동작: 행 부제와 스낵바가 갱신된다.
+    expect(find.text('프리미엄 이용 중'), findsOneWidget);
+    expect(find.text('프리미엄으로 업그레이드했어요.'), findsOneWidget);
+  });
+
+  testWidgets('알림 점 — 안읽음 0이면 꺼지고, 있으면 행·벨 양쪽에 켜진다',
+      (WidgetTester tester) async {
+    // 안읽음 0 (정본 카운트 provider를 직접 고정).
+    await _pumpMyPage(tester, extra: <Override>[
+      unreadNotificationCountProvider.overrideWithValue(0),
+    ]);
+    expect(find.text('알림'), findsOneWidget);
+    expect(find.text('알림 설정'), findsOneWidget);
+    expect(_unreadDot(), findsNothing);
+  });
+
+  testWidgets('알림 점 — 안읽음이 있으면 알림 행과 헤더 벨에 점이 켜진다',
+      (WidgetTester tester) async {
+    await _pumpMyPage(tester, extra: <Override>[
+      unreadNotificationCountProvider.overrideWithValue(2),
+    ]);
+    // 헤더 벨 + '알림' 행 = 2개.
+    expect(_unreadDot(), findsNWidgets(2));
   });
 }

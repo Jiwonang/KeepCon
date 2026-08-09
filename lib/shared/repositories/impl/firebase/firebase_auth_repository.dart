@@ -198,6 +198,41 @@ class FirebaseAuthRepository implements AuthRepository {
     }
   }
 
+  @override
+  Stream<UserPlan> watchPlan() {
+    final fb.User? raw = _auth.currentUser;
+    if (raw == null) return Stream<UserPlan>.value(UserPlan.free);
+    // users/{uid} 문서 스냅샷 → plan 필드(부재 = free). 세션 전환 추적은
+    // 소비자(provider)가 재구독하는 계약이므로 여기서는 현재 uid에 고정한다.
+    return _users.doc(raw.uid).snapshots().map(
+      (DocumentSnapshot<Map<String, dynamic>> doc) {
+        // 비문자열 값(수동 조작·타 클라이언트 오기록)도 free로 폴백 — cast로
+        // 스트림에 TypeError를 흘리지 않는다(모르는 값 = free 계약).
+        final Object? v = doc.data()?['plan'];
+        return UserPlan.fromName(v is String ? v : null);
+      },
+    );
+  }
+
+  @override
+  Future<void> updatePlan({required UserPlan plan}) async {
+    final fb.User? raw = _auth.currentUser;
+    if (raw == null) {
+      throw const AuthException(AuthErrorCode.unknown, 'not signed in');
+    }
+    try {
+      // ⚠️ firestore.rules가 users/{uid} 쓰기에서 plan 필드 변경을 차단한다
+      // (자가 승격 방지). 결제 검증 경로가 붙기 전까지 실백엔드에서는 여기서
+      // permission-denied로 실패하는 것이 **의도된 동작**이다.
+      await _users.doc(raw.uid).set(
+        <String, dynamic>{'plan': plan.name},
+        SetOptions(merge: true),
+      );
+    } on Object catch (e) {
+      throw AuthException(AuthErrorCode.unknown, 'updatePlan failed: $e');
+    }
+  }
+
   // --- 매핑 헬퍼 ---------------------------------------------------------
 
   /// [fb.FirebaseAuthException.code]를 도메인 [AuthException]으로 매핑한다.
