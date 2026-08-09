@@ -515,6 +515,7 @@ class _BellIcon extends ConsumerWidget {
     final ColorScheme scheme = Theme.of(context).colorScheme;
     final bool hasUnread = ref.watch(unreadNotificationCountProvider) > 0;
     return IconButton(
+      tooltip: '알림',
       onPressed: () => Navigator.of(context).push(
         MaterialPageRoute<void>(
           builder: (_) => const GroupNotificationsPage(),
