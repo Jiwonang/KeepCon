@@ -28,6 +28,7 @@ import '../../../shared/providers/repositories.dart';
 import '../../../shared/providers/session_provider.dart';
 import 'gifticon_filter.dart';
 import 'gifticon_sorter.dart';
+import 'now_provider.dart';
 
 /// 현재 사용자의 원천 기프티콘 목록.
 ///
@@ -89,9 +90,15 @@ final visibleGifticonsProvider = Provider<AsyncValue<List<Gifticon>>>((ref) {
   final GifticonFilter filter = ref.watch(filterProvider);
   final SortOption sort = ref.watch(sortOptionProvider);
 
+  // 시각은 [nowProvider] 정본에서 받는다. 항목마다 읽으면 자정을 넘기는 순간 같은 목록
+  // 안에서 "오늘"이 갈리고, 여기서 따로 읽으면 배너 목록과 이 목록이 갈린다 —
+  // 둘 다 같은 값을 봐야 "배너가 센 개수 == 필터가 남긴 목록"이 성립한다.
+  final DateTime now = ref.watch(nowProvider);
+
   return rawAsync.whenData((List<Gifticon> raw) {
-    final List<Gifticon> filtered =
-        raw.where(filter.matches).toList(growable: false);
+    final List<Gifticon> filtered = raw
+        .where((Gifticon g) => filter.matches(g, now: now))
+        .toList(growable: false);
     return sortGifticons(filtered, sort);
   });
 });
