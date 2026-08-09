@@ -32,6 +32,14 @@ class InMemoryAuthRepository implements AuthRepository {
   /// 신규 가입 id 발급용 시퀀스(결정적 — 랜덤/시간 비의존).
   int _seq = 0;
 
+  /// 이메일(정규화) → 플랜. 부재 = [UserPlan.free] (Firestore 계약과 동형).
+  final Map<String, UserPlan> _plans = <String, UserPlan>{};
+
+  /// 플랜 변경 방출용. 사용자 전환은 소비자(provider) 재구독이 계약이므로
+  /// 여기서는 변경 이벤트만 흘린다.
+  final StreamController<UserPlan> _planController =
+      StreamController<UserPlan>.broadcast();
+
   User? _currentUser;
   final StreamController<User?> _controller =
       StreamController<User?>.broadcast();
@@ -150,9 +158,29 @@ class InMemoryAuthRepository implements AuthRepository {
     _setCurrent(null);
   }
 
+  @override
+  Stream<UserPlan> watchPlan() async* {
+    final User? current = _currentUser;
+    yield current == null
+        ? UserPlan.free
+        : (_plans[_key(current.email)] ?? UserPlan.free);
+    yield* _planController.stream;
+  }
+
+  @override
+  Future<void> updatePlan({required UserPlan plan}) async {
+    final User? current = _currentUser;
+    if (current == null) {
+      throw const AuthException(AuthErrorCode.unknown, 'not signed in');
+    }
+    _plans[_key(current.email)] = plan;
+    _planController.add(plan);
+  }
+
   /// 리소스 정리. 앱 종료/테스트 teardown 시 호출.
   void dispose() {
     _controller.close();
+    _planController.close();
   }
 
   // --- 내부 헬퍼 ---------------------------------------------------------

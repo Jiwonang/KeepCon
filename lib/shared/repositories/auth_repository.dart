@@ -128,4 +128,21 @@ abstract class AuthRepository {
   /// 성공 시 계정과 영속 프로필이 삭제되고 로그아웃 상태가 되며,
   /// [watchCurrentUser]가 `null`을 방출한다.
   Future<void> deleteAccount({required String password});
+
+  /// 현재 사용자의 구독 플랜을 관찰한다.
+  ///
+  /// 구독 시점의 현재 사용자를 기준으로 하며, 미로그인 상태에서는
+  /// [UserPlan.free]를 방출한다. 세션이 바뀌면 소비자(provider)가 재구독하는
+  /// 것을 계약으로 한다 — 구현체는 세션 전환을 스스로 추적하지 않는다.
+  ///
+  /// 저장 위치는 `users/{uid}.plan`(필드 부재 = free). [UserPlan] 문서 참조.
+  Stream<UserPlan> watchPlan();
+
+  /// 현재 사용자의 구독 플랜을 변경한다.
+  ///
+  /// - 미로그인 상태 호출 → [AuthException]([AuthErrorCode.unknown])
+  /// - **실백엔드에서는 보안 규칙이 `plan` 필드 쓰기를 차단**하므로(자가 승격 방지,
+  ///   `firestore.rules` 참조) [AuthException]으로 실패한다. 결제 검증(서버/스토어
+  ///   영수증)이 붙으면 그 경로가 이 값을 쓴다. 데모(in-memory)에서는 실동작한다.
+  Future<void> updatePlan({required UserPlan plan});
 }
