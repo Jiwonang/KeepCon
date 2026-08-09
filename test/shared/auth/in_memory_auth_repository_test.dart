@@ -277,4 +277,20 @@ void main() {
       expect(await repo.watchPlan().first, UserPlan.free);
     });
   });
+
+  group('signInWithGoogle', () {
+    test('데모 Google 계정으로 로그인 상태가 된다', () async {
+      final User user = await repo.signInWithGoogle();
+      expect(user, InMemoryAuthRepository.googleDemoUser);
+      expect(repo.currentUser, InMemoryAuthRepository.googleDemoUser);
+    });
+
+    test('세션 스트림이 Google 사용자를 방출한다', () async {
+      final Future<User?> emitted = repo
+          .watchCurrentUser()
+          .firstWhere((User? u) => u?.id == 'google-user-1');
+      await repo.signInWithGoogle();
+      expect((await emitted)?.email, 'google.demo@keepcon.test');
+    });
+  });
 }

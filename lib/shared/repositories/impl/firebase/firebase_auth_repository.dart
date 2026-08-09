@@ -131,6 +131,48 @@ class FirebaseAuthRepository implements AuthRepository {
   }
 
   @override
+  Future<User> signInWithGoogle() async {
+    // 웹 전용: 브라우저 팝업(OAuth)으로 완결되어 추가 패키지가 필요 없다.
+    // Android/iOS는 google_sign_in + SHA-1 등록이 선행돼야 하므로 후속 범위.
+    if (!kIsWeb) {
+      throw const AuthException(
+          AuthErrorCode.unknown, 'google sign-in: web only for now');
+    }
+    final fb.UserCredential cred;
+    try {
+      cred = await _auth.signInWithPopup(fb.GoogleAuthProvider());
+    } on fb.FirebaseAuthException catch (e) {
+      // 팝업 닫기/중복 팝업 = 사용자 취소 — 오류가 아니라 cancelled로 매핑한다.
+      if (e.code == 'popup-closed-by-user' ||
+          e.code == 'cancelled-popup-request' ||
+          e.code == 'user-cancelled') {
+        throw AuthException(AuthErrorCode.cancelled, e.message);
+      }
+      throw _mapException(e);
+    }
+
+    final User? user = _mapUser(cred.user);
+    if (user == null) {
+      throw const AuthException(
+          AuthErrorCode.unknown, 'no user after google signIn');
+    }
+
+    // 프로필 저장(계약) — 최초 로그인 시 생성, 이후엔 merge로 무해.
+    // 실패해도 로그인은 이미 성립했으므로 signUp과 같은 이유로 도메인 예외로 감싼다.
+    try {
+      await _users.doc(user.id).set(<String, dynamic>{
+        'email': user.email,
+        'displayName': user.displayName,
+        'createdAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+    } on Object catch (e) {
+      throw AuthException(
+          AuthErrorCode.unknown, 'google signIn post-step failed: $e');
+    }
+    return user;
+  }
+
+  @override
   Future<User> updateDisplayName({required String displayName}) async {
     final fb.User? raw = _auth.currentUser;
     if (raw == null) {
