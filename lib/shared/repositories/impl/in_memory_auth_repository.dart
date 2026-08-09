@@ -155,6 +155,9 @@ class InMemoryAuthRepository implements AuthRepository {
       throw const AuthException(AuthErrorCode.invalidCredential);
     }
     _accounts.remove(key);
+    // 플랜도 함께 삭제 — 남기면 같은 이메일로 재가입할 때 이전 계정의
+    // premium이 부활한다(새 계정은 free에서 시작하는 것이 계약).
+    _plans.remove(key);
     _setCurrent(null);
   }
 

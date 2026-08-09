@@ -265,5 +265,16 @@ void main() {
             .having((e) => e.code, 'code', AuthErrorCode.unknown)),
       );
     });
+
+    test('계정 삭제 후 같은 이메일로 재가입하면 free에서 시작한다', () async {
+      await repo.signUp(
+          email: 'a@b.com', password: 'secret1', displayName: 'A');
+      await repo.updatePlan(plan: UserPlan.premium);
+      await repo.deleteAccount(password: 'secret1');
+
+      await repo.signUp(
+          email: 'a@b.com', password: 'secret1', displayName: 'A2');
+      expect(await repo.watchPlan().first, UserPlan.free);
+    });
   });
 }
