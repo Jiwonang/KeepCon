@@ -86,4 +86,14 @@ void main() {
     expect(repo.currentUser, isNull);
     expect(find.text('계정이 삭제됐어요.'), findsOneWidget);
   });
+
+  testWidgets('앱 정보 — 버전과 라이선스 진입이 있는 다이얼로그를 띄운다', (WidgetTester tester) async {
+    await _pumpMyPage(tester);
+
+    await tester.tap(find.text('앱 정보'));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(AboutDialog), findsOneWidget);
+    expect(find.text('0.1.0'), findsOneWidget); // 버전 표기.
+  });
 }
