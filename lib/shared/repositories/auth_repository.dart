@@ -28,6 +28,9 @@ enum AuthErrorCode {
   /// 이메일 형식 오류.
   invalidEmail,
 
+  /// 사용자가 로그인 흐름을 스스로 취소함(팝업 닫기 등). 오류 표시 대상이 아니다.
+  cancelled,
+
   /// 위에 해당하지 않는 기타 실패(네트워크·내부 오류 등).
   unknown,
 }
@@ -104,6 +107,20 @@ abstract class AuthRepository {
   /// 계정 존재 여부를 노출하지 않기 위해, 미가입 이메일이어도 예외 없이 성공
   /// 처리할 수 있다(구현체 재량). 형식 오류 등은 [AuthException]을 던진다.
   Future<void> sendPasswordReset({required String email});
+
+  /// Google 계정으로 로그인한다.
+  ///
+  /// 성공 시 로그인 상태가 되고 [User]를 반환하며, 프로필을 영속 저장소에
+  /// 기록한다(계약: 프로필 저장 포함 — 최초 로그인 시 생성).
+  ///
+  /// **현재 웹 전용이다.** 웹은 브라우저 팝업(OAuth)으로 완결되어 추가 패키지·
+  /// 플랫폼 설정이 필요 없다. Android/iOS는 `google_sign_in` 패키지와 SHA-1
+  /// 등록이 선행돼야 하므로 후속 범위다 — 비웹 호출은
+  /// [AuthException]([AuthErrorCode.unknown])을 던진다.
+  ///
+  /// 사용자가 팝업을 닫아 취소하면 [AuthException]([AuthErrorCode.cancelled]) —
+  /// 페이지는 이 코드를 **오류로 표시하지 않는 것**을 계약으로 한다.
+  Future<User> signInWithGoogle();
 
   /// 현재 사용자의 표시 이름을 변경한다.
   ///

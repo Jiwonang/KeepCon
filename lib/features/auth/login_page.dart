@@ -4,13 +4,15 @@
 /// 전환하므로 이 화면은 직접 내비게이션하지 않는다(세션이 단일 진실). 실패는
 /// [AuthException] 메시지로 안내한다.
 ///
-/// 레이아웃(위→아래): 로고+타이틀 → Google 로그인(준비 중) → 구분선 → 이메일/비밀번호 →
+/// 레이아웃(위→아래): 로고+타이틀 → Google 로그인(웹 실동작) → 구분선 → 이메일/비밀번호 →
 /// 로그인 버튼 → 회원가입·비밀번호 찾기 링크.
 ///
 /// 이동: 회원가입 → [SignupPage], 비밀번호 찾기 → [ResetPasswordPage].
-/// Google 로그인은 아직 미구현(안내만). 색/폰트/라운드는 `Theme.of(context)` 소비.
+/// Google 로그인은 **웹에서 실동작**(팝업 OAuth, [AuthRepository.signInWithGoogle]) —
+/// Android/iOS는 google_sign_in + SHA-1 등록이 선행돼야 하므로 준비 중 안내만 한다.
 library;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -70,7 +72,23 @@ class _LoginPageState extends ConsumerState<LoginPage> {
       ..showSnackBar(SnackBar(content: Text(msg)));
   }
 
-  void _notReady() => _snack('Google 로그인은 준비 중이에요. 이메일로 로그인해 주세요.');
+  /// Google 로그인 — 웹에서만 실동작(팝업 OAuth). 그 외 플랫폼은 준비 중 안내.
+  ///
+  /// 성공 시 세션이 바뀌어 `AuthGate`가 셸로 전환한다(직접 내비게이션 없음).
+  /// [AuthErrorCode.cancelled](팝업 닫기)는 계약대로 조용히 무시한다.
+  Future<void> _googleSignIn() async {
+    if (_loading) return;
+    setState(() => _loading = true);
+    try {
+      await ref.read(authRepositoryProvider).signInWithGoogle();
+    } on AuthException catch (e) {
+      if (e.code != AuthErrorCode.cancelled) _snack(authErrorMessage(e));
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  void _notReady() => _snack('이 플랫폼에서는 Google 로그인 준비 중이에요. 이메일로 로그인해 주세요.');
 
   void _openSignup() => Navigator.of(context).push(
         MaterialPageRoute<void>(builder: (_) => const SignupPage()),
@@ -112,8 +130,8 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                 ),
                 const SizedBox(height: 48),
 
-                // ── Google 로그인 (준비 중) ──
-                _GoogleButton(onPressed: _notReady),
+                // ── Google 로그인 (웹: 실동작 / 그 외: 준비 중) ──
+                _GoogleButton(onPressed: kIsWeb ? _googleSignIn : _notReady),
                 const SizedBox(height: 30),
 
                 // ── 구분선 ──
@@ -198,7 +216,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
   }
 }
 
-/// Google 로그인 버튼(아웃라인). 실제 OAuth는 후속 — 지금은 데모 진입.
+/// Google 로그인 버튼(아웃라인). 웹에서 실동작, 그 외 플랫폼은 준비 중 안내.
 class _GoogleButton extends StatelessWidget {
   const _GoogleButton({required this.onPressed});
 

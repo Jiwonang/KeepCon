@@ -23,6 +23,13 @@ class InMemoryAuthRepository implements AuthRepository {
   /// 데모 기본 계정의 비밀번호(in-memory 로그인 플로우 시연/테스트용).
   static const String defaultPassword = 'keepcon';
 
+  /// Google 데모 사용자(웹 팝업 흐름의 in-memory 대응).
+  static const User googleDemoUser = User(
+    id: 'google-user-1',
+    email: 'google.demo@keepcon.test',
+    displayName: 'Google 데모',
+  );
+
   /// Firebase 기본 정책과 맞춘 최소 비밀번호 길이.
   static const int minPasswordLength = 6;
 
@@ -118,6 +125,17 @@ class InMemoryAuthRepository implements AuthRepository {
     }
     // in-memory: 실제 메일 시스템이 없으므로 성공 처리한다(미가입이어도 조용히 성공 —
     // 계정 존재 노출 방지 계약과 일치).
+  }
+
+  @override
+  Future<User> signInWithGoogle() async {
+    // 팝업 UI가 없으므로 고정 데모 계정으로 즉시 성공 처리한다(취소 경로 없음).
+    _accounts.putIfAbsent(
+      _key(googleDemoUser.email),
+      () => const _Account(password: '', user: googleDemoUser),
+    );
+    _setCurrent(googleDemoUser);
+    return googleDemoUser;
   }
 
   @override
