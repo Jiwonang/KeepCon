@@ -205,7 +205,7 @@ flutter run --dart-define=USE_FIREBASE=true       # dev 서버에 붙어 실기�
 
 Windows에서 SDK를 기본 위치인 `%LOCALAPPDATA%\Android\Sdk`에 두면, 패키지 앱(MSIX)에서 실행한 도구가 그 경로를 **자기 컨테이너 안쪽으로 리디렉션**해 설치하는 일이 있습니다. 그러면 그 도구 안에서는 멀쩡히 보이는데 **일반 터미널·Android Studio에서는 같은 경로가 비어 있어서** `flutter doctor`가 이렇게 나옵니다:
 
-```
+```text
 [X] Android toolchain - develop for Android devices
     X ANDROID_HOME = C:\Users\<사용자>\AppData\Local\Android\Sdk
       but Android SDK not found at this location.
@@ -235,9 +235,11 @@ setx ANDROID_SDK_ROOT "C:\Android\Sdk"
 3. USB 연결 → 폰에 뜨는 **"USB 디버깅을 허용하시겠습니까?"** 허용 (USB 모드는 충전이 아니라 **파일 전송(MTP)**)
 
 ```bash
-flutter devices                                # 폰 모델명이 보이는지 먼저 확인
+flutter devices                                # 폰 모델명·device-id 가 보이는지 먼저 확인
 flutter run --dart-define=USE_FIREBASE=true    # 실기기는 로컬 에뮬레이터에 못 붙습니다 → dev 서버
 ```
+
+> 💡 Windows·Chrome·Edge까지 함께 잡혀 기기가 여러 개면 `flutter run` 이 어느 기기에 띄울지 되묻습니다. `flutter devices` 에 나온 device-id로 **`-d <device-id>`** 를 붙이면 바로 실행됩니다.
 
 | 증상 | 원인 |
 |------|------|
