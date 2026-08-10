@@ -65,6 +65,8 @@ Firestore 에뮬레이터가 Java로 돌아갑니다. **없으면 에뮬레이�
 java -version
 ```
 
+> 📱 **Android 기기(실기기·AVD)로도 띄울 거라면 JDK 17 이상**을 설치하세요. Android 빌드가 Java 17을 타깃해서, 딱 11만 설치하면 **에뮬레이터는 뜨는데 `flutter run` 이 Gradle에서 실패합니다.** Android SDK 설치 위치·환경 변수는 [README의 *Android 기기로 띄우기*](../README.md#-android-기기로-띄우기-실기기--avd) 참조.
+
 > Firebase 계정 로그인은 **필요 없습니다.** 에뮬레이터는 `demo-` 로 시작하는 가짜 프로젝트를 쓰기 때문에 실제 Google 서버에 접속하지 않습니다.
 
 ### 모드 C는 — 추가 설치 없음

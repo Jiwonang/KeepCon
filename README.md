@@ -64,7 +64,8 @@ lib/
 ### 사전 준비
 - [Flutter SDK](https://docs.flutter.dev/get-started/install) 3.27 이상 (Dart 3.6+) — `Color.withValues()` 등 3.27+ API 사용
 - 확인: `flutter doctor`
-- *(에뮬레이터로 띄울 경우 추가)* Node.js 20+ (`npm i -g firebase-tools`), Java 11+
+- *(에뮬레이터로 띄울 경우 추가)* Node.js 20+ (`npm i -g firebase-tools`), **Java 11+** — Firestore 에뮬레이터 구동용
+- *(Android 기기로 띄울 경우 추가)* **JDK 17+** · Android SDK — 웹으로만 개발하면 필요 없습니다. [Android 기기로 띄우기](#-android-기기로-띄우기-실기기--avd) 참조
 
 ### 설치 (처음 한 번만)
 ```bash
@@ -165,6 +166,8 @@ flutter run --dart-define=USE_FIREBASE=true       # dev 서버에 붙어 실기�
 
 > **dev·실서비스 모두 Android·iOS가 구성돼 있습니다**(패키지명·번들 id 둘 다 `com.keepcon.app`).
 >
+> 📱 **Android가 처음이면** JDK·SDK 준비부터 필요합니다 → [Android 기기로 띄우기](#-android-기기로-띄우기-실기기--avd).
+>
 > ⚠️ **iOS는 macOS + Xcode에서만 빌드됩니다.** Windows에서는 `flutter run`이 iOS 기기를 아예 보지 못합니다. macOS에서 처음 열 때 Xcode › Runner › Signing & Capabilities에서 **개인 Apple ID로 팀을 지정**해야 실기기에 설치됩니다(무료 계정도 7일짜리 프로비저닝으로 설치는 됩니다).
 >
 > ⚠️ **실기기 + 로컬 에뮬레이터 조합은 지원하지 않습니다.** `10.0.2.2` 자동 전환은 Android 스튜디오 에뮬레이터 전용이라 USB 실기기에서는 닿지 않고, 사설 IP로 우회하려면 에뮬레이터 LAN 바인딩(`firebase.json`의 `host`) · 방화벽 인바운드 허용 · cleartext HTTP 허용(`networkSecurityConfig`)까지 전부 손봐야 합니다. **실기기는 dev 서버(`USE_FIREBASE=true`)를 쓰세요** — 설정이 필요 없습니다.
@@ -181,6 +184,86 @@ flutter run --dart-define=USE_FIREBASE=true       # dev 서버에 붙어 실기�
 | `KeepCon: Firebase 연결됨 (prod — keepcon-ab660)` | **실서비스** — 의도한 게 아니면 즉시 중단 |
 
 > ⚠️ `--dart-define` 은 컴파일 시점에 적용됩니다. 실행 중 `r`(핫 리로드)로는 안 바뀌니, 모드를 바꾸려면 `Ctrl+C` 후 다시 실행하세요.
+
+---
+
+### 📱 Android 기기로 띄우기 (실기기 · AVD)
+
+웹으로만 개발한다면 이 절은 건너뛰세요. Android로 띄울 때만 필요합니다.
+
+#### 준비물
+
+| 항목 | 버전 | 왜 |
+|------|------|-----|
+| **JDK** | **17 이상** | Android 빌드가 Java 17을 타깃합니다([`android/app/build.gradle.kts`](android/app/build.gradle.kts)의 `jvmTarget = JVM_17`). 21도 됩니다 |
+| **Android SDK** | Platform 35 · Platform-Tools · Command-line Tools | `flutter doctor`의 *Android toolchain* 항목이 검사합니다 |
+| **Android Emulator + 시스템 이미지** | AVD로 띄울 때만 | 실기기만 쓸 거면 설치하지 마세요(수 GB 절약) |
+
+> ⚠️ **에뮬레이터용 `Java 11+` 와 Android 빌드용 `JDK 17+` 는 별개입니다.** 위 사전 준비의 "Java 11+"만 보고 딱 11을 설치하면 **에뮬레이터는 뜨는데 `flutter run`이 Gradle에서 실패합니다.** Android도 하실 거면 처음부터 17 이상을 설치하세요.
+
+#### Android SDK 위치 — `%LOCALAPPDATA%` 아래는 피하세요
+
+Windows에서 SDK를 기본 위치인 `%LOCALAPPDATA%\Android\Sdk`에 두면, 패키지 앱(MSIX)에서 실행한 도구가 그 경로를 **자기 컨테이너 안쪽으로 리디렉션**해 설치하는 일이 있습니다. 그러면 그 도구 안에서는 멀쩡히 보이는데 **일반 터미널·Android Studio에서는 같은 경로가 비어 있어서** `flutter doctor`가 이렇게 나옵니다:
+
+```
+[X] Android toolchain - develop for Android devices
+    X ANDROID_HOME = C:\Users\<사용자>\AppData\Local\Android\Sdk
+      but Android SDK not found at this location.
+```
+
+**AppData 바깥에 두면 이 문제가 생기지 않습니다.** Android Studio → Settings → Languages & Frameworks → Android SDK 에서 *Android SDK Location* 을 `C:\Android\Sdk` 같은 경로로 지정하고, 환경 변수를 영구 등록하세요(cmd):
+
+```bash
+setx ANDROID_HOME "C:\Android\Sdk"
+```
+
+```bash
+setx ANDROID_SDK_ROOT "C:\Android\Sdk"
+```
+
+> `setx` 는 **현재 창에는 적용되지 않습니다** — 실행한 뒤 터미널을 새로 여세요.
+> `setx PATH ...` 는 쓰지 마세요. PATH가 1024자에서 잘려 나갑니다(PATH 편집은 시스템 속성 GUI에서). `flutter` 는 `ANDROID_HOME` 만 있으면 `adb` 를 찾습니다.
+
+새 창에서 `flutter doctor` 의 *Android toolchain* 이 ✓ 면 준비 끝입니다.
+
+> *Visual Studio not installed* 는 **무시하세요.** Windows **데스크톱** 앱 빌드용이고 KeepCon은 web·android·ios만 구성돼 있습니다. 이름이 비슷할 뿐 VS Code와는 무관합니다.
+
+#### 실기기로 띄우기
+
+1. 폰: 설정 → 휴대전화 정보 → **빌드번호 7번 연타** → 개발자 옵션 활성화
+2. 개발자 옵션 → **USB 디버깅** 켜기
+3. USB 연결 → 폰에 뜨는 **"USB 디버깅을 허용하시겠습니까?"** 허용 (USB 모드는 충전이 아니라 **파일 전송(MTP)**)
+
+```bash
+flutter devices                                # 폰 모델명이 보이는지 먼저 확인
+flutter run --dart-define=USE_FIREBASE=true    # 실기기는 로컬 에뮬레이터에 못 붙습니다 → dev 서버
+```
+
+| 증상 | 원인 |
+|------|------|
+| `flutter devices` 에 폰이 안 보임 | 충전 전용 케이블일 수 있습니다. 데이터 케이블로 바꾸고 `adb devices` 로 재확인 |
+| `adb devices` 가 `unauthorized` | 폰의 허용 팝업을 놓친 것. 케이블을 뽑았다 다시 꽂으세요 |
+
+#### AVD(가상 기기)로 띄우기
+
+실기기와 달리 **로컬 에뮬레이터에 그대로 붙습니다** — `resolveEmulatorHost()` 가 호스트 PC를 `10.0.2.2` 로 자동 전환하기 때문입니다. 그룹 삭제·공유 취소 같은 **파괴적 테스트는 이쪽에서** 하세요.
+
+Android Studio → Device Manager → Create Device 로 만들거나, cmd에서:
+
+```bash
+"%ANDROID_HOME%\cmdline-tools\latest\bin\sdkmanager.bat" "emulator" "system-images;android-35;google_apis;x86_64"
+```
+
+```bash
+"%ANDROID_HOME%\cmdline-tools\latest\bin\avdmanager.bat" create avd -n keepcon_pixel -k "system-images;android-35;google_apis;x86_64" -d pixel_7
+```
+
+```bash
+flutter emulators --launch keepcon_pixel
+flutter run                                    # 플래그 없음 = 로컬 에뮬레이터
+```
+
+> 터미널 A에서 `tool\emulators.cmd` 로 Firebase 에뮬레이터를 먼저 띄워 두어야 합니다 — 안 띄우면 안내 화면에서 멈춥니다.
 
 ---
 
