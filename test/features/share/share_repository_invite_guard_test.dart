@@ -92,17 +92,44 @@ void main() {
     });
   });
 
-  group('InviteExpiry.duration (enum)', () {
-    test('각 선택지의 유효 기간', () {
-      expect(InviteExpiry.oneHour.duration, const Duration(hours: 1));
-      expect(InviteExpiry.oneDay.duration, const Duration(days: 1));
-      expect(InviteExpiry.sevenDays.duration, const Duration(days: 7));
-      expect(InviteExpiry.never.duration, isNull);
+  group('Group.inviteValidity (24시간 고정 정책)', () {
+    test('유효기간은 24시간', () {
+      expect(Group.inviteValidity, const Duration(hours: 24));
+    });
+
+    test('만료를 지정하지 않고 만든 그룹은 지금부터 24시간 유효', () {
+      final DateTime before = DateTime.now();
+      final Group g = Group(
+        id: 'g',
+        name: 'g',
+        emoji: '🎁',
+        inviteCode: '000000',
+        members: const <GroupMember>[
+          GroupMember(
+            userId: 'user-1',
+            displayName: '나',
+            avatarEmoji: '🙂',
+            role: MemberRole.owner,
+          ),
+        ],
+      );
+      final DateTime after = DateTime.now();
+
+      expect(
+        g.inviteExpiresAt.isBefore(before.add(Group.inviteValidity)),
+        isFalse,
+      );
+      expect(
+        g.inviteExpiresAt.isBefore(
+            after.add(Group.inviteValidity + const Duration(seconds: 5))),
+        isTrue,
+      );
+      expect(g.isInviteExpired(DateTime.now()), isFalse);
     });
   });
 
   group('Group.isInviteExpired (모델 predicate)', () {
-    Group groupWithExpiry(DateTime? expiresAt) => Group(
+    Group groupWithExpiry(DateTime expiresAt) => Group(
           id: 'g',
           name: 'g',
           emoji: '🎁',
@@ -120,10 +147,6 @@ void main() {
 
     final DateTime now = DateTime(2026, 7, 28, 12);
 
-    test('만료 없음(null)이면 항상 유효', () {
-      expect(groupWithExpiry(null).isInviteExpired(now), isFalse);
-    });
-
     test('만료 시각이 지났으면 만료', () {
       expect(
         groupWithExpiry(now.subtract(const Duration(minutes: 1)))
@@ -138,62 +161,31 @@ void main() {
         isFalse,
       );
     });
+
+    test('만료 시각 정각은 만료로 본다(경계)', () {
+      expect(groupWithExpiry(now).isInviteExpired(now), isTrue);
+    });
   });
 
-  group('ShareRepository.setInviteExpiry 가드', () {
-    test('방장은 유한 만료 설정 가능 — inviteExpiresAt이 미래로 반영', () async {
-      final Group mine = await repo.createGroup(name: '만료 그룹', emoji: '⏰');
-      expect(mine.inviteExpiresAt, isNull); // 생성 직후엔 무제한.
-
+  group('createGroup 초대 만료', () {
+    test('생성된 그룹의 초대는 생성 시점 + 24시간까지 유효', () async {
       final DateTime before = DateTime.now();
-      final Group updated = await repo.setInviteExpiry(
-          groupId: mine.id, expiry: InviteExpiry.oneHour);
+      final Group mine = await repo.createGroup(name: '만료 그룹', emoji: '⏰');
       final DateTime after = DateTime.now();
 
-      expect(updated.inviteExpiresAt, isNotNull);
-      // 설정 시점 + 1시간 근방(호출 사이 경과분 slack 허용).
+      // 생성 시점 + 24시간 근방(호출 사이 경과분 slack 허용).
       expect(
-        updated.inviteExpiresAt!
-                .isAfter(before.add(const Duration(hours: 1))) ||
-            updated.inviteExpiresAt!
-                .isAtSameMomentAs(before.add(const Duration(hours: 1))),
-        isTrue,
+        mine.inviteExpiresAt.isBefore(before.add(Group.inviteValidity)),
+        isFalse,
       );
       expect(
-        updated.inviteExpiresAt!
-            .isBefore(after.add(const Duration(hours: 1, seconds: 5))),
+        mine.inviteExpiresAt.isBefore(
+            after.add(Group.inviteValidity + const Duration(seconds: 5))),
         isTrue,
       );
+      expect(mine.isInviteExpired(DateTime.now()), isFalse);
       expect((await repo.getGroupById(mine.id))!.inviteExpiresAt,
-          updated.inviteExpiresAt);
-    });
-
-    test('방장이 never로 설정하면 만료 해제(null)', () async {
-      final Group mine = await repo.createGroup(name: '해제 그룹', emoji: '♾️');
-      await repo.setInviteExpiry(groupId: mine.id, expiry: InviteExpiry.oneDay);
-      expect((await repo.getGroupById(mine.id))!.inviteExpiresAt, isNotNull);
-
-      await repo.setInviteExpiry(groupId: mine.id, expiry: InviteExpiry.never);
-      expect((await repo.getGroupById(mine.id))!.inviteExpiresAt, isNull);
-    });
-
-    test('일반 멤버는 만료 변경 거부(StateError), 값 유지', () async {
-      final Group joined = await repo.joinGroup('333333');
-      expect(joined.isOwnedBy(me), isFalse);
-      final DateTime? before = joined.inviteExpiresAt;
-      await expectLater(
-        repo.setInviteExpiry(groupId: joined.id, expiry: InviteExpiry.oneHour),
-        throwsStateError,
-      );
-      expect((await repo.getGroupById(joined.id))!.inviteExpiresAt, before);
-    });
-
-    test('없는 그룹은 StateError', () async {
-      await expectLater(
-        repo.setInviteExpiry(
-            groupId: 'no_such_group', expiry: InviteExpiry.oneHour),
-        throwsStateError,
-      );
+          mine.inviteExpiresAt);
     });
   });
 

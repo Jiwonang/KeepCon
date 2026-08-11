@@ -324,35 +324,17 @@ class InMemoryShareRepository implements ShareRepository {
   }
 
   @override
-  Future<Group> setInviteExpiry({
-    required String groupId,
-    required InviteExpiry expiry,
-  }) async {
-    final User me = _requireUser();
-    final Group g = _requireGroup(groupId);
-    if (!g.isOwnedBy(me.id)) {
-      throw StateError('Only the owner can change invite expiry: $groupId');
-    }
-    // 만료 시각은 설정 시점 기준으로 계산한다(never면 만료 없음 = null).
-    final Duration? d = expiry.duration;
-    final Group updated = g.copyWith(
-      inviteExpiresAt: d == null ? null : DateTime.now().add(d),
-    );
-    _groups[_groupIndex(groupId)] = updated;
-    _emit();
-    return updated;
-  }
-
-  @override
   Future<Group> regenerateInviteCode({required String groupId}) async {
     final User me = _requireUser();
     final Group g = _requireGroup(groupId);
     if (!g.isOwnedBy(me.id)) {
       throw StateError('Only the owner can regenerate invite code: $groupId');
     }
-    // 새 코드 발급 + 만료 초기화(재발급된 코드는 즉시 사용 가능해야 한다).
-    final Group updated =
-        g.copyWith(inviteCode: _nextCode(), inviteExpiresAt: null);
+    // 새 코드 발급 + 만료 창 갱신(재발급 시점부터 다시 24시간).
+    final Group updated = g.copyWith(
+      inviteCode: _nextCode(),
+      inviteExpiresAt: DateTime.now().add(Group.inviteValidity),
+    );
     _groups[_groupIndex(groupId)] = updated;
     _emit();
     return updated;

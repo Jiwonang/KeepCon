@@ -2,7 +2,8 @@
 //
 // 계약:
 // - 방장 본인만 재발급 가능(위반/그룹 없음이면 StateError).
-// - 새 코드를 발급해 기존 코드/링크를 무효화하고, 만료(inviteExpiresAt)를 초기화(null)한다.
+// - 새 코드를 발급해 기존 코드/링크를 무효화하고, 만료(inviteExpiresAt)를
+//   재발급 시점 + Group.inviteValidity(24시간)로 다시 연다.
 //
 // 행위자 기본 = InMemoryAuthRepository.defaultUser(id 'user-1').
 
@@ -35,15 +36,28 @@ void main() {
     auth.dispose();
   });
 
-  test('방장 재발급 — 코드 변경 + 만료 초기화(null)', () async {
+  test('방장 재발급 — 코드 변경 + 만료 창 24시간 재개시', () async {
     final Group g = await repo.createGroup(name: '재발급', emoji: '🔄');
-    await repo.setInviteExpiry(groupId: g.id, expiry: InviteExpiry.oneDay);
-    expect((await repo.getGroupById(g.id))!.inviteExpiresAt, isNotNull);
 
+    final DateTime before = DateTime.now();
     final Group updated = await repo.regenerateInviteCode(groupId: g.id);
+    final DateTime after = DateTime.now();
+
     expect(updated.inviteCode, isNot(g.inviteCode));
-    expect(updated.inviteExpiresAt, isNull);
+    // 재발급 시점 + 24시간 근방으로 밀린다(호출 사이 경과분 slack 허용).
+    expect(
+      updated.inviteExpiresAt.isBefore(before.add(Group.inviteValidity)),
+      isFalse,
+    );
+    expect(
+      updated.inviteExpiresAt.isBefore(
+          after.add(Group.inviteValidity + const Duration(seconds: 5))),
+      isTrue,
+    );
+    expect(updated.isInviteExpired(DateTime.now()), isFalse);
     expect((await repo.getGroupById(g.id))!.inviteCode, updated.inviteCode);
+    expect((await repo.getGroupById(g.id))!.inviteExpiresAt,
+        updated.inviteExpiresAt);
   });
 
   test('비방장은 재발급 불가(StateError)', () async {
