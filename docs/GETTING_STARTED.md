@@ -71,6 +71,16 @@ java -version
 
 **Flutter와 인터넷만 있으면 됩니다.** Node.js·Java도, Firebase 계정 로그인도 필요 없습니다. 서버는 이미 만들어져 있고 접속 정보가 저장소에 커밋돼 있어서, `flutter pub get` 만 끝났으면 바로 붙습니다.
 
+### 📱 Android 기기로 띄운다면 — 모드와 무관하게 추가로 필요
+
+**웹(Chrome)으로 띄우면 이 항목은 필요 없습니다.** 실기기나 AVD로 띄울 때만 해당합니다.
+
+- **JDK 17 이상** — Android 빌드가 Java 17을 타깃합니다. 모드 B의 "Java 11"만 설치하면 **에뮬레이터는 뜨는데 `flutter run` 이 Gradle에서 실패합니다.**
+- **Android SDK** — `flutter doctor` 의 *Android toolchain* 항목
+
+> 모드 C(dev 서버)도 예외가 아닙니다. "추가 설치 없음"은 **웹으로 띄울 때** 이야기입니다.
+> 설치 위치·환경 변수 설정은 [README의 *Android 기기로 띄우기*](../README.md#-android-기기로-띄우기-실기기--avd) 를 보세요.
+
 ---
 
 ## 2. 프로젝트 받기 (처음 한 번만)
