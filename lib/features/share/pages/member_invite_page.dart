@@ -3,13 +3,15 @@
 /// 초대 URL + 초대코드(각 복사 버튼), 만료시간 선택(프로토타입 UI), "방장만 초대"
 /// 권한 토글. 권한 토글은 [ShareRepository.setInviteOwnerOnly]로 그룹 정책에 반영되며
 /// 방장만 편집할 수 있다(그룹 상세의 초대 진입점은 [Group.canInvite]로 게이팅).
-/// 색 하드코딩 없음. 실제 초대 발송/만료는 후속 계약에서 연동한다.
+/// 하단 CTA는 OS 공유 시트를 띄워 설치된 앱(카카오톡·디스코드·LINE 등)으로 초대 링크를
+/// 보낸다. 색 하드코딩 없음. 실제 초대 발송/만료는 후속 계약에서 연동한다.
 library;
 
 import 'package:flutter/material.dart';
 import '../../../shared/theme/theme_tokens.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../../../shared/models/group.dart';
 import '../../../shared/models/user.dart';
@@ -53,6 +55,36 @@ class _MemberInvitePageState extends ConsumerState<MemberInvitePage> {
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(SnackBar(content: Text('$label${label.eulReul} 복사했어요.')));
+  }
+
+  /// OS 공유 시트를 띄워 초대 링크를 보낸다 — 설치된 앱(카카오톡·디스코드·LINE·메시지
+  /// 등)이 시트에 나열되고, 사용자가 고른 앱으로 문구+링크가 전달된다.
+  ///
+  /// 시트를 열 수 없으면 클립보드 복사로 폴백한다. 웹은 Web Share API가 있는
+  /// 브라우저에서만 시트가 뜨므로(로컬 개발은 대부분 `web-server` 실행) 이 경로가
+  /// 실제로 자주 쓰인다. 패키지 기본 폴백인 메일 앱 실행은 초대 경로로 맞지 않아
+  /// [ShareParams.mailToFallbackEnabled]를 꺼서 예외로 받아낸다.
+  ///
+  /// iPad 팝오버 기준점([ShareParams.sharePositionOrigin])은 이번 범위에서 다루지 않는다.
+  Future<void> _share(Group g) async {
+    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
+    try {
+      await SharePlus.instance.share(
+        ShareParams(
+          text: '"${g.name}" 그룹에 초대합니다.\n${g.inviteUrl}',
+          subject: '"${g.name}" 그룹 초대',
+          mailToFallbackEnabled: false,
+        ),
+      );
+    } catch (_) {
+      // 시트 미지원·실패 — 링크만 클립보드에 넣고 이유를 알린다.
+      await Clipboard.setData(ClipboardData(text: g.inviteUrl));
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(content: Text('공유 시트를 열 수 없어 초대 링크를 복사했어요.')),
+        );
+    }
   }
 
   Future<void> _setOwnerOnly(String groupId, bool value) async {
@@ -314,15 +346,15 @@ class _MemberInvitePageState extends ConsumerState<MemberInvitePage> {
           ],
         ),
       ),
-      // 하단 고정 CTA — 초대 링크 공유(복사).
+      // 하단 고정 CTA — OS 공유 시트로 초대 링크 전달(상단 필드는 복사 전용).
       bottomNavigationBar: SafeArea(
         top: false,
         child: Padding(
           padding: const EdgeInsets.fromLTRB(24, 8, 24, 16),
           child: ElevatedButton.icon(
-            onPressed: () => _copy(g.inviteUrl, '초대 링크'),
+            onPressed: () => _share(g),
             icon: const Icon(Icons.ios_share, size: 20),
-            label: const Text('초대 링크 공유'),
+            label: const Text('어플로 공유하기'),
             style: ElevatedButton.styleFrom(
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(AppRadii.button),
