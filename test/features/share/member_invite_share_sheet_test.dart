@@ -168,43 +168,74 @@ void main() {
     expect(shareCalls, isEmpty);
   });
 
-  testWidgets('만료된 초대는 복사도 공유도 되지 않는다', (WidgetTester tester) async {
-    final Group expiredGroup = Group(
-      id: 'g_expired',
-      name: '만료집',
-      emoji: '🏠',
-      inviteCode: '654321',
-      // 24시간이 지난 상태(발급 시점이 과거).
-      inviteExpiresAt: DateTime.now().subtract(const Duration(minutes: 1)),
-      members: <GroupMember>[
-        GroupMember(
-          userId: InMemoryAuthRepository.defaultUser.id,
-          displayName: InMemoryAuthRepository.defaultUser.displayName,
-          avatarEmoji: '🙂',
-          role: MemberRole.owner,
-        ),
-      ],
-    );
+  /// 방장 1명(=현재 사용자)짜리 최소 그룹. [expiresAt]로 초대 유효기간을 직접 정한다.
+  Group groupExpiringAt(DateTime expiresAt) => Group(
+        id: 'g_expiry',
+        name: '만료집',
+        emoji: '🏠',
+        inviteCode: '654321',
+        inviteExpiresAt: expiresAt,
+        members: <GroupMember>[
+          GroupMember(
+            userId: InMemoryAuthRepository.defaultUser.id,
+            displayName: InMemoryAuthRepository.defaultUser.displayName,
+            avatarEmoji: '🙂',
+            role: MemberRole.owner,
+          ),
+        ],
+      );
 
+  /// 고정 그룹 스텁을 주입해 초대 화면을 띄운다.
+  Future<void> pumpWithGroup(WidgetTester tester, Group g) async {
     await tester.pumpWidget(
       ProviderScope(
         overrides: <Override>[
           authRepositoryProvider.overrideWithValue(auth),
           gifticonRepositoryProvider.overrideWithValue(gifticons),
-          shareRepositoryProvider.overrideWithValue(
-            _FixedGroupsShareRepository(<Group>[expiredGroup]),
-          ),
+          shareRepositoryProvider
+              .overrideWithValue(_FixedGroupsShareRepository(<Group>[g])),
         ],
-        child: MaterialApp(home: MemberInvitePage(groupId: expiredGroup.id)),
+        child: MaterialApp(home: MemberInvitePage(groupId: g.id)),
       ),
     );
     await tester.pumpAndSettle();
+  }
+
+  testWidgets('화면을 열어 둔 채 유효기간이 끝나면 복사·공유가 잠긴다', (WidgetTester tester) async {
+    // 곧 만료되는 초대(진입 시점엔 아직 유효).
+    final Group g =
+        groupExpiringAt(DateTime.now().add(const Duration(milliseconds: 800)));
+    await pumpWithGroup(tester, g);
+
+    expect(find.text('어플로 공유하기'), findsOneWidget);
+
+    // 실제 시각이 만료를 넘기게 두고(runAsync = 실 클럭), 가상 시각을 밀어 예약된
+    // 타이머를 발화시킨다. 둘 다 필요하다 — 만료 판정은 DateTime.now()를 본다.
+    await tester
+        .runAsync(() => Future<void>.delayed(const Duration(seconds: 1)));
+    await tester.pump(const Duration(seconds: 1));
+
+    expect(find.text('만료됨'), findsOneWidget);
+    expect(find.text('만료된 초대는 공유할 수 없어요'), findsOneWidget);
+
+    await tester.tap(find.text(g.inviteUrl));
+    await tester.tap(find.text('만료된 초대는 공유할 수 없어요'));
+    await tester.pumpAndSettle();
+    expect(clipboardWrites, isEmpty);
+    expect(shareCalls, isEmpty);
+  });
+
+  testWidgets('이미 만료된 초대로 진입하면 복사도 공유도 되지 않는다', (WidgetTester tester) async {
+    // 24시간이 지난 상태(발급 시점이 과거) — 레거시 문서를 epoch로 읽는 경우도 여기 해당.
+    final Group g =
+        groupExpiringAt(DateTime.now().subtract(const Duration(minutes: 1)));
+    await pumpWithGroup(tester, g);
 
     expect(find.text('만료됨'), findsOneWidget);
 
     // 링크·코드 필드 탭 → 복사되지 않는다.
-    await tester.tap(find.text(expiredGroup.inviteUrl));
-    await tester.tap(find.text(expiredGroup.inviteCode));
+    await tester.tap(find.text(g.inviteUrl));
+    await tester.tap(find.text(g.inviteCode));
     await tester.pumpAndSettle();
     expect(clipboardWrites, isEmpty);
 

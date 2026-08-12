@@ -11,6 +11,8 @@
 /// 되살리는 경로는 방장의 "코드 재발급"([ShareRepository.regenerateInviteCode])뿐이다.
 library;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import '../../../shared/theme/theme_tokens.dart';
 import 'package:flutter/services.dart';
@@ -37,6 +39,37 @@ class MemberInvitePage extends ConsumerStatefulWidget {
 }
 
 class _MemberInvitePageState extends ConsumerState<MemberInvitePage> {
+  /// 유효기간이 끝나는 순간 화면을 만료 상태로 되돌리는 타이머.
+  ///
+  /// 만료를 build 시점에만 계산하면, 화면을 열어 둔 채 24시간 경계를 넘겼을 때 복사·공유
+  /// 버튼이 계속 살아 있어 이미 죽은 링크를 내보낼 수 있다.
+  Timer? _expiryTimer;
+
+  /// 타이머가 걸려 있는 만료 시각 — 같은 값에 중복 등록하지 않기 위한 키.
+  /// 재발급으로 [Group.inviteExpiresAt]가 밀리면 값이 달라져 자동으로 다시 건다.
+  DateTime? _scheduledFor;
+
+  /// [expiresAt] 도달 시 1회 리빌드를 예약한다(이미 지났으면 걸지 않는다 — 만료는
+  /// 재발급 없이는 되돌아가지 않으므로 더 볼 경계가 없다).
+  void _scheduleExpiryRefresh(DateTime expiresAt) {
+    if (_scheduledFor == expiresAt) return;
+    _expiryTimer?.cancel();
+    _expiryTimer = null;
+    _scheduledFor = expiresAt;
+
+    final Duration remaining = expiresAt.difference(DateTime.now());
+    if (remaining <= Duration.zero) return;
+    _expiryTimer = Timer(remaining, () {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _expiryTimer?.cancel();
+    super.dispose();
+  }
+
   void _copy(String value, String label) {
     Clipboard.setData(ClipboardData(text: value));
     ScaffoldMessenger.of(context)
@@ -176,9 +209,10 @@ class _MemberInvitePageState extends ConsumerState<MemberInvitePage> {
       sessionUserProvider.select((AsyncValue<User?> s) => s.valueOrNull?.id),
     );
     final bool iAmOwner = uid != null && g.isOwnedBy(uid);
-    // 만료 여부는 진입 시점 기준으로만 판정한다(화면이 떠 있는 동안 자동으로 뒤집히지는
-    // 않는다 — 실제 차단은 참여 시 repository 가드가 최신 시각으로 다시 본다).
     final bool expired = g.isInviteExpired(DateTime.now());
+    // 화면을 열어 둔 채 유효기간이 끝나도 복사·공유가 살아 있지 않게, 만료 시각에
+    // 리빌드를 예약한다(재발급으로 만료가 밀리면 새 시각으로 다시 건다).
+    _scheduleExpiryRefresh(g.inviteExpiresAt);
 
     return Scaffold(
       appBar: _navBar(),
