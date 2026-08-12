@@ -24,7 +24,7 @@ String _two(int v) => v.toString().padLeft(2, '0');
 String formatExpiryLabel(DateTime d) => '~${formatYmdDot(d)}';
 
 /// 초대코드 만료 시각을 "YYYY.MM.DD HH:mm"로. 예: "2026.07.29 15:30".
-/// 초대 만료는 시(hour) 단위 옵션(1시간)이 있어 날짜만으로는 부족하므로 시각까지 표시한다.
+/// 초대 유효기간이 24시간이라 날짜만으로는 언제 끊기는지 알 수 없으므로 시각까지 표시한다.
 String formatInviteExpiry(DateTime d) =>
     '${formatYmdDot(d)} ${_two(d.hour)}:${_two(d.minute)}';
 

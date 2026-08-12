@@ -310,36 +310,11 @@ class FirebaseShareRepository implements ShareRepository {
   }
 
   @override
-  Future<Group> setInviteExpiry({
-    required String groupId,
-    required InviteExpiry expiry,
-  }) async {
-    final User me = _requireUser();
-    final DocumentReference<Map<String, dynamic>> ref = _groups.doc(groupId);
-    // 만료 시각은 설정 시점 기준으로 계산한다(never면 만료 없음 = null).
-    final Duration? d = expiry.duration;
-    final DateTime? expiresAt = d == null ? null : DateTime.now().add(d);
-
-    return _db.runTransaction<Group>((Transaction tx) async {
-      final DocumentSnapshot<Map<String, dynamic>> doc = await tx.get(ref);
-      if (!doc.exists) throw StateError('Group not found: $groupId');
-      final Group g = _groupFromDoc(doc);
-      if (!g.isOwnedBy(me.id)) {
-        throw StateError('Only the owner can change invite expiry: $groupId');
-      }
-      final Group updated = g.copyWith(inviteExpiresAt: expiresAt);
-      tx.update(ref, <String, dynamic>{
-        'inviteExpiresAt':
-            expiresAt == null ? null : Timestamp.fromDate(expiresAt),
-      });
-      return updated;
-    });
-  }
-
-  @override
   Future<Group> regenerateInviteCode({required String groupId}) async {
     final User me = _requireUser();
     final DocumentReference<Map<String, dynamic>> ref = _groups.doc(groupId);
+    // 만료 창은 재발급 시점부터 다시 24시간(트랜잭션 재시도에도 값이 흔들리지 않게 밖에서 고정).
+    final DateTime expiresAt = DateTime.now().add(Group.inviteValidity);
 
     return _db.runTransaction<Group>((Transaction tx) async {
       final DocumentSnapshot<Map<String, dynamic>> doc = await tx.get(ref);
@@ -348,12 +323,11 @@ class FirebaseShareRepository implements ShareRepository {
       if (!g.isOwnedBy(me.id)) {
         throw StateError('Only the owner can regenerate invite code: $groupId');
       }
-      // 새 코드 발급 + 만료 초기화(재발급된 코드는 즉시 사용 가능해야 한다).
       final Group updated =
-          g.copyWith(inviteCode: _randomCode(), inviteExpiresAt: null);
+          g.copyWith(inviteCode: _randomCode(), inviteExpiresAt: expiresAt);
       tx.update(ref, <String, dynamic>{
         'inviteCode': updated.inviteCode,
-        'inviteExpiresAt': null,
+        'inviteExpiresAt': Timestamp.fromDate(expiresAt),
       });
       return updated;
     });
@@ -711,9 +685,7 @@ class FirebaseShareRepository implements ShareRepository {
         'emoji': g.emoji,
         'inviteCode': g.inviteCode,
         'inviteOwnerOnly': g.inviteOwnerOnly,
-        'inviteExpiresAt': g.inviteExpiresAt == null
-            ? null
-            : Timestamp.fromDate(g.inviteExpiresAt!),
+        'inviteExpiresAt': Timestamp.fromDate(g.inviteExpiresAt),
         'maxMembers': g.maxMembers,
         'members': g.members
             .map((GroupMember m) => <String, dynamic>{
@@ -857,13 +829,14 @@ class FirebaseShareRepository implements ShareRepository {
     return null;
   }
 
-  /// 초대코드 만료 시각을 문서 값에서 해석한다.
+  /// 초대코드 만료 시각을 문서 값에서 해석한다. **fail-closed** — 만료 검사를 우회하는
+  /// 값을 만들지 않는다.
   ///
-  /// **오직 `null`(미설정)만 "만료 없음"으로 허용**한다. 값이 있는데 [Timestamp]/[DateTime]이
-  /// 아닌 손상 문서는 만료 검사를 우회하지 않도록 **fail-closed** — 이미 만료된 것(epoch)으로
-  /// 취급해 참여를 거부한다.
-  DateTime? _inviteExpiresAtFrom(Object? value) {
-    if (value == null) return null;
+  /// 값이 없거나(24시간 정책 이전에 만들어진 레거시 문서 = 만료 필드 없음/`null`)
+  /// [Timestamp]·[DateTime]이 아닌 손상 값이면 이미 만료된 것(epoch)으로 취급해 참여를
+  /// 거부한다. 레거시 그룹의 코드는 어차피 발급된 지 24시간이 지났으므로 정책상 만료가 맞고,
+  /// 방장이 `regenerateInviteCode`로 새 코드를 받으면 정상 복구된다.
+  DateTime _inviteExpiresAtFrom(Object? value) {
     if (value is Timestamp) return value.toDate();
     if (value is DateTime) return value;
     return DateTime.fromMillisecondsSinceEpoch(0);

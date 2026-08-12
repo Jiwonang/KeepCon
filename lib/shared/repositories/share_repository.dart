@@ -46,6 +46,8 @@ abstract class ShareRepository {
   /// 새 그룹을 생성한다. 행위자가 방장([MemberRole.owner])이 된다.
   ///
   /// [maxMembers]는 그룹 인원 상한(방장 포함, 기본 [Group.defaultMaxMembers], 최소 1).
+  /// 함께 발급되는 초대코드는 생성 시점부터 [Group.inviteValidity](24시간) 동안만 유효하다
+  /// ([Group.inviteExpiresAt]).
   /// 세션에 현재 사용자가 없으면 [StateError].
   Future<Group> createGroup({
     required String name,
@@ -104,23 +106,13 @@ abstract class ShareRepository {
     required bool ownerOnly,
   });
 
-  /// 초대코드 만료 기간을 설정한다. 만료 시각은 `설정 시점 + [InviteExpiry.duration]`으로
-  /// 계산해 [Group.inviteExpiresAt]에 반영한다([InviteExpiry.never]면 만료 없음(`null`)).
-  ///
-  /// 가드: 방장 본인만 만료를 바꿀 수 있다(초대 정책과 동일 규약). 위반/그룹 없음이면 [StateError].
-  /// 성공 시 갱신된 그룹을 반환한다.
-  Future<Group> setInviteExpiry({
-    required String groupId,
-    required InviteExpiry expiry,
-  });
-
   /// 초대코드를 재발급한다 — 새 코드를 발급해 **기존 코드/링크를 무효화**한다.
   ///
-  /// 재발급된 초대는 즉시 사용 가능해야 하므로 만료([Group.inviteExpiresAt])를
-  /// 초기화(무제한)한다. 만료가 필요하면 [setInviteExpiry]로 다시 설정한다.
+  /// 만료([Group.inviteExpiresAt])는 재발급 시점 + [Group.inviteValidity](24시간)로 다시
+  /// 계산된다. 만료된 초대를 되살리는 유일한 경로이며, 만료 기간 자체는 고를 수 없다.
   ///
   /// 가드: 방장 본인만 재발급할 수 있다. 위반/그룹 없음이면 [StateError].
-  /// 성공 시 갱신된(새 코드·만료 초기화) 그룹을 반환한다.
+  /// 성공 시 갱신된(새 코드·만료 갱신) 그룹을 반환한다.
   Future<Group> regenerateInviteCode({required String groupId});
 
   // ── 공유 기프티콘 ────────────────────────────────────────────────────

@@ -12,6 +12,8 @@
 /// - (a) 정상 — 공유 채널이 그룹명+초대 링크를 담아 1회 호출되고, 클립보드는 그대로다.
 /// - (b) 시트 실패 — 채널이 던지면 클립보드 복사로 폴백하고 이유를 스낵바로 알린다.
 ///   웹(Web Share API 미지원 브라우저)에서 실제로 타는 경로라 공허한 방어가 아니다.
+/// - (c) **만료된 초대** — 24시간이 지난 코드는 받는 쪽이 참여할 수 없으므로(`joinGroup`
+///   가드) 내보내는 경로(복사·공유 시트)를 전부 막는다. 죽은 링크를 배포하는 회귀 고정.
 library;
 
 import 'package:flutter/material.dart';
@@ -24,6 +26,27 @@ import 'package:keepcon/shared/providers/repositories.dart';
 import 'package:keepcon/shared/repositories/impl/in_memory_auth_repository.dart';
 import 'package:keepcon/shared/repositories/impl/in_memory_gifticon_repository.dart';
 import 'package:keepcon/shared/repositories/impl/in_memory_share_repository.dart';
+import 'package:keepcon/shared/repositories/share_repository.dart';
+
+/// `watchGroups`만 지원하는 최소 스텁 — 만료된 초대를 가진 그룹을 주입한다.
+///
+/// [InMemoryShareRepository]로는 만료 상태를 만들 수 없다(24시간 고정 정책이라 만료를
+/// 앞당기는 API가 없다 — 그게 이 정책의 핵심이다). 그 밖의 호출은 [noSuchMethod]로 막아
+/// 예상 밖 경로가 조용히 통과하지 않게 한다.
+class _FixedGroupsShareRepository implements ShareRepository {
+  _FixedGroupsShareRepository(this.groups);
+
+  final List<Group> groups;
+
+  @override
+  Stream<List<Group>> watchGroups(String userId) =>
+      Stream<List<Group>>.value(groups);
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => throw UnsupportedError(
+        '이 테스트는 watchGroups만 사용한다 (호출됨: ${invocation.memberName})',
+      );
+}
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -143,5 +166,83 @@ void main() {
 
     expect(clipboardWrites, <String>[group.inviteUrl]);
     expect(shareCalls, isEmpty);
+  });
+
+  /// 방장 1명(=현재 사용자)짜리 최소 그룹. [expiresAt]로 초대 유효기간을 직접 정한다.
+  Group groupExpiringAt(DateTime expiresAt) => Group(
+        id: 'g_expiry',
+        name: '만료집',
+        emoji: '🏠',
+        inviteCode: '654321',
+        inviteExpiresAt: expiresAt,
+        members: <GroupMember>[
+          GroupMember(
+            userId: InMemoryAuthRepository.defaultUser.id,
+            displayName: InMemoryAuthRepository.defaultUser.displayName,
+            avatarEmoji: '🙂',
+            role: MemberRole.owner,
+          ),
+        ],
+      );
+
+  /// 고정 그룹 스텁을 주입해 초대 화면을 띄운다.
+  Future<void> pumpWithGroup(WidgetTester tester, Group g) async {
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: <Override>[
+          authRepositoryProvider.overrideWithValue(auth),
+          gifticonRepositoryProvider.overrideWithValue(gifticons),
+          shareRepositoryProvider
+              .overrideWithValue(_FixedGroupsShareRepository(<Group>[g])),
+        ],
+        child: MaterialApp(home: MemberInvitePage(groupId: g.id)),
+      ),
+    );
+    await tester.pumpAndSettle();
+  }
+
+  testWidgets('화면을 열어 둔 채 유효기간이 끝나면 복사·공유가 잠긴다', (WidgetTester tester) async {
+    // 곧 만료되는 초대(진입 시점엔 아직 유효).
+    final Group g =
+        groupExpiringAt(DateTime.now().add(const Duration(milliseconds: 800)));
+    await pumpWithGroup(tester, g);
+
+    expect(find.text('어플로 공유하기'), findsOneWidget);
+
+    // 실제 시각이 만료를 넘기게 두고(runAsync = 실 클럭), 가상 시각을 밀어 예약된
+    // 타이머를 발화시킨다. 둘 다 필요하다 — 만료 판정은 DateTime.now()를 본다.
+    await tester
+        .runAsync(() => Future<void>.delayed(const Duration(seconds: 1)));
+    await tester.pump(const Duration(seconds: 1));
+
+    expect(find.text('만료됨'), findsOneWidget);
+    expect(find.text('만료된 초대는 공유할 수 없어요'), findsOneWidget);
+
+    await tester.tap(find.text(g.inviteUrl));
+    await tester.tap(find.text('만료된 초대는 공유할 수 없어요'));
+    await tester.pumpAndSettle();
+    expect(clipboardWrites, isEmpty);
+    expect(shareCalls, isEmpty);
+  });
+
+  testWidgets('이미 만료된 초대로 진입하면 복사도 공유도 되지 않는다', (WidgetTester tester) async {
+    // 24시간이 지난 상태(발급 시점이 과거) — 레거시 문서를 epoch로 읽는 경우도 여기 해당.
+    final Group g =
+        groupExpiringAt(DateTime.now().subtract(const Duration(minutes: 1)));
+    await pumpWithGroup(tester, g);
+
+    expect(find.text('만료됨'), findsOneWidget);
+
+    // 링크·코드 필드 탭 → 복사되지 않는다.
+    await tester.tap(find.text(g.inviteUrl));
+    await tester.tap(find.text(g.inviteCode));
+    await tester.pumpAndSettle();
+    expect(clipboardWrites, isEmpty);
+
+    // 하단 CTA도 비활성 — 죽은 링크를 공유 시트로 내보내지 않는다.
+    await tester.tap(find.text('만료된 초대는 공유할 수 없어요'));
+    await tester.pumpAndSettle();
+    expect(shareCalls, isEmpty);
+    expect(clipboardWrites, isEmpty);
   });
 }
