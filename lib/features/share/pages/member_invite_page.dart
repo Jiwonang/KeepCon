@@ -195,18 +195,19 @@ class _MemberInvitePageState extends ConsumerState<MemberInvitePage> {
             Text('아래 링크나 코드를 공유하세요.', style: theme.textTheme.bodyLarge),
             const SizedBox(height: 28),
 
-            // 초대 링크 / 초대코드.
+            // 초대 링크 / 초대코드. 만료된 코드는 배포해봐야 참여가 거부되므로
+            // 복사 자체를 막는다(재발급이 유일한 유효 경로).
             _CopyField(
               label: '초대 링크',
               value: g.inviteUrl,
-              onCopy: () => _copy(g.inviteUrl, '초대 링크'),
+              onCopy: expired ? null : () => _copy(g.inviteUrl, '초대 링크'),
             ),
             const SizedBox(height: 16),
             _CopyField(
               label: '초대코드',
               value: g.inviteCode,
               emphasize: true,
-              onCopy: () => _copy(g.inviteCode, '초대코드'),
+              onCopy: expired ? null : () => _copy(g.inviteCode, '초대코드'),
             ),
             // 방장만 재발급 가능 — 기존 코드/링크 무효화.
             if (iAmOwner)
@@ -285,14 +286,15 @@ class _MemberInvitePageState extends ConsumerState<MemberInvitePage> {
         ),
       ),
       // 하단 고정 CTA — OS 공유 시트로 초대 링크 전달(상단 필드는 복사 전용).
+      // 만료된 초대는 받는 쪽이 참여할 수 없으므로 내보내는 경로를 함께 막는다.
       bottomNavigationBar: SafeArea(
         top: false,
         child: Padding(
           padding: const EdgeInsets.fromLTRB(24, 8, 24, 16),
           child: ElevatedButton.icon(
-            onPressed: () => _share(g),
+            onPressed: expired ? null : () => _share(g),
             icon: const Icon(Icons.ios_share, size: 20),
-            label: const Text('어플로 공유하기'),
+            label: Text(expired ? '만료된 초대는 공유할 수 없어요' : '어플로 공유하기'),
             style: ElevatedButton.styleFrom(
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(AppRadii.button),
@@ -309,6 +311,8 @@ class _MemberInvitePageState extends ConsumerState<MemberInvitePage> {
 }
 
 /// 라벨 + 값 + 복사 버튼 필드(아웃라인). [emphasize]면 값이 코드처럼 크게(자간 포함).
+///
+/// [onCopy]가 `null`이면 비활성(만료된 초대) — 흐리게 표시하고 탭·복사 버튼을 막는다.
 class _CopyField extends StatelessWidget {
   const _CopyField({
     required this.label,
@@ -319,7 +323,7 @@ class _CopyField extends StatelessWidget {
 
   final String label;
   final String value;
-  final VoidCallback onCopy;
+  final VoidCallback? onCopy;
   final bool emphasize;
 
   @override
@@ -327,48 +331,51 @@ class _CopyField extends StatelessWidget {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
 
-    return Material(
-      color: scheme.surface,
-      borderRadius: BorderRadius.circular(AppRadii.panel),
-      child: InkWell(
-        onTap: onCopy,
+    return Opacity(
+      opacity: onCopy == null ? 0.5 : 1,
+      child: Material(
+        color: scheme.surface,
         borderRadius: BorderRadius.circular(AppRadii.panel),
-        child: Ink(
-          padding: const EdgeInsets.fromLTRB(18, 14, 10, 14),
-          decoration: BoxDecoration(
-            color: scheme.surface,
-            borderRadius: BorderRadius.circular(AppRadii.panel),
-            border: Border.all(color: scheme.outline.withValues(alpha: 0.18)),
-          ),
-          child: Row(
-            children: <Widget>[
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: <Widget>[
-                    Text(label, style: theme.textTheme.bodySmall),
-                    const SizedBox(height: 6),
-                    Text(
-                      value,
-                      style: emphasize
-                          ? context.inviteCodeStyle
-                          : theme.textTheme.bodyLarge?.copyWith(
-                              fontSize: 17,
-                              fontWeight: FontWeight.w700,
-                            ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ],
+        child: InkWell(
+          onTap: onCopy,
+          borderRadius: BorderRadius.circular(AppRadii.panel),
+          child: Ink(
+            padding: const EdgeInsets.fromLTRB(18, 14, 10, 14),
+            decoration: BoxDecoration(
+              color: scheme.surface,
+              borderRadius: BorderRadius.circular(AppRadii.panel),
+              border: Border.all(color: scheme.outline.withValues(alpha: 0.18)),
+            ),
+            child: Row(
+              children: <Widget>[
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Text(label, style: theme.textTheme.bodySmall),
+                      const SizedBox(height: 6),
+                      Text(
+                        value,
+                        style: emphasize
+                            ? context.inviteCodeStyle
+                            : theme.textTheme.bodyLarge?.copyWith(
+                                fontSize: 17,
+                                fontWeight: FontWeight.w700,
+                              ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-              IconButton(
-                onPressed: onCopy,
-                icon: const Icon(Icons.copy_outlined),
-                tooltip: '복사',
-                color: scheme.onSurfaceVariant,
-              ),
-            ],
+                IconButton(
+                  onPressed: onCopy,
+                  icon: const Icon(Icons.copy_outlined),
+                  tooltip: '복사',
+                  color: scheme.onSurfaceVariant,
+                ),
+              ],
+            ),
           ),
         ),
       ),
