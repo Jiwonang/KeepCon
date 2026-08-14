@@ -878,8 +878,15 @@ class __GifticonFormScreenState extends ConsumerState<_GifticonFormScreen> {
                 ),
                 validator: (value) {
                   final String trimmed = value?.trim() ?? '';
+
+                  // 바코드는 계약상 nullable이다 — [Gifticon.barcode] 문서가
+                  // "수동 입력 미기재 시 없을 수 있다"고 명시하고
+                  // [GifticonFormState.validate]도 요구하지 않는다. 화면만 필수로
+                  // 강제하면 바코드 없는 기프티콘을 아예 등록할 수 없다.
+                  //
+                  // 값이 없으면 중복 검사 대상도 아니다(컨트롤러가 건너뛴다).
                   if (trimmed.isEmpty) {
-                    return '바코드 번호를 입력해 주세요.';
+                    return null;
                   }
                   if (trimmed == _duplicateBarcode) {
                     return '이미 등록된 바코드 번호입니다.';

@@ -144,7 +144,6 @@ void main() {
     // 각 필수 항목에 안내가 뜬다.
     expect(find.text('브랜드를 입력해 주세요.'), findsOneWidget);
     expect(find.text('상품명을 입력해 주세요.'), findsOneWidget);
-    expect(find.text('바코드 번호를 입력해 주세요.'), findsOneWidget);
 
     // 유효기간은 Form validator가 없어 그냥 통과하던 구멍이었다 — 회귀 방지.
     expect(find.text('유효기간을 선택해 주세요.'), findsOneWidget);
@@ -244,10 +243,26 @@ void main() {
 
     expect(find.text('브랜드를 입력해 주세요.'), findsNothing);
     expect(find.text('상품명을 입력해 주세요.'), findsNothing);
-    expect(find.text('바코드 번호를 입력해 주세요.'), findsNothing);
 
     await pickExpiryDate(tester);
     expect(find.text('유효기간을 선택해 주세요.'), findsNothing);
+  });
+
+  testWidgets('바코드 없이도 등록된다(계약상 nullable)', (WidgetTester tester) async {
+    await openManualForm(tester);
+
+    // 바코드만 비워 둔다.
+    await tester.enterText(fieldByLabel('브랜드 / 사용처'), '스타벅스');
+    await tester.enterText(fieldByLabel('상품명'), '종이 쿠폰');
+    await tester.pumpAndSettle();
+
+    await pickExpiryDate(tester);
+    await tapSave(tester);
+
+    final List<Gifticon> saved = await repo.getGifticons(myId);
+
+    expect(saved, hasLength(1));
+    expect(saved.single.barcode, isNull);
   });
 
   testWidgets('바코드를 고치면 중복 안내가 사라진다', (WidgetTester tester) async {
