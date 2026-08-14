@@ -6,12 +6,15 @@
 /// 반환 계약(얇게 유지):
 ///
 /// ```dart
-/// final String? barcode = await Navigator.of(context).push<String>(
-///   MaterialPageRoute<String>(builder: (_) => const BarcodeScannerScreen()),
+/// final BarcodeScanResult? scan =
+///     await Navigator.of(context).push<BarcodeScanResult>(
+///   MaterialPageRoute<BarcodeScanResult>(
+///     builder: (_) => const BarcodeScannerScreen(),
+///   ),
 /// );
 /// ```
 ///
-/// - 인식 성공 → 인식된 바코드 문자열
+/// - 인식 성공 → [BarcodeScanResult] (바코드 + 인식된 순간의 프레임)
 /// - 사용자가 닫음 / 오류로 종료 → `null`
 ///
 /// 화면 자체는 "카메라를 띄워 문자열 하나를 돌려주는" 역할만 한다.
@@ -31,6 +34,26 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../../../shared/theme/theme_tokens.dart';
 
+/// [BarcodeScannerScreen]의 반환값.
+///
+/// 바코드만 돌려주면 폼의 나머지 칸(브랜드·상품명·금액·유효기간)을 사용자가 전부
+/// 손으로 채워야 한다. 촬영 방식에서는 정지 이미지를 OCR해 그것들을 미리 채워
+/// 줬으므로, 라이브 스캔으로 바꾸면서 그 편의가 사라지지 않도록 **인식된 순간의
+/// 프레임**을 함께 돌려준다. 호출자가 이 프레임으로 OCR을 돌린다.
+class BarcodeScanResult {
+  const BarcodeScanResult({required this.barcode, this.imageBytes});
+
+  /// 인식된 바코드 문자열.
+  final String barcode;
+
+  /// 바코드를 인식한 프레임의 **JPEG** 바이트.
+  ///
+  /// Android/iOS 모두 JPEG으로 인코딩되며 화면 방향에 맞춰 회전까지 보정돼 있다.
+  /// 플랫폼이 프레임을 주지 않으면(웹 등) `null`이며, 그 경우 호출자는 OCR 없이
+  /// 바코드만 쓰면 된다 — **없다고 해서 스캔이 실패한 것은 아니다.**
+  final Uint8List? imageBytes;
+}
+
 /// 실시간 카메라 바코드/QR 스캔 화면.
 ///
 /// 첫 유효 바코드를 감지하면 즉시 스캐너를 멈추고 결과를 pop한다.
@@ -49,6 +72,24 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
   /// - `torchEnabled: false` — 플래시는 사용자가 상단 버튼으로 켠다.
   late final MobileScannerController _controller = MobileScannerController(
     torchEnabled: false,
+
+    // 인식한 프레임을 돌려받아 OCR에 쓴다.
+    //
+    // 이 옵션이 **추가로** 물리는 비용은 JPEG 인코딩뿐이고, 그것도 네이티브
+    // 구현이 **바코드가 검출된 프레임에서만** 수행한다(검출이 없으면 그 전에
+    // 조기 반환). 프레임 분석 자체는 스캔의 본질이라 이 옵션과 무관하게 매
+    // 프레임 돌아간다 — 즉 "스캔 대비 추가 부담"이 검출 순간에만 생긴다는 뜻이지,
+    // 카메라가 노는 것은 아니다.
+    returnImage: true,
+
+    // Android 기본 분석 해상도는 **640x480**이라 바코드는 읽혀도 기프티콘의
+    // 작은 글자(상품명·유효기간)는 OCR이 놓친다. 프레임을 OCR에 쓸 것이므로
+    // 올려 잡는다. 기기가 지원하지 않으면 가장 가까운 해상도로 대체된다.
+    //
+    // ⚠️ mobile_scanner 7.4.0 기준 이 옵션은 **Android 전용**이다. iOS는 무시되어
+    // 플랫폼 기본 해상도로 동작하므로, iOS에서는 OCR 정확도가 Android보다 낮을 수
+    // 있다(바코드 인식 자체는 영향 없음). iOS 실기기 검증 때 함께 확인할 것.
+    cameraResolution: const Size(1920, 1080),
   );
 
   /// 이미 유효 바코드를 처리했는지 여부.
@@ -132,7 +173,12 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
     );
 
     // 인식 결과를 호출자(ScanPage)에게 즉시 돌려준다.
-    Navigator.of(context).pop(value);
+    //
+    // 프레임([BarcodeCapture.image])은 있으면 같이 실어 보낸다. 없더라도 바코드는
+    // 유효하므로 그대로 진행한다 — OCR은 덤이지 성공 조건이 아니다.
+    Navigator.of(context).pop(
+      BarcodeScanResult(barcode: value, imageBytes: capture.image),
+    );
   }
 
   @override
