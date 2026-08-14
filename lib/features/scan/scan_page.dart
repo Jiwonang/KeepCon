@@ -16,6 +16,11 @@ import 'package:image_picker/image_picker.dart';
 import 'package:keepcon/features/scan/services/gifticon_ocr_parser.dart';
 import 'package:keepcon/features/scan/services/ml_kit_service.dart';
 import 'package:keepcon/features/scan/state/gifticon_form_state.dart';
+import 'package:keepcon/features/scan/util/price_input_formatter.dart';
+import 'package:keepcon/features/scan/widgets/barcode_scanner_screen.dart';
+import 'package:keepcon/shared/models/gifticon.dart';
+import 'package:keepcon/shared/theme/theme_tokens.dart';
+import 'package:keepcon/shared/util/date_format.dart';
 
 enum _GifticonGroup {
   cafe(label: '카페/음료', emoji: '☕', icon: null),
@@ -48,6 +53,18 @@ class _ScanPageState extends ConsumerState<ScanPage> {
   String? _selectedTargetGroupId; // null이면 내 지갑(개인 소장)
   bool _busy = false;
 
+  /// 스캔 프레임(JPEG)을 임시 파일로 떨군다.
+  ///
+  /// ML Kit의 [InputImage.fromFilePath]와 폼의 이미지 미리보기([Image.file])가
+  /// 모두 경로를 요구하므로, 바이트를 한 번만 파일로 만들어 둘 다에 쓴다.
+  /// 갤러리 경로에서 image_picker가 만드는 임시 파일과 같은 성격이다.
+  Future<File> _writeTempFrame(Uint8List bytes) async {
+    final Directory dir = await Directory.systemTemp.createTemp('keepcon_scan');
+    final File file = File('${dir.path}/frame.jpg');
+    await file.writeAsBytes(bytes, flush: true);
+    return file;
+  }
+
   Future<void> _openForm(ScanSource source) async {
     if (_busy) return;
     setState(() {
@@ -73,15 +90,71 @@ class _ScanPageState extends ConsumerState<ScanPage> {
         return;
       }
 
+      // 카메라는 촬영 버튼 없이 "비추기만 해도" 인식되는 실시간 스캔을 쓴다.
+      //
+      // [BarcodeScannerScreen]이 첫 유효 바코드를 감지하는 즉시 pop하므로 사용자는
+      // 셔터를 누를 필요가 없다. 그러면서도 인식된 **프레임**을 함께 받아 OCR을
+      // 돌려, 촬영 방식이 해 주던 프리필(브랜드·상품명·금액·유효기간·이미지)을
+      // 그대로 유지한다.
+      if (source == ScanSource.camera) {
+        controller.setCategory(_selectedGroup.label);
+        if (!mounted) return;
+
+        final BarcodeScanResult? scan =
+            await Navigator.of(context).push<BarcodeScanResult>(
+          MaterialPageRoute<BarcodeScanResult>(
+            builder: (_) => const BarcodeScannerScreen(),
+          ),
+        );
+
+        // 사용자가 인식 전에 닫았으면(null) 폼을 열지 않는다.
+        if (scan == null || !mounted) return;
+
+        controller.setBarcode(scan.barcode);
+
+        // OCR은 **덤이다.** 프레임이 없거나 인식이 실패해도 바코드는 이미 유효하므로
+        // 폼은 반드시 연다 — 여기서 예외가 새어 나가면 바깥 catch가 폼을 열지 않아,
+        // 힘들게 잡은 바코드가 통째로 버려진다.
+        final Uint8List? frame = scan.imageBytes;
+
+        if (frame != null) {
+          try {
+            final File file = await _writeTempFrame(frame);
+
+            mlKitService = MlKitService();
+            final scanResult =
+                await mlKitService.scan(InputImage.fromFilePath(file.path));
+            final parsed = const GifticonOcrParser().parse(scanResult.text);
+
+            controller.prefillFromRecognition(
+              brand: parsed.brand,
+              productName: parsed.productName,
+              price: parsed.price,
+              category: _selectedGroup.label,
+              expiryDate: parsed.expiryDate,
+              imagePath: file.path,
+            );
+          } catch (e) {
+            debugPrint('KeepCon: 스캔 프레임 OCR 실패(바코드만 사용): $e');
+          }
+        }
+
+        if (!mounted) return;
+        await Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => const _GifticonFormScreen(),
+          ),
+        );
+        return;
+      }
+
       final picker = ImagePicker();
       final XFile? file = await picker.pickImage(
-        source: source == ScanSource.gallery
-            ? ImageSource.gallery
-            : ImageSource.camera,
+        source: ImageSource.gallery,
         imageQuality: 100,
       );
 
-      if (file == null) {
+      if (file == null || !mounted) {
         return;
       }
 
@@ -524,6 +597,12 @@ class __GifticonFormScreenState extends ConsumerState<_GifticonFormScreen> {
   late final TextEditingController _priceController;
   late final TextEditingController _barcodeController;
 
+  /// 중복으로 판정돼 저장이 거부된 바코드 번호.
+  ///
+  /// 직접 입력 경로에서 바코드 필드 아래에 빨간 안내를 띄우는 데 쓴다.
+  /// 사용자가 번호를 고치면 필드의 재검증에서 자동으로 문구가 사라진다.
+  String? _duplicateBarcode;
+
   @override
   void initState() {
     super.initState();
@@ -533,7 +612,9 @@ class __GifticonFormScreenState extends ConsumerState<_GifticonFormScreen> {
     _brandController = TextEditingController(text: initialState.brand);
     _productNameController =
         TextEditingController(text: initialState.productName);
-    _priceController = TextEditingController(text: initialState.price);
+    // 갤러리 OCR이 채운 값도 처음부터 콤마가 붙은 형태로 보여준다.
+    _priceController =
+        TextEditingController(text: formatThousands(initialState.price));
     _barcodeController = TextEditingController(text: initialState.barcode);
   }
 
@@ -563,13 +644,23 @@ class __GifticonFormScreenState extends ConsumerState<_GifticonFormScreen> {
     }
   }
 
-  void _submit() {
+  /// 저장 버튼 처리.
+  ///
+  /// [GifticonFormController.submit]은 **비동기**다 — 반드시 await하고 그 결과로
+  /// 안내를 갈라야 한다. await 없이 성공 스낵바를 띄우면 검증 실패·중복·저장 실패가
+  /// 전부 "저장되었습니다"로 보이고 화면까지 닫혀, 홈에는 아무것도 없는 상태가 된다.
+  Future<void> _submit() async {
     if (!(_formKey.currentState?.validate() ?? false)) {
+      // 필드마다 빨간 안내가 뜨지만, 스크롤 밖에 있으면 눌러도 아무 일도
+      // 안 일어난 것처럼 보인다 — 왜 막혔는지 함께 알린다.
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('입력하지 않은 필수 항목이 있습니다.'),
+          backgroundColor: Theme.of(context).colorScheme.error,
+        ),
+      );
       return;
     }
-
-    final navigator = Navigator.of(context);
-    final messenger = ScaffoldMessenger.of(context);
 
     final notifier = ref.read(gifticonFormControllerProvider.notifier);
 
@@ -578,14 +669,124 @@ class __GifticonFormScreenState extends ConsumerState<_GifticonFormScreen> {
     notifier.setPrice(_priceController.text.trim());
     notifier.setBarcode(_barcodeController.text.trim());
 
-    notifier.submit();
+    await notifier.submit();
 
-    messenger.showSnackBar(
-      const SnackBar(content: Text('기프티콘이 성공적으로 저장되었습니다.')),
-    );
+    if (!mounted) return;
 
-    navigator.pop();
-    navigator.popUntil((route) => route.isFirst);
+    final GifticonFormState formState =
+        ref.read(gifticonFormControllerProvider);
+
+    final NavigatorState navigator = Navigator.of(context);
+    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
+    final ColorScheme scheme = Theme.of(context).colorScheme;
+
+    switch (formState.submit) {
+      case ScanSubmitSuccess():
+        messenger.showSnackBar(
+          const SnackBar(content: Text('기프티콘이 성공적으로 저장되었습니다.')),
+        );
+        navigator.popUntil((route) => route.isFirst);
+
+      case ScanSubmitDuplicate(:final Gifticon existing):
+        // 직접 입력은 사용자가 그 자리에서 번호를 고칠 수 있으므로 화면에 머무르며
+        // 바코드 필드 아래에 빨간 문구로 알린다.
+        if (formState.source == ScanSource.manual) {
+          setState(() {
+            _duplicateBarcode = _barcodeController.text.trim();
+          });
+          _formKey.currentState?.validate();
+          return;
+        }
+
+        // 카메라/갤러리는 인식된 이미지·바코드가 이미 화면에 떠 있어 필드 문구로
+        // 고칠 것이 없다. 홈으로 돌려보낸 뒤 팝업으로 알린다.
+        //
+        // 다이얼로그는 이 화면의 context가 아니라 Navigator 자신의 context로 띄운다 —
+        // 이 화면은 popUntil 직후 사라지므로 그 context로는 열 수 없다.
+        navigator.popUntil((route) => route.isFirst);
+        await showDialog<void>(
+          context: navigator.context,
+          builder: (BuildContext dialogContext) {
+            final ThemeData dialogTheme = Theme.of(dialogContext);
+            final ColorScheme dialogScheme = dialogTheme.colorScheme;
+
+            // 보조 정보(브랜드·만료일)는 한 단계 눌러 두고 상품명만 굵게 —
+            // 눈이 "무엇과 겹쳤는지"에 먼저 닿게 한다.
+            final TextStyle? mutedStyle = dialogTheme.textTheme.bodySmall
+                ?.copyWith(color: dialogScheme.onSurfaceVariant);
+
+            return AlertDialog(
+              title: const Text('이미 등록된 기프티콘'),
+              // 제목이 "이미 등록됨"을 이미 말하므로 본문은 그것을 되풀이하지 않는다.
+              // 대신 세 박자로 나눈다 — 무슨 일인지 / 무엇과 겹쳤는지 / 그래서 어떻게 됐는지.
+              // 한 문장에 다 담으면 좁은 다이얼로그에서 어색하게 줄바꿈된다.
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  const Text('같은 바코드의 기프티콘이 이미 있어요.'),
+                  const SizedBox(height: 14),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 12,
+                    ),
+                    decoration: BoxDecoration(
+                      color: dialogScheme.surfaceContainerHighest,
+                      borderRadius: BorderRadius.circular(AppRadii.card),
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        Text(existing.brand, style: mutedStyle),
+                        const SizedBox(height: 2),
+                        Text(
+                          existing.productName,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: dialogTheme.textTheme.bodyLarge?.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        // 같은 상품이 여러 개일 때 만료일이 있어야 어떤 건지 특정된다.
+                        Text(
+                          '${formatYmdDot(existing.expiryDate)} 만료',
+                          style: mutedStyle,
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  Text('새로 등록하지 않았어요.', style: mutedStyle),
+                ],
+              ),
+              actions: <Widget>[
+                TextButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(),
+                  child: const Text('확인'),
+                ),
+              ],
+            );
+          },
+        );
+
+      case ScanSubmitFailure(:final String message):
+        // 실패 시 화면을 닫지 않는다 — 닫으면 입력이 사라지고 사용자는 무엇이
+        // 잘못됐는지 알 수 없다(유효기간 미선택 등이 여기로 온다).
+        messenger.showSnackBar(
+          SnackBar(
+            content: Text(message),
+            backgroundColor: scheme.error,
+          ),
+        );
+
+      case ScanSubmitIdle():
+      case ScanSubmitInProgress():
+        break;
+    }
   }
 
   @override
@@ -664,14 +865,20 @@ class __GifticonFormScreenState extends ConsumerState<_GifticonFormScreen> {
               TextFormField(
                 controller: _barcodeController,
                 keyboardType: TextInputType.number,
+                // 번호를 고치는 즉시 재검증돼 중복 안내가 사라진다.
+                autovalidateMode: AutovalidateMode.onUserInteraction,
                 decoration: const InputDecoration(
                   labelText: '바코드 번호',
                   hintText: '숫자만 입력',
                   border: OutlineInputBorder(),
                 ),
                 validator: (value) {
-                  if (value == null || value.trim().isEmpty) {
+                  final String trimmed = value?.trim() ?? '';
+                  if (trimmed.isEmpty) {
                     return '바코드 번호를 입력해 주세요.';
+                  }
+                  if (trimmed == _duplicateBarcode) {
+                    return '이미 등록된 바코드 번호입니다.';
                   }
                   return null;
                 },
@@ -680,31 +887,66 @@ class __GifticonFormScreenState extends ConsumerState<_GifticonFormScreen> {
               TextFormField(
                 controller: _priceController,
                 keyboardType: TextInputType.number,
+                // 입력하는 동안 천 단위 콤마를 붙인다(1000 → 1,000).
+                // 커서 복원·선행 0 처리까지 검증된 scan 정본 포매터를 그대로 쓴다.
+                // 상태에는 콤마가 남아도 되고, 계약 변환은 parsedPrice가 콤마를
+                // 제거한 뒤 int로 바꾼다.
+                inputFormatters: const <TextInputFormatter>[
+                  ThousandsSeparatorInputFormatter(),
+                ],
                 decoration: const InputDecoration(
                   labelText: '금액 / 금액권 잔액 (선택)',
-                  hintText: '예: 10000',
+                  hintText: '예: 10,000',
                   border: OutlineInputBorder(),
                 ),
               ),
               const SizedBox(height: 16),
-              InkWell(
-                onTap: () => _selectExpiryDate(context),
-                borderRadius: BorderRadius.circular(8),
-                child: InputDecorator(
-                  decoration: const InputDecoration(
-                    labelText: '유효기간',
-                    border: OutlineInputBorder(),
-                    suffixIcon: Icon(Icons.calendar_today_rounded),
-                  ),
-                  child: Text(
-                    expiryDateText,
-                    style: theme.textTheme.bodyLarge,
-                  ),
-                ),
+              // 유효기간은 계약상 필수인데 [Form] validator가 없어서
+              // `_formKey.validate()`를 그냥 통과했다 — 저장 단계에서야 실패하니
+              // "저장되었습니다"만 뜨고 홈에는 아무것도 없던 원인이다.
+              // FormField로 감싸 다른 필수 항목과 똑같이 저장을 막는다.
+              FormField<DateTime>(
+                initialValue: formState.expiryDate,
+                // 날짜를 고르는 즉시 재검증돼 빨간 안내가 사라진다.
+                // (없으면 값은 들어갔는데 "선택해 주세요"가 남아 있다)
+                autovalidateMode: AutovalidateMode.onUserInteraction,
+                validator: (DateTime? value) {
+                  if (value == null) {
+                    return '유효기간을 선택해 주세요.';
+                  }
+                  return null;
+                },
+                builder: (FormFieldState<DateTime> field) {
+                  return InkWell(
+                    onTap: () async {
+                      await _selectExpiryDate(context);
+                      if (!mounted) return;
+                      // 고른 날짜를 FormField에도 알려야 빨간 안내가 사라진다.
+                      field.didChange(
+                        ref.read(gifticonFormControllerProvider).expiryDate,
+                      );
+                    },
+                    borderRadius: BorderRadius.circular(8),
+                    child: InputDecorator(
+                      decoration: InputDecoration(
+                        labelText: '유효기간',
+                        border: const OutlineInputBorder(),
+                        suffixIcon: const Icon(Icons.calendar_today_rounded),
+                        errorText: field.errorText,
+                      ),
+                      child: Text(
+                        expiryDateText,
+                        style: theme.textTheme.bodyLarge,
+                      ),
+                    ),
+                  );
+                },
               ),
               const SizedBox(height: 32),
               ElevatedButton(
-                onPressed: _submit,
+                // 저장이 이제 비동기라 연타하면 같은 기프티콘이 두 번 들어갈 수 있다.
+                onPressed:
+                    formState.submit is ScanSubmitInProgress ? null : _submit,
                 style: ElevatedButton.styleFrom(
                   minimumSize: const Size.fromHeight(52),
                   shape: RoundedRectangleBorder(
