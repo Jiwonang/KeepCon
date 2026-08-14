@@ -231,6 +231,25 @@ void main() {
     expect(await repo.getGifticons(myId), hasLength(1));
   });
 
+  testWidgets('필수 항목을 채우면 네 칸 모두 안내가 즉시 사라진다', (WidgetTester tester) async {
+    await openManualForm(tester);
+
+    // 먼저 저장을 눌러 네 칸 모두 빨간 상태로 만든다.
+    await tapSave(tester);
+    expect(find.text('브랜드를 입력해 주세요.'), findsOneWidget);
+
+    // 채워 넣으면 저장을 다시 누르지 않아도 안내가 걷힌다.
+    // (일부 칸만 즉시 갱신되면 채운 칸에 "입력해 주세요"가 남아 혼란스럽다)
+    await fillRequired(tester, barcode: '8801234567890');
+
+    expect(find.text('브랜드를 입력해 주세요.'), findsNothing);
+    expect(find.text('상품명을 입력해 주세요.'), findsNothing);
+    expect(find.text('바코드 번호를 입력해 주세요.'), findsNothing);
+
+    await pickExpiryDate(tester);
+    expect(find.text('유효기간을 선택해 주세요.'), findsNothing);
+  });
+
   testWidgets('바코드를 고치면 중복 안내가 사라진다', (WidgetTester tester) async {
     const String duplicated = '8801234567890';
 

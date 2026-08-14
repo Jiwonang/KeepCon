@@ -834,6 +834,9 @@ class __GifticonFormScreenState extends ConsumerState<_GifticonFormScreen> {
               ],
               TextFormField(
                 controller: _brandController,
+                // 네 필수 항목이 모두 같은 방식으로 반응해야 한다 — 일부만 즉시
+                // 갱신되면 채워 넣은 칸에 "입력해 주세요"가 남아 혼란스럽다.
+                autovalidateMode: AutovalidateMode.onUserInteraction,
                 decoration: const InputDecoration(
                   labelText: '브랜드 / 사용처',
                   hintText: '예: 스타벅스, GS25',
@@ -849,6 +852,7 @@ class __GifticonFormScreenState extends ConsumerState<_GifticonFormScreen> {
               const SizedBox(height: 16),
               TextFormField(
                 controller: _productNameController,
+                autovalidateMode: AutovalidateMode.onUserInteraction,
                 decoration: const InputDecoration(
                   labelText: '상품명',
                   hintText: '예: 카페 아메리카노 T',
