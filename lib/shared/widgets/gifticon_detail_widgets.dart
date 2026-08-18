@@ -143,12 +143,14 @@ class DetailInfoBanner extends StatelessWidget {
           Expanded(child: Text(text, style: theme.textTheme.bodyMedium)),
           if (onRetry != null) ...<Widget>[
             const SizedBox(width: 8),
+            // 탭 영역을 줄이지 않는다(`minimumSize: Size.zero` + `shrinkWrap` 금지).
+            // 이 버튼은 fail-closed 가드를 푸는 **유일한 경로**라, 누르기 어려우면
+            // 사용자는 화면이 고장났다고 읽는다. 기본값이 Material 권장 48dp를 만족하므로
+            // 좌우 여백만 조정하고 나머지는 건드리지 않는다.
             TextButton(
               onPressed: onRetry,
               style: TextButton.styleFrom(
                 padding: const EdgeInsets.symmetric(horizontal: 12),
-                minimumSize: Size.zero,
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
               ),
               child: const Text('다시 시도'),
             ),

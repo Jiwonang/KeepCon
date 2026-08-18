@@ -75,12 +75,16 @@ void main() {
         sharedGifticonIdsProvider.overrideWithValue(sharedState),
       ],
     );
+    // 정리는 **여기서** 등록한다(전역 `tearDown` 금지). 이 파일에는 boot()을 쓰지 않고
+    // 자기 컨테이너를 직접 만드는 테스트가 있는데, 전역 tearDown에 두면 그 테스트가
+    // 초기화되지 않은 `late` 변수를 건드린다 — 단독 실행하면 LateInitializationError로
+    // 죽고, 전체 스위트에서는 앞 테스트가 채워 둔 값 덕에 **가려진다**(이미 dispose된
+    // 객체를 한 번 더 닫는데 둘 다 멱등이라 조용히 통과). CodeRabbit 리뷰에서 검출.
+    addTearDown(() {
+      container.dispose();
+      repo.dispose();
+    });
   }
-
-  tearDown(() {
-    container.dispose();
-    repo.dispose();
-  });
 
   /// 기본 테스트 뷰포트(800×600)는 상세 화면보다 짧아, 하단의 사용 완료 버튼과 안내
   /// 배너가 [ListView]의 지연 생성에 걸려 **아예 빌드되지 않는다**(찾을 수도 없다).
@@ -123,7 +127,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byType(GifticonDetailPage), findsOneWidget);
-    // BarcodeWidget이 drawText로 번호를 함께 그린다.
+    // 번호는 `drawText`(캔버스 그리기)가 아니라 별도 [Text] 위젯이 그린다 —
+    // 스크린리더가 읽고 복사도 되어야 하기 때문이다. 이 단언이 그 위젯을 고정한다.
     expect(find.text('9788901234567'), findsWidgets);
     expect(find.widgetWithText(ElevatedButton, '사용 완료'), findsOneWidget);
   });
