@@ -139,7 +139,13 @@ class FirebaseShareRepository implements ShareRepository {
   @override
   Future<Group> joinGroup(String inviteToken) async {
     final User me = _requireUser();
-    // 초대코드로 실제 그룹을 찾아 합류한다(mock의 가짜 그룹 생성과 달리 실 참여).
+    // 초대 토큰으로 실제 그룹을 찾아 합류한다(mock의 가짜 그룹 생성과 달리 실 참여).
+    //
+    // 레거시 `inviteCode` 필드는 **일부러 조회하지 않는다.** 읽기 매핑에는 폴백을 뒀지만
+    // 여기에까지 두 번째 질의를 붙이는 건 값이 없다 — 이 질의 자체가 보안 규칙에 막히기
+    // 때문이다. 비멤버는 `groups`를 읽을 수 없어서(`allow read`는 멤버 한정) 초대 토큰을
+    // 아는 것과 무관하게 결과가 permission-denied다. 즉 이 경로는 필드 이름과 상관없이
+    // 이미 동작하지 않으며, 승인제(`requestToJoin`)가 대체하면 통째로 사라진다.
     final QuerySnapshot<Map<String, dynamic>> q = await _groups
         .where('inviteToken', isEqualTo: inviteToken)
         .limit(1)
