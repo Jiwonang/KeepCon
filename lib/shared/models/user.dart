@@ -23,6 +23,13 @@ enum UserPlan {
   /// 프리미엄 — 무제한 저장·가족 공유·광고 제거.
   premium;
 
+  /// 무료 플랜의 기프티콘 저장 개수 상한. 정책 값(SSOT)이다.
+  ///
+  /// ⚠️ 이 상수는 **값만 정의**할 뿐 강제하지 않는다 — 실제 저장 차단은 스캔(등록 경로),
+  /// "N/상한개" 표시·업그레이드 유도는 홈이 이 값을 읽어 구현한다([free] 문서 참조).
+  /// [premium]은 무제한이라 대응 상한이 없다.
+  static const int freeGifticonLimit = 10;
+
   /// 저장 문자열([name])에서 파싱한다. 모르는 값·null은 [free]다.
   static UserPlan fromName(String? name) =>
       name == premium.name ? premium : free;

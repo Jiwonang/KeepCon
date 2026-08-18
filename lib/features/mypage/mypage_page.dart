@@ -283,7 +283,7 @@ class MyPage extends ConsumerWidget {
         content: Text(
           isPremium
               ? '현재 프리미엄 플랜 이용 중입니다.\n무제한 저장 · 가족 공유 · 광고 제거'
-              : '현재 무료 플랜 이용 중입니다.\n저장 10개 · 공유 불가\n\n'
+              : '현재 무료 플랜 이용 중입니다.\n저장 ${UserPlan.freeGifticonLimit}개 · 공유 불가\n\n'
                   '프리미엄: 무제한 저장 · 가족 공유(최대 10명) · 광고 제거',
         ),
         actions: <Widget>[
