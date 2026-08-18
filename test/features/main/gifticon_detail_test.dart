@@ -57,17 +57,22 @@ void main() {
   ///
   /// [sharedIds]로 "이 기프티콘이 그룹에 공유돼 있는가"를 주입한다. 기본값은 확정된 빈
   /// 집합 — 공유된 것이 없다. `null`을 주면 **아직 확정 전(로딩)** 을 흉내 낸다.
-  void boot(List<Gifticon> seed, {Set<String>? sharedIds = const <String>{}}) {
+  void boot(
+    List<Gifticon> seed, {
+    Set<String>? sharedIds = const <String>{},
+    bool sharedIdsFailed = false,
+  }) {
     repo = InMemoryGifticonRepository(seed: seed);
+    final AsyncValue<Set<String>> sharedState = sharedIdsFailed
+        ? const AsyncValue<Set<String>>.error('boom', StackTrace.empty)
+        : sharedIds == null
+            ? const AsyncValue<Set<String>>.loading()
+            : AsyncValue<Set<String>>.data(sharedIds);
     container = ProviderContainer(
       overrides: <Override>[
         gifticonRepositoryProvider.overrideWithValue(repo),
         rawGifticonsProvider.overrideWith((_) => repo.watchGifticons(_ownerId)),
-        sharedGifticonIdsProvider.overrideWithValue(
-          sharedIds == null
-              ? const AsyncValue<Set<String>>.loading()
-              : AsyncValue<Set<String>>.data(sharedIds),
-        ),
+        sharedGifticonIdsProvider.overrideWithValue(sharedState),
       ],
     );
   }
@@ -192,6 +197,22 @@ void main() {
 
     expect(find.widgetWithText(ElevatedButton, '사용 완료'), findsNothing);
     expect(find.text('공유 상태를 확인하는 중이에요…'), findsOneWidget);
+    // 로딩은 곧 풀리므로 재시도 버튼을 주지 않는다(에러일 때만 준다).
+    expect(find.widgetWithText(TextButton, '다시 시도'), findsNothing);
+  });
+
+  testWidgets('공유 상태 조회가 실패하면 되살릴 버튼을 준다', (WidgetTester tester) async {
+    // 회귀 방어: fail-closed로 막아 놓고 재시도 경로를 주지 않으면, 콜드 스타트에서 한 번
+    // 실패한 에러가 캐시된 채 남아(StreamProvider는 스스로 재구독하지 않고
+    // sharedGifticonsProvider는 non-autoDispose) **앱을 껐다 켜기 전까지** 모든 기프티콘의
+    // 사용 완료가 영구히 막힌다. 상세를 나갔다 들어와도 풀리지 않는다.
+    final Gifticon g = _gifticon();
+    boot(<Gifticon>[g], sharedIdsFailed: true);
+    await mountDetail(tester, g);
+
+    expect(find.widgetWithText(ElevatedButton, '사용 완료'), findsNothing);
+    expect(find.text('공유 상태를 확인하지 못해 사용 완료를 잠시 막아 뒀어요.'), findsOneWidget);
+    expect(find.widgetWithText(TextButton, '다시 시도'), findsOneWidget);
   });
 
   testWidgets('실제 공유(ShareRepository.shareGifticon) 후 버튼이 닫힌다',

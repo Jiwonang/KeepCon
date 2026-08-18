@@ -305,21 +305,10 @@ void _retrySessionIfFailed(WidgetRef ref) {
   }
 }
 
-/// 에러인 그룹별 공유 스트림 인스턴스만 재구독한다(내 **현재** 그룹 범위).
-///
-/// family 전체 invalidate를 쓰지 않는 이유 둘: ① 실패하지 않은 그룹의 Firestore
-/// 리스너까지 재시작돼 문서 읽기·과금이 그룹 수만큼 늘고(재시도가 필요한 건 에러
-/// 인스턴스뿐이다 — [_retrySessionIfFailed]와 같은 원칙), ② non-autoDispose family라
-/// 탈퇴한 그룹의 스테일 인스턴스도 재실행돼 비멤버 구독(permission-denied)을 되살린다.
-void _retryFailedSharedInstances(WidgetRef ref) {
-  final List<Group> groups =
-      ref.read(myGroupsProvider).valueOrNull ?? const <Group>[];
-  for (final Group g in groups) {
-    if (ref.read(sharedGifticonsProvider(g.id)).hasError) {
-      ref.invalidate(sharedGifticonsProvider(g.id));
-    }
-  }
-}
+// 에러인 그룹별 공유 스트림만 재구독하는 `_retryFailedSharedInstances`는 계약 정본
+// [retryFailedSharedGifticonStreams](`lib/shared/providers/shared_gifticons_provider.dart`)로
+// 승격됐다 — main 상세도 같은 축을 되살려야 하는 두 번째 소비자가 됐다. 사본을 남기면
+// 한쪽만 손볼 때 갈라지므로 선언을 삭제하고 정본을 직수입한다(#13 규약).
 
 /// 알림 스트림 수동 재시도 — **에러인** 원천만 invalidate해 재구독한다.
 ///
@@ -359,14 +348,14 @@ void retryUsageLogs(WidgetRef ref) {
 /// 화면 — 에러 여부와 무관하게 사용자가 그 그룹을 명시적으로 되살리는 의미). 인자가
 /// 없으면(share 메인·공유 상세처럼 전 그룹을 합쳐 보는 화면) **에러인 인스턴스만**
 /// 골라 재구독한다 — 합쳐 보는 화면이라도 재시도가 필요한 건 실패한 스트림뿐이다
-/// ([_retryFailedSharedInstances]의 근거 참조).
+/// ([retryFailedSharedGifticonStreams]의 근거 참조).
 void retrySharedGifticons(WidgetRef ref, {String? groupId}) {
   _retrySessionIfFailed(ref);
   if (groupId != null) {
     ref.invalidate(sharedGifticonsProvider(groupId));
     return;
   }
-  _retryFailedSharedInstances(ref);
+  retryFailedSharedGifticonStreams(ref);
 }
 
 /// 공유 항목 단건 조회([sharedItemByIdProvider]) 실패의 수동 재시도.
@@ -374,12 +363,12 @@ void retrySharedGifticons(WidgetRef ref, {String? groupId}) {
 /// 조회는 **내 그룹 목록 × 그룹별 공유 목록**을 가로지르므로 실패 원인이 두 축 중
 /// 어느 쪽이든 될 수 있다([sharedItemLookupHasErrorProvider]가 그 합집합이다). 그래서
 /// 두 축을 함께 되살린다 — 각 축은 여전히 **에러인 계층만** 재구독하므로(계약
-/// [retryMyGroups] + [_retryFailedSharedInstances]) 멀쩡한 스트림은 건드리지 않는다.
+/// [retryMyGroups] + [retryFailedSharedGifticonStreams]) 멀쩡한 스트림은 건드리지 않는다.
 ///
 /// 세션 계층은 [retryMyGroups]가 맡으므로 [_retrySessionIfFailed]를 겹쳐 부르지 않는다.
 void retrySharedItemLookup(WidgetRef ref) {
   retryMyGroups(ref);
-  _retryFailedSharedInstances(ref);
+  retryFailedSharedGifticonStreams(ref);
 }
 
 /// 공유 시트 후보 수동 재시도 — 후보 계산 경로(내 기프티콘 + 내 그룹 목록 + 그룹별

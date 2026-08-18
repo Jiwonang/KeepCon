@@ -67,7 +67,16 @@ final allSharedProvider = Provider<List<SharedGifticon>>((ref) {
 ///
 /// 그룹 목록과 그룹별 공유 스트림이 **모두** 값을 낸 뒤에만 [AsyncData]가 된다. 하나라도
 /// 로딩이면 [AsyncLoading], 에러면 그 에러를 전파한다(파일 상단 fail-closed 절 참조).
-final sharedGifticonIdsProvider = Provider<AsyncValue<Set<String>>>((ref) {
+///
+/// ## 수명 = autoDispose (의도)
+/// 주 소비자인 기프티콘 상세는 **일회성 플로우**다 — 카드를 눌러 바코드를 보고 닫는다.
+/// keepAlive로 두면 이 provider가 [myGroupsProvider]를 붙잡아, 상세를 한 번 열기만 해도
+/// `watchGroups`와 그룹별 `watchSharedGifticons` 리스너가 **앱 수명 동안 잔존**한다.
+/// 그것이 정확히 [myGroupsProvider]가 `autoDispose`인 이유이고(그 파일의 "수명 설계 근거"
+/// 1항 — scan을 예로 든 같은 함정), 상세는 scan보다 훨씬 자주 열린다. share 탭은 자신의
+/// keepAlive 파생들이 정본을 계속 붙잡으므로 체감 수명이 승격 전과 같다.
+final sharedGifticonIdsProvider =
+    Provider.autoDispose<AsyncValue<Set<String>>>((ref) {
   final AsyncValue<List<Group>> groupsAsync = ref.watch(myGroupsProvider);
   final List<Group>? groups = groupsAsync.valueOrNull;
   if (groups == null) {
@@ -100,3 +109,39 @@ final sharedGifticonIdsProvider = Provider<AsyncValue<Set<String>>>((ref) {
   }
   return AsyncValue<Set<String>>.data(ids);
 });
+
+/// 에러인 그룹별 공유 스트림 인스턴스만 재구독한다(내 **현재** 그룹 범위).
+///
+/// family 전체 invalidate를 쓰지 않는 이유 둘: ① 실패하지 않은 그룹의 Firestore 리스너까지
+/// 재시작돼 문서 읽기·과금이 그룹 수만큼 늘고(재시도가 필요한 건 에러 인스턴스뿐이다),
+/// ② non-autoDispose family라 탈퇴한 그룹의 스테일 인스턴스도 재실행돼 비멤버 구독
+/// (permission-denied)을 되살린다.
+void retryFailedSharedGifticonStreams(WidgetRef ref) {
+  final List<Group> groups =
+      ref.read(myGroupsProvider).valueOrNull ?? const <Group>[];
+  for (final Group g in groups) {
+    if (ref.read(sharedGifticonsProvider(g.id)).hasError) {
+      ref.invalidate(sharedGifticonsProvider(g.id));
+    }
+  }
+}
+
+/// 공유 여부 판정 경로([sharedGifticonIdsProvider])의 **수동** 재시도.
+///
+/// 판정은 그룹 목록 × 그룹별 공유 스트림을 가로지르므로 실패 원인이 두 축 중 어느 쪽이든
+/// 될 수 있다. 두 축을 함께 되살리되, 각 축은 **에러인 계층만** 재구독한다
+/// (계약 [retryMyGroups] + [retryFailedSharedGifticonStreams]).
+///
+/// ## 왜 이 훅이 반드시 있어야 하는가
+/// [sharedGifticonIdsProvider]는 fail-closed다 — 확정 전에는 소비자가 액션을 막는다. 그런데
+/// [StreamProvider]는 스스로 재구독하지 않고 [sharedGifticonsProvider]는 non-autoDispose라,
+/// **콜드 스타트에서 한 번 실패하면 그 에러가 캐시된 채 남는다.** 재시도 경로가 없으면
+/// 통신이 회복돼도 앱을 껐다 켜기 전까지 액션이 영구히 막힌다.
+///
+/// ## ⚠️ 사용자 액션에서만 호출할 것 (자동 재시도 금지 — #13)
+/// `build`/`listen`에서 에러를 감지해 자동으로 부르면 장애 중 모든 화면이 동시에
+/// 재구독하는 retry storm이 된다. 호출 지점은 버튼 콜백뿐이다.
+void retrySharedGifticonIds(WidgetRef ref) {
+  retryMyGroups(ref);
+  retryFailedSharedGifticonStreams(ref);
+}

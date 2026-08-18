@@ -181,8 +181,15 @@ class GifticonDetailPage extends ConsumerWidget {
                     ? Icons.error_outline
                     : Icons.hourglass_empty,
                 text: sharedIdsAsync.hasError
-                    ? '공유 상태를 확인하지 못해 사용 완료를 잠시 막아 뒀어요. 연결을 확인해 주세요.'
+                    ? '공유 상태를 확인하지 못해 사용 완료를 잠시 막아 뒀어요.'
                     : '공유 상태를 확인하는 중이에요…',
+                // 에러일 때 **반드시** 되살릴 길을 준다. 그룹 스트림은 스스로 재구독하지
+                // 않고 non-autoDispose라, 콜드 스타트에서 한 번 실패하면 그 에러가 캐시된
+                // 채 남는다 — 버튼이 없으면 통신이 회복돼도, 상세를 나갔다 들어와도
+                // 사용 완료가 앱 재시작 전까지 영구히 막힌다(코드리뷰 검출).
+                onRetry: sharedIdsAsync.hasError
+                    ? () => retrySharedGifticonIds(ref)
+                    : null,
               ),
 
             if (canMarkUsed)
