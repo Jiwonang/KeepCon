@@ -18,8 +18,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../shared/models/gifticon.dart';
 import '../../../shared/providers/repositories.dart';
+import '../../../shared/providers/shared_gifticons_provider.dart';
 import '../../../shared/theme/brand_palette.dart';
 import '../../../shared/theme/theme_tokens.dart';
+import '../../../shared/widgets/gifticon_detail_widgets.dart';
 import '../../../shared/util/date_format.dart' show formatYmdDot;
 import '../../../shared/util/expiry_policy.dart';
 import '../../../shared/util/korean_particle.dart';
@@ -54,21 +56,44 @@ class GifticonDetailPage extends ConsumerWidget {
     final int daysLeft = daysUntilExpiry(g.expiryDate, now: now);
     final bool expiredByDate = isExpiredByDate(g.expiryDate, now: now);
     final bool used = g.status == GifticonStatus.used;
-    final bool shared = g.targetGroupId != null;
+
+    // 공유 여부는 계약 정본 [sharedGifticonIdsProvider]에 묻는다.
+    //
+    // **[Gifticon.targetGroupId]를 보면 안 된다.** 그 필드는 scan이 *등록 시점에* 그룹을
+    // 지정한 경우에만 채워진다 — 흔한 경로인 "이미 등록한 기프티콘을 공유 탭에서 공유"는
+    // [ShareRepository.shareGifticon]이 [SharedGifticon] 레코드만 만들고 원본을 건드리지
+    // 않아 끝까지 null이고, Firestore 매핑은 이 필드를 읽지도 쓰지도 않아 dev/prod에서는
+    // 항상 null이다. 그걸로 판정하면 가드가 죽은 채 통과한다(코드리뷰에서 검출).
+    final AsyncValue<Set<String>> sharedIdsAsync =
+        ref.watch(sharedGifticonIdsProvider);
+    final Set<String>? sharedIds = sharedIdsAsync.valueOrNull;
+    final bool shared = sharedIds?.contains(g.id) ?? false;
 
     // 사용 완료 버튼 노출 조건.
     //
     // ① 상태가 available일 때만 — used/expired는 terminal 전이라 호출하면 StateError다.
-    // ② 그룹 공유 중이면 숨긴다. 여기서 [GifticonRepository.updateStatus]를 부르면 원본만
-    //    used가 되고 그룹의 [SharedGifticon]은 '사용 가능'으로 남는다 — 계약이 제공하는
-    //    동기화는 공유→원본 한 방향뿐이기 때문이다([ShareRepository.markUsed]). 그 상태로
-    //    두면 다른 멤버가 이미 쓴 기프티콘을 매장에서 꺼내게 된다. 양방향 동기화는 계약
-    //    변경이라 별건으로 다루고, 여기서는 이미 완비된 공유 탭 경로로 보낸다.
+    // ② 공유 여부가 **확정된 뒤에만**(`sharedIds != null`). 로딩을 "공유 안 됨"으로 접으면
+    //    가드가 fail-open 한다 — 그룹 목록이 도착하기 전 몇 프레임 버튼이 열리고, 그 창에서
+    //    누르면 원본만 used가 된다.
+    // ③ 공유 중이 아닐 때만. 공유 중인데 여기서 [GifticonRepository.updateStatus]를 부르면
+    //    원본만 used가 되고 그룹의 [SharedGifticon]은 '사용 가능'으로 남는다 — 계약의
+    //    동기화는 공유→원본 한 방향뿐이다([ShareRepository.markUsed]). 그 상태로 두면 다른
+    //    멤버가 이미 쓴 기프티콘을 매장에서 꺼내게 된다. 양방향 동기화는 계약 변경이라
+    //    별건으로 다루고, 여기서는 이미 완비된 공유 탭 경로로 보낸다.
     //
     // 날짜상 만료(expiredByDate)는 **막지 않는다.** status를 expired로 옮기는 주체가 아직
     // 없어(만료 판정은 날짜 기준 표시일 뿐) 여기서 가리면 만료일이 지난 기프티콘은 영영
     // 사용 완료로 정리하지 못하고 목록에 남는다.
-    final bool canMarkUsed = g.status == GifticonStatus.available && !shared;
+    final bool canMarkUsed =
+        g.status == GifticonStatus.available && sharedIds != null && !shared;
+
+    // 목록 카드는 날짜 만료도 '만료'로 칠하는데(`_DDayBadge`), 뱃지가 status만 보면 목록에서
+    // '만료'인 카드를 눌렀는데 상세 헤더는 '사용가능'이라고 답한다. 같은 기프티콘을 두고 두
+    // 화면이 다른 말을 하지 않도록 표시용 상태를 맞춘다(저장된 status는 건드리지 않는다).
+    final GifticonStatus displayStatus =
+        g.status == GifticonStatus.available && expiredByDate
+            ? GifticonStatus.expired
+            : g.status;
 
     return Scaffold(
       appBar: AppBar(
@@ -80,7 +105,7 @@ class GifticonDetailPage extends ConsumerWidget {
         child: ListView(
           padding: const EdgeInsets.fromLTRB(24, 14, 24, 28),
           children: <Widget>[
-            _BrandHero(brand: brand, brandName: g.brand),
+            BrandHero(brand: brand, brandName: g.brand),
             const SizedBox(height: 22),
 
             // 브랜드 · 상품명 · 상태 뱃지.
@@ -104,7 +129,7 @@ class GifticonDetailPage extends ConsumerWidget {
                 const SizedBox(width: 12),
                 Padding(
                   padding: const EdgeInsets.only(top: 6),
-                  child: _StatusBadge(status: g.status),
+                  child: _StatusBadge(status: displayStatus),
                 ),
               ],
             ),
@@ -132,19 +157,32 @@ class GifticonDetailPage extends ConsumerWidget {
             const SizedBox(height: 22),
 
             if (used)
-              const _InfoBanner(
+              const DetailInfoBanner(
                 icon: Icons.check_circle_outline,
                 text: '이미 사용 완료한 기프티콘이에요.',
               ),
             if (!used && g.status == GifticonStatus.expired)
-              const _InfoBanner(
+              const DetailInfoBanner(
                 icon: Icons.event_busy_outlined,
                 text: '만료 처리된 기프티콘이에요.',
               ),
             if (shared && !used)
-              const _InfoBanner(
+              const DetailInfoBanner(
                 icon: Icons.group_outlined,
                 text: '그룹에 공유 중이에요. 사용 완료 처리는 공유 탭에서 해주세요.',
+              ),
+            // 공유 여부가 아직 확정되지 않아 버튼을 막아 둔 상태. 이유를 적지 않으면
+            // 사용자는 버튼이 왜 없는지 알 수 없다(고장으로 읽힌다).
+            if (!used &&
+                g.status == GifticonStatus.available &&
+                sharedIds == null)
+              DetailInfoBanner(
+                icon: sharedIdsAsync.hasError
+                    ? Icons.error_outline
+                    : Icons.hourglass_empty,
+                text: sharedIdsAsync.hasError
+                    ? '공유 상태를 확인하지 못해 사용 완료를 잠시 막아 뒀어요. 연결을 확인해 주세요.'
+                    : '공유 상태를 확인하는 중이에요…',
               ),
 
             if (canMarkUsed)
@@ -214,7 +252,11 @@ class GifticonDetailPage extends ConsumerWidget {
       messenger
         ..hideCurrentSnackBar()
         ..showSnackBar(const SnackBar(content: Text('지금은 사용 완료할 수 없어요.')));
-    } catch (_) {
+    } catch (e, st) {
+      // **로그를 반드시 남긴다.** 이 catch는 통신 실패를 겨냥한 것이지만 문법상 모든
+      // 예외를 삼키므로, 매핑 버그 같은 진짜 결함까지 "연결을 확인하세요"로 위장시킨다.
+      // 그때 콘솔에 아무것도 없으면 사용자도 개발자도 둘을 구분할 방법이 없다.
+      debugPrint('GifticonDetailPage.updateStatus 실패: $e\n$st');
       // 그 외 실패는 사실상 전부 통신 문제다. `updateStatus`는 Firestore
       // `runTransaction`을 쓰는데 **트랜잭션은 오프라인 큐잉이 안 되므로**, 망이 끊기면
       // `FirebaseException(unavailable)`로 떨어진다 — 지하철·엘리베이터, 그리고 하필
@@ -316,90 +358,6 @@ class _BarcodeCard extends StatelessWidget {
   }
 }
 
-/// 브랜드 히어로 — 브랜드 색 쿠폰 배너(좌우 노치 + 브랜드 라벨).
-class _BrandHero extends StatelessWidget {
-  const _BrandHero({required this.brand, required this.brandName});
-
-  final BrandStyle brand;
-  final String brandName;
-
-  @override
-  Widget build(BuildContext context) {
-    final ColorScheme scheme = Theme.of(context).colorScheme;
-    const double height = 180;
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(AppRadii.hero),
-      child: SizedBox(
-        height: height,
-        child: Stack(
-          children: <Widget>[
-            Positioned.fill(child: ColoredBox(color: brand.background)),
-            Positioned(
-              left: -11,
-              top: height / 2 - 11,
-              child: _Notch(color: scheme.surface),
-            ),
-            Positioned(
-              right: -11,
-              top: height / 2 - 11,
-              child: _Notch(color: scheme.surface),
-            ),
-            Positioned(
-              top: 20,
-              right: 24,
-              child: Text(
-                brandName,
-                style: TextStyle(
-                  color: brand.foreground,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: 0.5,
-                ),
-              ),
-            ),
-            Center(
-              child: Container(
-                width: 88,
-                height: 88,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: brand.foreground.withValues(alpha: 0.92),
-                  shape: BoxShape.circle,
-                ),
-                child: Text(
-                  brand.label,
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: brand.background,
-                    fontSize: 24,
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// 티켓 노치(작은 원).
-class _Notch extends StatelessWidget {
-  const _Notch({required this.color});
-
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 22,
-      height: 22,
-      decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-    );
-  }
-}
-
 /// 상태 뱃지 — 라벨·색은 목록 카드와 같은 정본([gifticonStatusLabel])을 쓴다.
 class _StatusBadge extends StatelessWidget {
   const _StatusBadge({required this.status});
@@ -461,34 +419,6 @@ class _MetaRow extends StatelessWidget {
           ),
         ),
       ],
-    );
-  }
-}
-
-/// 상태 안내 배너(사용완료·만료·공유중).
-class _InfoBanner extends StatelessWidget {
-  const _InfoBanner({required this.icon, required this.text});
-
-  final IconData icon;
-  final String text;
-
-  @override
-  Widget build(BuildContext context) {
-    final ThemeData theme = Theme.of(context);
-    return Container(
-      margin: const EdgeInsets.only(bottom: 16),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(AppRadii.tile),
-      ),
-      child: Row(
-        children: <Widget>[
-          Icon(icon, size: 18, color: theme.colorScheme.onSurfaceVariant),
-          const SizedBox(width: 10),
-          Expanded(child: Text(text, style: theme.textTheme.bodyMedium)),
-        ],
-      ),
     );
   }
 }

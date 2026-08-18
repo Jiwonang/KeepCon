@@ -30,6 +30,7 @@ import '../../../shared/models/user.dart';
 import '../../../shared/providers/my_groups_provider.dart';
 import '../../../shared/providers/repositories.dart';
 import '../../../shared/providers/session_provider.dart';
+import '../../../shared/providers/shared_gifticons_provider.dart';
 
 // 세션은 계약 정본 [sessionUserProvider]를 각 파생·화면이 직접 `watch` 한다(경과 조치였던
 // 페이지 별칭 `shareCurrentUserProvider`는 제거됨 — 매트릭스 #13).
@@ -66,28 +67,11 @@ final groupByIdProvider =
   });
 });
 
-/// 특정 그룹의 공유 기프티콘 스트림.
-final sharedGifticonsProvider =
-    StreamProvider.family<List<SharedGifticon>, String>((ref, groupId) {
-  return ref.watch(shareRepositoryProvider).watchSharedGifticons(groupId);
-});
-
-/// 내 모든 그룹을 가로지른 공유 기프티콘(공유 메인 요약용).
-///
-/// 각 그룹별 [sharedGifticonsProvider]를 `watch`해 합친다. 어느 그룹의 스트림이 바뀌거나
-/// 내 그룹 집합이 바뀌면 자동 재계산된다(리액티브 결합).
-final allSharedProvider = Provider<List<SharedGifticon>>((ref) {
-  final List<Group> groups =
-      ref.watch(myGroupsProvider).valueOrNull ?? const <Group>[];
-  final List<SharedGifticon> out = <SharedGifticon>[];
-  for (final Group g in groups) {
-    out.addAll(
-      ref.watch(sharedGifticonsProvider(g.id)).valueOrNull ??
-          const <SharedGifticon>[],
-    );
-  }
-  return out;
-});
+// [sharedGifticonsProvider]·[allSharedProvider]는 계약 정본으로 승격됐다
+// (`lib/shared/providers/shared_gifticons_provider.dart`) — main 상세가 "이 기프티콘이
+// 공유 중인가"를 물어야 하는 두 번째 소비자가 됐기 때문이다. 별칭(재export shim)을 남기지
+// 않고 선언을 삭제한 뒤 정본을 직수입한다(#13 규약). 이 파일의 나머지 파생들은 import된
+// 정본을 그대로 `watch`하므로 호출 형태는 승격 전과 같다.
 
 /// id로 공유 항목 단건 조회(내 그룹들을 가로질러 탐색). 공유취소 등으로 사라지면 null.
 final sharedItemByIdProvider =

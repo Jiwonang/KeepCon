@@ -19,8 +19,11 @@ import 'package:keepcon/features/main/state/gifticon_filter.dart';
 import 'package:keepcon/features/main/state/gifticon_list_providers.dart';
 import 'package:keepcon/shared/models/gifticon.dart';
 import 'package:keepcon/shared/providers/repositories.dart';
+import 'package:keepcon/shared/providers/shared_gifticons_provider.dart';
 import 'package:keepcon/shared/repositories/gifticon_repository.dart';
+import 'package:keepcon/shared/repositories/impl/in_memory_auth_repository.dart';
 import 'package:keepcon/shared/repositories/impl/in_memory_gifticon_repository.dart';
+import 'package:keepcon/shared/repositories/impl/in_memory_share_repository.dart';
 
 const String _ownerId = 'user-1';
 final DateTime _now = DateTime(2026, 8, 18);
@@ -30,7 +33,6 @@ Gifticon _gifticon({
   String productName = '아메리카노 T',
   String? barcode = '9788901234567',
   GifticonStatus status = GifticonStatus.available,
-  String? targetGroupId,
 }) {
   return Gifticon(
     id: id,
@@ -43,7 +45,6 @@ Gifticon _gifticon({
     expiryDate: _now.add(const Duration(days: 30)),
     registeredAt: _now,
     status: status,
-    targetGroupId: targetGroupId,
   );
 }
 
@@ -53,12 +54,20 @@ void main() {
 
   /// 저장소 하나를 목록 스트림과 provider 양쪽에 물린다 — 상세에서 상태를 바꾸면
   /// 목록도 같은 인스턴스를 보고 있어야 화면이 따라간다(계약 SSOT provider 규약).
-  void boot(List<Gifticon> seed) {
+  ///
+  /// [sharedIds]로 "이 기프티콘이 그룹에 공유돼 있는가"를 주입한다. 기본값은 확정된 빈
+  /// 집합 — 공유된 것이 없다. `null`을 주면 **아직 확정 전(로딩)** 을 흉내 낸다.
+  void boot(List<Gifticon> seed, {Set<String>? sharedIds = const <String>{}}) {
     repo = InMemoryGifticonRepository(seed: seed);
     container = ProviderContainer(
       overrides: <Override>[
         gifticonRepositoryProvider.overrideWithValue(repo),
         rawGifticonsProvider.overrideWith((_) => repo.watchGifticons(_ownerId)),
+        sharedGifticonIdsProvider.overrideWithValue(
+          sharedIds == null
+              ? const AsyncValue<Set<String>>.loading()
+              : AsyncValue<Set<String>>.data(sharedIds),
+        ),
       ],
     );
   }
@@ -160,10 +169,87 @@ void main() {
   });
 
   testWidgets('그룹 공유 중이면 버튼 대신 공유 탭으로 안내한다', (WidgetTester tester) async {
-    final Gifticon shared = _gifticon(targetGroupId: 'group-1');
-    boot(<Gifticon>[shared]);
+    // 공유 여부의 근거는 [SharedGifticon.gifticonId] 집합이다.
+    final Gifticon shared = _gifticon();
+    boot(<Gifticon>[shared], sharedIds: <String>{'g1'});
     await mountDetail(tester, shared);
 
+    expect(find.widgetWithText(ElevatedButton, '사용 완료'), findsNothing);
+    expect(
+      find.text('그룹에 공유 중이에요. 사용 완료 처리는 공유 탭에서 해주세요.'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('공유 여부가 확정되기 전에는 버튼을 열지 않는다(fail-closed)',
+      (WidgetTester tester) async {
+    // 회귀 방어: 로딩을 "공유 안 됨"으로 접으면 그룹 목록이 도착하기 전 몇 프레임 동안
+    // 버튼이 열린다. 그 창에서 누르면 원본만 used가 되고 그룹 항목은 '사용 가능'으로
+    // 남아, 다른 멤버가 이미 쓴 기프티콘을 매장에서 꺼내게 된다.
+    final Gifticon g = _gifticon();
+    boot(<Gifticon>[g], sharedIds: null);
+    await mountDetail(tester, g);
+
+    expect(find.widgetWithText(ElevatedButton, '사용 완료'), findsNothing);
+    expect(find.text('공유 상태를 확인하는 중이에요…'), findsOneWidget);
+  });
+
+  testWidgets('실제 공유(ShareRepository.shareGifticon) 후 버튼이 닫힌다',
+      (WidgetTester tester) async {
+    // 위 테스트들은 집합을 주입하지만, 이 테스트는 **계약 구현을 실제로 태워** 판정
+    // 근거가 맞는지 본다. 승격 전에는 `Gifticon.targetGroupId`로 판정했는데, 그 필드는
+    // 등록 시점에 그룹을 지정한 경우에만 채워지고 `shareGifticon`은 건드리지 않아
+    // — 즉 아래 시나리오에서 가드가 통째로 죽어 있었다(코드리뷰 검출).
+    final InMemoryAuthRepository auth = InMemoryAuthRepository();
+    final InMemoryGifticonRepository gifticons = InMemoryGifticonRepository();
+    final InMemoryShareRepository share = InMemoryShareRepository(
+      authRepository: auth,
+      gifticonRepository: gifticons,
+    );
+    addTearDown(() {
+      share.dispose();
+      auth.dispose();
+      gifticons.dispose();
+    });
+
+    final String myId = InMemoryAuthRepository.defaultUser.id;
+    final Gifticon mine = Gifticon(
+      id: 'gift-A',
+      ownerId: myId,
+      brand: '스타벅스',
+      productName: '아메리카노 T',
+      category: '카페',
+      price: 4500,
+      barcode: '9788901234567',
+      expiryDate: _now.add(const Duration(days: 30)),
+      registeredAt: _now,
+    );
+    await gifticons.addGifticon(mine);
+    // 등록은 개인 지갑으로 했고(targetGroupId 없음), 나중에 그룹에 공유한다 —
+    // 이것이 흔한 경로다.
+    await share.shareGifticon(groupId: 'g_family', gifticon: mine);
+
+    final ProviderContainer c = ProviderContainer(
+      overrides: <Override>[
+        authRepositoryProvider.overrideWithValue(auth),
+        gifticonRepositoryProvider.overrideWithValue(gifticons),
+        shareRepositoryProvider.overrideWithValue(share),
+        rawGifticonsProvider
+            .overrideWith((_) => gifticons.watchGifticons(myId)),
+      ],
+    );
+    addTearDown(c.dispose);
+
+    useTallViewport(tester);
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: c,
+        child: MaterialApp(home: GifticonDetailPage(gifticon: mine)),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(c.read(sharedGifticonIdsProvider).valueOrNull, contains('gift-A'));
     expect(find.widgetWithText(ElevatedButton, '사용 완료'), findsNothing);
     expect(
       find.text('그룹에 공유 중이에요. 사용 완료 처리는 공유 탭에서 해주세요.'),
