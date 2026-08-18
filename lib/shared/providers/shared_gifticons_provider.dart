@@ -68,13 +68,27 @@ final allSharedProvider = Provider<List<SharedGifticon>>((ref) {
 /// 그룹 목록과 그룹별 공유 스트림이 **모두** 값을 낸 뒤에만 [AsyncData]가 된다. 하나라도
 /// 로딩이면 [AsyncLoading], 에러면 그 에러를 전파한다(파일 상단 fail-closed 절 참조).
 ///
-/// ## 수명 = autoDispose (의도)
+/// ## 수명 = autoDispose (의도) — **다만 절반만 놓아준다**
 /// 주 소비자인 기프티콘 상세는 **일회성 플로우**다 — 카드를 눌러 바코드를 보고 닫는다.
-/// keepAlive로 두면 이 provider가 [myGroupsProvider]를 붙잡아, 상세를 한 번 열기만 해도
-/// `watchGroups`와 그룹별 `watchSharedGifticons` 리스너가 **앱 수명 동안 잔존**한다.
-/// 그것이 정확히 [myGroupsProvider]가 `autoDispose`인 이유이고(그 파일의 "수명 설계 근거"
-/// 1항 — scan을 예로 든 같은 함정), 상세는 scan보다 훨씬 자주 열린다. share 탭은 자신의
-/// keepAlive 파생들이 정본을 계속 붙잡으므로 체감 수명이 승격 전과 같다.
+/// keepAlive로 두면 이 provider가 [myGroupsProvider]를 붙잡아 `watchGroups` 구독이 앱
+/// 수명 동안 잔존한다. 그것이 정확히 [myGroupsProvider]가 `autoDispose`인 이유이고
+/// (그 파일의 "수명 설계 근거" 1항 — scan을 예로 든 같은 함정), 상세는 scan보다 훨씬 자주
+/// 열린다. 그래서 이쪽도 `autoDispose`로 둔다.
+///
+/// ⚠️ **놓아주는 것은 [myGroupsProvider] 축뿐이다.** 이 provider가 그룹마다 `watch`하는
+/// [sharedGifticonsProvider]는 `autoDispose`가 아닌 family라, 한 번 만들어진 인스턴스는
+/// 리스너가 모두 떨어져도 스스로 dispose되지 않는다 — 즉 **상세를 한 번 열면 그룹 수만큼의
+/// `watchSharedGifticons` 리스너는 앱이 끝날 때까지 남는다.** 여기서 `autoDispose`가 그것까지
+/// 막아 준다고 읽지 말 것(주석이 실제보다 앞서가면 다음 사람이 다시 확인하지 않는다).
+///
+/// 그 축을 정말 닫으려면 [sharedGifticonsProvider] 자체를 `autoDispose`로 바꿔야 하는데,
+/// share 도메인이 **non-autoDispose임을 전제로** 짜여 있어(예:
+/// [retryFailedSharedGifticonStreams]의 "탈퇴한 그룹의 스테일 인스턴스" 주석,
+/// `test/features/share/share_error_ui_test.dart`의 재시도 고정) 이 파일만 고쳐서 될 일이
+/// 아니다. share 재검증을 포함한 별건으로 다룬다.
+///
+/// share 탭 자체의 체감 수명은 승격 전과 같다 — 그 페이지의 keepAlive 파생들이 정본을
+/// 계속 붙잡는다.
 final sharedGifticonIdsProvider =
     Provider.autoDispose<AsyncValue<Set<String>>>((ref) {
   final AsyncValue<List<Group>> groupsAsync = ref.watch(myGroupsProvider);
