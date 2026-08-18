@@ -25,6 +25,7 @@ dependencies:
   flutter_timezone: ^5.1.0
   app_links: ^7.2.1
   share_plus: ^13.3.0
+  barcode_widget: ^2.0.4
 dev_dependencies:
   flutter_test:
     sdk: flutter

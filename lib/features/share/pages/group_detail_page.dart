@@ -16,6 +16,7 @@ import '../../../shared/models/share.dart';
 import '../../../shared/models/user.dart';
 import '../../../shared/providers/repositories.dart';
 import '../../../shared/providers/session_provider.dart';
+import '../../../shared/providers/shared_gifticons_provider.dart';
 import '../../../shared/theme/brand_palette.dart';
 import '../../../shared/theme/theme_tokens.dart';
 import '../state/share_providers.dart';
