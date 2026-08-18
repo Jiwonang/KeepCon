@@ -23,7 +23,10 @@ class DefaultFirebaseOptions {
       case TargetPlatform.android:
         return android;
       case TargetPlatform.iOS:
-        return ios;
+        throw UnsupportedError(
+          'DefaultFirebaseOptions have not been configured for ios - '
+          'you can reconfigure this by running the FlutterFire CLI again.',
+        );
       case TargetPlatform.macOS:
         throw UnsupportedError(
           'DefaultFirebaseOptions have not been configured for macos - '
@@ -62,13 +65,5 @@ class DefaultFirebaseOptions {
     messagingSenderId: '1084555870987',
     projectId: 'keepcon-ab660',
     storageBucket: 'keepcon-ab660.firebasestorage.app',
-  );
-  static const FirebaseOptions ios = FirebaseOptions(
-    apiKey: 'AIzaSyCT6FYwRNGjczyK7Zcg-ZUw-ro8u8ghS2Q',
-    appId: '1:1084555870987:ios:0b8e7fefa9e4795325980e',
-    messagingSenderId: '1084555870987',
-    projectId: 'keepcon-ab660',
-    storageBucket: 'keepcon-ab660.firebasestorage.app',
-    iosBundleId: 'com.keepcon.app',
   );
 }

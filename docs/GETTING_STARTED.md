@@ -45,7 +45,7 @@ Windows는 설치 중 옵션을 그대로 두면 됩니다. **Git Bash가 같이
 
 ```bash
 flutter --version     # 3.27 이상이면 OK
-flutter doctor        # 빨간 X 중 Android/iOS 관련은 웹으로만 돌릴 거면 무시해도 됩니다
+flutter doctor        # 빨간 X 중 Android 관련은 웹으로만 돌릴 거면 무시해도 됩니다
 ```
 
 ### 모드 B도 쓸 거면 — 두 개 더
@@ -250,7 +250,7 @@ flutter run --dart-define=USE_FIREBASE=true     # dev 서버에 붙어 실기기
 
 **실기기 + 로컬 에뮬레이터 조합은 지원하지 않습니다.** `10.0.2.2` 자동 전환은 Android 스튜디오 에뮬레이터에만 해당하고, USB 실기기에는 그 주소가 없습니다. 사설 IP로 우회하려면 에뮬레이터 LAN 바인딩 · PC 방화벽 · cleartext HTTP 허용까지 전부 손봐야 하니, **실기기는 위처럼 dev 서버를 쓰세요.**
 
-**iOS도 dev·실서비스 모두 구성돼 있습니다**(번들 id `com.keepcon.app`). 다만 **빌드는 macOS + Xcode에서만** 됩니다 — Windows에서는 `flutter devices`에 iPhone이 잡히지 않습니다. macOS에서 처음 열 때 Xcode › Runner › Signing & Capabilities에서 개인 Apple ID로 팀을 지정해야 실기기에 설치됩니다.
+**iOS는 구성하지 않습니다.** 빌드·서명·실행이 전부 macOS + Xcode를 요구하는데 팀에 macOS가 없어, 검증할 수 없는 코드만 쌓이던 `ios/`를 2026-08-18에 걷어냈습니다. 실기기 시연은 Android로 합니다. 되살리는 절차는 [README](../README.md#-firebase-프로젝트-구성)에 있습니다.
 
 ---
 
