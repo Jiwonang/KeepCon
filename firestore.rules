@@ -5,7 +5,8 @@ rules_version = '2';
 // 접근 원칙:
 // - users: 본인 프로필만.
 // - gifticons: 소유자(ownerId)만.
-// - groups: 멤버만 읽기 / 방장만 삭제 / 생성·합류·관리는 아래 규칙대로.
+// - groups: 멤버만 읽기·변경 / 방장만 삭제. 비멤버가 스스로 합류하는 경로는 없다
+//   (합류는 방장 승인을 거친다 — 아래 groups 규칙 주석 참조).
 // - sharedGifticons·usageLogs·notifications: 소속 그룹 멤버만.
 // - shareLocks: 내부 잠금 메커니즘(민감 데이터 없음) — 로그인 사용자면 관리.
 // - 그 외: 기본 차단.
@@ -69,20 +70,51 @@ service cloud.firestore {
       // 삭제: 방장만.
       allow delete: if isSignedIn() && resource.data.ownerId == uid();
 
-      // 변경: 기존 멤버의 관리 작업, 또는 초대코드 합류(비멤버가 자신만 추가하고
-      //       기존 멤버를 제거하지 않을 때).
-      allow update: if isSignedIn() && (
-        uid() in resource.data.memberIds
-        || (
-          !(uid() in resource.data.memberIds)
-          && uid() in request.resource.data.memberIds
-          && request.resource.data.memberIds.hasAll(resource.data.memberIds)
-          // 합류 시 멤버 목록만 바꿀 수 있다 — ownerId·name·inviteCode 등 메타데이터
-          // 변조(방장 권한 탈취 등)를 차단한다.
-          && request.resource.data.diff(resource.data)
-              .affectedKeys().hasOnly(['members', 'memberIds'])
-        )
-      );
+      // 방장의 운영 변경 — 이름·초대·정원·멤버 구성 전반.
+      //
+      // 변경 후에도 ownerId가 멤버 목록 안에 있어야 한다. 이 한 줄이 "방장 없는 그룹"을
+      // 막고, 동시에 소유권 이전을 자연스럽게 표현한다 — 방장이 그냥 나가면 ownerId가
+      // 멤버 밖으로 나가 거부되고, 새 방장을 지정하며 나가면 통과한다.
+      function isGroupOwnerUpdate() {
+        return resource.data.ownerId == uid()
+          && request.resource.data.ownerId in request.resource.data.memberIds;
+      }
+
+      // 일반 멤버에게 허용되는 유일한 변경 — **memberIds에서 자기 하나만 빼는 '나가기'**.
+      //
+      // `members`(맵 배열)는 **건드리지 못하게 한다.** 규칙은 배열을 순회할 수 없어
+      // "지워진 원소가 정말 나 자신인가"를 확인할 방법이 없다. 두 배열을 함께 열어 주면
+      // 크기·포함 관계 검사를 모두 통과하면서 memberIds에서는 자기를, members에서는
+      // **남을** 지우는 조합이 성립한다(두 필드가 갈라져, 지워진 멤버는 화면에서 사라지지만
+      // memberIds 기반인 보안 규칙·쿼리에서는 살아 있는 유령이 된다).
+      //
+      // 그래서 멤버십의 정본을 memberIds 하나로 못박는다 — 이미 쿼리(array-contains)와
+      // isGroupMember()가 보는 필드다. `members`는 표시용 메타데이터이고, 떠난 사람의
+      // 항목은 읽는 쪽(_groupFromDocOrNull)에서 걸러지며 다음 방장 쓰기에서 정리된다.
+      function isSelfLeave() {
+        let before = resource.data;
+        let after = request.resource.data;
+        // 방장은 이 경로를 쓸 수 없다. 쓸 수 있게 두면 방장이 혼자 빠져나가 ownerId가
+        // 멤버 밖을 가리키는 '주인 없는 그룹'이 남는다(앱은 그런 문서를 손상으로 보고
+        // 목록에서 통째로 걸러내므로, 남은 멤버에게는 그룹이 사라진 것처럼 보인다).
+        // 방장의 이탈 경로는 둘뿐이다 — 혼자면 그룹 삭제, 아니면 소유권 이전.
+        return before.ownerId != uid()
+          && after.diff(before).affectedKeys().hasOnly(['memberIds'])
+          && !(uid() in after.memberIds)
+          && before.memberIds.hasAll(after.memberIds)
+          && after.memberIds.size() == before.memberIds.size() - 1;
+      }
+
+      // 변경: **멤버만**. 방장은 그룹 운영 전반, 일반 멤버는 나가기 한 가지뿐이다.
+      //
+      // ⚠️ 예전에는 여기에 "비멤버가 자신을 추가하는 합류" 예외가 있었다. 그 조항은
+      //    초대코드·만료·정원·inviteOwnerOnly를 **하나도 검사하지 않았다**(전부 클라이언트
+      //    트랜잭션 안에만 있는 가드라, 규칙을 거치지 않는 요청에는 무력했다). 결국
+      //    groupId만 알면 초대 없이, 심지어 자기 role을 owner로 써넣고 합류할 수 있었다.
+      //    합류는 '방장 승인'을 거치도록 바뀌므로(참여 요청 → 승인) 이 예외는 삭제한다.
+      allow update: if isSignedIn()
+        && uid() in resource.data.memberIds
+        && (isGroupOwnerUpdate() || isSelfLeave());
     }
 
     // 공유 기프티콘 — 소속 그룹 멤버.
