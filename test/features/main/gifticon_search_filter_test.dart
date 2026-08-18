@@ -15,6 +15,8 @@
 /// 픽스처·harness 이디엄은 `expiry_banner_test.dart`와 같다.
 library;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -334,6 +336,106 @@ void main() {
       await pumpHome(tester, const <Gifticon>[]);
 
       expect(find.textContaining('새 기프티콘을 추가해'), findsOneWidget);
+    });
+  });
+
+  group('정렬/필터 시트 — 계정 경계를 넘은 필터', () {
+    // 회귀: `SortFilterBar`는 이 PR 전까지 어디에도 마운트되지 않은 고아 위젯이라
+    // 아래 크래시가 도달 불가능했다. 시트로 연결하면서 잠재 결함도 함께 살아났다.
+
+    testWidgets('선택지에 없는 카테고리가 남아 있어도 시트가 죽지 않는다', (WidgetTester tester) async {
+      // 원천이 비어 카테고리 선택지가 하나도 없는데 필터에는 '카페'가 남은 상태.
+      // 방어가 없으면 DropdownButton의 "value에 해당하는 item이 정확히 하나" 단언이
+      // 터져 시트 자리에 렌더 에러가 뜬다.
+      //
+      // **필터는 세션이 확정된 뒤에 건다.** 먼저 걸면 세션의 첫 방출(로딩 null →
+      // 사용자)이 계정 전환으로 잡혀 filterProvider가 스스로 초기화하고, 시트가 열릴
+      // 때는 이미 필터가 비어 있어 이 테스트가 아무것도 검증하지 못한다.
+      final ProviderContainer container = await pumpHome(tester, const []);
+      expect(container.read(availableCategoriesProvider), isEmpty);
+
+      container.read(filterProvider.notifier).state =
+          GifticonFilter.none.withCategory('카페');
+      await tester.pumpAndSettle();
+      expect(container.read(filterProvider).categoryFilter, '카페',
+          reason: '이 시점에 필터가 살아 있어야 가드를 실제로 시험한다');
+
+      await tester.tap(find.byIcon(Icons.tune));
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull);
+      expect(find.text('정렬 · 필터'), findsOneWidget);
+      expect(find.text('카테고리 전체'), findsOneWidget,
+          reason: '선택지에 없는 값은 "전체"로 접어 그린다');
+    });
+
+    test('계정이 바뀌면 이전 사용자의 필터를 들고 가지 않는다', () async {
+      // 원인 쪽 수정 — 값이 계정 경계를 넘지 않게 한다. 넘어가면 새 사용자가 자기가 건
+      // 적 없는 필터로 걸러진 목록을 보게 된다.
+      final StreamController<User?> session =
+          StreamController<User?>.broadcast();
+      addTearDown(session.close);
+
+      final ProviderContainer container = ProviderContainer(
+        overrides: <Override>[
+          gifticonRepositoryProvider.overrideWithValue(
+              InMemoryGifticonRepository(seed: const <Gifticon>[])),
+          sessionUserProvider.overrideWith((_) => session.stream),
+          nowProvider.overrideWithValue(fixedNow),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      container.listen<GifticonFilter>(filterProvider, (_, __) {});
+      session.add(me);
+      await pumpEventQueue();
+
+      container.read(filterProvider.notifier).state =
+          GifticonFilter.none.withCategory('카페').withSearchQuery('스벅');
+      expect(container.read(filterProvider).isAnyActive, isTrue);
+
+      // 로그아웃 → 다른 계정 로그인.
+      session.add(null);
+      await pumpEventQueue();
+      session.add(const User(
+        id: 'user-2',
+        email: 'b@keepcon.app',
+        displayName: '다른 사람',
+      ));
+      await pumpEventQueue();
+
+      expect(container.read(filterProvider), GifticonFilter.none);
+    });
+
+    test('같은 계정이 재방출돼도 걸어 둔 필터는 유지된다', () async {
+      // 토큰 갱신·프로필 편집으로 세션이 다시 방출되는 것은 계정 전환이 아니다.
+      // id로 비교하지 않고 방출마다 리셋하면 사용자가 건 필터가 제멋대로 풀린다.
+      final StreamController<User?> session =
+          StreamController<User?>.broadcast();
+      addTearDown(session.close);
+
+      final ProviderContainer container = ProviderContainer(
+        overrides: <Override>[
+          gifticonRepositoryProvider.overrideWithValue(
+              InMemoryGifticonRepository(seed: const <Gifticon>[])),
+          sessionUserProvider.overrideWith((_) => session.stream),
+          nowProvider.overrideWithValue(fixedNow),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      container.listen<GifticonFilter>(filterProvider, (_, __) {});
+      session.add(me);
+      await pumpEventQueue();
+
+      container.read(filterProvider.notifier).state =
+          GifticonFilter.none.withSearchQuery('스벅');
+
+      // 같은 uid, 다른 displayName(프로필 편집 경로).
+      session.add(User(id: me.id, email: me.email, displayName: '바뀐 이름'));
+      await pumpEventQueue();
+
+      expect(container.read(filterProvider).searchQuery, '스벅');
     });
   });
 
