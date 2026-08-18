@@ -111,7 +111,13 @@ service cloud.firestore {
       //    초대코드·만료·정원·inviteOwnerOnly를 **하나도 검사하지 않았다**(전부 클라이언트
       //    트랜잭션 안에만 있는 가드라, 규칙을 거치지 않는 요청에는 무력했다). 결국
       //    groupId만 알면 초대 없이, 심지어 자기 role을 owner로 써넣고 합류할 수 있었다.
-      //    합류는 '방장 승인'을 거치도록 바뀌므로(참여 요청 → 승인) 이 예외는 삭제한다.
+      //    합류는 '방장 승인'을 거치도록 바꿀 예정이므로(참여 요청 → 승인) 이 예외는 삭제한다.
+      //
+      //    ⚠️ 그 승인 흐름은 **아직 구현되지 않았다.** 즉 지금 이 규칙 아래에서는 비멤버가
+      //    그룹에 합류할 경로가 없다 — `ShareRepository.joinGroup(inviteCode)`은 비멤버가
+      //    inviteCode로 groups를 조회하는 것부터 위 `allow read`(멤버만)에 막힌다.
+      //    (이 읽기 제약은 이번 변경 이전부터 있었으므로, Firebase 경로의 초대코드 참여는
+      //    원래부터 동작하지 않았다. 팀 테스트는 시드로 미리 넣어 둔 그룹을 써 왔다.)
       allow update: if isSignedIn()
         && uid() in resource.data.memberIds
         && (isGroupOwnerUpdate() || isSelfLeave());
