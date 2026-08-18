@@ -222,19 +222,26 @@ class _JoinGroupSheetState extends ConsumerState<_JoinGroupSheet> {
     if (code.isEmpty) return;
     final NavigatorState navigator = Navigator.of(context);
     final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
+    // try는 **저장소 호출만** 감싼다. 성공 뒤의 pop·스낵바까지 넣으면, 참여는 됐는데
+    // 화면 정리에서 예외가 났을 때 실패 안내가 떠 사용자가 참여에 실패했다고 오해한다.
     try {
       await ref.read(shareRepositoryProvider).joinGroup(code);
-      navigator.pop();
-      messenger
-        ..hideCurrentSnackBar()
-        ..showSnackBar(const SnackBar(content: Text('그룹에 참여했어요.')));
-    } on StateError {
+    } catch (_) {
+      // `on StateError`로 좁히면 백엔드가 던지는 예외(권한 거부·네트워크 등)가 그대로
+      // 빠져나가 **아무 안내도 없이 시트가 멈춘다** — 사용자에겐 버튼이 죽은 것으로만
+      // 보인다. 실패 원인과 무관하게 항상 결과를 알려준다.
+      // (예외 타입으로 백엔드를 구분하지 않으므로 UI가 firebase에 의존하지 않는다.)
       messenger
         ..hideCurrentSnackBar()
         ..showSnackBar(const SnackBar(
           content: Text('참여할 수 없어요. 코드가 틀렸거나 만료됐거나 정원이 찼을 수 있어요.'),
         ));
+      return;
     }
+    navigator.pop();
+    messenger
+      ..hideCurrentSnackBar()
+      ..showSnackBar(const SnackBar(content: Text('그룹에 참여했어요.')));
   }
 
   @override
