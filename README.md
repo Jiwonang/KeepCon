@@ -355,9 +355,11 @@ gh api -X POST repos/Jiwonang/KeepCon/rulesets --input ruleset.json
 
 **추가 하드 백스톱 (권장 — soft 규칙을 강제로 전환):** 아래를 켜면 문서 규칙이 "지침"에서 "강제"가 됩니다.
 
-- 룰셋 → **Require review from Code Owners** — [`CODEOWNERS`](.github/CODEOWNERS)에 지정된 계약 소유자 리뷰 없이는 `lib/shared`·하네스 설정 변경을 머지 불가(페이지 담당의 계약 임의 수정 차단).
-- 룰셋 → **Require branches to be up to date before merging** — 오래된 브랜치는 최신화 전까지 머지 차단(스테일 머지 방지).
-- ⛔ 룰셋 → 필수 상태 체크에 **`CodeRabbit / Review`는 추가하지 마세요.** 예전 안내였지만 **효과가 없는 것으로 확인**됐습니다 — CodeRabbit 체크는 리뷰 여부와 무관하게 항상 `pass 0s`이고(PR #89·#93·#94 관측: `Review skipped: manual review required for this OSS repository`), 그 이름의 컨텍스트는 어느 PR에서도 보고된 적이 없어 등록하면 **영원히 pending으로 남아 모든 머지가 막힐** 수 있습니다. 리뷰 층은 게이트가 아니라 [`keepcon-review-gate`](.claude/skills/keepcon-review-gate/SKILL.md) 절차로 지킵니다.
+- ⬜ 룰셋 → **Require review from Code Owners** — [`CODEOWNERS`](.github/CODEOWNERS)에 지정된 계약 소유자 리뷰 없이는 `lib/shared`·하네스 설정 변경을 머지 불가. **현재 꺼져 있습니다**(`require_code_owner_review: false`, `required_approving_review_count: 0`).
+- ✅ 룰셋 → **Require branches to be up to date before merging** — 오래된 브랜치는 최신화 전까지 머지 차단(스테일 머지 방지). **이미 켜져 있습니다**(`strict_required_status_checks_policy: true`).
+- ⬜ 룰셋 → 필수 상태 체크에 **`Firestore rules`·`Markdown lint` 추가** — 현재 필수는 `Format · Analyze · Test`와 `CodeRabbit` 둘뿐이라, **나머지 두 잡은 red여도 머지가 막히지 않습니다.** 특히 `Firestore rules`는 Dart 테스트가 원리상 못 잡는 계층을 지키는 잡이라 이 구멍이 아픕니다.
+- ℹ️ **`CodeRabbit`은 이미 필수 체크로 등록돼 있습니다**(이름은 `CodeRabbit / Review`가 아니라 `CodeRabbit`). 다만 리뷰 여부와 무관하게 항상 `pass`라 게이트 효과는 없습니다 — `Review skipped …`(#89·#93)든 `Review rate limited`(#97)든 초록입니다. **빼지 않고 둔다면 알아 둘 것:** App 접근 범위에서 KeepCon이 빠지는 순간 체크가 보고되지 않아 **모든 머지가 실제로 막힙니다.**
+- 위 상태는 추측하지 말고 조회하세요: `gh api repos/Jiwonang/KeepCon/rulesets/18610485 --jq '.rules[] | select(.type=="required_status_checks" or .type=="pull_request") | .parameters'`
 - 룰셋 → **Do not allow bypassing the above settings**(admin 포함) — 규칙의 뿌리를 admin 우회로부터 보호.
 - Settings → Code security → **Secret scanning + Push protection**(Public 무료) — 비밀정보가 포함된 push를 서버가 거부(`.gitignore`는 게이트가 아니므로 이게 진짜 백스톱).
 
@@ -365,7 +367,7 @@ gh api -X POST repos/Jiwonang/KeepCon/rulesets --input ruleset.json
 
 **네 층**으로 품질을 관리합니다 (층위가 서로 달라 **중첩 운영**):
 
-- **1층 · CI 게이트 (필수·자동):** 모든 PR에서 **세 잡**을 통과해야 합니다 — `Format · Analyze · Test`(**SSOT guard** · dart format · flutter analyze · flutter test), `Firestore rules`, `Markdown lint`. `SSOT guard`는 첫 잡의 **스텝**이라 `gh pr checks`에 별도 항목으로 뜨지 않습니다. `SSOT guard`([`tool/check_ssot.sh`](tool/check_ssot.sh))는 `lib/features`에서 공유 계약 타입·provider를 재정의/재선언하면 실패시켜 SSOT를 기계적으로 강제합니다. `Markdown lint`([`.markdownlint-cli2.jsonc`](.markdownlint-cli2.jsonc))는 리뷰가 반복해서 지적하던 문서 포맷을 기계로 옮긴 것입니다 — 켜는 룰은 실제 지적에 대응하는 5개뿐입니다(기본 룰셋 전체는 위반 2,500건이라 소음이 됩니다).
+- **1층 · CI 게이트 (필수·자동):** 모든 PR에서 **세 잡**이 돕니다 — `Format · Analyze · Test`(**SSOT guard** · dart format · flutter analyze · flutter test), `Firestore rules`, `Markdown lint`. `SSOT guard`는 첫 잡의 **스텝**이라 `gh pr checks`에 별도 항목으로 뜨지 않습니다. ⚠️ **셋 중 룰셋 필수 체크는 `Format · Analyze · Test` 하나뿐입니다** — 나머지 둘은 red여도 머지 버튼이 열려 있으니, 게이트로 승격할 때까지는 눈으로 확인하세요(위 "추가 하드 백스톱" 참조). `SSOT guard`([`tool/check_ssot.sh`](tool/check_ssot.sh))는 `lib/features`에서 공유 계약 타입·provider를 재정의/재선언하면 실패시켜 SSOT를 기계적으로 강제합니다. `Markdown lint`([`.markdownlint-cli2.jsonc`](.markdownlint-cli2.jsonc))는 리뷰가 반복해서 지적하던 문서 포맷을 기계로 옮긴 것입니다 — 켜는 룰은 실제 지적에 대응하는 5개뿐입니다(기본 룰셋 전체는 위반 2,500건이라 소음이 됩니다).
 - **2층 · 에이전트 리뷰 — [`keepcon-code-reviewer`](.claude/agents/keepcon-code-reviewer.md) (기본 리뷰, 항상):** 변경 diff를 6개 축(기능 정확성·유지보수성·데이터 정합성·안정성·보안·성능)으로 리뷰합니다. 분류와 검증 방식은 CodeRabbit이 이 저장소 PR #40~#95에 남긴 **인라인 지적 122건을 분석해** 물려받았습니다. 코드를 쓴 맥락을 공유하지 않는 에이전트가 처음부터 읽는 것이 이 층의 존재 이유입니다.
   - 봇이 못 하던 **실행 검증**이 이 층의 우위입니다 — `flutter test`를 돌리고, 보안 규칙이 얽히면 에뮬레이터로 실제 요청을 보내 재현합니다(`firestore.rules`의 권한 위조 구멍은 이 방법으로만 드러났습니다 — 그 PR #89는 CodeRabbit이 할당량에 걸려 한 번도 리뷰하지 못했습니다).
 - **3층 · AI 리뷰 — CodeRabbit (두 번째 의견, ⚠️ 수동 트리거):** 협업 규칙 준수·버그를 리뷰합니다. 설정은 [`.coderabbit.yaml`](.coderabbit.yaml)에 한국어로 정의(별도 API 키·워크플로 불필요). **단, 설정 파일만으로는 동작하지 않습니다** — CodeRabbit은 **GitHub App**이라 저장소에 설치·접근 허용되어야 합니다.

@@ -25,7 +25,7 @@ CodeRabbit   pass   0s   "Review skipped: manual review required for this OSS re
 
 | 층 | 담당 | 성격 |
 |---|---|---|
-| 1 | CI 세 잡 (`Format · Analyze · Test` · `Firestore rules` · `Markdown lint`) | 기계 게이트 — red면 머지 불가 |
+| 1 | CI 세 잡 (`Format · Analyze · Test` · `Firestore rules` · `Markdown lint`) | 셋 다 자동 실행. **다만 룰셋 필수 체크는 `Format · Analyze · Test` 하나뿐** — 나머지 둘은 red여도 머지가 막히지 않으니 눈으로 확인한다 |
 | 2 | `keepcon-code-reviewer` 에이전트 | **기본 리뷰 — 항상 돈다** |
 | 3 | CodeRabbit | 두 번째 의견 — 할당량이 있을 때만 |
 | 4 | 릴리스 전 `/security-review` | 주기적 |
@@ -40,11 +40,13 @@ CodeRabbit   pass   0s   "Review skipped: manual review required for this OSS re
 gh pr checks <번호>
 ```
 
-CI 잡이 하나라도 red면 **여기서 멈춘다.** 원인을 진단해 수정 → 커밋 → 푸시를 전부 green이 될 때까지 반복한다(CLAUDE.md의 수정 루프). `CodeRabbit` 행의 pass는 **무시한다** — 위에 적은 이유로 정보가 없다.
+CI 잡이 하나라도 red면 **여기서 멈춘다.** ⚠️ **`Firestore rules`·`Markdown lint`는 룰셋 필수 체크가 아니라 red여도 머지 버튼이 열려 있다** — 게이트가 막아 주지 않으므로 이 단계에서 사람이 본다(현재 필수 체크는 `Format · Analyze · Test`와 `CodeRabbit` 둘뿐이다: `gh api repos/Jiwonang/KeepCon/rulesets/18610485 --jq '.rules[] | select(.type=="required_status_checks") | .parameters.required_status_checks'`). 원인을 진단해 수정 → 커밋 → 푸시를 전부 green이 될 때까지 반복한다(CLAUDE.md의 수정 루프). `CodeRabbit` 행의 pass는 **무시한다** — 위에 적은 이유로 정보가 없다.
 
 ### 2. 기본 리뷰 (항상)
 
-`keepcon-code-reviewer` 에이전트로 변경 diff를 리뷰한다. **작성자가 자기 코드를 리뷰하는 것이 아니라, 맥락을 공유하지 않는 에이전트가 처음부터 읽게 한다** — 잘못 읽어서 생긴 전제가 전달되지 않는 것이 이 층의 존재 이유다. 리뷰 결과나 작성 의도를 프롬프트에 넣지 않는다.
+`keepcon-code-reviewer` 에이전트로 변경 diff를 리뷰한다. **작성자가 자기 코드를 리뷰하는 것이 아니라, 맥락을 공유하지 않는 에이전트가 처음부터 읽게 한다** — 잘못 읽어서 생긴 전제가 전달되지 않는 것이 이 층의 존재 이유다.
+
+프롬프트에는 리뷰 결과·작성 의도를 넣지 않는다. **다만 그것으로 차단되지는 않는다** — PR 번호를 주는 이상 리뷰어는 `gh pr view`로 PR 본문("고민했던 내용" 포함)을 읽는다. 그래서 진짜 방어선은 차단이 아니라 **반증**이다: PR 본문과 주석은 **주장으로만 취급하고 코드·실행으로 다시 확인한다**(에이전트 정의의 "반증 지향" 절). 의도를 정말 차단하려면 PR 번호 대신 `<base>...<head>` 커밋 범위만 넘긴다.
 
 유효한 지적은 수정 → 커밋 → 푸시하고 1번으로 돌아간다.
 
@@ -72,15 +74,20 @@ gh pr view <번호> --json comments,reviews --jq '[.comments[], .reviews[]] | ma
 
 ### 3b. 리뷰가 지금 head를 봤는지 확인 (필수)
 
-`REVIEWED`는 "언젠가 리뷰됐다"는 뜻일 뿐이다. **리뷰 시각과 head 커밋 시각을 비교한다:**
+`REVIEWED`는 "언젠가 리뷰됐다"는 뜻일 뿐이다. **CodeRabbit이 리뷰한 커밋과 현재 head를 비교한다:**
 
 ```bash
-gh pr view <번호> --json comments,reviews,commits --jq '([.comments[], .reviews[]] | map(select(.author.login=="coderabbitai") | select(.body|test("Actionable comments posted|No actionable comments")) | (.createdAt // .submittedAt)) | max) as $r | (.commits | last | .committedDate) as $c | if $r == null then "NO_REVIEW" elif $r < $c then "STALE (리뷰 \($r) < head \($c))" else "CURRENT" end'
+gh api repos/Jiwonang/KeepCon/pulls/<번호>/reviews --jq '[.[] | select(.user.login=="coderabbitai[bot]") | .commit_id] | last // "NO_REVIEW"'
+gh pr view <번호> --json headRefOid --jq .headRefOid
 ```
 
-`STALE`이면 **그 뒤 커밋은 리뷰되지 않았다** — `@coderabbitai review`로 재트리거한다. `CURRENT`일 때만 3층이 채워진 것이다.
+두 SHA가 같으면 `CURRENT`, 다르면 `STALE`이다. `STALE`이면 **그 뒤 커밋은 리뷰되지 않았다** — `@coderabbitai review`로 재트리거한다. `CURRENT`일 때만 3층이 채워진 것이다.
 
-이 검사가 없으면 눈으로는 못 잡는다. 도입 시점에 돌려 보니 **PR #93·#95 둘 다 `STALE`이었고, #93은 그 상태로 머지됐다** — 리뷰 게시 뒤 17분 동안 들어간 커밋은 아무도 보지 않았다. "리뷰 본문이 있는지"만 확인하는 규칙으로는 여기까지 못 간다.
+> ⚠️ **시각(timestamp)으로 비교하지 마라.** 리뷰 게시 시각과 `commits[].committedDate`를 견주는 방식은 틀린다 — `committedDate`는 푸시 시각이 아니라 **작성자 로컬 시계의 커밋 생성 시각**이다. 리뷰를 기다리는 몇 분 사이에 커밋해 두고 리뷰가 올라온 뒤 푸시하면(흔한 작업 흐름) 커밋이 리뷰보다 **이르게** 찍혀 `CURRENT`로 통과한다 — 3b가 막으려던 바로 그것이다. 작성자 시계가 앞서 있으면 반대로 늘 `STALE`이 되어 소음이 된다. SHA 비교는 시계·푸시 지연과 무관하다.
+>
+> ⚠️ 3단계의 로그인 이름은 `coderabbitai`인데 **여기서는 `coderabbitai[bot]`이다.** REST(`/pulls/N/reviews`)와 GraphQL(`gh pr view`)이 봇 계정을 다르게 표기한다 — 섞어 쓰면 항상 `NO_REVIEW`가 나온다.
+
+이 검사가 없으면 눈으로는 못 잡는다. 도입 시점에 돌려 보니 **PR #93·#95 둘 다 `STALE`이었고, #93은 그 상태로 머지됐다**(#93: 리뷰 커밋 `3568d64f` ≠ head `3ff2eb7d`). "리뷰 본문이 있는지"만 확인하는 규칙으로는 여기까지 못 간다.
 
 ### 4. 폴백 — 기다려도 안 될 때만
 
