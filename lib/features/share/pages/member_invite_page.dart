@@ -327,7 +327,7 @@ class _MemberInvitePageState extends ConsumerState<MemberInvitePage> {
           padding: const EdgeInsets.fromLTRB(24, 8, 24, 16),
           child: ElevatedButton.icon(
             onPressed: expired ? null : () => _share(g),
-            icon: const Icon(Icons.ios_share, size: 20),
+            icon: const Icon(Icons.share, size: 20),
             label: Text(expired ? '만료된 초대는 공유할 수 없어요' : '어플로 공유하기'),
             style: ElevatedButton.styleFrom(
               shape: RoundedRectangleBorder(
