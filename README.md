@@ -158,17 +158,15 @@ flutter run -d chrome --dart-define=USE_FIREBASE_PROD=true
 # 데모 — 백엔드 없이 즉시 실행. 화면·UI 작업용(그룹 공유는 검증 불가)
 flutter run -d chrome --dart-define=USE_DEMO=true
 
-# 실기기(Android·iOS) — 기기를 연결하고 `-d chrome` 만 빼면 된다.
-# Android는 개발자 옵션 > USB 디버깅, iOS는 Xcode에서 서명 팀 설정이 먼저 필요하다.
+# 실기기(Android) — 기기를 연결하고 `-d chrome` 만 빼면 된다.
+# 개발자 옵션 > USB 디버깅을 먼저 켜야 한다.
 flutter devices                                   # 기기가 보이는지 먼저 확인
 flutter run --dart-define=USE_FIREBASE=true       # dev 서버에 붙어 실기기 데모
 ```
 
-> **dev·실서비스 모두 Android·iOS가 구성돼 있습니다**(패키지명·번들 id 둘 다 `com.keepcon.app`).
+> **dev·실서비스 모두 web·Android가 구성돼 있습니다**(패키지명 `com.keepcon.app`). iOS는 구성하지 않습니다 — 이유는 아래 [연결된 Firebase 프로젝트](#연결된-firebase-프로젝트---둘-다-구성-완료) 참조.
 >
 > 📱 **Android가 처음이면** JDK·SDK 준비부터 필요합니다 → [Android 기기로 띄우기](#-android-기기로-띄우기-실기기--avd).
->
-> ⚠️ **iOS는 macOS + Xcode에서만 빌드됩니다.** Windows에서는 `flutter run`이 iOS 기기를 아예 보지 못합니다. macOS에서 처음 열 때 Xcode › Runner › Signing & Capabilities에서 **개인 Apple ID로 팀을 지정**해야 실기기에 설치됩니다(무료 계정도 7일짜리 프로비저닝으로 설치는 됩니다).
 >
 > ⚠️ **실기기 + 로컬 에뮬레이터 조합은 지원하지 않습니다.** `10.0.2.2` 자동 전환은 Android 스튜디오 에뮬레이터 전용이라 USB 실기기에서는 닿지 않고, 사설 IP로 우회하려면 에뮬레이터 LAN 바인딩(`firebase.json`의 `host`) · 방화벽 인바운드 허용 · cleartext HTTP 허용(`networkSecurityConfig`)까지 전부 손봐야 합니다. **실기기는 dev 서버(`USE_FIREBASE=true`)를 쓰세요** — 설정이 필요 없습니다.
 >
@@ -226,7 +224,7 @@ setx ANDROID_SDK_ROOT "C:\Android\Sdk"
 
 새 창에서 `flutter doctor` 의 *Android toolchain* 이 ✓ 면 준비 끝입니다.
 
-> *Visual Studio not installed* 는 **무시하세요.** Windows **데스크톱** 앱 빌드용이고 KeepCon은 web·android·ios만 구성돼 있습니다. 이름이 비슷할 뿐 VS Code와는 무관합니다.
+> *Visual Studio not installed* 는 **무시하세요.** Windows **데스크톱** 앱 빌드용이고 KeepCon은 web·android만 구성돼 있습니다. 이름이 비슷할 뿐 VS Code와는 무관합니다.
 
 #### 실기기로 띄우기
 
@@ -500,7 +498,11 @@ tool\verify_firestore_rules.cmd
 | 데이터 | 팀 공유. 언제든 밀어도 됨 | 실서비스. 함부로 건드리지 말 것 |
 | 리셋 | `tool/reset_dev.sh` | 없음 (의도적) |
 
-두 프로젝트 모두 Firestore `(default)` · **Standard** 에디션 · **Native** 모드 · `asia-northeast3`(서울)이고, [`firestore.rules`](firestore.rules) · [`firestore.indexes.json`](firestore.indexes.json)이 배포돼 있습니다. 구성된 플랫폼은 **web · android · ios** 입니다(Android 패키지명·iOS 번들 id 모두 `com.keepcon.app`). 데스크톱(windows·macos·linux)은 미구성입니다.
+두 프로젝트 모두 Firestore `(default)` · **Standard** 에디션 · **Native** 모드 · `asia-northeast3`(서울)이고, [`firestore.rules`](firestore.rules) · [`firestore.indexes.json`](firestore.indexes.json)이 배포돼 있습니다. 구성된 플랫폼은 **web · android** 입니다(Android 패키지명 `com.keepcon.app`).
+
+> **iOS와 데스크톱(windows·macos·linux)은 구성하지 않습니다.** iOS는 빌드·서명·실행이 전부 macOS + Xcode를 요구하는데 팀에 macOS가 없어 **검증할 수 없는 코드만 쌓였습니다**(2026-08-03에 구성했다가 2026-08-18에 걷어냈습니다).
+>
+> 되살릴 일이 생기면 `flutter create --platforms=ios .` 로 `ios/`를 재생성하고, 아래 `configure` 명령에 `ios` 와 `--ios-bundle-id=com.keepcon.app` 을 다시 넣으면 됩니다 — Firebase 콘솔의 iOS 앱이 살아 있으면 옛 번들 id 그대로 붙습니다. 그때 **macOS에서 `configure`를 돌렸다면 `ios/Runner/GoogleService-Info.plist` 와 Xcode 프로젝트의 그 파일 참조를 반드시 지우세요** — `google-services.json`과 똑같이 네이티브가 `[DEFAULT]` FirebaseApp을 먼저 만들어 백엔드를 하나로 고정합니다(Windows에서 돌리면 애초에 만들지 않습니다).
 
 #### `flutterfire configure`를 다시 돌려야 할 때
 
@@ -514,7 +516,7 @@ tool\verify_firestore_rules.cmd
 |---|---|
 | `--out` | CLI가 기본값 `lib/firebase_options.dart`(= **실서비스**)에 씁니다. dev 재생성 한 번으로 실서비스 옵션이 dev 값으로 덮여 씁니다. |
 | `--platforms` (전체 나열) | 빠진 플랫폼이 생성물에서 **사라집니다.** |
-| `--android-package-name` / `--ios-bundle-id` | CLI가 프로젝트 파일에서 패키지명을 추측합니다. 명시하면 최소한 **내가 어떤 이름으로 등록하는지 커밋에 남습니다** — 위 사고처럼 브랜치 상태에 따라 값이 조용히 달라지는 걸 리뷰에서 잡을 수 있습니다. |
+| `--android-package-name` | CLI가 프로젝트 파일에서 패키지명을 추측합니다. 명시하면 최소한 **내가 어떤 이름으로 등록하는지 커밋에 남습니다** — 위 사고처럼 브랜치 상태에 따라 값이 조용히 달라지는 걸 리뷰에서 잡을 수 있습니다. |
 
 돌린 뒤에는 **생성된 appId가 실제 `applicationId`/번들 id로 등록된 앱인지** 확인하세요:
 
@@ -524,22 +526,21 @@ firebase apps:sdkconfig ANDROID --project keepcon-dev   # package_name 이 com.k
 
 ```bash
 # dev — 팀 개발
-flutterfire configure --project=keepcon-dev --platforms=android,ios,web \
-  --android-package-name=com.keepcon.app --ios-bundle-id=com.keepcon.app \
+flutterfire configure --project=keepcon-dev --platforms=android,web \
+  --android-package-name=com.keepcon.app \
   --out=lib/firebase_options_dev.dart
 
 # 실서비스
-flutterfire configure --project=keepcon-ab660 --platforms=android,ios,web \
-  --android-package-name=com.keepcon.app --ios-bundle-id=com.keepcon.app \
+flutterfire configure --project=keepcon-ab660 --platforms=android,web \
+  --android-package-name=com.keepcon.app \
   --out=lib/firebase_options.dart
 ```
 
-> ℹ️ **네이티브 설정 파일(`google-services.json` · `GoogleService-Info.plist`)을 쓰지 않습니다.** 그 파일들은 네이티브가 `[DEFAULT]` FirebaseApp을 먼저 만들어 **백엔드를 하나로 고정**하는데, KeepCon은 emulator·dev·prod를 실행 시 고르기 때문입니다(파일이 있으면 나머지 둘이 `[core/duplicate-app]`으로 죽습니다). 세 플랫폼 모두 web과 똑같이 **생성된 Dart 옵션만** 씁니다 — 자세한 근거는 [`android/app/build.gradle.kts`](android/app/build.gradle.kts) 주석에 있습니다.
+> ℹ️ **네이티브 설정 파일(`google-services.json`)을 쓰지 않습니다.** 그 파일은 네이티브가 `[DEFAULT]` FirebaseApp을 먼저 만들어 **백엔드를 하나로 고정**하는데, KeepCon은 emulator·dev·prod를 실행 시 고르기 때문입니다(파일이 있으면 나머지 둘이 `[core/duplicate-app]`으로 죽습니다). Android도 web과 똑같이 **생성된 Dart 옵션만** 씁니다 — 자세한 근거는 [`android/app/build.gradle.kts`](android/app/build.gradle.kts) 주석에 있습니다.
 >
 > ⚠️ 그래서 **위 명령을 돌린 뒤에는 되돌릴 것이 있습니다.** CLI가 아래를 되살려 놓으므로 전부 지우고 커밋하세요:
 > - `android/app/google-services.json` (`.gitignore`에 등록돼 있어 커밋되지는 않습니다)
 > - `com.google.gms.google-services` 플러그인 **적용**([`android/app/build.gradle.kts`](android/app/build.gradle.kts)) — `settings.gradle.kts`의 `apply false` 선언은 적용이 아니라 무해합니다
-> - **macOS에서 돌렸다면** `ios/Runner/GoogleService-Info.plist` 와 Xcode 프로젝트에 추가된 그 파일 참조 (Windows에서 돌리면 애초에 만들지 않습니다)
 
 > ⚠️ **Firestore 에디션은 반드시 Standard입니다.** Enterprise는 MongoDB 호환 API용이라 `cloud_firestore` SDK도 `request.auth.uid` 기반 보안 규칙도 동작하지 않습니다. 콘솔에서 DB를 새로 만들 일이 있으면 Standard/Native를 고르세요.
 >
