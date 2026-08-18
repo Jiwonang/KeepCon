@@ -13,6 +13,10 @@
 # 실행:
 #   bash tool/verify_firestore_rules.sh
 #
+# CI: `.github/workflows/ci.yml`의 `Firestore rules` 잡이 에뮬레이터를 직접 띄워 이 스크립트를
+#   돌린다(`firebase emulators:exec`). Dart 테스트는 in-memory 구현을 쓰므로 규칙 계층을
+#   검증하지 못한다 — 이 스크립트가 그 계층의 유일한 회귀 방어선이다.
+#
 # 주의: 인증 헤더 없이 Firestore 에뮬레이터 REST를 호출하면 **관리자로 취급되어 규칙을
 #   우회**한다. 그래서 모든 케이스는 반드시 사용자 ID 토큰을 붙여 호출한다.
 set -uo pipefail
@@ -112,6 +116,118 @@ check "A가 그룹 생성(본인이 방장·멤버)" 200 -X PATCH "${DOCS}/group
 check "A가 그룹 조회" 200 -X GET "${DOCS}/groups/rules-grp" "${AUTH_A[@]}"
 check "B(비멤버)가 그룹 조회 → 차단" 403 -X GET "${DOCS}/groups/rules-grp" "${AUTH_B[@]}"
 check "B가 남을 방장으로 그룹 생성 → 차단" 403 -X PATCH "${DOCS}/groups/rules-grp-2" "${AUTH_B[@]}" "${JSON[@]}" -d "$(group_doc "${UID_A}" "${UID_A}")"
+
+echo "groups — 변경 권한 (방장 운영 vs 멤버 나가기)"
+
+# 같은 문서를 두 번 쓰면 앞선 실행이 남긴 상태(소유권 이전 등) 때문에 시드가 막힌다.
+# 실행마다 새 문서 id를 쓴다.
+RUN="$$-${RANDOM}"
+
+# members 배열 원소 하나(REST mapValue). $1=userId $2=표시이름 $3=role
+member_val() {
+  printf '{"mapValue":{"fields":{"userId":{"stringValue":"%s"},"displayName":{"stringValue":"%s"},"avatarEmoji":{"stringValue":"🙂"},"role":{"stringValue":"%s"}}}}' "$1" "$2" "$3"
+}
+
+# 그룹 전체 문서. $1=ownerId, $2=members 원소들(콤마 구분), $3=memberIds 원소들, $4=초대코드
+group_full() {
+  printf '{"fields":{"ownerId":{"stringValue":"%s"},"name":{"stringValue":"가족"},"emoji":{"stringValue":"🎁"},"inviteCode":{"stringValue":"%s"},"inviteOwnerOnly":{"booleanValue":false},"inviteExpiresAt":{"timestampValue":"2030-01-01T00:00:00Z"},"maxMembers":{"integerValue":"10"},"members":{"arrayValue":{"values":[%s]}},"memberIds":{"arrayValue":{"values":[%s]}}}}' "$1" "$4" "$2" "$3"
+}
+
+# memberIds만 바꾸는 부분 갱신 — 앱의 '나가기'가 보내는 형태. $1=memberIds 원소들
+ids_patch() {
+  printf '{"fields":{"memberIds":{"arrayValue":{"values":[%s]}}}}' "$1"
+}
+
+# members와 memberIds를 함께 바꾸는 부분 갱신. $1=members 원소들, $2=memberIds 원소들
+members_patch() {
+  printf '{"fields":{"members":{"arrayValue":{"values":[%s]}},"memberIds":{"arrayValue":{"values":[%s]}}}}' "$1" "$2"
+}
+
+# Firestore REST의 PATCH는 **updateMask가 없으면 문서 전체를 교체**한다(요청에 없는
+# 필드는 삭제된다). 앱은 `tx.update`로 일부 필드만 바꾸므로, 마스크를 붙이지 않으면
+# 규칙이 보는 "변경 후 문서"가 실제와 전혀 달라진다 — 예컨대 초대코드만 보낸 요청이
+# ownerId·memberIds가 사라진 문서로 판정돼 방장조차 거부당한다.
+MASK_MEMBERS='updateMask.fieldPaths=members&updateMask.fieldPaths=memberIds'
+MASK_IDS='updateMask.fieldPaths=memberIds'
+MASK_OWNER_MEMBERS="updateMask.fieldPaths=ownerId&${MASK_MEMBERS}"
+MASK_NAME='updateMask.fieldPaths=name'
+MASK_CODE='updateMask.fieldPaths=inviteCode'
+MASK_OWNER='updateMask.fieldPaths=ownerId'
+
+M_A=$(member_val "${UID_A}" "A" "owner")
+M_B=$(member_val "${UID_B}" "B" "member")
+M_B_OWNER=$(member_val "${UID_B}" "B" "owner")
+ID_A="{\"stringValue\":\"${UID_A}\"}"
+ID_B="{\"stringValue\":\"${UID_B}\"}"
+
+# seed_group <문서 id 접미사> <members> <memberIds> — A가 방장으로 그룹을 만든다.
+#
+# 만든 문서 경로는 전역 ${SEEDED_DOC}에 담는다. 명령 치환으로 돌려주지 않는 이유:
+# check()가 결과 줄을 표준출력에 쓰므로 $(seed_group ...)은 그 줄까지 함께 삼킨다.
+SEEDED_DOC=""
+seed_group() {
+  local suffix="$1" members="$2" ids="$3"
+  SEEDED_DOC="groups/rules-grp-${suffix}-${RUN}"
+  check "  (준비) ${suffix} 그룹 생성" 200 -X PATCH "${DOCS}/${SEEDED_DOC}" \
+    "${AUTH_A[@]}" "${JSON[@]}" -d "$(group_full "${UID_A}" "${members}" "${ids}" "482913")"
+}
+
+# ── 비멤버는 스스로 합류할 수 없다(이번 수정의 핵심) ──────────────────────
+seed_group join "${M_A}" "${ID_A}"
+G_JOIN="${SEEDED_DOC}"
+check "B(비멤버)가 자신을 멤버로 추가 → 차단" 403 -X PATCH "${DOCS}/${G_JOIN}?${MASK_MEMBERS}" \
+  "${AUTH_B[@]}" "${JSON[@]}" -d "$(members_patch "${M_A},${M_B}" "${ID_A},${ID_B}")"
+check "B(비멤버)가 자신을 방장 role로 추가 → 차단" 403 -X PATCH "${DOCS}/${G_JOIN}?${MASK_MEMBERS}" \
+  "${AUTH_B[@]}" "${JSON[@]}" -d "$(members_patch "${M_A},${M_B_OWNER}" "${ID_A},${ID_B}")"
+
+# ── 일반 멤버는 '자기 나가기'만 할 수 있다 ────────────────────────────────
+seed_group leave "${M_A},${M_B}" "${ID_A},${ID_B}"
+G_LEAVE="${SEEDED_DOC}"
+check "B(멤버)가 memberIds에서 자기만 빼고 나가기" 200 -X PATCH "${DOCS}/${G_LEAVE}?${MASK_IDS}" \
+  "${AUTH_B[@]}" "${JSON[@]}" -d "$(ids_patch "${ID_A}")"
+
+seed_group kick "${M_A},${M_B}" "${ID_A},${ID_B}"
+G_KICK="${SEEDED_DOC}"
+check "B(멤버)가 방장을 memberIds에서 제거 → 차단" 403 -X PATCH "${DOCS}/${G_KICK}?${MASK_IDS}" \
+  "${AUTH_B[@]}" "${JSON[@]}" -d "$(ids_patch "${ID_B}")"
+
+# 나가기가 members까지 건드릴 수 있으면, memberIds에서는 자기를 빼면서 members에서는
+# **남을** 지우는 조합이 크기·포함 검사를 모두 통과한다(두 필드가 갈라져, 지워진 멤버는
+# 화면에서 사라지지만 memberIds 기반 규칙·쿼리에서는 살아 있는 유령이 된다).
+# 그래서 나가기는 memberIds 한 필드로 못박혀 있다 — 이 케이스가 그 못을 지킨다.
+seed_group splitleave "${M_A},${M_B}" "${ID_A},${ID_B}"
+G_SPLIT="${SEEDED_DOC}"
+check "B(멤버)가 나가면서 members에서는 방장을 지우기 → 차단" 403 -X PATCH "${DOCS}/${G_SPLIT}?${MASK_MEMBERS}" \
+  "${AUTH_B[@]}" "${JSON[@]}" -d "$(members_patch "${M_B}" "${ID_A}")"
+
+seed_group promote "${M_A},${M_B}" "${ID_A},${ID_B}"
+G_PROMO="${SEEDED_DOC}"
+check "B(멤버)가 자기 role을 방장으로 승격 → 차단" 403 -X PATCH "${DOCS}/${G_PROMO}?${MASK_MEMBERS}" \
+  "${AUTH_B[@]}" "${JSON[@]}" -d "$(members_patch "${M_A},${M_B_OWNER}" "${ID_A},${ID_B}")"
+
+seed_group meta "${M_A},${M_B}" "${ID_A},${ID_B}"
+G_META="${SEEDED_DOC}"
+check "B(멤버)가 그룹 이름 변경 → 차단" 403 -X PATCH "${DOCS}/${G_META}?${MASK_NAME}" \
+  "${AUTH_B[@]}" "${JSON[@]}" -d '{"fields":{"name":{"stringValue":"납치된 그룹"}}}'
+check "A(방장)가 초대코드 재발급" 200 -X PATCH "${DOCS}/${G_META}?${MASK_CODE}" \
+  "${AUTH_A[@]}" "${JSON[@]}" -d '{"fields":{"inviteCode":{"stringValue":"771205"}}}'
+
+# ── 방장은 운영 전반을 할 수 있지만, 방장 자리를 비울 수는 없다 ──────────
+seed_group remove "${M_A},${M_B}" "${ID_A},${ID_B}"
+G_RM="${SEEDED_DOC}"
+check "A(방장)가 B를 내보내기" 200 -X PATCH "${DOCS}/${G_RM}?${MASK_MEMBERS}" \
+  "${AUTH_A[@]}" "${JSON[@]}" -d "$(members_patch "${M_A}" "${ID_A}")"
+
+seed_group transfer "${M_A},${M_B}" "${ID_A},${ID_B}"
+G_TR="${SEEDED_DOC}"
+check "A(방장)가 멤버 아닌 사람에게 소유권 이전 → 차단" 403 -X PATCH "${DOCS}/${G_TR}?${MASK_OWNER}" \
+  "${AUTH_A[@]}" "${JSON[@]}" \
+  -d "{\"fields\":{\"ownerId\":{\"stringValue\":\"ghost-uid\"}}}"
+check "A(방장)가 그냥 나가서 방장 자리를 비움 → 차단" 403 -X PATCH "${DOCS}/${G_TR}?${MASK_MEMBERS}" \
+  "${AUTH_A[@]}" "${JSON[@]}" -d "$(members_patch "${M_B}" "${ID_B}")"
+check "A(방장)가 B에게 소유권을 넘기고 나가기" 200 -X PATCH "${DOCS}/${G_TR}?${MASK_OWNER_MEMBERS}" \
+  "${AUTH_A[@]}" "${JSON[@]}" \
+  -d "{\"fields\":{\"ownerId\":{\"stringValue\":\"${UID_B}\"},\"members\":{\"arrayValue\":{\"values\":[${M_B_OWNER}]}},\"memberIds\":{\"arrayValue\":{\"values\":[${ID_B}]}}}}"
 
 echo
 echo "결과: 통과 ${pass} / 실패 ${fail}"
