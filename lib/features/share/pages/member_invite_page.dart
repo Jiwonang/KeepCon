@@ -114,10 +114,16 @@ class _MemberInvitePageState extends ConsumerState<MemberInvitePage> {
             groupId: groupId,
             ownerOnly: value,
           );
-    } on StateError {
+    } catch (_) {
+      // `on StateError`로 좁히면 백엔드 예외(권한 거부·네트워크 등)가 그대로 빠져나가
+      // **아무 안내도 없이 스위치만 되돌아간다** — 실패 원인과 무관하게 항상 알린다.
+      // 문구도 원인을 특정하지 않는다 — 스위치는 방장에게만 활성화되므로(`iAmOwner`)
+      // 권한은 오히려 원인일 가능성이 낮다.
       messenger
         ..hideCurrentSnackBar()
-        ..showSnackBar(const SnackBar(content: Text('방장만 이 설정을 바꿀 수 있어요.')));
+        ..showSnackBar(
+          const SnackBar(content: Text('초대 설정을 바꾸지 못했어요. 다시 시도해 주세요.')),
+        );
     }
   }
 
@@ -150,26 +156,29 @@ class _MemberInvitePageState extends ConsumerState<MemberInvitePage> {
       await ref
           .read(shareRepositoryProvider)
           .regenerateInviteCode(groupId: groupId);
-      messenger
-        ..hideCurrentSnackBar()
-        ..showSnackBar(
-          const SnackBar(content: Text('새 초대코드를 발급했어요. 24시간 동안 유효해요.')),
-        );
     } on StateError {
-      // StateError는 권한 외에 그룹 없음(삭제됨)도 포함하므로 중립적으로 안내한다.
+      // 계약 위반(권한 없음·그룹 삭제됨)은 재시도해도 소용없으니 원인을 알린다.
       messenger
         ..hideCurrentSnackBar()
         ..showSnackBar(
           const SnackBar(content: Text('그룹이 없거나 재발급 권한이 없어요.')),
         );
+      return;
     } catch (_) {
-      // 네트워크 등 기타 오류.
+      // 네트워크 등 기타 오류 — 재시도가 통할 수 있다.
       messenger
         ..hideCurrentSnackBar()
         ..showSnackBar(
           const SnackBar(content: Text('초대코드를 재발급하지 못했어요. 다시 시도해 주세요.')),
         );
+      return;
     }
+    // 성공 처리는 try 밖에서 — 발급은 됐는데 스낵바에서 예외가 나면 실패 안내가 떠 오해한다.
+    messenger
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        const SnackBar(content: Text('새 초대코드를 발급했어요. 24시간 동안 유효해요.')),
+      );
   }
 
   AppBar _navBar() => AppBar(

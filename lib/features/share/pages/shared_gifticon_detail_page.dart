@@ -252,7 +252,9 @@ class _DetailBody extends ConsumerWidget {
     final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
     try {
       await ref.read(shareRepositoryProvider).toggleReservation(item.id);
-    } on StateError {
+    } catch (_) {
+      // `on StateError`로 좁히면 백엔드 예외(권한 거부·네트워크 등)가 그대로 빠져나가
+      // **아무 안내도 없이 화면이 멈춘다** — 실패 원인과 무관하게 항상 결과를 알린다.
       messenger
         ..hideCurrentSnackBar()
         ..showSnackBar(const SnackBar(content: Text('지금은 찜할 수 없어요.')));
@@ -263,14 +265,15 @@ class _DetailBody extends ConsumerWidget {
     final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
     try {
       await ref.read(shareRepositoryProvider).markUsed(item.id);
-      messenger
-        ..hideCurrentSnackBar()
-        ..showSnackBar(const SnackBar(content: Text('사용 완료 처리했어요.')));
-    } on StateError {
+    } catch (_) {
       messenger
         ..hideCurrentSnackBar()
         ..showSnackBar(const SnackBar(content: Text('지금은 사용 완료할 수 없어요.')));
+      return;
     }
+    messenger
+      ..hideCurrentSnackBar()
+      ..showSnackBar(const SnackBar(content: Text('사용 완료 처리했어요.')));
   }
 
   Future<void> _confirmCancel(BuildContext context, WidgetRef ref) async {
@@ -296,11 +299,12 @@ class _DetailBody extends ConsumerWidget {
     // 버튼은 이미 공유자·미사용중일 때만 노출되지만, 저장소 가드가 최종 판정한다.
     try {
       await ref.read(shareRepositoryProvider).cancelShare(item.id);
-      navigator.pop();
-    } on StateError {
+    } catch (_) {
       messenger
         ..hideCurrentSnackBar()
         ..showSnackBar(const SnackBar(content: Text('지금은 회수할 수 없어요.')));
+      return;
     }
+    navigator.pop();
   }
 }
