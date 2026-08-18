@@ -164,7 +164,7 @@ flutter devices                                   # 기기가 보이는지 먼�
 flutter run --dart-define=USE_FIREBASE=true       # dev 서버에 붙어 실기기 데모
 ```
 
-> **dev·실서비스 모두 web·Android가 구성돼 있습니다**(패키지명 `com.keepcon.app`). iOS는 구성하지 않습니다 — 이유는 아래 [Firebase 프로젝트 구성](#-firebase-프로젝트-구성) 참조.
+> **dev·실서비스 모두 web·Android가 구성돼 있습니다**(패키지명 `com.keepcon.app`). iOS는 구성하지 않습니다 — 이유는 아래 [연결된 Firebase 프로젝트](#연결된-firebase-프로젝트---둘-다-구성-완료) 참조.
 >
 > 📱 **Android가 처음이면** JDK·SDK 준비부터 필요합니다 → [Android 기기로 띄우기](#-android-기기로-띄우기-실기기--avd).
 >
@@ -496,7 +496,9 @@ tool\verify_firestore_rules.cmd
 
 두 프로젝트 모두 Firestore `(default)` · **Standard** 에디션 · **Native** 모드 · `asia-northeast3`(서울)이고, [`firestore.rules`](firestore.rules) · [`firestore.indexes.json`](firestore.indexes.json)이 배포돼 있습니다. 구성된 플랫폼은 **web · android** 입니다(Android 패키지명 `com.keepcon.app`).
 
-> **iOS와 데스크톱(windows·macos·linux)은 구성하지 않습니다.** iOS는 빌드·서명·실행이 전부 macOS + Xcode를 요구하는데 팀에 macOS가 없어 **검증할 수 없는 코드만 쌓였습니다**(2026-08-03에 구성했다가 2026-08-18에 걷어냈습니다). 되살릴 일이 생기면 `flutter create --platforms=ios .` 로 `ios/`를 재생성하고 아래 `configure` 명령에 `ios` 와 `--ios-bundle-id=com.keepcon.app` 을 다시 넣으면 됩니다 — Firebase 콘솔의 iOS 앱이 살아 있으면 옛 번들 id 그대로 붙습니다.
+> **iOS와 데스크톱(windows·macos·linux)은 구성하지 않습니다.** iOS는 빌드·서명·실행이 전부 macOS + Xcode를 요구하는데 팀에 macOS가 없어 **검증할 수 없는 코드만 쌓였습니다**(2026-08-03에 구성했다가 2026-08-18에 걷어냈습니다).
+>
+> 되살릴 일이 생기면 `flutter create --platforms=ios .` 로 `ios/`를 재생성하고, 아래 `configure` 명령에 `ios` 와 `--ios-bundle-id=com.keepcon.app` 을 다시 넣으면 됩니다 — Firebase 콘솔의 iOS 앱이 살아 있으면 옛 번들 id 그대로 붙습니다. 그때 **macOS에서 `configure`를 돌렸다면 `ios/Runner/GoogleService-Info.plist` 와 Xcode 프로젝트의 그 파일 참조를 반드시 지우세요** — `google-services.json`과 똑같이 네이티브가 `[DEFAULT]` FirebaseApp을 먼저 만들어 백엔드를 하나로 고정합니다(Windows에서 돌리면 애초에 만들지 않습니다).
 
 #### `flutterfire configure`를 다시 돌려야 할 때
 
