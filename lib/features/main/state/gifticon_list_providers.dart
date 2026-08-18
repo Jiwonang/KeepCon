@@ -66,9 +66,26 @@ final rawGifticonsProvider = StreamProvider<List<Gifticon>>((ref) {
 final sortOptionProvider =
     StateProvider<SortOption>((ref) => SortOption.expiryAsc);
 
-/// 현재 활성 필터 상태(상태별/카테고리별). 기본값: 필터 없음.
-final filterProvider =
-    StateProvider<GifticonFilter>((ref) => GifticonFilter.none);
+/// 현재 활성 필터 상태(상태별/카테고리별/만료임박/검색어). 기본값: 필터 없음.
+///
+/// **계정이 바뀌면 스스로 초기화한다.** 이 provider는 앱 수명 내내 살아 있어 로그아웃해도
+/// 값이 남는데, 필터 값 중 카테고리와 검색어는 *그 사용자의 기프티콘*에서 온 것이라
+/// 다음 사용자에게는 의미가 없다. 남겨 두면 두 가지가 깨진다:
+/// - 새 사용자가 이유 없이 걸러진 목록을 본다(자기가 건 적 없는 필터라 원인을 못 찾는다).
+/// - 정렬/필터 시트의 카테고리 드롭다운이 **선택지에 없는 값**을 받아 `DropdownButton`
+///   단언으로 죽는다(선택지는 새 사용자의 목록에서 파생되므로 옛 카테고리가 없다).
+///
+/// 두 번째는 시트 쪽에서도 "선택지에 없으면 전체로 접기"로 막아 두었지만, 그건 증상
+/// 차단이다. 값이 계정 경계를 넘지 않게 하는 것이 원인 쪽 수정이다.
+final filterProvider = StateProvider<GifticonFilter>((ref) {
+  ref.listen<String?>(
+    sessionUserProvider.select((AsyncValue<User?> s) => s.valueOrNull?.id),
+    (String? previous, String? next) {
+      if (previous != next) ref.controller.state = GifticonFilter.none;
+    },
+  );
+  return GifticonFilter.none;
+});
 
 /// 원천 목록에서 도출한, 현재 사용자의 모든 카테고리(중복 제거·정렬).
 ///

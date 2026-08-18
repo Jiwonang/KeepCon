@@ -121,9 +121,20 @@ class _CategoryFilterDropdown extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // 선택지에 없는 값을 [DropdownButton]에 주면 "value에 해당하는 item이 정확히 하나"
+    // 단언이 터져 **컨트롤 자리에 렌더 에러가 뜬다**. 상태·정렬은 enum 전체가 늘 선택지에
+    // 있어 이 문제가 없지만, 카테고리 선택지는 사용자의 기프티콘에서 파생되므로
+    // 필터에 담긴 값이 목록에서 사라질 수 있다(계정 전환, 원천이 아직 로딩 중이라 빈
+    // 목록으로 접히는 프레임).
+    //
+    // 그래서 선택지에 없으면 "전체"로 접어 그린다. 필터 상태 자체를 여기서 고치지는
+    // 않는다 — 그리는 위젯이 상태를 되돌리면 build가 부작용을 갖게 된다. 되돌리는 일은
+    // 계정 전환 시점에 [filterProvider]가 스스로 한다.
+    final bool valueIsSelectable = value == null || categories.contains(value);
+
     return _LabeledDropdown<String?>(
       icon: Icons.category_outlined,
-      value: value,
+      value: valueIsSelectable ? value : null,
       items: [
         const DropdownMenuItem<String?>(
           value: null,
