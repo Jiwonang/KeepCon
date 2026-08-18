@@ -27,6 +27,7 @@ import 'state/highlighted_gifticon.dart';
 import 'state/now_provider.dart';
 import 'widgets/format.dart';
 import 'widgets/gifticon_status_label.dart';
+import 'widgets/sort_filter_sheet.dart';
 
 /// 메인(홈) 화면. [AppRoutes.main]에 등록해 사용한다.
 class MainPage extends ConsumerWidget {
@@ -206,26 +207,99 @@ class _NotificationBell extends StatelessWidget {
 
 // ─────────────────────── 2. 검색바 + 필터 버튼 ───────────────────────
 
-class _SearchRow extends StatelessWidget {
+/// 검색바 + 필터 버튼.
+///
+/// 입력은 [filterProvider]의 검색어에 **즉시** 반영한다. 디바운스를 두지 않는 이유:
+/// 필터링이 이미 받아 둔 목록 위에서 메모리로 끝나기 때문이다(Firestore 재질의가 아니다).
+/// 늦출 비용이 없는 곳에 지연을 넣으면 타이핑이 굼떠 보이기만 한다.
+class _SearchRow extends ConsumerStatefulWidget {
   const _SearchRow();
+
+  @override
+  ConsumerState<_SearchRow> createState() => _SearchRowState();
+}
+
+class _SearchRowState extends ConsumerState<_SearchRow> {
+  late final TextEditingController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    // 위젯이 다시 만들어져도(탭 전환 등) 걸려 있던 검색어를 이어서 보여준다. 필터 상태는
+    // provider에 남아 목록에 계속 적용되고 있으므로, 입력창만 비면 둘이 어긋난다.
+    _controller = TextEditingController(
+      text: ref.read(filterProvider).searchQuery,
+    );
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  /// 입력 원문을 필터에 반영한다. 정규화는 [GifticonFilter.withSearchQuery]가 한다.
+  void _applyQuery(String raw) {
+    final GifticonFilter current = ref.read(filterProvider);
+    final GifticonFilter next = current.withSearchQuery(raw);
+    // 정규화 결과가 같으면(예: 끝에 공백만 더 쳤다) 상태를 건드리지 않는다.
+    if (next != current) {
+      ref.read(filterProvider.notifier).state = next;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final ColorScheme scheme = Theme.of(context).colorScheme;
+
+    // **역방향 동기화** — 섹션 헤더의 해제(×)는 필터를 통째로 [GifticonFilter.none]으로
+    // 되돌린다. 그때 이 컨트롤러를 같이 비우지 않으면 목록은 전체로 돌아갔는데 검색창에는
+    // 글자가 남아, 사용자는 "검색 중인데 왜 다 보이지"를 만난다.
+    //
+    // **비어질 때만** 따라간다. 반대 방향까지 밀어 넣으면(필터 값 → 컨트롤러) 정규화된
+    // 소문자가 입력창으로 되돌아와 타이핑 중 대문자가 뭉개진다.
+    ref.listen<String>(
+      filterProvider.select((GifticonFilter f) => f.searchQuery),
+      (String? previous, String next) {
+        if (next.isEmpty && _controller.text.isNotEmpty) _controller.clear();
+      },
+    );
+
     return Row(
       children: [
         Expanded(
-          child: TextField(
-            enabled: false,
-            decoration: InputDecoration(
-              hintText: '브랜드, 상품명 검색',
-              prefixIcon: Icon(Icons.search, color: scheme.onSurfaceVariant),
-            ),
+          // 지우기(×) 버튼은 입력 **원문**이 비었는지로 판단한다. 필터의 검색어로 보면
+          // 공백만 친 상태에서 버튼이 사라져 지울 방법이 없어진다.
+          child: ValueListenableBuilder<TextEditingValue>(
+            valueListenable: _controller,
+            builder: (BuildContext context, TextEditingValue value, _) {
+              return TextField(
+                controller: _controller,
+                textInputAction: TextInputAction.search,
+                onChanged: _applyQuery,
+                decoration: InputDecoration(
+                  hintText: '브랜드, 상품명 검색',
+                  prefixIcon:
+                      Icon(Icons.search, color: scheme.onSurfaceVariant),
+                  suffixIcon: value.text.isEmpty
+                      ? null
+                      : IconButton(
+                          icon: const Icon(Icons.close),
+                          color: scheme.onSurfaceVariant,
+                          tooltip: '검색어 지우기',
+                          onPressed: () {
+                            _controller.clear();
+                            _applyQuery('');
+                          },
+                        ),
+                ),
+              );
+            },
           ),
         ),
         const SizedBox(width: 12),
         InkResponse(
-          onTap: () {},
+          onTap: () => showSortFilterSheet(context),
           radius: 28,
           child: Container(
             width: 52,
@@ -330,7 +404,8 @@ class _ExpiryBanner extends ConsumerWidget {
           const SizedBox(width: 8),
           _ConfirmPill(
             // 토글이다 — 적용만 되고 풀 방법이 없으면 목록이 잠긴 것처럼 보인다.
-            // (홈에는 아직 필터 컨트롤 UI가 없어 이 버튼이 유일한 해제 수단이다.)
+            // (정렬/필터 시트에는 만료 임박 항목이 없다. 저장된 상태가 아니라 날짜에서
+            // 파생되는 조건이라서다 — 푸는 길은 이 버튼과 섹션 헤더의 해제(×) 둘뿐이다.)
             label: isFiltered ? '해제' : '확인',
             onTap: () {
               ref.read(filterProvider.notifier).state =
@@ -462,7 +537,9 @@ class _StatCard extends StatelessWidget {
 ///
 /// 필터가 걸려 있으면 "전체"라고 쓰지 않는다. 걸러진 목록을 전체라고 부르면 사용자는
 /// 기프티콘이 사라졌다고 읽는다 — 특히 만료 임박 필터는 배너 버튼 한 번으로 켜지므로
-/// 어디서 켜졌는지 모른 채 마주치기 쉽다.
+/// 어디서 켜졌는지 모른 채 마주치기 쉽다. 검색어도 같은 이유로 이 계산에 넣는다.
+///
+/// 정렬 라벨은 [showSortFilterSheet]를 여는 버튼이다(검색바 옆 필터 버튼과 같은 시트).
 class _SectionHeader extends ConsumerWidget {
   final int count;
   final SortOption sort;
@@ -478,14 +555,23 @@ class _SectionHeader extends ConsumerWidget {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
 
-    // 만료 임박과 상태·카테고리 필터는 AND로 결합한다. 그래서 둘이 겹치면 count는
-    // "임박한 것 전부"가 아니라 그 교집합이다 — "만료 임박 N개"라고만 쓰면 더 좁은
-    // 숫자를 임박 전체인 것처럼 보여주고, 다른 필터가 걸려 있다는 사실도 숨긴다.
-    final String base =
-        filter.expiringSoonOnly ? '만료 임박 $count개' : '전체 $count개';
-    final String countLabel = filter.hasOptionFilter
-        ? (filter.expiringSoonOnly ? '$base · 필터 적용' : '$count개 · 필터 적용')
-        : base;
+    // 검색·만료 임박·상태·카테고리는 모두 AND로 결합한다. 그래서 둘 이상 겹치면 count는
+    // 어느 한 조건의 전부가 아니라 그 교집합이다 — "만료 임박 N개"라고만 쓰면 더 좁은
+    // 숫자를 임박 전체인 것처럼 보여주고, 다른 조건이 걸려 있다는 사실도 숨긴다.
+    //
+    // 그래서 앞머리에는 **가장 눈에 띄는 조건 하나만** 이름 붙이고(검색 > 만료 임박 >
+    // 그 외), 거기서 이름을 얻지 못한 조건이 더 남아 있으면 '· 필터 적용'을 덧붙인다.
+    // 검색을 맨 앞에 두는 것은 사용자가 방금 직접 친 조건이라 가장 먼저 확인하기 때문이다.
+    final String base = filter.hasSearchQuery
+        ? '검색 결과 $count개'
+        : filter.expiringSoonOnly
+            ? '만료 임박 $count개'
+            : filter.hasOptionFilter
+                ? '$count개'
+                : '전체 $count개';
+    final bool hasUnnamed = filter.hasOptionFilter ||
+        (filter.hasSearchQuery && filter.expiringSoonOnly);
+    final String countLabel = hasUnnamed ? '$base · 필터 적용' : base;
 
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -521,18 +607,28 @@ class _SectionHeader extends ConsumerWidget {
             ],
           ),
         ),
-        Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              sortOptionLabel(sort),
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: scheme.primary,
-                fontWeight: FontWeight.w700,
-              ),
+        // 화살표까지 그려 놓고 눌리지 않으면 고장으로 읽힌다. 검색바 옆 필터 버튼과
+        // **같은 시트**를 연다 — 정렬도 그 시트 안에 있으므로 진입점만 둘인 셈이다.
+        InkWell(
+          onTap: () => showSortFilterSheet(context),
+          borderRadius: BorderRadius.circular(AppRadii.dot),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  sortOptionLabel(sort),
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: scheme.primary,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                Icon(Icons.keyboard_arrow_down,
+                    size: 18, color: scheme.primary),
+              ],
             ),
-            Icon(Icons.keyboard_arrow_down, size: 18, color: scheme.primary),
-          ],
+          ),
         ),
       ],
     );
@@ -595,6 +691,10 @@ class _GifticonListState extends ConsumerState<_GifticonList> {
   Widget build(BuildContext context) {
     final String? highlightedId = ref.watch(highlightedGifticonIdProvider);
 
+    // 목록이 비었을 때 뭐라고 안내할지 가르는 데 쓴다(아래 빈 상태 분기). 조건부로
+    // watch하면 목록이 찼다 비었다 할 때 구독이 붙었다 떨어져, 여기서 미리 읽는다.
+    final GifticonFilter filter = ref.watch(filterProvider);
+
     // 강조가 거둬지면 다음 강조가 다시 스크롤할 수 있게 기록을 비운다.
     if (highlightedId == null) _scrolledFor = null;
 
@@ -606,9 +706,14 @@ class _GifticonListState extends ConsumerState<_GifticonList> {
     _scrollToHighlighted(highlightedId);
 
     if (widget.gifticons.isEmpty) {
-      return const SliverToBoxAdapter(
+      // 하나도 안 가진 것과, 걸러져서 안 보이는 것은 다른 상황이다. 후자에 "새 기프티콘을
+      // 추가해 보세요"라고 하면 가지고 있는 것이 사라졌다고 읽는다 — 그때 필요한 안내는
+      // 추가가 아니라 조건을 풀라는 쪽이다.
+      return SliverToBoxAdapter(
         child: _CenterMessage(
-          text: '표시할 기프티콘이 없습니다.\n새 기프티콘을 추가해 보세요.',
+          text: filter.isAnyActive
+              ? '조건에 맞는 기프티콘이 없습니다.\n검색어나 필터를 바꿔 보세요.'
+              : '표시할 기프티콘이 없습니다.\n새 기프티콘을 추가해 보세요.',
         ),
       );
     }
