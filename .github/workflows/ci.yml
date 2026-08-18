@@ -43,3 +43,35 @@ jobs:
 
       - name: Test
         run: flutter test
+
+  firestore-rules:
+    name: Firestore rules
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # `firestore.rules`는 배포 전까지 "문법만 맞는 문서"이고, 규칙 계층의 결함은
+      # Dart 테스트가 원리상 잡지 못한다(테스트는 in-memory 구현을 쓴다). 실제로
+      # 비멤버가 초대 없이 그룹에 합류하고 스스로 방장 role을 써넣을 수 있는 구멍이
+      # 이 방식으로만 드러났다. 그래서 에뮬레이터에 규칙을 걸고 실제 요청을 보낸다.
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # Firestore 에뮬레이터는 JVM에서 돈다.
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Install Firebase CLI
+        run: npm install -g firebase-tools
+
+      # demo- 접두 프로젝트라 자격증명 없이 뜬다.
+      - name: Verify firestore.rules
+        run: >-
+          firebase emulators:exec --project demo-keepcon --only auth,firestore
+          "bash tool/verify_firestore_rules.sh"

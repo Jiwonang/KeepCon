@@ -20,6 +20,7 @@ import '../../shared/util/expiry_policy.dart';
 import '../../shared/util/money_format.dart' show formatWon;
 import '../mypage/mypage_page.dart';
 import '../scan/scan_page.dart';
+import 'pages/gifticon_detail_page.dart';
 import 'state/gifticon_filter.dart';
 import 'state/gifticon_list_providers.dart';
 import 'state/gifticon_stats.dart';
@@ -727,6 +728,13 @@ class _GifticonListState extends ConsumerState<_GifticonList> {
           key: highlighted ? _highlightKey : null,
           gifticon: g,
           highlighted: highlighted,
+          // 셸의 push 패턴을 따른다(앱 전역이 MaterialPageRoute 직접 push — AppRoutes는
+          // 탭 라우트 문서용이라 실제 내비게이션에 쓰이지 않는다).
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute<void>(
+              builder: (BuildContext _) => GifticonDetailPage(gifticon: g),
+            ),
+          ),
         );
       },
     );
@@ -740,10 +748,14 @@ class _RichGifticonCard extends StatelessWidget {
   /// 알림을 타고 들어와 잠시 짚어 보여주는 중인지. 테두리로 표시한다.
   final bool highlighted;
 
+  /// 카드 탭 — 상세 화면 진입. null이면 비활성(잉크 반응도 없다).
+  final VoidCallback? onTap;
+
   const _RichGifticonCard({
     super.key,
     required this.gifticon,
     this.highlighted = false,
+    this.onTap,
   });
 
   @override
@@ -768,100 +780,116 @@ class _RichGifticonCard extends StatelessWidget {
 
     return AnimatedContainer(
       duration: const Duration(milliseconds: 250),
-      padding: const EdgeInsets.all(16),
       decoration: highlighted
           ? base.copyWith(
               border: Border.all(color: scheme.primary, width: 2),
             )
           : base,
-      child: Stack(
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                width: 64,
-                height: 84,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: brand.background,
-                  borderRadius: BorderRadius.circular(AppRadii.tile),
-                ),
-                child: Text(
-                  brand.label,
-                  style: TextStyle(
-                    color: brand.foreground,
-                    fontWeight: FontWeight.w900,
-                    fontSize: 18,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
+      // 잉크(리플)가 카드 배경 **위에** 그려지도록 [InkWell]을 컨테이너 안쪽에 둔다.
+      // 바깥에 두면 불투명한 surface 배경에 가려 눌린 반응이 보이지 않는다. 리플이
+      // 라운드 모서리 밖으로 번지지 않게 클립도 데코와 같은 반경으로 건다.
+      clipBehavior: Clip.antiAlias,
+      child: Material(
+        type: MaterialType.transparency,
+        child: InkWell(
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Stack(
+              children: [
+                Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(gifticon.brand,
-                        style: theme.textTheme.bodySmall,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis),
-                    const SizedBox(height: 2),
-                    Text(
-                      gifticon.productName,
-                      style: context.itemTitleStyle,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                    Container(
+                      width: 64,
+                      height: 84,
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: brand.background,
+                        borderRadius: BorderRadius.circular(AppRadii.tile),
+                      ),
+                      child: Text(
+                        brand.label,
+                        style: TextStyle(
+                          color: brand.foreground,
+                          fontWeight: FontWeight.w900,
+                          fontSize: 18,
+                        ),
+                      ),
                     ),
-                    const SizedBox(height: 2),
-                    Text(
-                      priceText,
-                      style: context.rowTitleStyle,
-                    ),
-                    const SizedBox(height: 10),
-                    Row(
-                      children: [
-                        Icon(Icons.schedule,
-                            size: 14,
-                            color:
-                                used ? scheme.onSurfaceVariant : scheme.error),
-                        const SizedBox(width: 4),
-                        Flexible(
-                          child: Text(
-                            '${formatYmdDot(gifticon.expiryDate)} 만료',
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color:
-                                  used ? scheme.onSurfaceVariant : scheme.error,
-                              fontWeight: FontWeight.w500,
-                            ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(gifticon.brand,
+                              style: theme.textTheme.bodySmall,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis),
+                          const SizedBox(height: 2),
+                          Text(
+                            gifticon.productName,
+                            style: context.itemTitleStyle,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                           ),
-                        ),
-                      ],
+                          const SizedBox(height: 2),
+                          Text(
+                            priceText,
+                            style: context.rowTitleStyle,
+                          ),
+                          const SizedBox(height: 10),
+                          Row(
+                            children: [
+                              Icon(Icons.schedule,
+                                  size: 14,
+                                  color: used
+                                      ? scheme.onSurfaceVariant
+                                      : scheme.error),
+                              const SizedBox(width: 4),
+                              Flexible(
+                                child: Text(
+                                  '${formatYmdDot(gifticon.expiryDate)} 만료',
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    color: used
+                                        ? scheme.onSurfaceVariant
+                                        : scheme.error,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Container(
+                      width: 56,
+                      height: 68,
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: brand.background.withValues(alpha: 0.10),
+                        borderRadius: BorderRadius.circular(AppRadii.thumb),
+                      ),
+                      child: Icon(Icons.card_giftcard,
+                          color: brand.background.withValues(alpha: 0.55),
+                          size: 24),
                     ),
                   ],
                 ),
-              ),
-              const SizedBox(width: 10),
-              Container(
-                width: 56,
-                height: 68,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: brand.background.withValues(alpha: 0.10),
-                  borderRadius: BorderRadius.circular(AppRadii.thumb),
+                Positioned(
+                  top: 0,
+                  right: 0,
+                  child: _DDayBadge(
+                      used: used, expired: expired, daysLeft: daysLeft),
                 ),
-                child: Icon(Icons.card_giftcard,
-                    color: brand.background.withValues(alpha: 0.55), size: 24),
-              ),
-            ],
+              ],
+            ),
           ),
-          Positioned(
-            top: 0,
-            right: 0,
-            child: _DDayBadge(used: used, expired: expired, daysLeft: daysLeft),
-          ),
-        ],
+        ),
       ),
     );
   }

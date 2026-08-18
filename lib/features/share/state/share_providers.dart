@@ -30,6 +30,7 @@ import '../../../shared/models/user.dart';
 import '../../../shared/providers/my_groups_provider.dart';
 import '../../../shared/providers/repositories.dart';
 import '../../../shared/providers/session_provider.dart';
+import '../../../shared/providers/shared_gifticons_provider.dart';
 
 // 세션은 계약 정본 [sessionUserProvider]를 각 파생·화면이 직접 `watch` 한다(경과 조치였던
 // 페이지 별칭 `shareCurrentUserProvider`는 제거됨 — 매트릭스 #13).
@@ -66,28 +67,11 @@ final groupByIdProvider =
   });
 });
 
-/// 특정 그룹의 공유 기프티콘 스트림.
-final sharedGifticonsProvider =
-    StreamProvider.family<List<SharedGifticon>, String>((ref, groupId) {
-  return ref.watch(shareRepositoryProvider).watchSharedGifticons(groupId);
-});
-
-/// 내 모든 그룹을 가로지른 공유 기프티콘(공유 메인 요약용).
-///
-/// 각 그룹별 [sharedGifticonsProvider]를 `watch`해 합친다. 어느 그룹의 스트림이 바뀌거나
-/// 내 그룹 집합이 바뀌면 자동 재계산된다(리액티브 결합).
-final allSharedProvider = Provider<List<SharedGifticon>>((ref) {
-  final List<Group> groups =
-      ref.watch(myGroupsProvider).valueOrNull ?? const <Group>[];
-  final List<SharedGifticon> out = <SharedGifticon>[];
-  for (final Group g in groups) {
-    out.addAll(
-      ref.watch(sharedGifticonsProvider(g.id)).valueOrNull ??
-          const <SharedGifticon>[],
-    );
-  }
-  return out;
-});
+// [sharedGifticonsProvider]·[allSharedProvider]는 계약 정본으로 승격됐다
+// (`lib/shared/providers/shared_gifticons_provider.dart`) — main 상세가 "이 기프티콘이
+// 공유 중인가"를 물어야 하는 두 번째 소비자가 됐기 때문이다. 별칭(재export shim)을 남기지
+// 않고 선언을 삭제한 뒤 정본을 직수입한다(#13 규약). 이 파일의 나머지 파생들은 import된
+// 정본을 그대로 `watch`하므로 호출 형태는 승격 전과 같다.
 
 /// id로 공유 항목 단건 조회(내 그룹들을 가로질러 탐색). 공유취소 등으로 사라지면 null.
 final sharedItemByIdProvider =
@@ -321,21 +305,10 @@ void _retrySessionIfFailed(WidgetRef ref) {
   }
 }
 
-/// 에러인 그룹별 공유 스트림 인스턴스만 재구독한다(내 **현재** 그룹 범위).
-///
-/// family 전체 invalidate를 쓰지 않는 이유 둘: ① 실패하지 않은 그룹의 Firestore
-/// 리스너까지 재시작돼 문서 읽기·과금이 그룹 수만큼 늘고(재시도가 필요한 건 에러
-/// 인스턴스뿐이다 — [_retrySessionIfFailed]와 같은 원칙), ② non-autoDispose family라
-/// 탈퇴한 그룹의 스테일 인스턴스도 재실행돼 비멤버 구독(permission-denied)을 되살린다.
-void _retryFailedSharedInstances(WidgetRef ref) {
-  final List<Group> groups =
-      ref.read(myGroupsProvider).valueOrNull ?? const <Group>[];
-  for (final Group g in groups) {
-    if (ref.read(sharedGifticonsProvider(g.id)).hasError) {
-      ref.invalidate(sharedGifticonsProvider(g.id));
-    }
-  }
-}
+// 에러인 그룹별 공유 스트림만 재구독하는 `_retryFailedSharedInstances`는 계약 정본
+// [retryFailedSharedGifticonStreams](`lib/shared/providers/shared_gifticons_provider.dart`)로
+// 승격됐다 — main 상세도 같은 축을 되살려야 하는 두 번째 소비자가 됐다. 사본을 남기면
+// 한쪽만 손볼 때 갈라지므로 선언을 삭제하고 정본을 직수입한다(#13 규약).
 
 /// 알림 스트림 수동 재시도 — **에러인** 원천만 invalidate해 재구독한다.
 ///
@@ -375,14 +348,14 @@ void retryUsageLogs(WidgetRef ref) {
 /// 화면 — 에러 여부와 무관하게 사용자가 그 그룹을 명시적으로 되살리는 의미). 인자가
 /// 없으면(share 메인·공유 상세처럼 전 그룹을 합쳐 보는 화면) **에러인 인스턴스만**
 /// 골라 재구독한다 — 합쳐 보는 화면이라도 재시도가 필요한 건 실패한 스트림뿐이다
-/// ([_retryFailedSharedInstances]의 근거 참조).
+/// ([retryFailedSharedGifticonStreams]의 근거 참조).
 void retrySharedGifticons(WidgetRef ref, {String? groupId}) {
   _retrySessionIfFailed(ref);
   if (groupId != null) {
     ref.invalidate(sharedGifticonsProvider(groupId));
     return;
   }
-  _retryFailedSharedInstances(ref);
+  retryFailedSharedGifticonStreams(ref);
 }
 
 /// 공유 항목 단건 조회([sharedItemByIdProvider]) 실패의 수동 재시도.
@@ -390,12 +363,12 @@ void retrySharedGifticons(WidgetRef ref, {String? groupId}) {
 /// 조회는 **내 그룹 목록 × 그룹별 공유 목록**을 가로지르므로 실패 원인이 두 축 중
 /// 어느 쪽이든 될 수 있다([sharedItemLookupHasErrorProvider]가 그 합집합이다). 그래서
 /// 두 축을 함께 되살린다 — 각 축은 여전히 **에러인 계층만** 재구독하므로(계약
-/// [retryMyGroups] + [_retryFailedSharedInstances]) 멀쩡한 스트림은 건드리지 않는다.
+/// [retryMyGroups] + [retryFailedSharedGifticonStreams]) 멀쩡한 스트림은 건드리지 않는다.
 ///
 /// 세션 계층은 [retryMyGroups]가 맡으므로 [_retrySessionIfFailed]를 겹쳐 부르지 않는다.
 void retrySharedItemLookup(WidgetRef ref) {
   retryMyGroups(ref);
-  _retryFailedSharedInstances(ref);
+  retryFailedSharedGifticonStreams(ref);
 }
 
 /// 공유 시트 후보 수동 재시도 — 후보 계산 경로(내 기프티콘 + 내 그룹 목록 + 그룹별

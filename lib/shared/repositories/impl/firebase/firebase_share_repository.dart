@@ -199,7 +199,16 @@ class FirebaseShareRepository implements ShareRepository {
         tx.delete(ref);
         cascade = true;
       } else {
-        tx.update(ref, _groupToDoc(g.copyWith(members: remaining)));
+        // 전체 문서가 아니라 **memberIds 한 필드만** 쓴다. 보안 규칙의 '나가기'
+        // 분기가 그 필드만 허용하기 때문이다 — `members`(맵 배열)까지 열어 주면 규칙이
+        // "지워진 원소가 정말 본인인가"를 확인할 수 없어, 나가면서 남을 지우는 조작이
+        // 통과한다. 떠난 멤버의 표시용 항목은 `_groupFromDocOrNull`이 읽을 때 걸러내고,
+        // 다음 방장 쓰기에서 문서에서도 정리된다.
+        //
+        // 전체 문서를 다시 쓰지 않는 또 다른 이유: 레거시 문서에 없던 필드(inviteExpiresAt·
+        // maxMembers 등)가 기본값으로 채워지며 함께 변경돼 규칙 조건이 깨진다. 팀 공용
+        // 시드 그룹이 정확히 그 모양이라, 전체 쓰기로는 아무도 그룹을 나갈 수 없다.
+        tx.update(ref, _memberIdsPatch(remaining));
       }
     });
 
@@ -695,12 +704,22 @@ class FirebaseShareRepository implements ShareRepository {
                   'role': m.role.name,
                 })
             .toList(growable: false),
-        // 조회용 역정규화 — watchGroups의 array-contains 대상.
+        // 멤버십의 **정본** — watchGroups의 array-contains 대상이자 보안 규칙의
+        // 멤버십 판정 기준이다. 위의 `members`는 표시용 메타데이터다.
         'memberIds':
             g.members.map((GroupMember m) => m.userId).toList(growable: false),
         // 소유자 역정규화 — 보안 규칙이 방장 판정에 쓴다(members 배열 순회는 규칙에서 어려움).
         // 모든 그룹 write가 _groupToDoc을 거치므로 멤버 변경 시 자동으로 동기화된다.
         'ownerId': g.owner.userId,
+      };
+
+  /// 멤버 이탈만 반영하는 부분 갱신 페이로드([leaveGroup] 전용).
+  ///
+  /// 보안 규칙의 '나가기' 분기는 `memberIds` 외의 변경을 거부하므로 이 한 필드만 보낸다.
+  Map<String, dynamic> _memberIdsPatch(List<GroupMember> members) =>
+      <String, dynamic>{
+        'memberIds':
+            members.map((GroupMember m) => m.userId).toList(growable: false),
       };
 
   /// 문서 → [Group]. **비멤버/멤버0/방장≠1** 등 [Group] 불변식을 못 만족하는 손상
@@ -709,7 +728,7 @@ class FirebaseShareRepository implements ShareRepository {
     final Map<String, dynamic> data = doc.data() ?? const <String, dynamic>{};
     final List<dynamic> rawMembers =
         (data['members'] as List<dynamic>?) ?? const <dynamic>[];
-    final List<GroupMember> members = rawMembers
+    final List<GroupMember> parsed = rawMembers
         .whereType<Map<String, dynamic>>()
         .map((Map<String, dynamic> m) => GroupMember(
               userId: m['userId'] as String? ?? '',
@@ -718,6 +737,18 @@ class FirebaseShareRepository implements ShareRepository {
               role: _roleFromName(m['role'] as String?),
             ))
         .toList(growable: false);
+    // 멤버십의 정본은 `memberIds`다 — 목록 쿼리(array-contains)와 보안 규칙의 멤버십
+    // 판정이 모두 그 필드를 본다. 멤버 '나가기'는 규칙상 `memberIds`만 바꿀 수 있으므로
+    // (`members`까지 열어 주면 나가면서 남을 지우는 조작이 통과한다) 떠난 사람의
+    // 표시용 항목이 잠시 남는다. 여기서 걸러 두 필드의 불일치가 화면에 새지 않게 한다.
+    // 남은 항목은 다음 방장 쓰기(`_groupToDoc`)에서 문서에서도 사라진다.
+    final List<dynamic>? rawIds = data['memberIds'] as List<dynamic>?;
+    final List<GroupMember> members = rawIds == null
+        // 레거시 문서엔 memberIds가 없을 수 있다 — 그때는 members를 그대로 믿는다.
+        ? parsed
+        : parsed
+            .where((GroupMember m) => rawIds.contains(m.userId))
+            .toList(growable: false);
     // Group 생성자 불변식(멤버≥1, 방장 정확히 1명)을 못 지키면 스킵.
     final int owners =
         members.where((GroupMember m) => m.role == MemberRole.owner).length;

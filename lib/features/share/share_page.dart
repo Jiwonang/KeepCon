@@ -24,6 +24,7 @@ import '../../shared/models/user.dart';
 import '../../shared/providers/my_groups_provider.dart'
     show myGroupsProvider, retryMyGroups;
 import '../../shared/providers/session_provider.dart';
+import '../../shared/providers/shared_gifticons_provider.dart';
 import '../../shared/theme/theme_tokens.dart';
 import 'pages/group_detail_page.dart';
 import 'pages/group_notifications_page.dart';
