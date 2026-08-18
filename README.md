@@ -68,6 +68,7 @@ lib/
 - *(Android 기기로 띄울 경우 추가)* **JDK 17+** · Android SDK — 웹으로만 개발하면 필요 없습니다. [Android 기기로 띄우기](#-android-기기로-띄우기-실기기--avd) 참조
 
 ### 설치 (처음 한 번만)
+
 ```bash
 git clone https://github.com/Jiwonang/KeepCon.git
 cd KeepCon
@@ -330,6 +331,7 @@ flutter run                                    # 플래그 없음 = 로컬 에�
 **방법 B — `gh` CLI (프로그램적 설정)**
 
 아래 JSON을 `ruleset.json`으로 저장하고 소유자 계정으로 실행합니다:
+
 ```json
 {
   "name": "protect-main-develop",
@@ -344,6 +346,7 @@ flutter run                                    # 플래그 없음 = 로컬 에�
   ]
 }
 ```
+
 ```bash
 gh api -X POST repos/Jiwonang/KeepCon/rulesets --input ruleset.json
 ```
@@ -354,25 +357,26 @@ gh api -X POST repos/Jiwonang/KeepCon/rulesets --input ruleset.json
 
 - 룰셋 → **Require review from Code Owners** — [`CODEOWNERS`](.github/CODEOWNERS)에 지정된 계약 소유자 리뷰 없이는 `lib/shared`·하네스 설정 변경을 머지 불가(페이지 담당의 계약 임의 수정 차단).
 - 룰셋 → **Require branches to be up to date before merging** — 오래된 브랜치는 최신화 전까지 머지 차단(스테일 머지 방지).
-- 룰셋 → 필수 상태 체크에 **`CodeRabbit / Review`** 추가 — 리뷰가 붙지 않은 PR 머지 차단. ⚠️ **지금은 걸려 있지 않다고 가정하세요** — PR #90은 CodeRabbit이 한 번도 돌지 않은 상태에서 `mergeable_state: clean`이었습니다(필수 체크 미완료면 `blocked`여야 함). 즉 트리거를 깜빡한 PR을 게이트가 막아 주지 못하므로, **리뷰 본문을 눈으로 확인하고 머지**해야 합니다. 소유자가 룰셋에서 등록 여부를 확인해 없으면 추가해 주세요.
+- ⛔ 룰셋 → 필수 상태 체크에 **`CodeRabbit / Review`는 추가하지 마세요.** 예전 안내였지만 **효과가 없는 것으로 확인**됐습니다 — CodeRabbit 체크는 리뷰 여부와 무관하게 항상 `pass 0s`이고(PR #89·#93·#94 관측: `Review skipped: manual review required for this OSS repository`), 그 이름의 컨텍스트는 어느 PR에서도 보고된 적이 없어 등록하면 **영원히 pending으로 남아 모든 머지가 막힐** 수 있습니다. 리뷰 층은 게이트가 아니라 [`keepcon-review-gate`](.claude/skills/keepcon-review-gate/SKILL.md) 절차로 지킵니다.
 - 룰셋 → **Do not allow bypassing the above settings**(admin 포함) — 규칙의 뿌리를 admin 우회로부터 보호.
 - Settings → Code security → **Secret scanning + Push protection**(Public 무료) — 비밀정보가 포함된 push를 서버가 거부(`.gitignore`는 게이트가 아니므로 이게 진짜 백스톱).
 
 ### 코드 리뷰 정책
 
-세 층으로 품질을 관리합니다 (층위가 서로 달라 **중첩 운영**):
+**네 층**으로 품질을 관리합니다 (층위가 서로 달라 **중첩 운영**):
 
-- **CI 게이트 (필수·자동):** 모든 PR에서 `Format · Analyze · Test`(**SSOT guard** · dart format · flutter analyze · flutter test) 통과 — 안정성의 기반. `SSOT guard`([`tool/check_ssot.sh`](tool/check_ssot.sh))는 `lib/features`에서 공유 계약 타입·provider를 재정의/재선언하면 실패시켜 SSOT를 기계적으로 강제합니다.
-- **AI 리뷰 — CodeRabbit (⚠️ 지금은 수동 트리거):** CodeRabbit이 협업 규칙 준수·버그를 리뷰합니다. 리뷰 설정은 [`.coderabbit.yaml`](.coderabbit.yaml)에 한국어로 정의(별도 API 키·워크플로 불필요). **단, 설정 파일만으로는 동작하지 않는다** — CodeRabbit은 **GitHub App**이라 저장소에 설치·접근 허용되어야 리뷰가 붙습니다.
-  - **⚠️ PR을 열어도 자동으로 리뷰하지 않습니다.** CodeRabbit은 **스타 10개 미만 저장소를 수동 트리거로 전환**했습니다(`Reviews should be triggered manually for repositories with fewer than 10 stars`). KeepCon은 여기 해당하며, 봇은 "Review available on request" 안내만 남깁니다.
-    - **돌리는 법:** PR에 `@coderabbitai review` 댓글을 달거나, 봇 코멘트의 **`🔍 Trigger review` 체크박스** 클릭. `Review triggered` 응답이 오면 **접수된** 것이고, 리뷰 본문은 몇 분 뒤 올라옵니다.
-    - **🚧 머지 기준은 리뷰 본문입니다.** `Review triggered` 응답만으로 머지하지 마세요 — 그건 접수 확인일 뿐입니다. **`Actionable comments posted: N` 같은 리뷰 본문이 실제로 게시된 것을 확인한 뒤에만** 머지합니다.
-    - **왜 중요한가:** 이걸 모르면 **봇의 침묵을 "지적 없음"으로 읽습니다.** 3층 방어 중 한 층이 비었는데 티가 안 나는 상태가 red보다 위험합니다.
-    - **⚠️ 트리거해도 튕길 수 있습니다 — 리뷰 할당량.** 리뷰 수는 일정 시간 창(rolling window) 안에서 제한됩니다. 소진 상태면 `⚠️ Action not completed / Review rate limited`와 함께 남은 대기 시간을 알려줍니다(`Next review available in: N minutes`). **PR을 연달아 올리면 두 번째는 기다렸다 다시 트리거**해야 합니다. 현재 잔량은 `@coderabbitai rate limit` 로 물어볼 수 있습니다.
+- **1층 · CI 게이트 (필수·자동):** 모든 PR에서 **세 잡**을 통과해야 합니다 — `Format · Analyze · Test`(**SSOT guard** · dart format · flutter analyze · flutter test), `Firestore rules`, `Markdown lint`. `SSOT guard`는 첫 잡의 **스텝**이라 `gh pr checks`에 별도 항목으로 뜨지 않습니다. `SSOT guard`([`tool/check_ssot.sh`](tool/check_ssot.sh))는 `lib/features`에서 공유 계약 타입·provider를 재정의/재선언하면 실패시켜 SSOT를 기계적으로 강제합니다. `Markdown lint`([`.markdownlint-cli2.jsonc`](.markdownlint-cli2.jsonc))는 리뷰가 반복해서 지적하던 문서 포맷을 기계로 옮긴 것입니다 — 켜는 룰은 실제 지적에 대응하는 5개뿐입니다(기본 룰셋 전체는 위반 2,500건이라 소음이 됩니다).
+- **2층 · 에이전트 리뷰 — [`keepcon-code-reviewer`](.claude/agents/keepcon-code-reviewer.md) (기본 리뷰, 항상):** 변경 diff를 6개 축(기능 정확성·유지보수성·데이터 정합성·안정성·보안·성능)으로 리뷰합니다. 분류와 검증 방식은 CodeRabbit이 이 저장소 PR #40~#95에 남긴 **인라인 지적 122건을 분석해** 물려받았습니다. 코드를 쓴 맥락을 공유하지 않는 에이전트가 처음부터 읽는 것이 이 층의 존재 이유입니다.
+  - 봇이 못 하던 **실행 검증**이 이 층의 우위입니다 — `flutter test`를 돌리고, 보안 규칙이 얽히면 에뮬레이터로 실제 요청을 보내 재현합니다(`firestore.rules`의 권한 위조 구멍은 이 방법으로만 드러났습니다 — 그 PR #89는 CodeRabbit이 할당량에 걸려 한 번도 리뷰하지 못했습니다).
+- **3층 · AI 리뷰 — CodeRabbit (두 번째 의견, ⚠️ 수동 트리거):** 협업 규칙 준수·버그를 리뷰합니다. 설정은 [`.coderabbit.yaml`](.coderabbit.yaml)에 한국어로 정의(별도 API 키·워크플로 불필요). **단, 설정 파일만으로는 동작하지 않습니다** — CodeRabbit은 **GitHub App**이라 저장소에 설치·접근 허용되어야 합니다.
+  - **⚠️ 이 층은 자주 빕니다 — 그래서 예비입니다.** ①**PR을 열어도 자동으로 리뷰하지 않습니다**(스타 10개 미만 저장소는 수동 트리거로 전환됨) ②트리거해도 시간 창 **할당량**에 걸려 `Review rate limited`로 튕깁니다(PR #90이 써서 #92가 두 번 튕겼습니다). 리뷰가 없는 PR이 생기지 않도록 **2층을 기본으로 두고 이 층을 얹는** 순서입니다.
+    - **돌리는 법:** PR에 `@coderabbitai review` 댓글, 또는 봇 코멘트의 **`🔍 Trigger review` 체크박스**. 잔량은 `@coderabbitai rate limit`.
+    - **🚧 머지 기준은 리뷰 본문입니다.** `Review triggered`는 접수 확인일 뿐입니다. `Actionable comments posted: N`이 있어도 **그 뒤 푸시한 커밋은 리뷰되지 않았습니다**(증분 리뷰) — 재트리거하세요.
+    - **⚠️ CodeRabbit 체크의 green은 정보가 없습니다.** 리뷰 여부와 무관하게 항상 `pass`라 게이트로 쓸 수 없습니다. 판정은 [`keepcon-review-gate`](.claude/skills/keepcon-review-gate/SKILL.md)의 3분기 명령으로 합니다(`REVIEWED`/`RATE_LIMITED`/`NOT_TRIGGERED`) — 리뷰 본문이 `comments`가 아니라 `reviews`에 실리는 PR이 있어 눈으로 세면 오판합니다.
     - **원래대로 되돌리려면:** 스타가 **10개 이상이면** 자동 리뷰로 복귀합니다(할당량 제한은 별개라 그대로 남습니다).
   - **활성화(1회, 소유자):** [github.com/settings/installations](https://github.com/settings/installations) → CodeRabbit → *Configure* → *Repository access*에 `Jiwonang/KeepCon` 추가(*All repositories*도 가능). 계정에 아직 App이 없으면 [github.com/apps/coderabbitai](https://github.com/apps/coderabbitai)에서 설치.
   - **비용:** **Public 저장소는 무료**, Private는 유료(Pro)·무료 체험. KeepCon은 Public이라 App 범위에만 추가하면 무료로 동작합니다. (동작 여부=App 접근 범위, 비용=공개여부 — 별개.)
-- **커밋 전 AI 리뷰 — `/code-review` (온디맨드):** Claude Code로 작업할 때 **커밋 전** 변경 diff를 리뷰·수정한 뒤 커밋. 릴리스 전 `/security-review`로 보안 점검.
+- **4층 · 커밋 전 자체 리뷰 — `/code-review` (온디맨드):** Claude Code로 작업할 때 **커밋 전** 변경 diff를 리뷰·수정한 뒤 커밋합니다. 릴리스 전 `/security-review`로 보안 점검.
 
 ---
 
@@ -481,6 +485,7 @@ flutter run -d chrome --dart-define=USE_FIREBASE=true
 # 에뮬레이터가 떠 있는 상태에서 — bash
 bash tool/verify_firestore_rules.sh
 ```
+
 ```bat
 :: cmd·PowerShell
 tool\verify_firestore_rules.cmd
@@ -545,7 +550,7 @@ flutterfire configure --project=keepcon-ab660 --platforms=android,web \
 > ⚠️ 그래서 **위 명령을 돌린 뒤에는 되돌릴 것이 있습니다.** CLI가 아래를 되살려 놓으므로 전부 지우고 커밋하세요:
 > - `android/app/google-services.json` (`.gitignore`에 등록돼 있어 커밋되지는 않습니다)
 > - `com.google.gms.google-services` 플러그인 **적용**([`android/app/build.gradle.kts`](android/app/build.gradle.kts)) — `settings.gradle.kts`의 `apply false` 선언은 적용이 아니라 무해합니다
-
+<!-- markdownlint MD028: 위·아래는 서로 다른 주제의 주의사항이라 하나의 인용으로 합치지 않는다 -->
 > ⚠️ **Firestore 에디션은 반드시 Standard입니다.** Enterprise는 MongoDB 호환 API용이라 `cloud_firestore` SDK도 `request.auth.uid` 기반 보안 규칙도 동작하지 않습니다. 콘솔에서 DB를 새로 만들 일이 있으면 Standard/Native를 고르세요.
 >
 > ⚠️ **리전은 변경할 수 없습니다.** `asia-northeast3`는 생성 시점에 확정됐습니다. 바꾸려면 프로젝트를 새로 만들어야 합니다.
@@ -561,6 +566,7 @@ bash tool/deploy_rules.sh          # dev 에만 (기본)
 bash tool/deploy_rules.sh prod     # 실서비스. 'prod' 를 입력해야 진행
 bash tool/deploy_rules.sh all      # dev 먼저, 성공하면 prod
 ```
+
 ```bat
 :: cmd·PowerShell
 tool\deploy_rules.cmd all
@@ -578,9 +584,11 @@ tool\deploy_rules.cmd all
 
 1. `firebase projects:create <프로젝트-id> --display-name "..."`
 2. `dart pub global activate flutterfire_cli` 후 — dev면 `--out`으로 파일을 나눕니다:
+
    ```bash
    flutterfire configure --project=<id> --platforms=web --out=lib/firebase_options_dev.dart
    ```
+
 3. 콘솔에서 **Cloud Firestore**(Standard·Native·`asia-northeast3`) · **Authentication**(이메일/비밀번호) 활성화
    — Firestore는 콘솔에서 한 번 열어야 API가 켜지고, 그 뒤에는 CLI로도 만들 수 있습니다:
    `firebase firestore:databases:create "(default)" --location=asia-northeast3 --project <id>`

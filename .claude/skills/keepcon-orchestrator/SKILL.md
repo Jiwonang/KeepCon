@@ -48,7 +48,8 @@ KeepCon의 개발 에이전트 팀을 조율하여 Flutter 앱을 구현하는 �
 ### Phase 2: 팀 구성
 
 1. 팀 생성:
-   ```
+
+   ```text
    TeamCreate(
      team_name: "keepcon-team",
      members: [
@@ -69,7 +70,8 @@ KeepCon의 개발 에이전트 팀을 조율하여 Flutter 앱을 구현하는 �
    ```
 
 2. 작업 등록 (`depends_on`으로 순서 강제):
-   ```
+
+   ```text
    TaskCreate(tasks: [
      { title: "공유 계약 v1 확정", assignee: "contract-architect" },
      { title: "auth 페이지 구현", assignee: "auth-settings-dev", depends_on: ["공유 계약 v1 확정"] },
@@ -113,7 +115,7 @@ KeepCon의 개발 에이전트 팀을 조율하여 Flutter 앱을 구현하는 �
 
 ## 데이터 흐름
 
-```
+```text
 [리더] → TeamCreate → contract-architect ──(계약 브로드캐스트)──▶ 4 페이지 개발자
                               │                                    │  ↕ SendMessage
                        lib/shared/**                         lib/features/*/**

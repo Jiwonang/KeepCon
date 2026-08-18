@@ -101,6 +101,7 @@
 - 기계 검증 4종 전부 green. blocker·major 없음, minor 4건(전부 비차단).
 
 ## 경계면별 판정
+
 | # | 경계면 | 판정 | 교차 비교 근거 (생산자 ↔ 소비자) |
 |---|--------|------|--------------------------------|
 | 1 | scan → share 계약 (`shareGifticon`) | **통과** | 시그니처: 계약 `share_repository.dart:145-148` `shareGifticon({required String groupId, required Gifticon gifticon}) → Future<SharedGifticon>` ↔ 호출부 `gifticon_form_state.dart:759-762` 명명 인자 일치. **행위자 규약 준수** — actor를 파라미터로 넘기지 않음(계약 `share_repository.dart:9` "이 인터페이스는 행위자 id를 파라미터로 받지 않는다"), 구현이 `_requireUser()`로 세션 해석(`in_memory_share_repository.dart:401`). **1회 공유 불변식 충돌 없음(양쪽 구현 확인)** — draft `id: ''`(`gifticon_form_state.dart:694`)이지만 `InMemoryGifticonRepository.addGifticon`이 `gifticon-${++_seq}` 발급(`in_memory_gifticon_repository.dart:31`), `FirebaseGifticonRepository`가 `ref.id` 발급(`firebase_gifticon_repository.dart:42-43`) → `saved.id`는 항상 유일·비어있지 않음 → `_isAlreadyShared(saved.id, me.id)` 항상 false(`in_memory_share_repository.dart:410`). 어느 한쪽이라도 `id: ''`를 유지했다면 두 번째 저장부터 불변식 오검출 + Firestore `_locks.doc('')` 예외가 났을 지점 — 통과 확인. `getGroupById`도 계약 메서드(`share_repository.dart:43`, 없으면 null) 그대로 소비. SSOT provider 경유(`_ref.read(shareRepositoryProvider)`, `gifticon_form_state.dart:673`) — 구현체 직접 인스턴스화 없음 |
@@ -117,6 +118,7 @@
 - `flutter test`: **150 passed** ✓ (feat/scan-camera 시점 109 → 신규 테스트 포함 증가, 회귀 0)
 
 ## 회귀 확인 (이전 리포트 지적 항목)
+
 | 이전 지적 | 현재 | 근거 |
 |---|---|---|
 | [치명] Repository provider 중복 선언 → 인스턴스 분기 | **유지 수정됨** | scan 신규 provider도 SSOT를 watch. `lib/features`에 provider 재선언 0(SSOT guard ✓) |
