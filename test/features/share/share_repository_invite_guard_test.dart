@@ -103,7 +103,7 @@ void main() {
         id: 'g',
         name: 'g',
         emoji: '🎁',
-        inviteCode: '000000',
+        inviteToken: '000000',
         members: const <GroupMember>[
           GroupMember(
             userId: 'user-1',
@@ -133,7 +133,7 @@ void main() {
           id: 'g',
           name: 'g',
           emoji: '🎁',
-          inviteCode: '000000',
+          inviteToken: '000000',
           inviteExpiresAt: expiresAt,
           members: const <GroupMember>[
             GroupMember(
@@ -200,7 +200,7 @@ void main() {
     test('미발견 코드는 데모용 가짜 그룹으로 합류(in-memory 스텁)', () async {
       final Group joined = await repo.joinGroup('999999');
       expect(joined.id, isNot('g_family'));
-      expect(joined.inviteCode, '999999');
+      expect(joined.inviteToken, '999999');
       expect(joined.isMember(me), isTrue);
     });
   });

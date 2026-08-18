@@ -46,7 +46,7 @@ abstract class ShareRepository {
   /// 새 그룹을 생성한다. 행위자가 방장([MemberRole.owner])이 된다.
   ///
   /// [maxMembers]는 그룹 인원 상한(방장 포함, 기본 [Group.defaultMaxMembers], 최소 1).
-  /// 함께 발급되는 초대코드는 생성 시점부터 [Group.inviteValidity](24시간) 동안만 유효하다
+  /// 함께 발급되는 초대 토큰은 생성 시점부터 [Group.inviteValidity](24시간) 동안만 유효하다
   /// ([Group.inviteExpiresAt]).
   /// 세션에 현재 사용자가 없으면 [StateError].
   Future<Group> createGroup({
@@ -55,13 +55,13 @@ abstract class ShareRepository {
     int maxMembers,
   });
 
-  /// 초대코드로 그룹에 참여한다. 행위자가 멤버([MemberRole.member])로 합류한다.
+  /// 초대 토큰으로 그룹에 참여한다. 행위자가 멤버([MemberRole.member])로 합류한다.
   ///
-  /// 가드: 초대코드에 해당하는 그룹이 없으면 [StateError]. 그룹의
+  /// 가드: 초대 토큰에 해당하는 그룹이 없으면 [StateError]. 그룹의
   /// [Group.inviteExpiresAt]가 지났으면([Group.isInviteExpired]) [StateError]로 거부한다.
   /// 정원이 찼으면([Group.isFull]) [StateError]로 거부한다.
   /// 이미 멤버면 no-op으로 현재 그룹을 반환한다(정원/만료 가드보다 우선).
-  Future<Group> joinGroup(String inviteCode);
+  Future<Group> joinGroup(String inviteToken);
 
   /// 그룹에서 나간다.
   ///
@@ -106,14 +106,14 @@ abstract class ShareRepository {
     required bool ownerOnly,
   });
 
-  /// 초대코드를 재발급한다 — 새 코드를 발급해 **기존 코드/링크를 무효화**한다.
+  /// 초대 토큰을 재발급한다 — 새 토큰을 발급해 **기존 링크를 무효화**한다.
   ///
   /// 만료([Group.inviteExpiresAt])는 재발급 시점 + [Group.inviteValidity](24시간)로 다시
   /// 계산된다. 만료된 초대를 되살리는 유일한 경로이며, 만료 기간 자체는 고를 수 없다.
   ///
   /// 가드: 방장 본인만 재발급할 수 있다. 위반/그룹 없음이면 [StateError].
   /// 성공 시 갱신된(새 코드·만료 갱신) 그룹을 반환한다.
-  Future<Group> regenerateInviteCode({required String groupId});
+  Future<Group> regenerateInviteToken({required String groupId});
 
   // ── 공유 기프티콘 ────────────────────────────────────────────────────
   /// 특정 그룹의 공유 기프티콘 목록을 반응형으로 관찰한다.

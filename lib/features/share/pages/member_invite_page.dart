@@ -8,7 +8,7 @@
 ///
 /// **만료는 고르는 값이 아니다** — 모든 초대는 발급 시점부터 [Group.inviteValidity](24시간)
 /// 동안만 유효한 고정 정책이라, 이 화면은 남은 유효기간을 **표시만** 한다. 만료된 초대를
-/// 되살리는 경로는 방장의 "코드 재발급"([ShareRepository.regenerateInviteCode])뿐이다.
+/// 되살리는 경로는 방장의 "코드 재발급"([ShareRepository.regenerateInviteToken])뿐이다.
 library;
 
 import 'dart:async';
@@ -149,7 +149,7 @@ class _MemberInvitePageState extends ConsumerState<MemberInvitePage> {
     try {
       await ref
           .read(shareRepositoryProvider)
-          .regenerateInviteCode(groupId: groupId);
+          .regenerateInviteToken(groupId: groupId);
       messenger
         ..hideCurrentSnackBar()
         ..showSnackBar(
@@ -239,9 +239,9 @@ class _MemberInvitePageState extends ConsumerState<MemberInvitePage> {
             const SizedBox(height: 16),
             _CopyField(
               label: '초대코드',
-              value: g.inviteCode,
+              value: g.inviteToken,
               emphasize: true,
-              onCopy: expired ? null : () => _copy(g.inviteCode, '초대코드'),
+              onCopy: expired ? null : () => _copy(g.inviteToken, '초대코드'),
             ),
             // 방장만 재발급 가능 — 기존 코드/링크 무효화.
             if (iAmOwner)
@@ -391,7 +391,7 @@ class _CopyField extends StatelessWidget {
                       Text(
                         value,
                         style: emphasize
-                            ? context.inviteCodeStyle
+                            ? context.inviteTokenStyle
                             : theme.textTheme.bodyLarge?.copyWith(
                                 fontSize: 17,
                                 fontWeight: FontWeight.w700,

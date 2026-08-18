@@ -120,7 +120,7 @@ class FirebaseShareRepository implements ShareRepository {
       id: ref.id,
       name: name,
       emoji: emoji,
-      inviteCode: _randomCode(),
+      inviteToken: _randomToken(),
       maxMembers: maxMembers,
       members: <GroupMember>[
         GroupMember(
@@ -136,13 +136,15 @@ class FirebaseShareRepository implements ShareRepository {
   }
 
   @override
-  Future<Group> joinGroup(String inviteCode) async {
+  Future<Group> joinGroup(String inviteToken) async {
     final User me = _requireUser();
     // 초대코드로 실제 그룹을 찾아 합류한다(mock의 가짜 그룹 생성과 달리 실 참여).
-    final QuerySnapshot<Map<String, dynamic>> q =
-        await _groups.where('inviteCode', isEqualTo: inviteCode).limit(1).get();
+    final QuerySnapshot<Map<String, dynamic>> q = await _groups
+        .where('inviteToken', isEqualTo: inviteToken)
+        .limit(1)
+        .get();
     if (q.docs.isEmpty) {
-      throw StateError('No group for invite code: $inviteCode');
+      throw StateError('No group for invite token: $inviteToken');
     }
     final DocumentReference<Map<String, dynamic>> ref = q.docs.first.reference;
 
@@ -153,7 +155,7 @@ class FirebaseShareRepository implements ShareRepository {
       if (g.isMember(me.id)) return g; // 이미 멤버면 no-op.
       // 만료된 초대코드는 참여 거부(가드는 트랜잭션 안에서 최신 문서 기준으로 판정).
       if (g.isInviteExpired(DateTime.now())) {
-        throw StateError('Invite code expired: $inviteCode');
+        throw StateError('Invite token expired: $inviteToken');
       }
       // 정원 초과 참여 거부(트랜잭션 안에서 최신 멤버 수 기준으로 판정).
       if (g.isFull) {
@@ -319,7 +321,7 @@ class FirebaseShareRepository implements ShareRepository {
   }
 
   @override
-  Future<Group> regenerateInviteCode({required String groupId}) async {
+  Future<Group> regenerateInviteToken({required String groupId}) async {
     final User me = _requireUser();
     final DocumentReference<Map<String, dynamic>> ref = _groups.doc(groupId);
     // 만료 창은 재발급 시점부터 다시 24시간(트랜잭션 재시도에도 값이 흔들리지 않게 밖에서 고정).
@@ -333,9 +335,9 @@ class FirebaseShareRepository implements ShareRepository {
         throw StateError('Only the owner can regenerate invite code: $groupId');
       }
       final Group updated =
-          g.copyWith(inviteCode: _randomCode(), inviteExpiresAt: expiresAt);
+          g.copyWith(inviteToken: _randomToken(), inviteExpiresAt: expiresAt);
       tx.update(ref, <String, dynamic>{
-        'inviteCode': updated.inviteCode,
+        'inviteToken': updated.inviteToken,
         'inviteExpiresAt': Timestamp.fromDate(expiresAt),
       });
       return updated;
@@ -692,7 +694,7 @@ class FirebaseShareRepository implements ShareRepository {
   Map<String, dynamic> _groupToDoc(Group g) => <String, dynamic>{
         'name': g.name,
         'emoji': g.emoji,
-        'inviteCode': g.inviteCode,
+        'inviteToken': g.inviteToken,
         'inviteOwnerOnly': g.inviteOwnerOnly,
         'inviteExpiresAt': Timestamp.fromDate(g.inviteExpiresAt),
         'maxMembers': g.maxMembers,
@@ -762,7 +764,10 @@ class FirebaseShareRepository implements ShareRepository {
       id: doc.id,
       name: data['name'] as String? ?? '',
       emoji: data['emoji'] as String? ?? '🎁',
-      inviteCode: data['inviteCode'] as String? ?? '',
+      // 레거시 문서는 이 필드를 `inviteCode`로 갖고 있다(토큰으로 이름을 바꾸기 전).
+      // 읽을 때만 받아 주고, 그 그룹에 다음 쓰기가 일어나면 새 이름으로 옮겨간다.
+      inviteToken:
+          data['inviteToken'] as String? ?? data['inviteCode'] as String? ?? '',
       inviteOwnerOnly: data['inviteOwnerOnly'] as bool? ?? false,
       inviteExpiresAt: _inviteExpiresAtFrom(data['inviteExpiresAt']),
       maxMembers: maxMembers,
@@ -866,7 +871,7 @@ class FirebaseShareRepository implements ShareRepository {
   /// 값이 없거나(24시간 정책 이전에 만들어진 레거시 문서 = 만료 필드 없음/`null`)
   /// [Timestamp]·[DateTime]이 아닌 손상 값이면 이미 만료된 것(epoch)으로 취급해 참여를
   /// 거부한다. 레거시 그룹의 코드는 어차피 발급된 지 24시간이 지났으므로 정책상 만료가 맞고,
-  /// 방장이 `regenerateInviteCode`로 새 코드를 받으면 정상 복구된다.
+  /// 방장이 `regenerateInviteToken`로 새 코드를 받으면 정상 복구된다.
   DateTime _inviteExpiresAtFrom(Object? value) {
     if (value is Timestamp) return value.toDate();
     if (value is DateTime) return value;
@@ -890,7 +895,7 @@ class FirebaseShareRepository implements ShareRepository {
     return GroupNotificationType.registered;
   }
 
-  String _randomCode() {
+  String _randomToken() {
     // 6자리 코드. 원본 인스턴스가 시간/랜덤에 의존하지 않도록 문서 id 해시를 쓴다.
     final int h = _shared.doc().id.hashCode & 0x7fffffff;
     return (100000 + (h % 900000)).toString();

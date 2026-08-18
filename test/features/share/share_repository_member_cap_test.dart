@@ -48,7 +48,7 @@ void main() {
         id: 'g',
         name: 'g',
         emoji: '🎁',
-        inviteCode: '000000',
+        inviteToken: '000000',
         members: <GroupMember>[owner('user-1')],
       );
       expect(g.maxMembers, Group.defaultMaxMembers);
@@ -61,7 +61,7 @@ void main() {
         id: 'g',
         name: 'g',
         emoji: '🎁',
-        inviteCode: '000000',
+        inviteToken: '000000',
         maxMembers: 1,
         members: <GroupMember>[owner('user-1')],
       );
@@ -75,7 +75,7 @@ void main() {
           id: 'g',
           name: 'g',
           emoji: '🎁',
-          inviteCode: '000000',
+          inviteToken: '000000',
           maxMembers: 0,
           members: <GroupMember>[owner('user-1')],
         ),
@@ -109,7 +109,7 @@ void main() {
         displayName: '다른이',
       );
       await expectLater(
-        repo.joinGroup(full.inviteCode),
+        repo.joinGroup(full.inviteToken),
         throwsStateError,
       );
     });
@@ -117,7 +117,7 @@ void main() {
     test('여유가 있으면 새 사용자가 정상 참여', () async {
       final Group g =
           await repo.createGroup(name: '여유', emoji: '✅', maxMembers: 2);
-      final String code = g.inviteCode;
+      final String code = g.inviteToken;
 
       await auth.signUp(
         email: 'friend@keepcon.app',

@@ -19,7 +19,7 @@ import '../deeplink/deep_link_parser.dart';
 /// 로그인 전에 링크가 도착할 수 있으므로(초대 링크로 앱을 처음 여는 경우가 그렇다)
 /// 값은 **로그인 여부와 무관하게 보관**되고, 셸이 뜨는 시점에 소비된다.
 ///
-/// 승격 이력: 초대 한정이던 `pendingInviteCodeProvider`(share 페이지 소유, 웹 전용)를
+/// 승격 이력: 초대 한정이던 `pendingInviteTokenProvider`(share 페이지 소유, 웹 전용)를
 /// 두 번째 소비자(알림 탭)가 생기면서 목적지 계약으로 일반화했다.
 final StateProvider<AppDestination?> pendingDestinationProvider =
     StateProvider<AppDestination?>((Ref ref) => destinationFromPlatformUrl());

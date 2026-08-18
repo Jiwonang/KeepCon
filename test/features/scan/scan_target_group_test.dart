@@ -40,7 +40,7 @@ void main() {
             role: MemberRole.owner,
           ),
         ],
-        inviteCode: 'FAM123',
+        inviteToken: 'FAM123',
       ),
       Group(
         id: 'g_friends',
@@ -54,7 +54,7 @@ void main() {
             role: MemberRole.owner,
           ),
         ],
-        inviteCode: 'FRI123',
+        inviteToken: 'FRI123',
       ),
     ];
   }

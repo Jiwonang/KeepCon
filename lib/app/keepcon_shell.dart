@@ -55,9 +55,9 @@ class _KeepConShellState extends ConsumerState<KeepConShell> {
     ref.read(pendingDestinationProvider.notifier).state = null;
 
     switch (destination) {
-      case InviteDestination(:final String inviteCode):
+      case InviteDestination(:final String inviteToken):
         setState(() => _index = 1); // 공유 탭.
-        showJoinGroupSheet(context, initialCode: inviteCode);
+        showJoinGroupSheet(context, initialToken: inviteToken);
 
       case GifticonHighlightDestination(:final String gifticonId):
         setState(() => _index = 0); // 홈 탭.

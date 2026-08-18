@@ -145,7 +145,7 @@ class InMemoryShareRepository implements ShareRepository {
       id: _nextId('g'),
       name: name,
       emoji: emoji,
-      inviteCode: _randomCode(),
+      inviteToken: _randomToken(),
       maxMembers: maxMembers,
       members: <GroupMember>[
         GroupMember(
@@ -163,18 +163,18 @@ class InMemoryShareRepository implements ShareRepository {
   }
 
   @override
-  Future<Group> joinGroup(String inviteCode) async {
+  Future<Group> joinGroup(String inviteToken) async {
     final User me = _requireUser();
 
     // 저장된 그룹을 초대코드로 먼저 조회한다(계약 준수 — Firebase 구현과 동일하게
     // 만료·멤버십을 검증). 실제 그룹이 있으면 그 그룹에 합류한다.
     final int existing =
-        _groups.indexWhere((Group g) => g.inviteCode == inviteCode);
+        _groups.indexWhere((Group g) => g.inviteToken == inviteToken);
     if (existing >= 0) {
       final Group g = _groups[existing];
       if (g.isMember(me.id)) return g; // 이미 멤버면 no-op.
       if (g.isInviteExpired(DateTime.now())) {
-        throw StateError('Invite code expired: $inviteCode');
+        throw StateError('Invite code expired: $inviteToken');
       }
       if (g.isFull) {
         throw StateError('Group is full: ${g.id}');
@@ -200,7 +200,7 @@ class InMemoryShareRepository implements ShareRepository {
       id: _nextId('g'),
       name: '초대받은 그룹',
       emoji: '🎁',
-      inviteCode: inviteCode,
+      inviteToken: inviteToken,
       members: <GroupMember>[
         const GroupMember(
           userId: 'u_host',
@@ -324,7 +324,7 @@ class InMemoryShareRepository implements ShareRepository {
   }
 
   @override
-  Future<Group> regenerateInviteCode({required String groupId}) async {
+  Future<Group> regenerateInviteToken({required String groupId}) async {
     final User me = _requireUser();
     final Group g = _requireGroup(groupId);
     if (!g.isOwnedBy(me.id)) {
@@ -332,7 +332,7 @@ class InMemoryShareRepository implements ShareRepository {
     }
     // 새 코드 발급 + 만료 창 갱신(재발급 시점부터 다시 24시간).
     final Group updated = g.copyWith(
-      inviteCode: _nextCode(),
+      inviteToken: _nextToken(),
       inviteExpiresAt: DateTime.now().add(Group.inviteValidity),
     );
     _groups[_groupIndex(groupId)] = updated;
@@ -578,16 +578,16 @@ class InMemoryShareRepository implements ShareRepository {
   /// [User]가 아직 아바타를 갖지 않으므로 현재 사용자 멤버의 기본 아바타.
   static const String _defaultAvatar = '🙂';
 
-  String _randomCode() {
+  String _randomToken() {
     final int base = 100000 + (_seq * 37) % 900000;
     return base.toString();
   }
 
-  /// 매 호출마다 다른 코드 — 재발급용. [_randomCode]는 [_seq]에 결정적이므로
+  /// 매 호출마다 다른 코드 — 재발급용. [_randomToken]는 [_seq]에 결정적이므로
   /// 시퀀스를 먼저 진행시켜 이전 코드와 겹치지 않게 한다.
-  String _nextCode() {
+  String _nextToken() {
     _seq++;
-    return _randomCode();
+    return _randomToken();
   }
 
   // ── 시드 데이터 ──────────────────────────────────────────────────────
@@ -607,7 +607,7 @@ class InMemoryShareRepository implements ShareRepository {
       id: 'g_family',
       name: '가족',
       emoji: '🏠',
-      inviteCode: '482913',
+      inviteToken: '482913',
       members: <GroupMember>[
         meAsOwner,
         const GroupMember(
@@ -631,7 +631,7 @@ class InMemoryShareRepository implements ShareRepository {
       id: 'g_friends',
       name: '친구 모임',
       emoji: '👥',
-      inviteCode: '771205',
+      inviteToken: '771205',
       inviteOwnerOnly: true, // 방장(홍길동) 한정 초대 — 멤버인 나에겐 초대 진입점 숨김(시연).
       members: <GroupMember>[
         const GroupMember(

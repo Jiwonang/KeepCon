@@ -188,20 +188,20 @@ class _CreateGroupSheetState extends ConsumerState<_CreateGroupSheet> {
 
 /// 그룹 참여 바텀시트 — 초대코드 입력. 참여 시 [ShareRepository]에 반영한다.
 ///
-/// [initialCode]가 있으면(초대 딥링크 진입) 코드 입력란을 미리 채운다.
-Future<void> showJoinGroupSheet(BuildContext context, {String? initialCode}) {
+/// [initialToken]가 있으면(초대 딥링크 진입) 코드 입력란을 미리 채운다.
+Future<void> showJoinGroupSheet(BuildContext context, {String? initialToken}) {
   return showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
-    builder: (BuildContext ctx) => _JoinGroupSheet(initialCode: initialCode),
+    builder: (BuildContext ctx) => _JoinGroupSheet(initialToken: initialToken),
   );
 }
 
 class _JoinGroupSheet extends ConsumerStatefulWidget {
-  const _JoinGroupSheet({this.initialCode});
+  const _JoinGroupSheet({this.initialToken});
 
   /// 딥링크로 전달된 초대코드(있으면 입력란을 미리 채운다).
-  final String? initialCode;
+  final String? initialToken;
 
   @override
   ConsumerState<_JoinGroupSheet> createState() => _JoinGroupSheetState();
@@ -209,7 +209,7 @@ class _JoinGroupSheet extends ConsumerStatefulWidget {
 
 class _JoinGroupSheetState extends ConsumerState<_JoinGroupSheet> {
   late final TextEditingController _codeCtrl =
-      TextEditingController(text: widget.initialCode ?? '');
+      TextEditingController(text: widget.initialToken ?? '');
 
   @override
   void dispose() {

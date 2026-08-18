@@ -21,11 +21,11 @@ import 'app_destination.dart';
 /// (`localhost:*`)과 Firebase Hosting 미리보기 채널(`*--preview-*.web.app`) 링크가
 /// 조용히 무시된다 — 개발 중에 가장 자주 쓰는 두 경로다.
 ///
-/// 지원 형태(`parseInviteCode` 규약을 그대로 따른다):
+/// 지원 형태(`parseInviteToken` 규약을 그대로 따른다):
 /// - 경로: `.../invite/<code>`
 /// - 쿼리: `...?invite=<code>`
 AppDestination? parseDeepLink(Uri uri) {
-  final String? code = parseInviteCode(uri);
+  final String? code = parseInviteToken(uri);
   if (code != null) return InviteDestination(code);
   return null;
 }

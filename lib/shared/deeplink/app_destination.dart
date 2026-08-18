@@ -8,7 +8,7 @@
 ///
 /// 그래서 목적지를 값으로 표현하고, 조립부의 provider 한 곳
 /// (`shared/providers/deep_link_providers.dart`)에 실어 셸이 소비한다. 이미
-/// `pendingInviteCodeProvider`가 초대 한정으로 쓰던 방식을, 두 번째 소비자(알림 탭)가
+/// `pendingInviteTokenProvider`가 초대 한정으로 쓰던 방식을, 두 번째 소비자(알림 탭)가
 /// 생기면서 계약으로 승격한 것이다.
 ///
 /// ## sealed인 이유
@@ -23,28 +23,28 @@ sealed class AppDestination {
   const AppDestination();
 }
 
-/// 초대코드로 그룹 참여 흐름을 연다.
+/// 초대 토큰으로 그룹 참여 흐름을 연다.
 ///
 /// 공유 탭으로 전환하고 참여 시트를 코드가 채워진 상태로 띄운다.
 final class InviteDestination extends AppDestination {
   /// InviteDestination 인스턴스를 생성한다.
-  const InviteDestination(this.inviteCode);
+  const InviteDestination(this.inviteToken);
 
-  /// 참여에 쓸 초대코드. 빈 문자열은 파서가 만들지 않는다.
-  final String inviteCode;
+  /// 참여에 쓸 초대 토큰. 빈 문자열은 파서가 만들지 않는다.
+  final String inviteToken;
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
       other is InviteDestination &&
           runtimeType == other.runtimeType &&
-          inviteCode == other.inviteCode;
+          inviteToken == other.inviteToken;
 
   @override
-  int get hashCode => inviteCode.hashCode;
+  int get hashCode => inviteToken.hashCode;
 
   @override
-  String toString() => 'InviteDestination($inviteCode)';
+  String toString() => 'InviteDestination($inviteToken)';
 }
 
 /// 홈 목록에서 특정 기프티콘을 짚어 보여준다(만료 임박 알림을 탭했을 때).
