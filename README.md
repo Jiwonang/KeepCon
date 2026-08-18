@@ -367,7 +367,8 @@ gh api -X POST repos/Jiwonang/KeepCon/rulesets --input ruleset.json
   - **⚠️ PR을 열어도 자동으로 리뷰하지 않습니다.** CodeRabbit은 **스타 10개 미만 저장소를 수동 트리거로 전환**했습니다(`Reviews should be triggered manually for repositories with fewer than 10 stars`). KeepCon은 여기 해당하며, 봇은 "Review available on request" 안내만 남깁니다.
     - **돌리는 법:** PR에 `@coderabbitai review` 댓글을 달거나, 봇 코멘트의 **`🔍 Trigger review` 체크박스** 클릭. `Review triggered` 응답이 오면 걸린 것이고 리뷰 본문은 몇 분 뒤 올라옵니다.
     - **왜 중요한가:** 이걸 모르면 **봇의 침묵을 "지적 없음"으로 읽습니다.** 3층 방어 중 한 층이 비었는데 티가 안 나는 상태가 red보다 위험합니다.
-    - **원래대로 되돌리려면:** 스타 10개를 넘기면 자동 리뷰로 복귀합니다.
+    - **⚠️ 트리거해도 튕길 수 있습니다 — 리뷰 할당량.** 무료 플랜은 보유 리뷰가 1개뿐이라, 직전 PR에 썼으면 `⚠️ Action not completed / Review rate limited`가 돌아옵니다(`Next review available in: N minutes`). **PR을 연달아 올리면 두 번째는 기다렸다 다시 트리거**해야 합니다.
+    - **원래대로 되돌리려면:** 스타 10개를 넘기면 자동 리뷰로 복귀합니다(할당량 제한은 별개라 그대로 남습니다).
   - **활성화(1회, 소유자):** [github.com/settings/installations](https://github.com/settings/installations) → CodeRabbit → *Configure* → *Repository access*에 `Jiwonang/KeepCon` 추가(*All repositories*도 가능). 계정에 아직 App이 없으면 [github.com/apps/coderabbitai](https://github.com/apps/coderabbitai)에서 설치.
   - **비용:** **Public 저장소는 무료**, Private는 유료(Pro)·무료 체험. KeepCon은 Public이라 App 범위에만 추가하면 무료로 동작합니다. (동작 여부=App 접근 범위, 비용=공개여부 — 별개.)
 - **커밋 전 AI 리뷰 — `/code-review` (온디맨드):** Claude Code로 작업할 때 **커밋 전** 변경 diff를 리뷰·수정한 뒤 커밋. 릴리스 전 `/security-review`로 보안 점검.
