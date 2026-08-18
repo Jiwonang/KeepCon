@@ -356,7 +356,7 @@ gh api -X POST repos/Jiwonang/KeepCon/rulesets --input ruleset.json
 
 - 룰셋 → **Require review from Code Owners** — [`CODEOWNERS`](.github/CODEOWNERS)에 지정된 계약 소유자 리뷰 없이는 `lib/shared`·하네스 설정 변경을 머지 불가(페이지 담당의 계약 임의 수정 차단).
 - 룰셋 → **Require branches to be up to date before merging** — 오래된 브랜치는 최신화 전까지 머지 차단(스테일 머지 방지).
-- 룰셋 → 필수 상태 체크에 **`CodeRabbit / Review`** 추가 — 자동 리뷰가 붙지 않은 PR 머지 차단.
+- 룰셋 → 필수 상태 체크에 **`CodeRabbit / Review`** 추가 — 리뷰가 붙지 않은 PR 머지 차단. ⚠️ **실제로 걸려 있는지 확인 필요** — PR #90은 CodeRabbit이 한 번도 돌지 않은 상태에서 `mergeable_state: clean`이었습니다(필수 체크 미완료면 `blocked`여야 함). 안 걸려 있다면 트리거를 깜빡한 PR이 그대로 머지됩니다.
 - 룰셋 → **Do not allow bypassing the above settings**(admin 포함) — 규칙의 뿌리를 admin 우회로부터 보호.
 - Settings → Code security → **Secret scanning + Push protection**(Public 무료) — 비밀정보가 포함된 push를 서버가 거부(`.gitignore`는 게이트가 아니므로 이게 진짜 백스톱).
 
@@ -365,7 +365,11 @@ gh api -X POST repos/Jiwonang/KeepCon/rulesets --input ruleset.json
 세 층으로 품질을 관리합니다 (층위가 서로 달라 **중첩 운영**):
 
 - **CI 게이트 (필수·자동):** 모든 PR에서 `Format · Analyze · Test`(**SSOT guard** · dart format · flutter analyze · flutter test) 통과 — 안정성의 기반. `SSOT guard`([`tool/check_ssot.sh`](tool/check_ssot.sh))는 `lib/features`에서 공유 계약 타입·provider를 재정의/재선언하면 실패시켜 SSOT를 기계적으로 강제합니다.
-- **자동 AI 리뷰 — CodeRabbit (자동):** App이 저장소에 연결돼 있으면 PR이 열리거나 갱신될 때 CodeRabbit이 협업 규칙 준수·버그를 자동 리뷰합니다. 리뷰 설정은 [`.coderabbit.yaml`](.coderabbit.yaml)에 한국어로 정의(별도 API 키·워크플로 불필요). **단, 설정 파일만으로는 동작하지 않는다** — CodeRabbit은 **GitHub App**이라 저장소에 설치·접근 허용되어야 리뷰가 붙습니다.
+- **AI 리뷰 — CodeRabbit (⚠️ 지금은 수동 트리거):** CodeRabbit이 협업 규칙 준수·버그를 리뷰합니다. 리뷰 설정은 [`.coderabbit.yaml`](.coderabbit.yaml)에 한국어로 정의(별도 API 키·워크플로 불필요). **단, 설정 파일만으로는 동작하지 않는다** — CodeRabbit은 **GitHub App**이라 저장소에 설치·접근 허용되어야 리뷰가 붙습니다.
+  - **⚠️ PR을 열어도 자동으로 리뷰하지 않습니다.** CodeRabbit은 **스타 10개 미만 저장소를 수동 트리거로 전환**했습니다(`Reviews should be triggered manually for repositories with fewer than 10 stars`). KeepCon은 여기 해당하며, 봇은 "Review available on request" 안내만 남깁니다.
+    - **돌리는 법:** PR에 `@coderabbitai review` 댓글을 달거나, 봇 코멘트의 **`🔍 Trigger review` 체크박스** 클릭. `Review triggered` 응답이 오면 걸린 것이고 리뷰 본문은 몇 분 뒤 올라옵니다.
+    - **왜 중요한가:** 이걸 모르면 **봇의 침묵을 "지적 없음"으로 읽습니다.** 3층 방어 중 한 층이 비었는데 티가 안 나는 상태가 red보다 위험합니다.
+    - **원래대로 되돌리려면:** 스타 10개를 넘기면 자동 리뷰로 복귀합니다.
   - **활성화(1회, 소유자):** [github.com/settings/installations](https://github.com/settings/installations) → CodeRabbit → *Configure* → *Repository access*에 `Jiwonang/KeepCon` 추가(*All repositories*도 가능). 계정에 아직 App이 없으면 [github.com/apps/coderabbitai](https://github.com/apps/coderabbitai)에서 설치.
   - **비용:** **Public 저장소는 무료**, Private는 유료(Pro)·무료 체험. KeepCon은 Public이라 App 범위에만 추가하면 무료로 동작합니다. (동작 여부=App 접근 범위, 비용=공개여부 — 별개.)
 - **커밋 전 AI 리뷰 — `/code-review` (온디맨드):** Claude Code로 작업할 때 **커밋 전** 변경 diff를 리뷰·수정한 뒤 커밋. 릴리스 전 `/security-review`로 보안 점검.
