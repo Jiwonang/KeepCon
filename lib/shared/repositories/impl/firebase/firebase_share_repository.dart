@@ -27,6 +27,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../../../models/gifticon.dart';
 import '../../../models/group.dart';
+import '../../../models/join_request.dart';
 import '../../../models/share.dart';
 import '../../../models/user.dart';
 import '../../../util/korean_particle.dart';
@@ -343,6 +344,54 @@ class FirebaseShareRepository implements ShareRepository {
       return updated;
     });
   }
+
+  // ── 참여 요청(초대 링크 → 방장 승인) ────────────────────────────────
+  //
+  // **아직 구현하지 않았다.** 계약과 in-memory 구현을 먼저 확정하고, Firestore 구현은
+  // 다음 단계에서 스키마와 함께 넣는다. 이 경로는 저장소 스키마 결정에 통째로 매여 있다 —
+  // 비멤버는 보안 규칙상 `groups`를 읽을 수 없으므로 토큰으로 그룹을 찾으려면 토큰을
+  // 키로 하는 별도 조회 문서가 필요하고, 그 문서를 어떤 모양으로 둘지가 규칙·인덱스를
+  // 함께 정한다. 지금 지어 두면 그 결정이 내려질 때 통째로 다시 쓰게 된다.
+  //
+  // 그때까지 이 메서드들을 호출하는 화면은 없다(참여 요청 UI가 아직 없다). 조용히
+  // 아무 일도 안 하는 스텁 대신 [UnimplementedError]를 던지는 이유 — 배선이 먼저
+  // 들어왔을 때 즉시 드러나게 하려는 것이다.
+  static Never _joinRequestsNotOnFirebaseYet() => throw UnimplementedError(
+        '참여 요청은 Firestore 구현이 아직 없습니다. '
+        'InMemoryShareRepository(USE_DEMO)에서만 동작합니다.',
+      );
+
+  @override
+  Future<JoinRequest> requestToJoin(String inviteToken) async =>
+      _joinRequestsNotOnFirebaseYet();
+
+  @override
+  Stream<List<JoinRequest>> watchMyJoinRequests(String userId) =>
+      _joinRequestsNotOnFirebaseYet();
+
+  @override
+  Future<List<JoinRequest>> getMyJoinRequests(String userId) async =>
+      _joinRequestsNotOnFirebaseYet();
+
+  @override
+  Stream<List<JoinRequest>> watchPendingJoinRequests(String groupId) =>
+      _joinRequestsNotOnFirebaseYet();
+
+  @override
+  Future<List<JoinRequest>> getPendingJoinRequests(String groupId) async =>
+      _joinRequestsNotOnFirebaseYet();
+
+  @override
+  Future<Group> approveJoinRequest(String joinRequestId) async =>
+      _joinRequestsNotOnFirebaseYet();
+
+  @override
+  Future<JoinRequest> rejectJoinRequest(String joinRequestId) async =>
+      _joinRequestsNotOnFirebaseYet();
+
+  @override
+  Future<void> cancelJoinRequest(String joinRequestId) async =>
+      _joinRequestsNotOnFirebaseYet();
 
   // ── 공유 기프티콘 ─────────────────────────────────────────────────────
   @override

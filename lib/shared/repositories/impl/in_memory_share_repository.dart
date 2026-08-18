@@ -19,6 +19,7 @@ import 'dart:async';
 
 import '../../models/gifticon.dart';
 import '../../models/group.dart';
+import '../../models/join_request.dart';
 import '../../models/share.dart';
 import '../../models/user.dart';
 import '../../util/korean_particle.dart';
@@ -46,6 +47,7 @@ class InMemoryShareRepository implements ShareRepository {
   final List<Group> _groups = <Group>[];
   final Map<String, List<SharedGifticon>> _sharedByGroup =
       <String, List<SharedGifticon>>{};
+  final List<JoinRequest> _joinRequests = <JoinRequest>[];
   final List<UsageLog> _usageLogs = <UsageLog>[];
   final List<GroupNotification> _notifications = <GroupNotification>[];
 
@@ -343,6 +345,197 @@ class InMemoryShareRepository implements ShareRepository {
   void _removeGroup(String groupId) {
     _groups.removeWhere((Group g) => g.id == groupId);
     _sharedByGroup.remove(groupId);
+    // 참여 요청도 함께 거둔다. 사용 이력·알림은 `_isMemberOf`로 걸러지므로 그룹이
+    // 사라지면 저절로 보이지 않지만, 요청은 **userId로만** 조회되기 때문에 그냥 두면
+    // 요청자 화면에 "대기 중"이 영원히 남는다 — 승인·거절은 그룹을 찾지 못해 던지고,
+    // 방장도 이미 없어서 아무도 그 상태를 끝낼 수 없다.
+    _joinRequests.removeWhere((JoinRequest r) => r.groupId == groupId);
+  }
+
+  // ── 참여 요청(초대 링크 → 방장 승인) ────────────────────────────────
+  int _joinRequestIndex(String joinRequestId) {
+    final int i =
+        _joinRequests.indexWhere((JoinRequest r) => r.id == joinRequestId);
+    if (i < 0) throw StateError('Join request not found: $joinRequestId');
+    return i;
+  }
+
+  Group? _groupByTokenOrNull(String inviteToken) {
+    for (final Group g in _groups) {
+      if (g.inviteToken == inviteToken) return g;
+    }
+    return null;
+  }
+
+  void _notifyJoinRequested(Group g, String displayName) {
+    _pushNotification(
+      groupId: g.id,
+      type: GroupNotificationType.joinRequested,
+      title: '참여 요청',
+      message: '$displayName님이 ${g.name}${g.name.eulReul} 참여하고 싶어 해요.',
+    );
+  }
+
+  @override
+  Future<JoinRequest> requestToJoin(String inviteToken) async {
+    final User me = _requireUser();
+    final Group? g = _groupByTokenOrNull(inviteToken);
+    if (g == null) {
+      throw StateError('No group for invite token: $inviteToken');
+    }
+    if (g.isInviteExpired(DateTime.now())) {
+      throw StateError('Invite token expired: $inviteToken');
+    }
+    if (g.isMember(me.id)) {
+      throw StateError('Already a member of group: ${g.id}');
+    }
+
+    // (그룹, 사용자)당 요청은 하나만 둔다 — 같은 링크를 두 번 눌러도 방장에게 요청이
+    // 쌓이지 않게 하려는 것이고, Firebase 구현이 결정론적 문서 id를 쓸 수 있게 하는
+    // 전제이기도 하다.
+    final int existing = _joinRequests.indexWhere(
+      (JoinRequest r) => r.groupId == g.id && r.userId == me.id,
+    );
+    if (existing >= 0) {
+      final JoinRequest prev = _joinRequests[existing];
+      if (prev.isPending) return prev; // 멱등 — 알림도 다시 보내지 않는다.
+      // 결정이 끝난 요청(거절, 또는 승인 후 강퇴)은 다시 대기로 되돌린다.
+      final JoinRequest revived = prev.copyWith(
+        status: JoinRequestStatus.pending,
+        displayName: me.displayName,
+        requestedAt: DateTime.now(),
+      );
+      _joinRequests[existing] = revived;
+      _notifyJoinRequested(g, me.displayName);
+      _emit();
+      return revived;
+    }
+
+    final JoinRequest req = JoinRequest(
+      id: _nextId('jr'),
+      groupId: g.id,
+      userId: me.id,
+      displayName: me.displayName,
+      avatarEmoji: _defaultAvatar,
+      requestedAt: DateTime.now(),
+    );
+    _joinRequests.add(req);
+    _notifyJoinRequested(g, me.displayName);
+    _emit();
+    return req;
+  }
+
+  @override
+  Stream<List<JoinRequest>> watchMyJoinRequests(String userId) async* {
+    yield _myJoinRequests(userId);
+    yield* _tick.stream.map((_) => _myJoinRequests(userId));
+  }
+
+  @override
+  Future<List<JoinRequest>> getMyJoinRequests(String userId) async =>
+      _myJoinRequests(userId);
+
+  /// 내가 보낸 요청 — 최신순.
+  List<JoinRequest> _myJoinRequests(String userId) {
+    final List<JoinRequest> mine = _joinRequests
+        .where((JoinRequest r) => r.userId == userId)
+        .toList()
+      ..sort((JoinRequest a, JoinRequest b) =>
+          b.requestedAt.compareTo(a.requestedAt));
+    return List<JoinRequest>.unmodifiable(mine);
+  }
+
+  @override
+  Stream<List<JoinRequest>> watchPendingJoinRequests(String groupId) async* {
+    yield _pendingJoinRequests(groupId);
+    yield* _tick.stream.map((_) => _pendingJoinRequests(groupId));
+  }
+
+  @override
+  Future<List<JoinRequest>> getPendingJoinRequests(String groupId) async =>
+      _pendingJoinRequests(groupId);
+
+  /// 그룹의 대기 중 요청 — 오래된 순(먼저 기다린 사람이 위).
+  List<JoinRequest> _pendingJoinRequests(String groupId) {
+    final List<JoinRequest> pending = _joinRequests
+        .where((JoinRequest r) => r.groupId == groupId && r.isPending)
+        .toList()
+      ..sort((JoinRequest a, JoinRequest b) =>
+          a.requestedAt.compareTo(b.requestedAt));
+    return List<JoinRequest>.unmodifiable(pending);
+  }
+
+  @override
+  Future<Group> approveJoinRequest(String joinRequestId) async {
+    final User me = _requireUser();
+    final int idx = _joinRequestIndex(joinRequestId);
+    final JoinRequest req = _joinRequests[idx];
+    final Group g = _requireGroup(req.groupId);
+
+    // 가드를 **전부** 통과한 뒤에 상태를 바꾼다 — 중간에 던지면 요청만 승인으로
+    // 남고 멤버는 안 들어간 어긋난 상태가 된다.
+    if (!g.isOwnedBy(me.id)) {
+      throw StateError('Only the owner can approve join requests: ${g.id}');
+    }
+    if (!req.isPending) {
+      throw StateError('Join request is already decided: $joinRequestId');
+    }
+    final bool alreadyMember = g.isMember(req.userId);
+    if (!alreadyMember && g.isFull) {
+      throw StateError('Group is full: ${g.id}');
+    }
+
+    _joinRequests[idx] = req.copyWith(status: JoinRequestStatus.approved);
+    if (alreadyMember) {
+      // 다른 경로로 이미 멤버가 됐다면 요청만 정리한다(중복 추가 금지).
+      _emit();
+      return g;
+    }
+
+    final Group updated = g.copyWith(
+      members: <GroupMember>[
+        ...g.members,
+        GroupMember(
+          userId: req.userId,
+          displayName: req.displayName,
+          avatarEmoji: req.avatarEmoji,
+          role: MemberRole.member,
+        ),
+      ],
+    );
+    _groups[_groupIndex(g.id)] = updated;
+    _emit();
+    return updated;
+  }
+
+  @override
+  Future<JoinRequest> rejectJoinRequest(String joinRequestId) async {
+    final User me = _requireUser();
+    final int idx = _joinRequestIndex(joinRequestId);
+    final JoinRequest req = _joinRequests[idx];
+    final Group g = _requireGroup(req.groupId);
+    if (!g.isOwnedBy(me.id)) {
+      throw StateError('Only the owner can reject join requests: ${g.id}');
+    }
+    if (!req.isPending) {
+      throw StateError('Join request is already decided: $joinRequestId');
+    }
+    final JoinRequest updated =
+        req.copyWith(status: JoinRequestStatus.rejected);
+    _joinRequests[idx] = updated;
+    _emit();
+    return updated;
+  }
+
+  @override
+  Future<void> cancelJoinRequest(String joinRequestId) async {
+    final User me = _requireUser();
+    final int idx = _joinRequestIndex(joinRequestId);
+    if (_joinRequests[idx].userId != me.id) {
+      throw StateError('Only the requester can cancel: $joinRequestId');
+    }
+    _joinRequests.removeAt(idx);
+    _emit();
   }
 
   // ── 공유 기프티콘 ─────────────────────────────────────────────────────

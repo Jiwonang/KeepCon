@@ -304,7 +304,13 @@ enum GroupNotificationType {
   expiringSoon('만료 임박'),
 
   /// 사용 완료.
-  used('사용 완료');
+  used('사용 완료'),
+
+  /// 초대 링크로 들어온 사람이 그룹 참여를 요청함 — 방장의 승인이 필요하다.
+  ///
+  /// 이 알림이 없으면 방장이 요청이 온 줄을 모르고, 승인이 일어나지 않아 참여 흐름
+  /// 전체가 조용히 멈춘다. 알림은 그룹 멤버 전체가 읽지만 **승인은 방장만** 할 수 있다.
+  joinRequested('참여 요청');
 
   const GroupNotificationType(this.label);
 
