@@ -86,9 +86,10 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
     // 작은 글자(상품명·유효기간)는 OCR이 놓친다. 프레임을 OCR에 쓸 것이므로
     // 올려 잡는다. 기기가 지원하지 않으면 가장 가까운 해상도로 대체된다.
     //
-    // ⚠️ mobile_scanner 7.4.0 기준 이 옵션은 **Android 전용**이다. iOS는 무시되어
-    // 플랫폼 기본 해상도로 동작하므로, iOS에서는 OCR 정확도가 Android보다 낮을 수
-    // 있다(바코드 인식 자체는 영향 없음). iOS 실기기 검증 때 함께 확인할 것.
+    // ⚠️ mobile_scanner 7.4.0의 `MobileScannerController` 문서는 이 옵션을 **Android**
+    // 전용이라고 적어 두었지만, 7.3.0부터 **web 구현도 이 값을 쓴다** — getUserMedia의
+    // `ideal` 제약으로 넘겨 브라우저가 못 맞추면 가장 가까운 값으로 대체한다(미지정 시
+    // 1920x1080이 기본). KeepCon이 구성한 두 플랫폼(web·android) 모두 이 값이 반영된다.
     cameraResolution: const Size(1920, 1080),
   );
 
