@@ -62,6 +62,31 @@ final rawGifticonsProvider = StreamProvider<List<Gifticon>>((ref) {
   return repo.watchGifticons(uid);
 });
 
+/// id로 찾은 기프티콘 한 장. 상세 화면이 소비한다. 없으면 null.
+///
+/// **[visibleGifticonsProvider]가 아니라 원천 목록([rawGifticonsProvider])에서 찾는다.**
+/// 표시 목록은 필터를 통과한 것만 담으므로, 상태 필터('사용가능')가 걸린 채 상세에서
+/// 사용 완료를 누르면 그 항목이 표시 목록에서 빠지고 — **보고 있던 화면이 그 자리에서
+/// "찾을 수 없어요"로 바뀐다.** 방금 성공한 조작이 오류처럼 읽히는 셈이다. 상세는 목록의
+/// 필터·정렬과 무관한 화면이므로 원천을 본다.
+///
+/// 로딩 중과 부재를 둘 다 null로 접는다. 진입 경로가 목록 카드 탭뿐이라 이 provider를
+/// 읽는 시점엔 원천 스트림이 이미 값을 낸 뒤이고, 상세 화면도 진입 시점 스냅샷을
+/// 폴백으로 들고 있어 빈 화면이 뜨지 않는다. 알림→상세 직행 같은 콜드 진입이 생기면
+/// 그때 로딩을 구분해야 한다.
+/// `autoDispose`인 이유: family는 id마다 별도 인스턴스를 만들고, 일반 family는 컨테이너가
+/// 사는 동안 그 인스턴스를 모두 붙들고 있다 — 상세를 열어 본 기프티콘 수만큼 구독이
+/// 쌓인다. 상세를 닫으면 정리되도록 둔다.
+final gifticonByIdProvider =
+    Provider.autoDispose.family<Gifticon?, String>((ref, String id) {
+  final List<Gifticon> raw =
+      ref.watch(rawGifticonsProvider).valueOrNull ?? const <Gifticon>[];
+  for (final Gifticon g in raw) {
+    if (g.id == id) return g;
+  }
+  return null;
+});
+
 /// 현재 선택된 정렬 옵션(계약 [SortOption]). 기본값: 만료임박순.
 final sortOptionProvider =
     StateProvider<SortOption>((ref) => SortOption.expiryAsc);

@@ -16,6 +16,7 @@ import '../../../shared/providers/session_provider.dart';
 import '../../../shared/theme/brand_palette.dart';
 import '../../../shared/theme/theme_tokens.dart';
 import '../../../shared/util/korean_particle.dart';
+import '../../../shared/widgets/gifticon_detail_widgets.dart';
 import '../state/share_providers.dart';
 import '../widgets/share_common.dart';
 import '../widgets/share_error_banner.dart';
@@ -103,7 +104,7 @@ class _DetailBody extends ConsumerWidget {
           padding: const EdgeInsets.fromLTRB(24, 14, 24, 28),
           children: <Widget>[
             // 브랜드 히어로(쿠폰 배너).
-            _BrandHero(brand: brand, brandName: item.brand),
+            BrandHero(brand: brand, brandName: item.brand),
             const SizedBox(height: 22),
 
             // 브랜드·상품·상태.
@@ -185,14 +186,14 @@ class _DetailBody extends ConsumerWidget {
 
             // 잠김/사용완료 안내.
             if (locked)
-              _InfoBanner(
+              DetailInfoBanner(
                 icon: Icons.lock_outline,
                 text: item.lockedByUserId != null
                     ? '${names.labelFor(item.lockedByUserId!)}님이 사용 중이라 지금은 사용할 수 없어요.'
                     : '다른 멤버가 사용 중이라 지금은 사용할 수 없어요.',
               ),
             if (item.isUsed)
-              const _InfoBanner(
+              const DetailInfoBanner(
                 icon: Icons.check_circle_outline,
                 text: '이미 사용 완료된 기프티콘이에요.',
               ),
@@ -301,120 +302,5 @@ class _DetailBody extends ConsumerWidget {
         ..hideCurrentSnackBar()
         ..showSnackBar(const SnackBar(content: Text('지금은 회수할 수 없어요.')));
     }
-  }
-}
-
-/// 브랜드 히어로 — 브랜드 색 쿠폰 배너(좌우 노치 + 브랜드 로고 자리).
-class _BrandHero extends StatelessWidget {
-  const _BrandHero({required this.brand, required this.brandName});
-
-  final BrandStyle brand;
-  final String brandName;
-
-  @override
-  Widget build(BuildContext context) {
-    final ColorScheme scheme = Theme.of(context).colorScheme;
-    const double height = 180;
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(AppRadii.hero),
-      child: SizedBox(
-        height: height,
-        child: Stack(
-          children: <Widget>[
-            Positioned.fill(child: ColoredBox(color: brand.background)),
-            // 좌우 티켓 노치(배경색 원이 가장자리를 파고든다).
-            Positioned(
-              left: -11,
-              top: height / 2 - 11,
-              child: _Notch(color: scheme.surface),
-            ),
-            Positioned(
-              right: -11,
-              top: height / 2 - 11,
-              child: _Notch(color: scheme.surface),
-            ),
-            // 브랜드명(우상단).
-            Positioned(
-              top: 20,
-              right: 24,
-              child: Text(
-                brandName,
-                style: TextStyle(
-                  color: brand.foreground,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: 0.5,
-                ),
-              ),
-            ),
-            // 중앙 로고 자리(밝은 원 + 브랜드 라벨).
-            Center(
-              child: Container(
-                width: 88,
-                height: 88,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: brand.foreground.withValues(alpha: 0.92),
-                  shape: BoxShape.circle,
-                ),
-                child: Text(
-                  brand.label,
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: brand.background,
-                    fontSize: 24,
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// 티켓 노치(작은 원).
-class _Notch extends StatelessWidget {
-  const _Notch({required this.color});
-
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 22,
-      height: 22,
-      decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-    );
-  }
-}
-
-/// 상세 상단 안내 배너(잠김/사용완료).
-class _InfoBanner extends StatelessWidget {
-  const _InfoBanner({required this.icon, required this.text});
-
-  final IconData icon;
-  final String text;
-
-  @override
-  Widget build(BuildContext context) {
-    final ThemeData theme = Theme.of(context);
-    return Container(
-      margin: const EdgeInsets.only(bottom: 16),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(AppRadii.tile),
-      ),
-      child: Row(
-        children: <Widget>[
-          Icon(icon, size: 18, color: theme.colorScheme.onSurfaceVariant),
-          const SizedBox(width: 10),
-          Expanded(child: Text(text, style: theme.textTheme.bodyMedium)),
-        ],
-      ),
-    );
   }
 }
