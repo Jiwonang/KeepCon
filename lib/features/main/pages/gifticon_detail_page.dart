@@ -1,0 +1,475 @@
+/// main 페이지 — 내 기프티콘 상세.
+///
+/// 목록 카드를 탭하면 열린다. 매장에서 실제로 쓰는 화면이므로 **바코드가 주인공**이고,
+/// 그 아래 사용 완료 처리를 둔다. 상태 전이는 계약 [GifticonRepository.updateStatus]에
+/// 위임하며(전이 규칙은 [GifticonStatusTransition]이 SSOT), 이 화면은 판정하지 않고
+/// 노출 여부만 고른다.
+///
+/// ## 이미지를 싣지 않는 이유
+/// [Gifticon.imagePath]는 로컬 파일 경로(`image_picker`가 준 값)라 표시하려면 `dart:io`가
+/// 필요한데, 이 앱은 web도 지원 대상이라 `dart:io`를 조건부 import로 감싸야 한다. 그
+/// 추상화는 별도 관심사라 이번 범위에서 뺐다 — 바코드 번호가 있으면 아래 [_BarcodeCard]가
+/// 스캔 가능한 심볼을 직접 그리므로 매장 사용에는 지장이 없다.
+library;
+
+import 'package:barcode_widget/barcode_widget.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../../shared/models/gifticon.dart';
+import '../../../shared/providers/repositories.dart';
+import '../../../shared/theme/brand_palette.dart';
+import '../../../shared/theme/theme_tokens.dart';
+import '../../../shared/util/date_format.dart' show formatYmdDot;
+import '../../../shared/util/expiry_policy.dart';
+import '../../../shared/util/korean_particle.dart';
+import '../../../shared/util/money_format.dart' show formatWon;
+import '../state/gifticon_list_providers.dart';
+import '../state/now_provider.dart';
+import '../widgets/format.dart';
+import '../widgets/gifticon_status_label.dart';
+
+/// 기프티콘 상세 화면. 목록에서 `MaterialPageRoute`로 push한다.
+class GifticonDetailPage extends ConsumerWidget {
+  const GifticonDetailPage({super.key, required this.gifticon});
+
+  /// 진입 시점의 스냅샷. 저장소 최신값을 못 찾을 때의 폴백으로만 쓴다.
+  final Gifticon gifticon;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    // 저장소 최신값을 우선한다 — 사용 완료 처리 후 이 화면의 상태 뱃지·버튼이 즉시
+    // 따라가야 하기 때문이다. 목록에서 사라졌을 때만 진입 스냅샷으로 떨어진다(계정
+    // 전환·스트림 순단). 그 경우 화면은 옛 값을 보여주지만 조작은 저장소 가드가 막고
+    // 스낵바로 알린다 — 빈 화면을 띄우는 것보다 낫다.
+    final Gifticon g = ref.watch(gifticonByIdProvider(gifticon.id)) ?? gifticon;
+
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+    final BrandStyle brand = BrandPalette.of(g.brand);
+
+    // 시각은 [nowProvider] 정본에서 받는다 — 여기서 따로 [DateTime.now]를 읽으면 자정을
+    // 넘기는 순간 목록의 D-day와 상세의 D-day가 갈린다(목록은 이미 정본을 소비한다).
+    final DateTime now = ref.watch(nowProvider);
+    final int daysLeft = daysUntilExpiry(g.expiryDate, now: now);
+    final bool expiredByDate = isExpiredByDate(g.expiryDate, now: now);
+    final bool used = g.status == GifticonStatus.used;
+    final bool shared = g.targetGroupId != null;
+
+    // 사용 완료 버튼 노출 조건.
+    //
+    // ① 상태가 available일 때만 — used/expired는 terminal 전이라 호출하면 StateError다.
+    // ② 그룹 공유 중이면 숨긴다. 여기서 [GifticonRepository.updateStatus]를 부르면 원본만
+    //    used가 되고 그룹의 [SharedGifticon]은 '사용 가능'으로 남는다 — 계약이 제공하는
+    //    동기화는 공유→원본 한 방향뿐이기 때문이다([ShareRepository.markUsed]). 그 상태로
+    //    두면 다른 멤버가 이미 쓴 기프티콘을 매장에서 꺼내게 된다. 양방향 동기화는 계약
+    //    변경이라 별건으로 다루고, 여기서는 이미 완비된 공유 탭 경로로 보낸다.
+    //
+    // 날짜상 만료(expiredByDate)는 **막지 않는다.** status를 expired로 옮기는 주체가 아직
+    // 없어(만료 판정은 날짜 기준 표시일 뿐) 여기서 가리면 만료일이 지난 기프티콘은 영영
+    // 사용 완료로 정리하지 못하고 목록에 남는다.
+    final bool canMarkUsed = g.status == GifticonStatus.available && !shared;
+
+    return Scaffold(
+      appBar: AppBar(
+        centerTitle: true,
+        title: Text('기프티콘', style: context.navTitleStyle),
+      ),
+      body: SafeArea(
+        top: false,
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(24, 14, 24, 28),
+          children: <Widget>[
+            _BrandHero(brand: brand, brandName: g.brand),
+            const SizedBox(height: 22),
+
+            // 브랜드 · 상품명 · 상태 뱃지.
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Text(
+                        g.brand,
+                        style: theme.textTheme.bodyLarge
+                            ?.copyWith(color: scheme.onSurfaceVariant),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(g.productName, style: context.heroProductStyle),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: _StatusBadge(status: g.status),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+
+            // 금액 · 카테고리 · 유효기간.
+            _MetaRow(
+              icon: Icons.account_balance_wallet_outlined,
+              text: g.price > 0 ? '${formatWon(g.price)}원' : '금액 미입력',
+            ),
+            const SizedBox(height: 8),
+            _MetaRow(icon: Icons.sell_outlined, text: g.category),
+            const SizedBox(height: 8),
+            _MetaRow(
+              icon: Icons.schedule,
+              // 사용 완료한 것에까지 만료를 빨갛게 칠하면 처리할 일이 남은 것처럼 읽힌다.
+              emphasize: !used &&
+                  (expiredByDate || isExpiringSoon(g.expiryDate, now: now)),
+              text: '${formatYmdDot(g.expiryDate)} 만료'
+                  '${used ? '' : '  ·  ${formatDDay(daysLeft)}'}',
+            ),
+            const SizedBox(height: 22),
+
+            _BarcodeCard(barcode: g.barcode),
+            const SizedBox(height: 22),
+
+            if (used)
+              const _InfoBanner(
+                icon: Icons.check_circle_outline,
+                text: '이미 사용 완료한 기프티콘이에요.',
+              ),
+            if (!used && g.status == GifticonStatus.expired)
+              const _InfoBanner(
+                icon: Icons.event_busy_outlined,
+                text: '만료 처리된 기프티콘이에요.',
+              ),
+            if (shared && !used)
+              const _InfoBanner(
+                icon: Icons.group_outlined,
+                text: '그룹에 공유 중이에요. 사용 완료 처리는 공유 탭에서 해주세요.',
+              ),
+
+            if (canMarkUsed)
+              ElevatedButton.icon(
+                onPressed: () => _confirmAndMarkUsed(context, ref, g),
+                icon: const Icon(Icons.check, size: 20),
+                label: const Text('사용 완료'),
+                style: ElevatedButton.styleFrom(
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(AppRadii.tile),
+                  ),
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  textStyle: const TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 사용 완료 확인 → 계약 [GifticonRepository.updateStatus] 호출.
+  ///
+  /// 되돌릴 수 없는 전이(used는 terminal)라 확인을 한 번 받는다. 버튼 노출 조건이 이미
+  /// 걸러 주지만 최종 판정은 저장소 가드다 — 화면을 열어 둔 사이 다른 경로(공유 사용
+  /// 동기화)가 먼저 상태를 옮겼을 수 있어, [StateError]를 안내로 바꿔 받는다.
+  Future<void> _confirmAndMarkUsed(
+    BuildContext context,
+    WidgetRef ref,
+    Gifticon g,
+  ) async {
+    final bool? ok = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext ctx) => AlertDialog(
+        title: const Text('사용 완료'),
+        content: Text(
+          '${g.productName}${g.productName.eulReul} 사용 완료로 바꿀까요?\n'
+          '되돌릴 수 없어요.',
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('닫기'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('사용 완료'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !context.mounted) return;
+
+    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
+    try {
+      await ref
+          .read(gifticonRepositoryProvider)
+          .updateStatus(g.id, GifticonStatus.used);
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(const SnackBar(content: Text('사용 완료로 변경했어요.')));
+    } on StateError {
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(const SnackBar(content: Text('지금은 사용 완료할 수 없어요.')));
+    }
+  }
+}
+
+/// 바코드 카드 — 번호를 실제 스캔 가능한 심볼로 그린다.
+///
+/// ## 왜 항상 흰 바탕에 검은 바인가
+/// 테마 색(`scheme.onSurface` 등)을 쓰면 다크 모드에서 **밝은 바탕에 어두운 바**라는
+/// 스캐너의 전제가 뒤집힌다. 화면에서는 멀쩡해 보이는데 매장 리더기가 못 읽는, 확인하기
+/// 어려운 실패다. 그래서 이 카드만은 테마를 따르지 않고 흑백을 고정한다.
+///
+/// ## 왜 Code128인가
+/// 국내 기프티콘 바코드는 대부분 Code128이고, 이 심볼은 숫자·영문·기호를 모두 담아
+/// 입력값을 가리지 않는다. 그래도 인코딩은 실패할 수 있어([BarcodeWidget.errorBuilder])
+/// 번호 텍스트로 떨어진다 — **번호만 보이면 점원이 수동 입력할 수 있으므로** 심볼을 못
+/// 그리는 것이 곧 사용 불가는 아니다.
+class _BarcodeCard extends StatelessWidget {
+  const _BarcodeCard({required this.barcode});
+
+  final String? barcode;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+    final String? value = barcode?.trim();
+    final bool hasValue = value != null && value.isNotEmpty;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+      decoration: BoxDecoration(
+        color: hasValue ? Colors.white : scheme.surface,
+        borderRadius: BorderRadius.circular(AppRadii.card),
+        border: Border.all(color: scheme.outline.withValues(alpha: 0.18)),
+      ),
+      child: hasValue
+          ? Column(
+              children: <Widget>[
+                BarcodeWidget(
+                  barcode: Barcode.code128(),
+                  data: value,
+                  height: 96,
+                  // 번호는 아래에 **위젯으로** 따로 쓴다. [BarcodeWidget]의 drawText는
+                  // 캔버스에 직접 그리는 것이라 스크린리더가 읽지 못하고 복사도 안 된다.
+                  // 리더기가 못 읽을 때 번호를 부르거나 수동 입력하는 경로가 이 텍스트다.
+                  drawText: false,
+                  color: Colors.black,
+                  backgroundColor: Colors.white,
+                  // 심볼을 못 그려도 번호는 아래에 남으므로, 여기서는 자리만 비운다.
+                  errorBuilder: (BuildContext context, String error) =>
+                      const SizedBox.shrink(),
+                ),
+                const SizedBox(height: 14),
+                Text(
+                  value,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: Colors.black,
+                    fontSize: 16,
+                    letterSpacing: 2,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            )
+          : Column(
+              children: <Widget>[
+                Icon(
+                  Icons.qr_code_2,
+                  size: 72,
+                  color: scheme.onSurfaceVariant.withValues(alpha: 0.5),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  '바코드 번호가 없어요.',
+                  style: theme.textTheme.bodyMedium
+                      ?.copyWith(color: scheme.onSurfaceVariant),
+                ),
+              ],
+            ),
+    );
+  }
+}
+
+/// 브랜드 히어로 — 브랜드 색 쿠폰 배너(좌우 노치 + 브랜드 라벨).
+class _BrandHero extends StatelessWidget {
+  const _BrandHero({required this.brand, required this.brandName});
+
+  final BrandStyle brand;
+  final String brandName;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme scheme = Theme.of(context).colorScheme;
+    const double height = 180;
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(AppRadii.hero),
+      child: SizedBox(
+        height: height,
+        child: Stack(
+          children: <Widget>[
+            Positioned.fill(child: ColoredBox(color: brand.background)),
+            Positioned(
+              left: -11,
+              top: height / 2 - 11,
+              child: _Notch(color: scheme.surface),
+            ),
+            Positioned(
+              right: -11,
+              top: height / 2 - 11,
+              child: _Notch(color: scheme.surface),
+            ),
+            Positioned(
+              top: 20,
+              right: 24,
+              child: Text(
+                brandName,
+                style: TextStyle(
+                  color: brand.foreground,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 0.5,
+                ),
+              ),
+            ),
+            Center(
+              child: Container(
+                width: 88,
+                height: 88,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: brand.foreground.withValues(alpha: 0.92),
+                  shape: BoxShape.circle,
+                ),
+                child: Text(
+                  brand.label,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: brand.background,
+                    fontSize: 24,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 티켓 노치(작은 원).
+class _Notch extends StatelessWidget {
+  const _Notch({required this.color});
+
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 22,
+      height: 22,
+      decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+    );
+  }
+}
+
+/// 상태 뱃지 — 라벨·색은 목록 카드와 같은 정본([gifticonStatusLabel])을 쓴다.
+class _StatusBadge extends StatelessWidget {
+  const _StatusBadge({required this.status});
+
+  final GifticonStatus status;
+
+  @override
+  Widget build(BuildContext context) {
+    final Color color = gifticonStatusColor(status);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(AppRadii.badge),
+      ),
+      child: Text(
+        gifticonStatusLabel(status),
+        style: TextStyle(
+          color: color,
+          fontSize: 13,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    );
+  }
+}
+
+/// 아이콘 + 텍스트 한 줄(금액·카테고리·유효기간).
+class _MetaRow extends StatelessWidget {
+  const _MetaRow({
+    required this.icon,
+    required this.text,
+    this.emphasize = false,
+  });
+
+  final IconData icon;
+  final String text;
+
+  /// 만료 임박/경과를 error 색으로 강조할지.
+  final bool emphasize;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+    final Color color = emphasize ? scheme.error : scheme.onSurfaceVariant;
+
+    return Row(
+      children: <Widget>[
+        Icon(icon, size: 16, color: color),
+        const SizedBox(width: 6),
+        Expanded(
+          child: Text(
+            text,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: color,
+              fontWeight: emphasize ? FontWeight.w600 : FontWeight.w400,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// 상태 안내 배너(사용완료·만료·공유중).
+class _InfoBanner extends StatelessWidget {
+  const _InfoBanner({required this.icon, required this.text});
+
+  final IconData icon;
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(AppRadii.tile),
+      ),
+      child: Row(
+        children: <Widget>[
+          Icon(icon, size: 18, color: theme.colorScheme.onSurfaceVariant),
+          const SizedBox(width: 10),
+          Expanded(child: Text(text, style: theme.textTheme.bodyMedium)),
+        ],
+      ),
+    );
+  }
+}
