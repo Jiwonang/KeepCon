@@ -103,19 +103,21 @@ class _CreateGroupSheetState extends ConsumerState<_CreateGroupSheet> {
     if (name.isEmpty) return;
     final NavigatorState navigator = Navigator.of(context);
     final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
+    // try는 **저장소 호출만** 감싼다(참여 시트와 동일 규약 — `_JoinGroupSheetState._submit`).
     try {
       await ref
           .read(shareRepositoryProvider)
           .createGroup(name: name, emoji: _emoji, maxMembers: _maxMembers);
-      navigator.pop();
-      messenger
-        ..hideCurrentSnackBar()
-        ..showSnackBar(SnackBar(content: Text('"$name" 그룹을 만들었어요.')));
-    } on StateError {
+    } catch (_) {
       messenger
         ..hideCurrentSnackBar()
         ..showSnackBar(const SnackBar(content: Text('지금은 그룹을 만들 수 없어요.')));
+      return;
     }
+    navigator.pop();
+    messenger
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text('"$name" 그룹을 만들었어요.')));
   }
 
   @override
@@ -373,15 +375,16 @@ class _ShareGifticonSheet extends ConsumerWidget {
       await ref
           .read(shareRepositoryProvider)
           .shareGifticon(groupId: groupId, gifticon: g);
-      navigator.pop();
-      messenger
-        ..hideCurrentSnackBar()
-        ..showSnackBar(SnackBar(
-            content: Text('${g.productName}${g.productName.eulReul} 공유했어요.')));
-    } on StateError {
+    } catch (_) {
       messenger
         ..hideCurrentSnackBar()
         ..showSnackBar(const SnackBar(content: Text('지금은 공유할 수 없어요.')));
+      return;
     }
+    navigator.pop();
+    messenger
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(
+          content: Text('${g.productName}${g.productName.eulReul} 공유했어요.')));
   }
 }
