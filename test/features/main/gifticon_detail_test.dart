@@ -19,6 +19,7 @@ import 'package:keepcon/features/main/state/gifticon_filter.dart';
 import 'package:keepcon/features/main/state/gifticon_list_providers.dart';
 import 'package:keepcon/shared/models/gifticon.dart';
 import 'package:keepcon/shared/providers/repositories.dart';
+import 'package:keepcon/shared/repositories/gifticon_repository.dart';
 import 'package:keepcon/shared/repositories/impl/in_memory_gifticon_repository.dart';
 
 const String _ownerId = 'user-1';
@@ -197,4 +198,69 @@ void main() {
     expect(find.text('아메리카노 T'), findsOneWidget);
     expect(find.text('이미 사용 완료한 기프티콘이에요.'), findsOneWidget);
   });
+
+  testWidgets('통신 실패로 전이가 실패하면 그 사실을 알린다', (WidgetTester tester) async {
+    // 회귀 방어: `on StateError`만 잡던 시절엔 통신 실패가 통째로 삼켜졌다. 호출부가
+    // `onPressed: () => _confirm…()`이라 반환 Future가 버려져 unhandled async error가
+    // 되고 **화면에는 아무 일도 일어나지 않는다** — 사용자는 버튼이 먹통이라 여겨
+    // 여러 번 누르거나, 반대로 됐으려니 하고 매장을 나선다.
+    //
+    // `updateStatus`는 Firestore `runTransaction`을 쓰는데 트랜잭션은 오프라인 큐잉이
+    // 안 되므로, 망이 끊기면 StateError가 아닌 FirebaseException으로 떨어진다.
+    boot(<Gifticon>[_gifticon()]);
+    final ProviderContainer failing = ProviderContainer(
+      overrides: <Override>[
+        gifticonRepositoryProvider
+            .overrideWithValue(_FailingUpdateRepo(repo, Exception('오프라인'))),
+        rawGifticonsProvider.overrideWith((_) => repo.watchGifticons(_ownerId)),
+      ],
+    );
+    addTearDown(failing.dispose);
+
+    useTallViewport(tester);
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: failing,
+        child: MaterialApp(home: GifticonDetailPage(gifticon: _gifticon())),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.widgetWithText(ElevatedButton, '사용 완료'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(TextButton, '사용 완료'));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('다시 시도해 주세요'), findsOneWidget,
+        reason: '실패를 알리지 않으면 버튼이 먹통으로 읽힌다');
+    // 성공 안내가 함께 뜨면 더 나쁘다 — 안 된 일을 됐다고 말하는 셈이다.
+    expect(find.text('사용 완료로 변경했어요.'), findsNothing);
+  });
+}
+
+/// `updateStatus`만 실패시키는 데코레이터. 나머지는 실제 저장소에 위임한다.
+class _FailingUpdateRepo implements GifticonRepository {
+  _FailingUpdateRepo(this._inner, this._error);
+
+  final GifticonRepository _inner;
+  final Object _error;
+
+  @override
+  Future<Gifticon> updateStatus(String id, GifticonStatus status) async =>
+      throw _error;
+
+  @override
+  Future<Gifticon> addGifticon(Gifticon gifticon) =>
+      _inner.addGifticon(gifticon);
+
+  @override
+  Future<List<Gifticon>> getGifticons(String ownerId) =>
+      _inner.getGifticons(ownerId);
+
+  @override
+  Future<Gifticon?> getGifticonById(String id) => _inner.getGifticonById(id);
+
+  @override
+  Stream<List<Gifticon>> watchGifticons(String ownerId) =>
+      _inner.watchGifticons(ownerId);
 }

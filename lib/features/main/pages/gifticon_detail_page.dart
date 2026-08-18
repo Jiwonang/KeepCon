@@ -210,9 +210,28 @@ class GifticonDetailPage extends ConsumerWidget {
         ..hideCurrentSnackBar()
         ..showSnackBar(const SnackBar(content: Text('사용 완료로 변경했어요.')));
     } on StateError {
+      // 계약 위반(terminal 상태에서의 전이 등) — 다시 눌러도 결과가 같다.
       messenger
         ..hideCurrentSnackBar()
         ..showSnackBar(const SnackBar(content: Text('지금은 사용 완료할 수 없어요.')));
+    } catch (_) {
+      // 그 외 실패는 사실상 전부 통신 문제다. `updateStatus`는 Firestore
+      // `runTransaction`을 쓰는데 **트랜잭션은 오프라인 큐잉이 안 되므로**, 망이 끊기면
+      // `FirebaseException(unavailable)`로 떨어진다 — 지하철·엘리베이터, 그리고 하필
+      // 매장 계산대 앞에서 흔한 상황이다.
+      //
+      // 이걸 안 잡으면 예외가 삼켜진다: 호출부가 `onPressed: () => _confirm…()`이라
+      // 반환된 Future가 버려져 unhandled async error가 되고, 화면에는 **아무 일도
+      // 일어나지 않는다.** 사용자는 버튼이 먹통이라 여겨 여러 번 누르거나, 반대로
+      // 됐으려니 하고 매장을 나선다.
+      //
+      // StateError와 문구를 나누는 이유: 위는 "이미 끝난 일"(재시도 무의미)이고
+      // 이쪽은 "지금 안 될 뿐"(재시도하면 된다)이다.
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(content: Text('처리하지 못했어요. 연결을 확인하고 다시 시도해 주세요.')),
+        );
     }
   }
 }
