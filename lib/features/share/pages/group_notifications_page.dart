@@ -14,6 +14,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../shared/models/share.dart';
+import '../../../shared/diagnostics/report_handled_failure.dart';
 import '../../../shared/providers/repositories.dart';
 import '../../../shared/theme/theme_tokens.dart';
 import '../state/share_providers.dart';
@@ -73,7 +74,9 @@ class _GroupNotificationsPageState
   Future<void> _markRead(AsyncValue<List<GroupNotification>> attempted) async {
     try {
       await ref.read(shareRepositoryProvider).markNotificationsRead();
-    } catch (_) {
+    } catch (e, s) {
+      reportHandledFailure(ref, e, s,
+          context: 'GroupNotificationsPage.markNotificationsRead');
       // 실패는 "읽음 처리가 안 된 것"이므로 가드를 소모하지 않은 상태로 되돌린다.
       // 흔한 두 갈래 — ① [StateError]: 세션이 `data(null)`이면 [notificationsProvider]가
       // `AsyncData(<GroupNotification>[])`를 돌려주는데 이것도 AsyncData라 가드를

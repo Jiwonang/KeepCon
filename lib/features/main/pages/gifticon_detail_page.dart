@@ -16,6 +16,7 @@ import 'package:barcode_widget/barcode_widget.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../shared/diagnostics/report_handled_failure.dart';
 import '../../../shared/models/gifticon.dart';
 import '../../../shared/providers/repositories.dart';
 import '../../../shared/providers/shared_gifticons_provider.dart';
@@ -254,7 +255,9 @@ class GifticonDetailPage extends ConsumerWidget {
       messenger
         ..hideCurrentSnackBar()
         ..showSnackBar(const SnackBar(content: Text('사용 완료로 변경했어요.')));
-    } on StateError {
+    } on StateError catch (e, st) {
+      reportHandledFailure(ref, e, st,
+          context: 'GifticonDetailPage.updateStatus(guard)');
       // 계약 위반(terminal 상태에서의 전이 등) — 다시 눌러도 결과가 같다.
       messenger
         ..hideCurrentSnackBar()
@@ -263,7 +266,8 @@ class GifticonDetailPage extends ConsumerWidget {
       // **로그를 반드시 남긴다.** 이 catch는 통신 실패를 겨냥한 것이지만 문법상 모든
       // 예외를 삼키므로, 매핑 버그 같은 진짜 결함까지 "연결을 확인하세요"로 위장시킨다.
       // 그때 콘솔에 아무것도 없으면 사용자도 개발자도 둘을 구분할 방법이 없다.
-      debugPrint('GifticonDetailPage.updateStatus 실패: $e\n$st');
+      reportHandledFailure(ref, e, st,
+          context: 'GifticonDetailPage.updateStatus');
       // 그 외 실패는 사실상 전부 통신 문제다. `updateStatus`는 Firestore
       // `runTransaction`을 쓰는데 **트랜잭션은 오프라인 큐잉이 안 되므로**, 망이 끊기면
       // `FirebaseException(unavailable)`로 떨어진다 — 지하철·엘리베이터, 그리고 하필
