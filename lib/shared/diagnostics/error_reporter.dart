@@ -38,6 +38,7 @@
 /// 인증(`features/auth`)·마이 페이지는 `on AuthException`으로 좁혀 잡으므로 이 부류가 아니다.
 library;
 
+import 'package:firebase_core/firebase_core.dart' show FirebaseException;
 import 'package:flutter/foundation.dart';
 
 /// 처리된 실패를 개발자에게 남기는 계약.
@@ -68,19 +69,39 @@ class DebugPrintErrorReporter implements ErrorReporter {
   /// 예외 메시지를 로그에 실을지 여부.
   final bool includeMessage;
 
+  /// 사용자 데이터 없이 **분류만** 담는 라벨.
+  ///
+  /// `runtimeType.toString()`을 쓰지 않는 이유: **dart2js가 release에서 타입 이름을
+  /// minify한다.** KeepCon은 web을 배포하므로(`firebase.json` hosting) 그 경로에서는
+  /// `minified:a7` 같은 값이 찍혀, 원격 수집이 없는 지금 유일한 진단 채널이 무의미해진다.
+  /// Dart에 `avoid_type_to_string` 린트가 정확히 이 이유로 존재한다. `is` 검사는 실제
+  /// 클래스에 대한 런타임 판정이라 minify와 무관하다.
+  ///
+  /// [FirebaseException]만 `code`를 함께 남긴다 — `permission-denied`(규칙 버그)와
+  /// `unavailable`(오프라인)은 대응이 정반대인데 타입만으로는 구분되지 않는다. `code`는
+  /// 사용자 데이터가 아니라 가릴 이유도 없다.
+  static String _kindOf(Object error) {
+    if (error is FirebaseException) return 'FirebaseException(${error.code})';
+    if (error is StateError) return 'StateError';
+    if (error is ArgumentError) return 'ArgumentError';
+    if (error is TypeError) return 'TypeError';
+    if (error is UnsupportedError) return 'UnsupportedError';
+    if (error is FormatException) return 'FormatException';
+    if (error is Error) return 'Error';
+    return 'Exception';
+  }
+
   @override
   void report(Object error, StackTrace stack, {required String context}) {
     // 리포터는 절대 던지지 않는다 — 여기서 터지면 원래 실패를 가린다.
     try {
-      // release 로그에는 **타입만** 남긴다. 저장소 예외 메시지에는 식별자가 그대로 실려
-      // 있고(`Invite token expired: $inviteToken`, `Not a member of group: $groupId`),
+      // release 로그에는 **분류 라벨만** 남긴다. 저장소 예외 메시지에는 식별자가 그대로
+      // 실려 있고(`Invite token expired: $inviteToken`, `Not a member of group: $groupId`),
       // [debugPrint]는 release에서도 플랫폼 로그로 나간다 — 진단하려고 만든 경로가
       // 유출 경로가 되면 안 된다. 초대 토큰은 유출되면 그대로 참여 경로다.
       //
-      // 타입과 라벨만으로도 "어느 화면의 어느 액션이 어떤 부류로 실패했는가"는 남으므로
-      // 분류에는 충분하다. 값이 필요한 재현은 debug 빌드에서 한다.
-      final String what =
-          includeMessage ? '$error' : error.runtimeType.toString();
+      // 값이 필요한 재현은 debug 빌드에서 한다.
+      final String what = includeMessage ? '$error' : _kindOf(error);
       debugPrint('KeepCon: [$context] 처리된 실패 — $what');
       // 스택에는 파일·줄만 들어가므로 그대로 남긴다(진단의 핵심이다).
       debugPrint('$stack');

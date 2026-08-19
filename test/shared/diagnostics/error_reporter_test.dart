@@ -73,9 +73,30 @@ void main() {
       );
 
       expect(printed.first, isNot(contains('481923')));
-      // 분류에 필요한 것(라벨·타입)은 그대로 남는다.
+      // 분류에 필요한 것(라벨·종류)은 그대로 남는다.
       expect(printed.first, contains('JoinGroupSheet.joinGroup'));
       expect(printed.first, contains('StateError'));
+    });
+
+    test('종류 라벨은 is 검사로 만든다 — runtimeType은 web release에서 minify된다', () {
+      // dart2js는 release에서 타입 이름을 minify한다(Dart의 avoid_type_to_string 린트가
+      // 정확히 이 이유로 존재한다). KeepCon은 web을 배포하므로 runtimeType에 기대면
+      // 원격 수집이 없는 지금 유일한 진단 채널이 `minified:a7`이 된다.
+      void reportOf(Object e) => const DebugPrintErrorReporter(
+            includeMessage: false,
+          ).report(e, StackTrace.current, context: 'ctx');
+
+      for (final (Object error, String kind) in <(Object, String)>[
+        (StateError('x'), 'StateError'),
+        (ArgumentError('x'), 'ArgumentError'),
+        (UnsupportedError('x'), 'UnsupportedError'),
+        (const FormatException('x'), 'FormatException'),
+        (Exception('x'), 'Exception'),
+      ]) {
+        printed.clear();
+        reportOf(error);
+        expect(printed.first, contains(kind), reason: kind);
+      }
     });
 
     test('includeMessage=true면 메시지를 남긴다(debug 빌드 기본값)', () {
