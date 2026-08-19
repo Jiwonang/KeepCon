@@ -11,6 +11,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../shared/models/gifticon.dart';
 import '../../../shared/models/group.dart';
+import '../../../shared/diagnostics/report_handled_failure.dart';
 import '../../../shared/providers/repositories.dart';
 import '../../../shared/util/korean_particle.dart';
 import '../state/share_providers.dart';
@@ -108,7 +109,8 @@ class _CreateGroupSheetState extends ConsumerState<_CreateGroupSheet> {
       await ref
           .read(shareRepositoryProvider)
           .createGroup(name: name, emoji: _emoji, maxMembers: _maxMembers);
-    } catch (_) {
+    } catch (e, s) {
+      reportHandledFailure(ref, e, s, context: 'CreateGroupSheet.createGroup');
       messenger
         ..hideCurrentSnackBar()
         ..showSnackBar(const SnackBar(content: Text('지금은 그룹을 만들 수 없어요.')));
@@ -228,7 +230,8 @@ class _JoinGroupSheetState extends ConsumerState<_JoinGroupSheet> {
     // 화면 정리에서 예외가 났을 때 실패 안내가 떠 사용자가 참여에 실패했다고 오해한다.
     try {
       await ref.read(shareRepositoryProvider).joinGroup(code);
-    } catch (_) {
+    } catch (e, s) {
+      reportHandledFailure(ref, e, s, context: 'JoinGroupSheet.joinGroup');
       // `on StateError`로 좁히면 백엔드가 던지는 예외(권한 거부·네트워크 등)가 그대로
       // 빠져나가 **아무 안내도 없이 시트가 멈춘다** — 사용자에겐 버튼이 죽은 것으로만
       // 보인다. 실패 원인과 무관하게 항상 결과를 알려준다.
@@ -375,7 +378,9 @@ class _ShareGifticonSheet extends ConsumerWidget {
       await ref
           .read(shareRepositoryProvider)
           .shareGifticon(groupId: groupId, gifticon: g);
-    } catch (_) {
+    } catch (e, s) {
+      reportHandledFailure(ref, e, s,
+          context: 'ShareGifticonSheet.shareGifticon');
       messenger
         ..hideCurrentSnackBar()
         ..showSnackBar(const SnackBar(content: Text('지금은 공유할 수 없어요.')));

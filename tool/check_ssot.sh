@@ -31,7 +31,7 @@ scan() {
 }
 
 # 1) 공유 모델/enum/인터페이스 재정의 금지 (lib/shared 정본만 사용)
-SHARED_TYPES="Group|GroupMember|SharedGifticon|UsageLog|GroupNotification|MyGifticon|Gifticon|User|JoinRequest|ShareStatus|MemberRole|JoinRequestStatus|GroupNotificationType|GifticonStatus|SortOption|FilterOption|ShareStatusTransition|GifticonStatusTransition|ShareRepository|GifticonRepository|AuthRepository|MyGroupsRetry"
+SHARED_TYPES="Group|GroupMember|SharedGifticon|UsageLog|GroupNotification|MyGifticon|Gifticon|User|JoinRequest|ShareStatus|MemberRole|JoinRequestStatus|GroupNotificationType|GifticonStatus|SortOption|FilterOption|ShareStatusTransition|GifticonStatusTransition|ShareRepository|GifticonRepository|AuthRepository|MyGroupsRetry|ErrorReporter"
 
 # 선행 수식어 `([a-z]+ )*`로 Dart 3 클래스 수식어를 모두 포괄한다:
 # abstract/base/interface/final/sealed/mixin(및 조합, 예: `abstract interface class`,
@@ -47,7 +47,7 @@ if [ -n "$defs" ]; then
 fi
 
 # 2) SSOT provider 재선언 금지 (소비 ref.watch(...)는 허용, 선언은 금지)
-SSOT_PROVIDERS="authRepositoryProvider|gifticonRepositoryProvider|shareRepositoryProvider|themeModeProvider|myGroupsProvider|myGroupsRetryProvider|sessionUserProvider"
+SSOT_PROVIDERS="authRepositoryProvider|gifticonRepositoryProvider|shareRepositoryProvider|themeModeProvider|myGroupsProvider|myGroupsRetryProvider|sessionUserProvider|errorReporterProvider"
 
 # 선택적 `late`, 선택적 타입(`Provider<T> ` 등)을 포괄해 `final NAME =`,
 # `late final NAME =`, `final Provider<T> NAME =` 형태를 모두 잡는다.
