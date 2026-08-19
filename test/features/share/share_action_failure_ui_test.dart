@@ -25,6 +25,8 @@ import 'package:keepcon/features/share/widgets/share_sheets.dart';
 import 'package:keepcon/shared/models/gifticon.dart';
 import 'package:keepcon/shared/models/group.dart';
 import 'package:keepcon/shared/models/share.dart';
+import 'package:keepcon/shared/diagnostics/error_reporter.dart';
+import 'package:keepcon/shared/providers/error_reporter_provider.dart';
 import 'package:keepcon/shared/providers/repositories.dart';
 import 'package:keepcon/shared/repositories/impl/in_memory_auth_repository.dart';
 import 'package:keepcon/shared/repositories/impl/in_memory_gifticon_repository.dart';
@@ -139,6 +141,21 @@ class _BackendFailingShareRepository extends InMemoryShareRepository {
           : super.cancelShare(sharedGifticonId);
 }
 
+/// 무엇이 보고됐는지 기록하는 리포터.
+///
+/// `catch (_)`가 [Error]까지 삼켜 프로그래밍 결함이 사용자 문구 한 줄로 사라지던 것을 막는
+/// 것이 계약의 목적이므로, "안내가 떴는가"만이 아니라 **원본이 개발자에게 갔는가**도 함께
+/// 고정한다. 기본 구현은 콘솔에 쓰므로 테스트에서는 소음이 된다.
+class _SpyErrorReporter implements ErrorReporter {
+  final List<({Object error, String context})> reports =
+      <({Object error, String context})>[];
+
+  @override
+  void report(Object error, StackTrace stack, {required String context}) {
+    reports.add((error: error, context: context));
+  }
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -147,6 +164,7 @@ void main() {
   late InMemoryAuthRepository auth;
   late InMemoryGifticonRepository gifticons;
   late _BackendFailingShareRepository repo;
+  late _SpyErrorReporter reporter;
 
   setUp(() {
     auth = InMemoryAuthRepository();
@@ -155,6 +173,7 @@ void main() {
       authRepository: auth,
       gifticonRepository: gifticons,
     );
+    reporter = _SpyErrorReporter();
   });
 
   tearDown(() {
@@ -176,6 +195,7 @@ void main() {
           authRepositoryProvider.overrideWithValue(auth),
           gifticonRepositoryProvider.overrideWithValue(gifticons),
           shareRepositoryProvider.overrideWithValue(repo),
+          errorReporterProvider.overrideWithValue(reporter),
         ],
         child: MaterialApp(home: page),
       ),
@@ -375,6 +395,55 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('지금은 공유할 수 없어요.'), findsOneWidget);
+    });
+  });
+
+  group('사용자에게는 안내, 개발자에게는 원본', () {
+    // `catch (_)`는 [Exception]뿐 아니라 [Error](TypeError 등)까지 삼킨다. 안내만 띄우고
+    // 끝내면 프로그래밍 결함이 문구 한 줄로 바뀌어 조용히 사라진다 — 화면에는
+    // "지금은 나갈 수 없어요"만 남고 개발자에게는 아무것도 남지 않는다.
+    testWidgets('실패하면 원본 예외와 위치 라벨이 리포터로 간다', (WidgetTester tester) async {
+      final Group g = await repo.createGroup(name: '가족', emoji: '🏠');
+      repo.failing.add('deleteGroup');
+
+      await pump(tester, GroupDetailPage(groupId: g.id));
+      await tester.tap(find.text('그룹 삭제'));
+      await tester.pumpAndSettle();
+      await confirm(tester);
+
+      // 사용자 쪽 — 하던 대로 안내가 뜬다.
+      expect(find.text('그룹을 삭제하지 못했어요. 다시 시도해 주세요.'), findsOneWidget);
+
+      // 개발자 쪽 — 문자열로 뭉개지 않고 **원본 객체**를 넘긴다(스택·타입을 잃지 않는다).
+      expect(reporter.reports, hasLength(1));
+      expect(reporter.reports.single.error, isA<Exception>());
+      expect('${reporter.reports.single.error}', contains('deleteGroup'));
+      // 라벨은 로그에서 grep 되도록 호출부마다 고정 문자열이다.
+      expect(reporter.reports.single.context, 'GroupDetailPage.deleteGroup');
+    });
+
+    testWidgets('성공하면 아무것도 보고하지 않는다(정상 경로가 로그를 오염시키지 않게)',
+        (WidgetTester tester) async {
+      await pumpSheetHost(tester, (BuildContext c) => showCreateGroupSheet(c));
+      await tester.enterText(find.byType(TextField), '가족');
+      await tester.tap(find.widgetWithText(ElevatedButton, '만들기'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('"가족" 그룹을 만들었어요.'), findsOneWidget);
+      expect(reporter.reports, isEmpty);
+    });
+
+    testWidgets('시트 경로도 라벨을 남긴다 — 어느 화면인지 로그로 구분된다',
+        (WidgetTester tester) async {
+      repo.failing.add('createGroup');
+
+      await pumpSheetHost(tester, (BuildContext c) => showCreateGroupSheet(c));
+      await tester.enterText(find.byType(TextField), '가족');
+      await tester.tap(find.widgetWithText(ElevatedButton, '만들기'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('지금은 그룹을 만들 수 없어요.'), findsOneWidget);
+      expect(reporter.reports.single.context, 'CreateGroupSheet.createGroup');
     });
   });
 

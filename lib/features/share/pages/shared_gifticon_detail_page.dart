@@ -11,6 +11,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../shared/models/share.dart';
 import '../../../shared/models/user.dart';
+import '../../../shared/providers/error_reporter_provider.dart';
 import '../../../shared/providers/repositories.dart';
 import '../../../shared/providers/session_provider.dart';
 import '../../../shared/theme/brand_palette.dart';
@@ -252,7 +253,10 @@ class _DetailBody extends ConsumerWidget {
     final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
     try {
       await ref.read(shareRepositoryProvider).toggleReservation(item.id);
-    } catch (_) {
+    } catch (e, s) {
+      ref
+          .read(errorReporterProvider)
+          .report(e, s, context: 'SharedGifticonDetailPage.toggleReservation');
       // `on StateError`로 좁히면 백엔드 예외(권한 거부·네트워크 등)가 그대로 빠져나가
       // **아무 안내도 없이 화면이 멈춘다** — 실패 원인과 무관하게 항상 결과를 알린다.
       messenger
@@ -265,7 +269,10 @@ class _DetailBody extends ConsumerWidget {
     final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
     try {
       await ref.read(shareRepositoryProvider).markUsed(item.id);
-    } catch (_) {
+    } catch (e, s) {
+      ref
+          .read(errorReporterProvider)
+          .report(e, s, context: 'SharedGifticonDetailPage.markUsed');
       messenger
         ..hideCurrentSnackBar()
         ..showSnackBar(const SnackBar(content: Text('지금은 사용 완료할 수 없어요.')));
@@ -299,7 +306,10 @@ class _DetailBody extends ConsumerWidget {
     // 버튼은 이미 공유자·미사용중일 때만 노출되지만, 저장소 가드가 최종 판정한다.
     try {
       await ref.read(shareRepositoryProvider).cancelShare(item.id);
-    } catch (_) {
+    } catch (e, s) {
+      ref
+          .read(errorReporterProvider)
+          .report(e, s, context: 'SharedGifticonDetailPage.cancelShare');
       messenger
         ..hideCurrentSnackBar()
         ..showSnackBar(const SnackBar(content: Text('지금은 회수할 수 없어요.')));
