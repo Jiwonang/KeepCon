@@ -45,7 +45,9 @@ void main() {
     'emoji': 2,
     'inviteCode': 3,
     'inviteOwnerOnly': 'yes',
-    'maxMembers': 'many',
+    // `is num`을 통과하지만 `toInt()`가 UnsupportedError(= Error)를 던지는 값.
+    // Firestore는 IEEE 754 double을 그대로 저장하므로 실제로 들어올 수 있다.
+    'maxMembers': double.nan,
     'members': 'not-a-list',
     'memberIds': 'not-a-list',
     'inviteExpiresAt': 'nope',
@@ -161,10 +163,33 @@ void main() {
       expect(g!.memberCount, 1);
     });
 
+    test('멤버 항목이 손상돼도 던지지 않고, 유령 멤버는 정원을 먹지 않는다', () {
+      // `members: 'not-a-list'`는 첫 줄에서 단락돼 멤버 단위 리더를 하나도 태우지 않는다.
+      // 여기서는 리스트는 맞되 **항목이 손상된** 경우를 태운다.
+      final Group? g =
+          FirebaseShareRepository.groupFromDataOrNull('g1', <String, dynamic>{
+        'members': <dynamic>[
+          <String, dynamic>{
+            'userId': 7,
+            'displayName': 1,
+            'avatarEmoji': 2,
+            'role': 99,
+          },
+          'not-a-map',
+          <String, dynamic>{'userId': 'user-1', 'role': 'owner'},
+        ],
+      });
+
+      expect(g, isNotNull);
+      // userId를 못 읽은 항목은 아무와도 매칭되지 않으면서 정원 한 칸을 먹으므로 걸러낸다.
+      expect(g!.memberCount, 1);
+      expect(g.members.single.userId, 'user-1');
+    });
+
     test('maxMembers가 손상 값이면 기본값으로 떨어진다', () {
       final Group? g =
           FirebaseShareRepository.groupFromDataOrNull('g1', <String, dynamic>{
-        'maxMembers': 'many',
+        'maxMembers': double.nan,
         'members': <Map<String, dynamic>>[
           <String, dynamic>{'userId': 'user-1', 'role': 'owner'},
         ],
@@ -173,16 +198,34 @@ void main() {
       expect(g!.maxMembers, Group.defaultMaxMembers);
     });
 
-    test('inviteOwnerOnly가 손상 값이면 false(권한을 넓히지 않는다)', () {
+    // `canInvite = isOwnedBy || !inviteOwnerOnly` — **false가 더 허용적인 값**이다.
+    // 그래서 결측(레거시)과 손상의 폴백 방향이 갈린다.
+    test('inviteOwnerOnly가 없으면(레거시) 기본 정책 false', () {
+      final Group? g =
+          FirebaseShareRepository.groupFromDataOrNull('g1', <String, dynamic>{
+        'members': <Map<String, dynamic>>[
+          <String, dynamic>{'userId': 'user-1', 'role': 'owner'},
+          <String, dynamic>{'userId': 'user-2', 'role': 'member'},
+        ],
+      });
+
+      expect(g!.inviteOwnerOnly, isFalse);
+      expect(g.canInvite('user-2'), isTrue); // 멤버 아무나 초대 가능(기본 정책)
+    });
+
+    test('inviteOwnerOnly가 손상 값이면 true — 잠근 정책이 조용히 풀리지 않는다', () {
       final Group? g =
           FirebaseShareRepository.groupFromDataOrNull('g1', <String, dynamic>{
         'inviteOwnerOnly': 'yes',
         'members': <Map<String, dynamic>>[
           <String, dynamic>{'userId': 'user-1', 'role': 'owner'},
+          <String, dynamic>{'userId': 'user-2', 'role': 'member'},
         ],
       });
 
-      expect(g!.inviteOwnerOnly, isFalse);
+      expect(g!.inviteOwnerOnly, isTrue);
+      expect(g.canInvite('user-2'), isFalse); // 일반 멤버는 초대 불가로 닫힌다
+      expect(g.canInvite('user-1'), isTrue); // 방장은 그대로
     });
 
     test('만료 필드가 손상 값이면 epoch — 만료로 본다(fail-closed)', () {

@@ -26,6 +26,8 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart' show visibleForTesting;
 
+import 'doc_read.dart';
+
 import '../../../models/gifticon.dart';
 import '../../../models/group.dart';
 import '../../../models/share.dart';
@@ -566,7 +568,7 @@ class FirebaseShareRepository implements ShareRepository {
           in docs.skip(i).take(chunkSize)) {
         batch.delete(d.reference);
         final DocumentReference<Map<String, dynamic>>? lock =
-            _lockRefOrNull(_strOrNull(d.data()['gifticonId']));
+            _lockRefOrNull(docStringOrNull(d.data()['gifticonId']));
         if (lock != null) batch.delete(lock);
       }
       await batch.commit();
@@ -626,7 +628,7 @@ class FirebaseShareRepository implements ShareRepository {
   Stream<DateTime?> watchNotificationsReadAt(String userId) {
     return _notifReads.doc(userId).snapshots().map(
         (DocumentSnapshot<Map<String, dynamic>> d) =>
-            _readAtFrom(d.data()?['readAt']));
+            docDateOrNull(d.data()?['readAt']));
   }
 
   @override
@@ -735,15 +737,18 @@ class FirebaseShareRepository implements ShareRepository {
   @visibleForTesting
   static Group? groupFromDataOrNull(String id, Map<String, dynamic> data) {
     final List<dynamic> rawMembers =
-        _listOrNull(data['members']) ?? const <dynamic>[];
+        docListOrNull(data['members']) ?? const <dynamic>[];
     final List<GroupMember> parsed = rawMembers
         .whereType<Map<String, dynamic>>()
         .map((Map<String, dynamic> m) => GroupMember(
-              userId: _str(m['userId']),
-              displayName: _str(m['displayName']),
-              avatarEmoji: _str(m['avatarEmoji'], _defaultAvatar),
-              role: _roleFromName(_strOrNull(m['role'])),
+              userId: docString(m['userId']),
+              displayName: docString(m['displayName']),
+              avatarEmoji: docString(m['avatarEmoji'], _defaultAvatar),
+              role: _roleFromName(docStringOrNull(m['role'])),
             ))
+        // userId가 비어 있는 항목(필드 없음/손상)은 유령이다 — 아무와도 매칭되지 않으면서
+        // [Group.isFull]의 정원 한 칸을 먹고 화면에 빈 이름으로 남는다.
+        .where((GroupMember m) => m.userId.isNotEmpty)
         .toList(growable: false);
     // 멤버십의 정본은 `memberIds`다 — 목록 쿼리(array-contains)와 보안 규칙의 멤버십
     // 판정이 모두 그 필드를 본다. 멤버 '나가기'는 규칙상 `memberIds`만 바꿀 수 있으므로
@@ -752,7 +757,7 @@ class FirebaseShareRepository implements ShareRepository {
     // 남은 항목은 다음 방장 쓰기(`_groupToDoc`)에서 문서에서도 사라진다.
     // 손상 값(리스트가 아님)도 `null`과 같게 본다 — 여기서 터뜨려 봐야 목록 전체가
     // 죽을 뿐이고, 멤버십의 실제 판정은 보안 규칙이 서버에서 한다.
-    final List<dynamic>? rawIds = _listOrNull(data['memberIds']);
+    final List<dynamic>? rawIds = docListOrNull(data['memberIds']);
     final List<GroupMember> members = rawIds == null
         // 레거시 문서엔 memberIds가 없을 수 있다 — 그때는 members를 그대로 믿는다.
         ? parsed
@@ -765,15 +770,19 @@ class FirebaseShareRepository implements ShareRepository {
     if (members.isEmpty || owners != 1) return null;
     // 레거시 문서엔 maxMembers가 없어 기본값을 쓰고, 손상 값(현재 멤버 수보다 작음)은
     // 현재 멤버 수로 끌어올려 불변식(>=1, >=memberCount)을 지킨다.
-    final int rawMax =
-        _intOrNull(data['maxMembers']) ?? Group.defaultMaxMembers;
+    final int rawMax = docInt(data['maxMembers']) ?? Group.defaultMaxMembers;
     final int maxMembers = rawMax < members.length ? members.length : rawMax;
     return Group(
       id: id,
-      name: _str(data['name']),
-      emoji: _str(data['emoji'], '🎁'),
-      inviteCode: _str(data['inviteCode']),
-      inviteOwnerOnly: _bool(data['inviteOwnerOnly']),
+      name: docString(data['name']),
+      emoji: docString(data['emoji'], '🎁'),
+      inviteCode: docString(data['inviteCode']),
+      // 결측(레거시)은 기본 정책(false)이지만, **손상은 true로 닫는다** —
+      // `Group.canInvite`는 `!inviteOwnerOnly`일 때 모든 멤버에게 열리므로 false가 더
+      // 허용적인 값이다. 뭉쳐서 false로 떨어뜨리면 방장이 잠가 둔 정책이 손상 하나로
+      // 조용히 풀린다.
+      inviteOwnerOnly:
+          docBool(data['inviteOwnerOnly'], ifAbsent: false, ifCorrupt: true),
       inviteExpiresAt: _inviteExpiresAtFrom(data['inviteExpiresAt']),
       maxMembers: maxMembers,
       members: members,
@@ -807,23 +816,30 @@ class FirebaseShareRepository implements ShareRepository {
   ///
   /// 손상 문서라도 **던지지 않는다.** 이 매퍼는 목록 매핑
   /// ([watchSharedGifticons]/[getSharedGifticons])에서도 쓰이므로, 문서 하나가 예외를
-  /// 던지면 그룹의 공유 목록 스트림 전체가 죽는다. 빠진/어긋난 필드는 안전한 기본값으로
-  /// 메우고, 실제 권한·상태 판정은 트랜잭션 가드가 한다(빈 `sharedByUserId`는 공유자
-  /// 비교에서 어차피 걸러지므로 fail-closed다).
+  /// 던지면 그룹의 공유 목록 스트림 전체가 죽는다.
+  ///
+  /// 폴백의 방향은 필드마다 다르다:
+  /// - `sharedByUserId` → 빈 문자열. [cancelShare]의 공유자 비교가 어떤 실제 uid와도
+  ///   매칭시키지 않으므로 **fail-closed**다.
+  /// - `status` → [ShareStatus.available]. 이쪽은 **fail-open이다.** [markUsed]의 상태
+  ///   가드가 바로 이 매퍼가 만든 값을 보기 때문에(같은 값을 읽는 판정자라 독립 검증이
+  ///   아니다), 손상된 `used` 문서가 available로 읽히면 사용 완료가 한 번 더 통과해
+  ///   [UsageLog]가 중복 적재된다. `firestore.rules`도 상태 전이는 검사하지 않아 서버
+  ///   백스톱이 없다 — 상태 불변식의 서버 강제는 미구현 과제로 남아 있다.
   @visibleForTesting
   static SharedGifticon sharedFromData(String id, Map<String, dynamic> data) {
     return SharedGifticon(
       id: id,
-      groupId: _str(data['groupId']),
-      gifticonId: _str(data['gifticonId']),
-      sharedByUserId: _str(data['sharedByUserId']),
-      brand: _str(data['brand']),
-      productName: _str(data['productName']),
-      expiryDate: _toDate(data['expiryDate']),
-      status: _shareStatusFromName(_strOrNull(data['status'])),
-      lockedByUserId: _strOrNull(data['lockedByUserId']),
-      reservedByUserId: _strOrNull(data['reservedByUserId']),
-      barcode: _strOrNull(data['barcode']),
+      groupId: docString(data['groupId']),
+      gifticonId: docString(data['gifticonId']),
+      sharedByUserId: docString(data['sharedByUserId']),
+      brand: docString(data['brand']),
+      productName: docString(data['productName']),
+      expiryDate: docDate(data['expiryDate']),
+      status: _shareStatusFromName(docStringOrNull(data['status'])),
+      lockedByUserId: docStringOrNull(data['lockedByUserId']),
+      reservedByUserId: docStringOrNull(data['reservedByUserId']),
+      barcode: docStringOrNull(data['barcode']),
     );
   }
 
@@ -835,12 +851,12 @@ class FirebaseShareRepository implements ShareRepository {
   static UsageLog logFromData(String id, Map<String, dynamic> data) {
     return UsageLog(
       id: id,
-      groupId: _str(data['groupId']),
-      userId: _str(data['userId']),
-      sharedGifticonId: _str(data['sharedGifticonId']),
-      brand: _str(data['brand']),
-      productName: _str(data['productName']),
-      usedAt: _toDate(data['usedAt']),
+      groupId: docString(data['groupId']),
+      userId: docString(data['userId']),
+      sharedGifticonId: docString(data['sharedGifticonId']),
+      brand: docString(data['brand']),
+      productName: docString(data['productName']),
+      usedAt: docDate(data['usedAt']),
     );
   }
 
@@ -866,64 +882,25 @@ class FirebaseShareRepository implements ShareRepository {
   static GroupNotification notifFromData(String id, Map<String, dynamic> data) {
     return GroupNotification(
       id: id,
-      groupId: _str(data['groupId']),
-      type: _notifTypeFromName(_strOrNull(data['type'])),
-      title: _str(data['title']),
-      message: _str(data['message']),
-      createdAt: _toDate(data['createdAt']),
+      groupId: docString(data['groupId']),
+      type: _notifTypeFromName(docStringOrNull(data['type'])),
+      title: docString(data['title']),
+      message: docString(data['message']),
+      createdAt: docDate(data['createdAt']),
     );
   }
 
-  // ── 문서 필드 읽기 (타입 안전) ──────────────────────────────────────
-  //
-  // `as String?` 같은 캐스팅은 필드 타입이 어긋나면 [TypeError]를 던진다. 그런데
-  // [TypeError]는 [Exception]이 아니라 [Error]다 — 계약이 "가드 위반은 [StateError]"로
-  // 규정한 그물에도 안 걸리고, 목록 매핑에서 터지면 **문서 하나가 스트림 전체를 죽인다**.
-  // 아래 리더들은 시각 파서([_toDate])가 이미 쓰던 `is` 검사 방식으로 통일해, 손상 문서를
-  // 예외가 아니라 **기본값**으로 흡수한다(관측 가능한 실패 > 조용한 폭발).
-
-  /// 문서 필드 → [String]. 타입이 어긋나거나 없으면 [fallback].
-  static String _str(Object? value, [String fallback = '']) =>
-      value is String ? value : fallback;
-
-  /// 문서 필드 → [String]?. 타입이 어긋나면 `null`(= 값 없음).
-  static String? _strOrNull(Object? value) => value is String ? value : null;
-
-  /// 문서 필드 → [bool]. 타입이 어긋나거나 없으면 `false`.
-  static bool _bool(Object? value) => value is bool && value;
-
-  /// 문서 필드 → 리스트. 리스트가 아니면 `null` — 호출부가 "필드 없음(레거시)"과
-  /// "손상 값"을 같게 다룰 수 있게 한다.
-  static List<dynamic>? _listOrNull(Object? value) =>
-      value is List<dynamic> ? value : null;
-
-  /// 문서 필드 → [int]. 숫자가 아니면 `null`.
-  static int? _intOrNull(Object? value) => value is num ? value.toInt() : null;
-
-  /// 잠금 문서 참조 — [gifticonId]가 비어 있으면 `null`.
+  /// 잠금 문서 참조 — [gifticonId]를 문서 id로 쓸 수 없으면 `null`.
   ///
-  /// 빈 문자열은 Firestore 문서 경로로 쓸 수 없어 `doc('')`이 잘못된 참조가 된다. 손상
-  /// 문서(필드 없음/빈 값) 하나 때문에 **그룹 삭제·공유 회수가 영구히 막히는** 것을 막는다
-  /// — 지울 잠금이 없으면 건너뛰는 편이 낫다(잠금은 원본 id로만 생기므로 빈 id에 대응하는
-  /// 잠금은 애초에 존재하지 않는다).
+  /// `doc('')`은 [ArgumentError]를 던져, 손상 문서 하나가 **그룹 삭제·공유 회수를 영구히
+  /// 막는다**(재시도해도 문서가 그대로다). 지울 잠금을 못 찾으면 건너뛰는 편이 낫다.
+  ///
+  /// ⚠️ 잔여 위험: 빈 id에는 대응 잠금이 아예 없지만, `gifticonId` **필드가 타입 손상**이면
+  /// 원래 id를 알 수 없어 그 id로 만들어진 잠금이 **고아로 남는다** — 해당 기프티콘은
+  /// [shareGifticon]의 잠금 검사에 걸려 다시 공유할 수 없다. 전체 실패보다는 나은 절충이며,
+  /// 복구는 콘솔에서 잠금 문서를 지우는 것이다.
   DocumentReference<Map<String, dynamic>>? _lockRefOrNull(String? gifticonId) =>
-      (gifticonId == null || gifticonId.isEmpty)
-          ? null
-          : _locks.doc(gifticonId);
-
-  static DateTime _toDate(Object? value) {
-    if (value is Timestamp) return value.toDate();
-    if (value is DateTime) return value;
-    return DateTime.fromMillisecondsSinceEpoch(0);
-  }
-
-  /// 알림 마지막 읽음 시각 파서 — 없거나 손상 값이면 `null`(= 안 읽음). 안읽음 판정은
-  /// null을 "전부 안읽음"으로 안전하게 처리하므로 fail-open이 아니다.
-  static DateTime? _readAtFrom(Object? value) {
-    if (value is Timestamp) return value.toDate();
-    if (value is DateTime) return value;
-    return null;
-  }
+      isUsableDocId(gifticonId) ? _locks.doc(gifticonId!) : null;
 
   /// 초대코드 만료 시각을 문서 값에서 해석한다. **fail-closed** — 만료 검사를 우회하는
   /// 값을 만들지 않는다.

@@ -17,6 +17,9 @@
 library;
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart' show visibleForTesting;
+
+import 'doc_read.dart';
 
 import '../../../models/gifticon.dart';
 import '../../gifticon_repository.dart';
@@ -109,39 +112,41 @@ class FirebaseGifticonRepository implements GifticonRepository {
   /// Firestore 문서 → 계약 [Gifticon].
   ///
   /// 문서 id를 [Gifticon.id]로, `status` 문자열을 [GifticonStatus]로 역매핑한다.
-  Gifticon _fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
-    final Map<String, dynamic> data = doc.data() ?? const <String, dynamic>{};
-    return Gifticon(
-      id: doc.id,
-      ownerId: data['ownerId'] as String? ?? '',
-      brand: data['brand'] as String? ?? '',
-      productName: data['productName'] as String? ?? '',
-      // price는 required 계약. Firestore num(int/double) 또는 문자열 방어적 파싱.
-      // 손상/누락 시 0(무료·미상)으로 폴백해 역매핑이 깨지지 않게 한다.
-      price: (data['price'] as num?)?.toInt() ??
-          int.tryParse('${data['price'] ?? ''}') ??
-          0,
-      barcode: data['barcode'] as String?,
-      category: data['category'] as String? ?? '',
-      expiryDate: _toDate(data['expiryDate']),
-      registeredAt: _toDate(data['registeredAt']),
-      status: _statusFromName(data['status'] as String?),
-      imagePath: data['imagePath'] as String?,
-    );
-  }
+  Gifticon _fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) =>
+      gifticonFromData(doc.id, doc.data() ?? const <String, dynamic>{});
 
-  /// Firestore [Timestamp]/기타 값을 [DateTime]으로 역매핑한다.
-  DateTime _toDate(Object? value) {
-    if (value is Timestamp) return value.toDate();
-    if (value is DateTime) return value;
-    // 손상/누락 데이터에 대한 방어적 기본값(epoch). 정상 경로에서는 도달하지 않는다.
-    return DateTime.fromMillisecondsSinceEpoch(0);
+  /// [_fromDoc]의 순수 본체(문서 없이 맵만으로 동작 — 테스트 진입점).
+  ///
+  /// 손상 문서라도 **던지지 않는다.** [watchGifticons]/[getGifticons]가 목록 전체를 이
+  /// 매퍼로 매핑하므로, 문서 하나가 예외를 던지면 **사용자의 기프티콘 목록이 통째로
+  /// 사라진다**(공유 쪽과 같은 사고 구조다 — [doc_read.dart] 참조).
+  @visibleForTesting
+  static Gifticon gifticonFromData(String id, Map<String, dynamic> data) {
+    return Gifticon(
+      id: id,
+      ownerId: docString(data['ownerId']),
+      brand: docString(data['brand']),
+      productName: docString(data['productName']),
+      // price는 required 계약. 숫자면 그대로, 문자열이면 파싱, 그 밖(손상·누락)은 0.
+      //
+      // 예전에는 `(data['price'] as num?)?.toInt() ?? int.tryParse(...)`였는데, 문자열이
+      // 들어오면 **캐스팅이 먼저 [TypeError]를 던져 문자열 폴백에 닿지 못했다** —
+      // 방어 코드가 있는 것처럼 보이지만 실제로는 죽은 가지였다.
+      price:
+          docInt(data['price']) ?? int.tryParse(docString(data['price'])) ?? 0,
+      barcode: docStringOrNull(data['barcode']),
+      category: docString(data['category']),
+      expiryDate: docDate(data['expiryDate']),
+      registeredAt: docDate(data['registeredAt']),
+      status: _statusFromName(docStringOrNull(data['status'])),
+      imagePath: docStringOrNull(data['imagePath']),
+    );
   }
 
   /// 저장된 `status` 문자열을 [GifticonStatus]로 역매핑한다.
   ///
   /// 알 수 없는 값은 [GifticonStatus.available]로 폴백한다(방어적).
-  GifticonStatus _statusFromName(String? name) {
+  static GifticonStatus _statusFromName(String? name) {
     for (final GifticonStatus s in GifticonStatus.values) {
       if (s.name == name) return s;
     }
