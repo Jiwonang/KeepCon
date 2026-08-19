@@ -243,6 +243,7 @@ class InMemoryShareRepository implements ShareRepository {
       _removeGroup(groupId);
     } else {
       _groups[_groupIndex(groupId)] = g.copyWith(members: remaining);
+      _dropJoinRequest(groupId: groupId, userId: me.id);
     }
     _emit();
   }
@@ -305,6 +306,7 @@ class InMemoryShareRepository implements ShareRepository {
         .toList(growable: false);
     final Group updated = g.copyWith(members: next);
     _groups[_groupIndex(groupId)] = updated;
+    _dropJoinRequest(groupId: groupId, userId: userId);
     _emit();
     return updated;
   }
@@ -342,6 +344,17 @@ class InMemoryShareRepository implements ShareRepository {
     return updated;
   }
 
+  /// 멤버십이 끊긴 사람의 참여 요청 기록을 거둔다(나가기·강퇴).
+  ///
+  /// 남겨 두면 이미 그룹에 없는 사람에게 "승인됨"이 계속 보인다 — 요청 기록이 현재
+  /// 관계와 어긋나는 것이다. 다시 들어오고 싶으면 링크로 새로 요청하면 되고, 그 경로가
+  /// `requestToJoin`의 재요청과 같아진다(상태가 하나로 정리된다).
+  void _dropJoinRequest({required String groupId, required String userId}) {
+    _joinRequests.removeWhere(
+      (JoinRequest r) => r.groupId == groupId && r.userId == userId,
+    );
+  }
+
   void _removeGroup(String groupId) {
     _groups.removeWhere((Group g) => g.id == groupId);
     _sharedByGroup.remove(groupId);
@@ -365,15 +378,6 @@ class InMemoryShareRepository implements ShareRepository {
       if (g.inviteToken == inviteToken) return g;
     }
     return null;
-  }
-
-  void _notifyJoinRequested(Group g, String displayName) {
-    _pushNotification(
-      groupId: g.id,
-      type: GroupNotificationType.joinRequested,
-      title: '참여 요청',
-      message: '$displayName님이 ${g.name}${g.name.eulReul} 참여하고 싶어 해요.',
-    );
   }
 
   @override
@@ -402,11 +406,13 @@ class InMemoryShareRepository implements ShareRepository {
       // 결정이 끝난 요청(거절, 또는 승인 후 강퇴)은 다시 대기로 되돌린다.
       final JoinRequest revived = prev.copyWith(
         status: JoinRequestStatus.pending,
+        // 표시 스냅샷은 **전부** 다시 찍는다. 셋 중 둘만 갱신하면 `User`에 아바타가
+        // 붙는 날 재요청한 사람만 옛 아바타로 승인된다.
         displayName: me.displayName,
+        avatarEmoji: _defaultAvatar,
         requestedAt: DateTime.now(),
       );
       _joinRequests[existing] = revived;
-      _notifyJoinRequested(g, me.displayName);
       _emit();
       return revived;
     }
@@ -420,7 +426,6 @@ class InMemoryShareRepository implements ShareRepository {
       requestedAt: DateTime.now(),
     );
     _joinRequests.add(req);
-    _notifyJoinRequested(g, me.displayName);
     _emit();
     return req;
   }

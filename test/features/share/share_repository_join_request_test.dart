@@ -2,6 +2,7 @@
 //
 // 검증 대상 계약:
 // - requestToJoin: 링크 소지자는 **요청만** 할 수 있고 멤버가 되지 않는다.
+//   알림 문서는 만들지 않는다 — 방장에게 도착을 알리는 신호는 대기 목록 하나다.
 //   만료·이미 멤버는 StateError. 같은 사람의 재요청은 멱등(요청이 쌓이지 않는다).
 //   정원은 요청 시점에 보지 않는다(대기자는 자리를 차지하지 않는다).
 // - approveJoinRequest: 방장만, 대기 중인 요청만. 승인 시점에 정원을 본다.
@@ -15,7 +16,6 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:keepcon/shared/models/group.dart';
 import 'package:keepcon/shared/models/join_request.dart';
-import 'package:keepcon/shared/models/share.dart';
 import 'package:keepcon/shared/models/user.dart';
 import 'package:keepcon/shared/repositories/impl/in_memory_auth_repository.dart';
 import 'package:keepcon/shared/repositories/impl/in_memory_gifticon_repository.dart';
@@ -25,8 +25,6 @@ void main() {
   late InMemoryAuthRepository auth;
   late InMemoryGifticonRepository gifticons;
   late InMemoryShareRepository repo;
-
-  final String owner = InMemoryAuthRepository.defaultUser.id; // 'user-1'
 
   const String guestEmail = 'guest@keepcon.test';
   const String guestPassword = 'keepcon';
@@ -89,20 +87,6 @@ void main() {
       expect(await repo.getGroups(guest.id), isEmpty);
     });
 
-    test('방장에게 참여 요청 알림이 남는다', () async {
-      final Group g = await createOwnedGroup();
-      await asGuest();
-      await repo.requestToJoin(g.inviteToken);
-
-      await asOwner();
-      final List<GroupNotification> notifs = await repo.getNotifications(owner);
-      expect(
-        notifs.where((GroupNotification n) =>
-            n.groupId == g.id && n.type == GroupNotificationType.joinRequested),
-        hasLength(1),
-      );
-    });
-
     test('같은 링크를 두 번 눌러도 요청은 하나다(멱등)', () async {
       final Group g = await createOwnedGroup();
       await asGuest();
@@ -111,16 +95,9 @@ void main() {
       final JoinRequest second = await repo.requestToJoin(g.inviteToken);
 
       expect(second.id, first.id);
+      // 방장이 보는 신호(대기 목록)에도 하나만 쌓인다 — 이게 요청 도착을 알리는
+      // 유일한 경로이므로, 여기서 중복되면 방장 화면이 곧바로 어지러워진다.
       expect(await repo.getPendingJoinRequests(g.id), hasLength(1));
-
-      // 알림도 다시 쌓이지 않는다.
-      await asOwner();
-      final List<GroupNotification> notifs = await repo.getNotifications(owner);
-      expect(
-        notifs.where((GroupNotification n) =>
-            n.type == GroupNotificationType.joinRequested),
-        hasLength(1),
-      );
     });
 
     test('존재하지 않는 토큰으로는 요청할 수 없다', () async {
@@ -318,6 +295,52 @@ void main() {
 
       expect(await repo.getGroupById(g.id), isNull);
       expect(await repo.getMyJoinRequests(guest.id), isEmpty);
+    });
+  });
+
+  group('멤버십이 끊길 때', () {
+    test('강퇴하면 승인 기록도 함께 사라진다', () async {
+      final Group g = await createOwnedGroup();
+      final User guest = await asGuest();
+      final JoinRequest req = await repo.requestToJoin(g.inviteToken);
+
+      await asOwner();
+      await repo.approveJoinRequest(req.id);
+      final Group kicked =
+          await repo.removeMember(groupId: g.id, userId: guest.id);
+
+      expect(kicked.isMember(guest.id), isFalse);
+      // 남겨 두면 그룹에 없는 사람에게 "승인됨"이 계속 보인다(현재 관계와 어긋난다).
+      expect(await repo.getMyJoinRequests(guest.id), isEmpty);
+    });
+
+    test('스스로 나가도 승인 기록이 남지 않는다', () async {
+      final Group g = await createOwnedGroup();
+      final User guest = await asGuest();
+      final JoinRequest req = await repo.requestToJoin(g.inviteToken);
+
+      await asOwner();
+      await repo.approveJoinRequest(req.id);
+
+      await asGuest();
+      await repo.leaveGroup(g.id);
+
+      expect(await repo.getMyJoinRequests(guest.id), isEmpty);
+    });
+
+    test('강퇴당한 사람은 링크로 다시 요청할 수 있다', () async {
+      final Group g = await createOwnedGroup();
+      final User guest = await asGuest();
+      final JoinRequest req = await repo.requestToJoin(g.inviteToken);
+
+      await asOwner();
+      await repo.approveJoinRequest(req.id);
+      await repo.removeMember(groupId: g.id, userId: guest.id);
+
+      await asGuest();
+      final JoinRequest again = await repo.requestToJoin(g.inviteToken);
+      expect(again.status, JoinRequestStatus.pending);
+      expect(await repo.getPendingJoinRequests(g.id), hasLength(1));
     });
   });
 

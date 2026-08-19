@@ -180,9 +180,6 @@ class _NotificationCard extends StatelessWidget {
       case GroupNotificationType.used:
         icon = Icons.check_circle_outline;
         tint = scheme.onSurfaceVariant;
-      case GroupNotificationType.joinRequested:
-        icon = Icons.person_add_alt;
-        tint = scheme.primary;
     }
 
     return Container(

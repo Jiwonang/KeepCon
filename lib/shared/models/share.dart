@@ -304,13 +304,11 @@ enum GroupNotificationType {
   expiringSoon('만료 임박'),
 
   /// 사용 완료.
-  used('사용 완료'),
+  used('사용 완료');
 
-  /// 초대 링크로 들어온 사람이 그룹 참여를 요청함 — 방장의 승인이 필요하다.
-  ///
-  /// 이 알림이 없으면 방장이 요청이 온 줄을 모르고, 승인이 일어나지 않아 참여 흐름
-  /// 전체가 조용히 멈춘다. 알림은 그룹 멤버 전체가 읽지만 **승인은 방장만** 할 수 있다.
-  joinRequested('참여 요청');
+  // 참여 요청은 여기에 넣지 않는다 — 요청의 행위자는 비멤버인데 알림 문서는 멤버만
+  // 만들 수 있어, 클라이언트가 만들 수 없는 알림이 된다. 방장에게 요청을 알리는 신호는
+  // `ShareRepository.watchPendingJoinRequests` 하나다.
 
   const GroupNotificationType(this.label);
 

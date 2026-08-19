@@ -139,8 +139,14 @@ abstract class ShareRepository {
   /// 그룹이 삭제되면 그 그룹의 요청도 함께 사라진다 — 남겨 두면 아무도 끝낼 수 없는
   /// '대기 중'이 요청자 화면에 영원히 남는다.
   ///
-  /// 부수효과: 그룹에 [GroupNotificationType.joinRequested] 알림을 남긴다. 이 알림이
-  /// 없으면 방장이 요청을 모르고 승인이 일어나지 않아 흐름 전체가 멈춘다.
+  /// **알림 문서를 남기지 않는다.** 방장이 요청을 알아채는 신호는
+  /// [watchPendingJoinRequests] 하나뿐이며, 화면은 그 스트림의 길이로 배지를 그린다.
+  ///
+  /// 그룹 알림([GroupNotification])으로 알리지 않는 이유: 이 메서드의 행위자는 정의상
+  /// **비멤버**인데(바로 위 가드), 알림 문서는 멤버만 만들 수 있다. 규칙에 비멤버 예외를
+  /// 뚫으면 그룹의 알림 피드에 외부인이 쓰는 길이 열리고, 서버(Cloud Functions)로
+  /// 대신 쓰게 하려면 유료 플랜이 필요하다. 대기 목록이 이미 같은 정보를 갖고 있으므로
+  /// 둘 다 치르지 않는다 — 요청 문서 자체가 알림이다.
   Future<JoinRequest> requestToJoin(String inviteToken);
 
   /// [userId]가 보낸 참여 요청들을 반응형으로 관찰한다(최신순).
@@ -154,8 +160,15 @@ abstract class ShareRepository {
 
   /// [groupId]의 **대기 중** 참여 요청을 반응형으로 관찰한다(오래된 순).
   ///
-  /// 방장의 승인 목록이 소비한다. 처리된([JoinRequestStatus.approved]/
-  /// [JoinRequestStatus.rejected]) 요청은 포함하지 않는다.
+  /// 방장의 승인 목록이 소비하며, 요청이 도착했음을 방장에게 알리는 **유일한 신호**다
+  /// ([requestToJoin] 참조 — 알림 문서는 만들지 않는다). 처리된
+  /// ([JoinRequestStatus.approved]/[JoinRequestStatus.rejected]) 요청은 포함하지 않는다.
+  ///
+  /// **읽기 권한: 그 그룹의 방장만.** 대기자 명단은 아직 멤버가 아닌 사람들의 이름이라
+  /// 일반 멤버에게도 열지 않는다. in-memory 구현은 이 제한을 강제하지 않으므로
+  /// (조회 메서드는 행위자를 받지 않는다) 실제 차단은 Firestore 보안 규칙이 맡는다 —
+  /// 규칙을 쓸 때 이 문장이 기준이다. 요청자 본인은 [watchMyJoinRequests]로 자기
+  /// 요청만 읽는다.
   Stream<List<JoinRequest>> watchPendingJoinRequests(String groupId);
 
   /// [groupId]의 대기 중 참여 요청을 1회성으로 조회한다(오래된 순).

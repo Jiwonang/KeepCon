@@ -372,16 +372,24 @@ class FirebaseShareRepository implements ShareRepository {
       _joinRequestsNotOnFirebaseYet();
 
   @override
-  Stream<List<JoinRequest>> watchMyJoinRequests(String userId) =>
-      _joinRequestsNotOnFirebaseYet();
+  Stream<List<JoinRequest>> watchMyJoinRequests(String userId) async* {
+    // `async*`가 아니면 호출 지점에서 동기 throw가 되어, build나 initState
+    // 안에서 스트림을 만드는 순간 프레임이 죽는다. 나머지 6개(Future)는 에러가
+    // Future로 전달되므로 실패 방식을 여기에 맞춘다.
+    _joinRequestsNotOnFirebaseYet();
+  }
 
   @override
   Future<List<JoinRequest>> getMyJoinRequests(String userId) async =>
       _joinRequestsNotOnFirebaseYet();
 
   @override
-  Stream<List<JoinRequest>> watchPendingJoinRequests(String groupId) =>
-      _joinRequestsNotOnFirebaseYet();
+  Stream<List<JoinRequest>> watchPendingJoinRequests(String groupId) async* {
+    // `async*`가 아니면 호출 지점에서 동기 throw가 되어, build나 initState
+    // 안에서 스트림을 만드는 순간 프레임이 죽는다. 나머지 6개(Future)는 에러가
+    // Future로 전달되므로 실패 방식을 여기에 맞춘다.
+    _joinRequestsNotOnFirebaseYet();
+  }
 
   @override
   Future<List<JoinRequest>> getPendingJoinRequests(String groupId) async =>
