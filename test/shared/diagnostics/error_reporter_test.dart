@@ -62,6 +62,32 @@ void main() {
       expect(printed.first, contains('non-empty string'));
     });
 
+    test('includeMessage=false면 타입만 남긴다 — 예외 메시지에 식별자가 실린다', () {
+      // 저장소 예외 메시지에는 초대 토큰·그룹 id가 그대로 들어 있고
+      // (`Invite token expired: $inviteToken`), debugPrint는 release에서도
+      // 플랫폼 로그로 나간다. 진단하려고 만든 경로가 유출 경로가 되면 안 된다.
+      const DebugPrintErrorReporter(includeMessage: false).report(
+        StateError('Invite token expired: 481923'),
+        StackTrace.current,
+        context: 'JoinGroupSheet.joinGroup',
+      );
+
+      expect(printed.first, isNot(contains('481923')));
+      // 분류에 필요한 것(라벨·타입)은 그대로 남는다.
+      expect(printed.first, contains('JoinGroupSheet.joinGroup'));
+      expect(printed.first, contains('StateError'));
+    });
+
+    test('includeMessage=true면 메시지를 남긴다(debug 빌드 기본값)', () {
+      const DebugPrintErrorReporter(includeMessage: true).report(
+        StateError('Invite token expired: 481923'),
+        StackTrace.current,
+        context: 'ctx',
+      );
+
+      expect(printed.first, contains('481923'));
+    });
+
     test('로깅이 실패해도 던지지 않는다 — 리포터가 원래 실패를 가리면 안 된다', () {
       debugPrint = (String? message, {int? wrapWidth}) {
         throw StateError('logging itself failed');

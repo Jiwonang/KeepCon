@@ -14,7 +14,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../shared/models/share.dart';
-import '../../../shared/providers/error_reporter_provider.dart';
+import '../../../shared/diagnostics/report_handled_failure.dart';
 import '../../../shared/providers/repositories.dart';
 import '../../../shared/theme/theme_tokens.dart';
 import '../state/share_providers.dart';
@@ -75,7 +75,7 @@ class _GroupNotificationsPageState
     try {
       await ref.read(shareRepositoryProvider).markNotificationsRead();
     } catch (e, s) {
-      ref.read(errorReporterProvider).report(e, s,
+      reportHandledFailure(ref, e, s,
           context: 'GroupNotificationsPage.markNotificationsRead');
       // 실패는 "읽음 처리가 안 된 것"이므로 가드를 소모하지 않은 상태로 되돌린다.
       // 흔한 두 갈래 — ① [StateError]: 세션이 `data(null)`이면 [notificationsProvider]가

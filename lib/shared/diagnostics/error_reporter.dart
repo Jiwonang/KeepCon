@@ -24,7 +24,18 @@
 /// emulator/dev/prod를 실행 시 고르는 구조가 깨지기 때문이다(팀 기본 경로인 에뮬레이터 포함).
 ///
 /// 그래서 지금은 **이음매만** 만든다. 나중에 백엔드를 정하면 [ErrorReporter] 구현 하나를
-/// 더하고 조립부에서 provider를 갈아끼우면 되며, **잡는 자리 15곳은 손대지 않는다.**
+/// 더하고 조립부에서 provider를 갈아끼우면 되며, **잡는 자리는 손대지 않는다.**
+///
+/// ## 잔여 소비자 (아직 이 정본을 안 쓰는 곳)
+///
+/// 이 계약은 share 화면과 `GifticonDetailPage.updateStatus`를 덮는다. 아래는 같은 부류인데
+/// 아직 배선되지 않았다 — 다음 사람이 "정본이 이미 전부 덮는다"고 오해하지 않도록 적어 둔다.
+///
+/// - `lib/features/scan/state/gifticon_form_state.dart` — 원시 예외를 **사용자 문구에 직접**
+///   넣는다(`'저장에 실패했습니다: $e'`). 진단도 안 남는다. 문구 정리와 함께 별도로 다룬다.
+/// - `lib/features/scan/scan_page.dart` / `gifticon_ocr_parser.dart` — 광폭 catch, 진단 없음.
+///
+/// 인증(`features/auth`)·마이 페이지는 `on AuthException`으로 좁혀 잡으므로 이 부류가 아니다.
 library;
 
 import 'package:flutter/foundation.dart';
@@ -49,13 +60,29 @@ abstract class ErrorReporter {
 /// 따라 한 줄로 시작해, 스택은 그 아래에 붙인다.
 class DebugPrintErrorReporter implements ErrorReporter {
   /// 상수 생성자 — provider가 인스턴스를 한 벌만 들고 있으면 충분하다.
-  const DebugPrintErrorReporter();
+  ///
+  /// [includeMessage]가 참이면 예외 메시지를 그대로 찍고, 거짓이면 **타입만** 남긴다.
+  /// 기본값이 [kDebugMode]인 이유는 아래 [report] 참조.
+  const DebugPrintErrorReporter({this.includeMessage = kDebugMode});
+
+  /// 예외 메시지를 로그에 실을지 여부.
+  final bool includeMessage;
 
   @override
   void report(Object error, StackTrace stack, {required String context}) {
     // 리포터는 절대 던지지 않는다 — 여기서 터지면 원래 실패를 가린다.
     try {
-      debugPrint('KeepCon: [$context] 처리된 실패 — $error');
+      // release 로그에는 **타입만** 남긴다. 저장소 예외 메시지에는 식별자가 그대로 실려
+      // 있고(`Invite token expired: $inviteToken`, `Not a member of group: $groupId`),
+      // [debugPrint]는 release에서도 플랫폼 로그로 나간다 — 진단하려고 만든 경로가
+      // 유출 경로가 되면 안 된다. 초대 토큰은 유출되면 그대로 참여 경로다.
+      //
+      // 타입과 라벨만으로도 "어느 화면의 어느 액션이 어떤 부류로 실패했는가"는 남으므로
+      // 분류에는 충분하다. 값이 필요한 재현은 debug 빌드에서 한다.
+      final String what =
+          includeMessage ? '$error' : error.runtimeType.toString();
+      debugPrint('KeepCon: [$context] 처리된 실패 — $what');
+      // 스택에는 파일·줄만 들어가므로 그대로 남긴다(진단의 핵심이다).
       debugPrint('$stack');
     } catch (_) {
       // 로깅 실패는 삼킨다(할 수 있는 것이 없다).

@@ -22,6 +22,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:keepcon/features/share/pages/member_invite_page.dart';
 import 'package:keepcon/shared/models/group.dart';
+import 'package:keepcon/shared/diagnostics/error_reporter.dart';
+import 'package:keepcon/shared/providers/error_reporter_provider.dart';
 import 'package:keepcon/shared/providers/repositories.dart';
 import 'package:keepcon/shared/repositories/impl/in_memory_auth_repository.dart';
 import 'package:keepcon/shared/repositories/impl/in_memory_gifticon_repository.dart';
@@ -48,6 +50,19 @@ class _FixedGroupsShareRepository implements ShareRepository {
       );
 }
 
+/// 보고된 라벨을 기록하는 리포터.
+///
+/// 기본 구현은 콘솔에 쓰므로 이 테스트가 일부러 태우는 실패가 스택 트레이스째
+/// CI 로그에 쏟아진다 — 진짜 실패와 섞인다. 겸사겸사 배선도 고정한다.
+class _SpyErrorReporter implements ErrorReporter {
+  final List<String> contexts = <String>[];
+
+  @override
+  void report(Object error, StackTrace stack, {required String context}) {
+    contexts.add(context);
+  }
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -69,6 +84,8 @@ void main() {
   /// 공유 채널이 실패를 던질지 여부(웹 미지원 브라우저 재현).
   late bool shareFails;
 
+  late _SpyErrorReporter reporter;
+
   setUp(() async {
     auth = InMemoryAuthRepository();
     gifticons = InMemoryGifticonRepository();
@@ -81,6 +98,7 @@ void main() {
     shareCalls = <Map<Object?, Object?>>[];
     clipboardWrites = <String>[];
     shareFails = false;
+    reporter = _SpyErrorReporter();
 
     final TestDefaultBinaryMessenger messenger =
         TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
@@ -122,6 +140,7 @@ void main() {
         overrides: <Override>[
           authRepositoryProvider.overrideWithValue(auth),
           gifticonRepositoryProvider.overrideWithValue(gifticons),
+          errorReporterProvider.overrideWithValue(reporter),
           shareRepositoryProvider.overrideWithValue(share),
         ],
         child: MaterialApp(home: MemberInvitePage(groupId: group.id)),
@@ -155,6 +174,8 @@ void main() {
 
     expect(clipboardWrites, <String>[group.inviteUrl]);
     expect(find.text('공유 시트를 열 수 없어 초대 링크를 복사했어요.'), findsOneWidget);
+    // 폴백으로 넘어간 이유도 개발자에게 남는다 — 웹에서 실제로 타는 경로다.
+    expect(reporter.contexts, <String>['MemberInvitePage.shareInvite']);
   });
 
   testWidgets('상단 "초대 링크" 필드의 복사는 그대로다(공유와 별개 경로)',
@@ -192,6 +213,7 @@ void main() {
         overrides: <Override>[
           authRepositoryProvider.overrideWithValue(auth),
           gifticonRepositoryProvider.overrideWithValue(gifticons),
+          errorReporterProvider.overrideWithValue(reporter),
           shareRepositoryProvider
               .overrideWithValue(_FixedGroupsShareRepository(<Group>[g])),
         ],

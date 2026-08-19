@@ -21,7 +21,7 @@ import 'package:share_plus/share_plus.dart';
 
 import '../../../shared/models/group.dart';
 import '../../../shared/models/user.dart';
-import '../../../shared/providers/error_reporter_provider.dart';
+import '../../../shared/diagnostics/report_handled_failure.dart';
 import '../../../shared/providers/repositories.dart';
 import '../../../shared/providers/session_provider.dart';
 import '../../../shared/util/korean_particle.dart';
@@ -98,9 +98,7 @@ class _MemberInvitePageState extends ConsumerState<MemberInvitePage> {
         ),
       );
     } catch (e, s) {
-      ref
-          .read(errorReporterProvider)
-          .report(e, s, context: 'MemberInvitePage.shareInvite');
+      reportHandledFailure(ref, e, s, context: 'MemberInvitePage.shareInvite');
       // 시트 미지원·실패 — 링크만 클립보드에 넣고 이유를 알린다.
       await Clipboard.setData(ClipboardData(text: g.inviteUrl));
       messenger
@@ -119,9 +117,8 @@ class _MemberInvitePageState extends ConsumerState<MemberInvitePage> {
             ownerOnly: value,
           );
     } catch (e, s) {
-      ref
-          .read(errorReporterProvider)
-          .report(e, s, context: 'MemberInvitePage.setInviteOwnerOnly');
+      reportHandledFailure(ref, e, s,
+          context: 'MemberInvitePage.setInviteOwnerOnly');
       // `on StateError`로 좁히면 백엔드 예외(권한 거부·네트워크 등)가 그대로 빠져나가
       // **아무 안내도 없이 스위치만 되돌아간다** — 실패 원인과 무관하게 항상 알린다.
       // 문구도 원인을 특정하지 않는다 — 스위치는 방장에게만 활성화되므로(`iAmOwner`)
@@ -164,7 +161,7 @@ class _MemberInvitePageState extends ConsumerState<MemberInvitePage> {
           .read(shareRepositoryProvider)
           .regenerateInviteToken(groupId: groupId);
     } on StateError catch (e, s) {
-      ref.read(errorReporterProvider).report(e, s,
+      reportHandledFailure(ref, e, s,
           context: 'MemberInvitePage.regenerateInviteToken(guard)');
       // 계약 위반(권한 없음·그룹 삭제됨)은 재시도해도 소용없으니 원인을 알린다.
       messenger
@@ -174,9 +171,8 @@ class _MemberInvitePageState extends ConsumerState<MemberInvitePage> {
         );
       return;
     } catch (e, s) {
-      ref
-          .read(errorReporterProvider)
-          .report(e, s, context: 'MemberInvitePage.regenerateInviteToken');
+      reportHandledFailure(ref, e, s,
+          context: 'MemberInvitePage.regenerateInviteToken');
       // 네트워크 등 기타 오류 — 재시도가 통할 수 있다.
       messenger
         ..hideCurrentSnackBar()

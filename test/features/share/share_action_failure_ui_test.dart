@@ -275,6 +275,7 @@ void main() {
       await confirm(tester);
 
       expect(find.text('지금은 나갈 수 없어요.'), findsOneWidget);
+      expect(reporter.reports.single.context, 'GroupDetailPage.leaveGroup');
     });
 
     testWidgets('그룹 삭제 실패', (WidgetTester tester) async {
@@ -299,6 +300,7 @@ void main() {
       await confirm(tester);
 
       expect(find.text('멤버를 내보낼 수 없어요. 다시 확인해 주세요.'), findsOneWidget);
+      expect(reporter.reports.single.context, 'GroupDetailPage.removeMember');
     });
 
     testWidgets('소유권 이전 후 나가기 실패', (WidgetTester tester) async {
@@ -313,6 +315,8 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('지금은 나갈 수 없어요.'), findsOneWidget);
+      expect(reporter.reports.single.context,
+          'GroupDetailPage.transferOwnershipAndLeave');
     });
   });
 
@@ -332,6 +336,8 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('지금은 찜할 수 없어요.'), findsOneWidget);
+      expect(reporter.reports.single.context,
+          'SharedGifticonDetailPage.toggleReservation');
     });
 
     testWidgets('사용 완료 실패', (WidgetTester tester) async {
@@ -345,6 +351,8 @@ void main() {
       expect(find.text('지금은 사용 완료할 수 없어요.'), findsOneWidget);
       // 실패했으므로 성공 안내는 뜨지 않는다(try가 성공 처리까지 감싸면 순서가 꼬인다).
       expect(find.text('사용 완료 처리했어요.'), findsNothing);
+      expect(
+          reporter.reports.single.context, 'SharedGifticonDetailPage.markUsed');
     });
 
     testWidgets('공유 취소(회수) 실패', (WidgetTester tester) async {
@@ -357,6 +365,8 @@ void main() {
       await confirm(tester, '회수');
 
       expect(find.text('지금은 회수할 수 없어요.'), findsOneWidget);
+      expect(reporter.reports.single.context,
+          'SharedGifticonDetailPage.cancelShare');
     });
   });
 
@@ -395,6 +405,8 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('지금은 공유할 수 없어요.'), findsOneWidget);
+      expect(
+          reporter.reports.single.context, 'ShareGifticonSheet.shareGifticon');
     });
   });
 
@@ -457,6 +469,8 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('초대 설정을 바꾸지 못했어요. 다시 시도해 주세요.'), findsOneWidget);
+      expect(reporter.reports.single.context,
+          'MemberInvitePage.setInviteOwnerOnly');
     });
 
     testWidgets('초대코드 재발급 — 백엔드 실패는 재시도 안내로 구분한다', (WidgetTester tester) async {
@@ -471,6 +485,8 @@ void main() {
       expect(find.text('초대코드를 재발급하지 못했어요. 다시 시도해 주세요.'), findsOneWidget);
       // 성공 안내가 함께 뜨면 성공 처리가 try 안에 남아 있다는 뜻이다.
       expect(find.text('새 초대코드를 발급했어요. 24시간 동안 유효해요.'), findsNothing);
+      expect(reporter.reports.single.context,
+          'MemberInvitePage.regenerateInviteToken');
     });
   });
 }

@@ -16,7 +16,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../shared/models/group.dart';
 import '../../../shared/models/share.dart';
 import '../../../shared/models/user.dart';
-import '../../../shared/providers/error_reporter_provider.dart';
+import '../../../shared/diagnostics/report_handled_failure.dart';
 import '../../../shared/providers/repositories.dart';
 import '../../../shared/providers/session_provider.dart';
 import '../../../shared/providers/shared_gifticons_provider.dart';
@@ -261,9 +261,8 @@ class _GroupDetailBody extends ConsumerWidget {
           newOwnerUserId: newOwner.userId,
         );
       } catch (e, s) {
-        ref
-            .read(errorReporterProvider)
-            .report(e, s, context: 'GroupDetailPage.transferOwnershipAndLeave');
+        reportHandledFailure(ref, e, s,
+            context: 'GroupDetailPage.transferOwnershipAndLeave');
         _snack(messenger, '지금은 나갈 수 없어요.');
         return;
       }
@@ -280,9 +279,7 @@ class _GroupDetailBody extends ConsumerWidget {
     try {
       await repo.leaveGroup(group.id);
     } catch (e, s) {
-      ref
-          .read(errorReporterProvider)
-          .report(e, s, context: 'GroupDetailPage.leaveGroup');
+      reportHandledFailure(ref, e, s, context: 'GroupDetailPage.leaveGroup');
       _snack(messenger, '지금은 나갈 수 없어요.');
       return;
     }
@@ -297,9 +294,7 @@ class _GroupDetailBody extends ConsumerWidget {
     try {
       await ref.read(shareRepositoryProvider).deleteGroup(group.id);
     } catch (e, s) {
-      ref
-          .read(errorReporterProvider)
-          .report(e, s, context: 'GroupDetailPage.deleteGroup');
+      reportHandledFailure(ref, e, s, context: 'GroupDetailPage.deleteGroup');
       // 원인을 특정하지 않는다 — catch를 넓힌 뒤로는 권한 외에 네트워크·서버 오류도
       // 여기로 오므로, "방장만"이라고 단정하면 방장 본인이 오프라인일 때 거짓이 된다
       // (_onRemoveMember와 동일 규약).
@@ -327,9 +322,7 @@ class _GroupDetailBody extends ConsumerWidget {
             userId: member.userId,
           );
     } catch (e, s) {
-      ref
-          .read(errorReporterProvider)
-          .report(e, s, context: 'GroupDetailPage.removeMember');
+      reportHandledFailure(ref, e, s, context: 'GroupDetailPage.removeMember');
       // 실패 원인은 권한 외에도 그룹 없음·이미 이탈한 멤버·백엔드 오류를 포함하므로
       // 원인을 특정하지 않는 일반 실패 메시지로 안내한다.
       _snack(messenger, '멤버를 내보낼 수 없어요. 다시 확인해 주세요.');
