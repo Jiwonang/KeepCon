@@ -281,6 +281,8 @@ class InMemoryShareRepository implements ShareRepository {
         .toList(growable: false);
     final Group updated = g.copyWith(members: next);
     _groups[_groupIndex(groupId)] = updated;
+    // 소유권을 넘기는 쪽도 그룹을 떠난다 — 나가기·강퇴와 같은 정리가 필요하다.
+    _dropJoinRequest(groupId: groupId, userId: me.id);
     _emit();
     return updated;
   }

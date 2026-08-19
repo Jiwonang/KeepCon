@@ -57,6 +57,20 @@ void main() {
     }
   }
 
+  /// 두 번째 요청자 계정으로 전환한다(소유권 이전 시나리오용).
+  Future<User> asGuest2() async {
+    const String email = 'guest2@keepcon.test';
+    try {
+      return await auth.signIn(email: email, password: guestPassword);
+    } on Object {
+      return auth.signUp(
+        email: email,
+        password: guestPassword,
+        displayName: '초대받은 사람2',
+      );
+    }
+  }
+
   /// 방장 계정으로 돌아온다.
   Future<User> asOwner() => auth.signIn(
         email: InMemoryAuthRepository.defaultUser.email,
@@ -326,6 +340,39 @@ void main() {
       await repo.leaveGroup(g.id);
 
       expect(await repo.getMyJoinRequests(guest.id), isEmpty);
+    });
+
+    test('소유권을 넘기고 나가도 승인 기록이 남지 않는다', () async {
+      final Group g = await createOwnedGroup();
+
+      // 손님 둘이 요청하고 방장이 둘 다 승인한다.
+      final User guest = await asGuest();
+      final JoinRequest r1 = await repo.requestToJoin(g.inviteToken);
+      final User guest2 = await asGuest2();
+      final JoinRequest r2 = await repo.requestToJoin(g.inviteToken);
+      await asOwner();
+      await repo.approveJoinRequest(r1.id);
+      await repo.approveJoinRequest(r2.id);
+
+      // 방장이 손님1에게 넘기고 나간다 → 손님1이 방장.
+      await repo.transferOwnershipAndLeave(
+        groupId: g.id,
+        newOwnerUserId: guest.id,
+      );
+
+      // 승인으로 들어온 손님1이 방장이 된 뒤, 손님2에게 넘기며 나간다.
+      await asGuest();
+      final Group after = await repo.transferOwnershipAndLeave(
+        groupId: g.id,
+        newOwnerUserId: guest2.id,
+      );
+
+      expect(after.isMember(guest.id), isFalse);
+      expect(after.isOwnedBy(guest2.id), isTrue);
+      // 나가기·강퇴와 같은 정리가 이 경로에도 적용돼야 한다.
+      expect(await repo.getMyJoinRequests(guest.id), isEmpty);
+      // 남아 있는 손님2의 기록은 그대로다.
+      expect(await repo.getMyJoinRequests(guest2.id), hasLength(1));
     });
 
     test('강퇴당한 사람은 링크로 다시 요청할 수 있다', () async {
