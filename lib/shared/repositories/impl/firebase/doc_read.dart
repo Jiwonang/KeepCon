@@ -8,9 +8,9 @@
 ///   전체를 죽인다** — 손상된 문서 한 건 때문에 화면이 통째로 비거나 에러가 된다.
 ///
 /// 그래서 읽기는 캐스팅이 아니라 `is` 검사로 통일하고, 손상 값은 예외가 아니라 **기본값**
-/// 으로 흡수한다. 이 파일이 그 단일 정본이며 `FirebaseShareRepository`·
-/// `FirebaseGifticonRepository`가 함께 소비한다 — 한쪽만 방어되면 다음 사람이 어느 쪽이
-/// 정본인지 알 수 없다.
+/// 으로 흡수한다. 이 파일이 그 단일 정본이며 같은 폴더의 Firestore 리포지토리 셋
+/// (`FirebaseShareRepository`·`FirebaseGifticonRepository`·`FirebaseAuthRepository`)이
+/// 함께 소비한다 — 한쪽만 방어되면 다음 사람이 어느 쪽이 정본인지 알 수 없다.
 ///
 /// **폴백 방향은 호출부가 정한다.** 값이 없는 것(레거시 문서)과 값이 손상된 것은 다른
 /// 사건이므로, 방향이 갈리는 [docBool]은 둘을 따로 받는다.

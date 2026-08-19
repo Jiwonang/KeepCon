@@ -23,6 +23,11 @@ import 'package:keepcon/shared/repositories/impl/firebase/firebase_share_reposit
 
 void main() {
   /// 모든 필드에 "타입이 틀린" 값을 넣은 문서 — 캐스팅이 있으면 첫 필드에서 터진다.
+  ///
+  /// ⚠️ 그룹 매퍼에 이 픽스처를 넣으면 `members`가 리스트가 아니라 멤버 0명 → 불변식
+  /// 위반으로 **곧바로 null을 반환**한다. 그래서 그 아래에서만 읽히는 그룹 레벨 필드
+  /// (`name`·`emoji`·`inviteCode`·`inviteOwnerOnly`·`maxMembers`·`inviteExpiresAt`)는
+  /// 이 픽스처로는 **평가되지 않는다** — 각각의 단독 테스트가 담당한다.
   const Map<String, dynamic> garbage = <String, dynamic>{
     'groupId': 42,
     'gifticonId': <String>['not', 'a', 'string'],
@@ -45,9 +50,7 @@ void main() {
     'emoji': 2,
     'inviteCode': 3,
     'inviteOwnerOnly': 'yes',
-    // `is num`을 통과하지만 `toInt()`가 UnsupportedError(= Error)를 던지는 값.
-    // Firestore는 IEEE 754 double을 그대로 저장하므로 실제로 들어올 수 있다.
-    'maxMembers': double.nan,
+    'maxMembers': 'many',
     'members': 'not-a-list',
     'memberIds': 'not-a-list',
     'inviteExpiresAt': 'nope',
@@ -278,6 +281,40 @@ void main() {
 
     // `canInvite = isOwnedBy || !inviteOwnerOnly` — **false가 더 허용적인 값**이다.
     // 그래서 결측(레거시)과 손상의 폴백 방향이 갈린다.
+    test('거대 숫자는 상한(프리셋 최대)으로 조인다 — 정원 가드가 무력해지지 않게', () {
+      // `1e300`은 유한해서 docInt를 통과하고 `toInt()`가 int64 최대값으로 **포화**한다.
+      // 그대로 두면 isFull이 영원히 false가 되어 정원 가드가 사라지고, 남은 자리가
+      // 19자리로 화면에 나오며, 방장이 그룹을 쓰면 그 값이 문서에 되쓰인다.
+      expect(1e300.isFinite, isTrue); // isFinite만으로는 못 막는다
+      expect(1e300.toInt(), 9223372036854775807);
+
+      final Group? g =
+          FirebaseShareRepository.groupFromDataOrNull('g1', <String, dynamic>{
+        'maxMembers': 1e300,
+        'members': <Map<String, dynamic>>[
+          <String, dynamic>{'userId': 'user-1', 'role': 'owner'},
+        ],
+      });
+
+      expect(g!.maxMembers, Group.memberCapPresets.last);
+      expect(g.remainingSlots, Group.memberCapPresets.last - 1);
+      // 정원까지 채우면 실제로 닫힌다(가드가 살아 있다).
+      expect(g.copyWith(maxMembers: 1).isFull, isTrue);
+    });
+
+    test('정상 범위 값은 클램프가 건드리지 않는다', () {
+      for (final int cap in Group.memberCapPresets) {
+        final Group? g =
+            FirebaseShareRepository.groupFromDataOrNull('g1', <String, dynamic>{
+          'maxMembers': cap,
+          'members': <Map<String, dynamic>>[
+            <String, dynamic>{'userId': 'user-1', 'role': 'owner'},
+          ],
+        });
+        expect(g!.maxMembers, cap, reason: '프리셋 $cap');
+      }
+    });
+
     test('inviteOwnerOnly가 없으면(레거시) 기본 정책 false', () {
       final Group? g =
           FirebaseShareRepository.groupFromDataOrNull('g1', <String, dynamic>{

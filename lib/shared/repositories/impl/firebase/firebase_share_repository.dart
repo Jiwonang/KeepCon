@@ -768,10 +768,18 @@ class FirebaseShareRepository implements ShareRepository {
     final int owners =
         members.where((GroupMember m) => m.role == MemberRole.owner).length;
     if (members.isEmpty || owners != 1) return null;
-    // 레거시 문서엔 maxMembers가 없어 기본값을 쓰고, 손상 값(현재 멤버 수보다 작음)은
-    // 현재 멤버 수로 끌어올려 불변식(>=1, >=memberCount)을 지킨다.
+    // 레거시 문서엔 maxMembers가 없어 기본값을 쓴다. 손상 값은 **양쪽으로** 조인다:
+    // 아래로는 현재 멤버 수(불변식 >=1, >=memberCount), 위로는 프리셋 상한.
+    //
+    // 상한이 필요한 이유: [docInt]는 유한한 값만 통과시키지만 `1e300` 같은 거대 double은
+    // 유한하므로 통과하고 `toInt()`가 int64 최대값으로 **포화**한다. 그러면 [Group.isFull]이
+    // 영원히 false가 되어 정원 가드가 무력해지고, 남은 자리가 19자리로 화면에 나오며,
+    // 방장이 그룹을 한 번 쓰면 [_groupToDoc]이 그 값을 문서에 되쓴다. 규칙에도 정원 검사가
+    // 없어 서버 백스톱이 없다. 앱이 만들 수 있는 값은 프리셋뿐이므로(그룹 생성 시트) 상한을
+    // 넘는 값은 손상으로 본다.
     final int rawMax = docInt(data['maxMembers']) ?? Group.defaultMaxMembers;
-    final int maxMembers = rawMax < members.length ? members.length : rawMax;
+    final int maxMembers =
+        rawMax.clamp(members.length, Group.memberCapPresets.last);
     return Group(
       id: id,
       name: docString(data['name']),
@@ -783,7 +791,10 @@ class FirebaseShareRepository implements ShareRepository {
       // 조용히 풀린다.
       inviteOwnerOnly:
           docBool(data['inviteOwnerOnly'], ifAbsent: false, ifCorrupt: true),
-      inviteExpiresAt: _inviteExpiresAtFrom(data['inviteExpiresAt']),
+      // [docDate]의 epoch 폴백이 곧 **fail-closed**다 — 값이 없거나(24시간 정책 이전의
+      // 레거시 문서) 손상이면 이미 만료된 것으로 보고 참여를 거부한다. 레거시 코드는
+      // 어차피 24시간이 지났고, 방장의 `regenerateInviteCode`가 복구 경로다.
+      inviteExpiresAt: docDate(data['inviteExpiresAt']),
       maxMembers: maxMembers,
       members: members,
     );
@@ -934,19 +945,6 @@ class FirebaseShareRepository implements ShareRepository {
   /// 복구는 콘솔에서 잠금 문서를 지우는 것이다.
   DocumentReference<Map<String, dynamic>>? _lockRefOrNull(String? gifticonId) =>
       isUsableDocId(gifticonId) ? _locks.doc(gifticonId!) : null;
-
-  /// 초대코드 만료 시각을 문서 값에서 해석한다. **fail-closed** — 만료 검사를 우회하는
-  /// 값을 만들지 않는다.
-  ///
-  /// 값이 없거나(24시간 정책 이전에 만들어진 레거시 문서 = 만료 필드 없음/`null`)
-  /// [Timestamp]·[DateTime]이 아닌 손상 값이면 이미 만료된 것(epoch)으로 취급해 참여를
-  /// 거부한다. 레거시 그룹의 코드는 어차피 발급된 지 24시간이 지났으므로 정책상 만료가 맞고,
-  /// 방장이 `regenerateInviteCode`로 새 코드를 받으면 정상 복구된다.
-  static DateTime _inviteExpiresAtFrom(Object? value) {
-    if (value is Timestamp) return value.toDate();
-    if (value is DateTime) return value;
-    return DateTime.fromMillisecondsSinceEpoch(0);
-  }
 
   static MemberRole _roleFromName(String? name) =>
       name == MemberRole.owner.name ? MemberRole.owner : MemberRole.member;
