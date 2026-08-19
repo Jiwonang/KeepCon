@@ -915,7 +915,13 @@ class FirebaseShareRepository implements ShareRepository {
         (data['maxMembers'] == null || docInt(data['maxMembers']) != null) &&
         (data['inviteExpiresAt'] == null ||
             docDateOrNull(data['inviteExpiresAt']) != null) &&
-        (data['memberIds'] == null || data['memberIds'] is List<dynamic>);
+        // 리스트인지만 보면 부족하다 — 원소가 손상되면 `rawIds.contains(userId)`가
+        // 실패해 **정상 멤버가 탈락**하고, 그 상태로 되쓰면 문서에서 영구히 사라진다
+        // (유령 멤버 검증이 막으려던 것과 같은 데이터 손실이 다른 경로로 들어온다).
+        (data['memberIds'] == null ||
+            (data['memberIds'] is List<dynamic> &&
+                (data['memberIds'] as List<dynamic>)
+                    .every((dynamic e) => e is String)));
     if (!typesOk) throw StateError('Malformed group document: $id');
     return g;
   }

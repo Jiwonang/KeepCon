@@ -311,7 +311,7 @@ void main() {
       final List<Map<String, dynamic>> many = <Map<String, dynamic>>[
         <String, dynamic>{'userId': 'user-1', 'role': 'owner'},
         for (int i = 2; i <= over; i++)
-          <String, dynamic>{'userId': 'user-\$i', 'role': 'member'},
+          <String, dynamic>{'userId': 'user-$i', 'role': 'member'},
       ];
 
       final Group? g = FirebaseShareRepository.groupFromDataOrNull(
@@ -392,6 +392,44 @@ void main() {
           reason: '쓰기는 거부해야 한다',
         );
       }
+    });
+
+    test('쓰기 경로는 memberIds 원소 손상도 거부한다 — 정상 멤버가 탈락해 사라진다', () {
+      // `members`는 전부 정상이고 `memberIds`도 리스트라 "리스트인지"만 보면 통과한다.
+      // 그런데 원소가 손상되면 `rawIds.contains(userId)`가 실패해 user-2가 걸러지고,
+      // 그 상태로 되쓰면 문서에서 영구히 사라진다 — 유령 멤버 검증이 막으려던 것과
+      // 같은 데이터 손실이 다른 경로로 들어온다.
+      final Map<String, dynamic> data = <String, dynamic>{
+        'memberIds': <dynamic>['user-1', 42],
+        'members': <dynamic>[
+          <String, dynamic>{'userId': 'user-1', 'role': 'owner'},
+          <String, dynamic>{'userId': 'user-2', 'role': 'member'},
+        ],
+      };
+
+      // 읽기는 걸러진 채로 보여 준다(목록이 죽는 것보다 낫다).
+      expect(
+        FirebaseShareRepository.groupFromDataOrNull('g1', data)!.memberCount,
+        1,
+      );
+      // 쓰기는 거부한다.
+      expect(
+        () => FirebaseShareRepository.requireGroupFromData('g1', data),
+        throwsStateError,
+      );
+    });
+
+    test('memberIds 원소가 전부 문자열이면 통과한다(정상 문서)', () {
+      final Group g =
+          FirebaseShareRepository.requireGroupFromData('g1', <String, dynamic>{
+        'memberIds': <dynamic>['user-1', 'user-2'],
+        'members': <dynamic>[
+          <String, dynamic>{'userId': 'user-1', 'role': 'owner'},
+          <String, dynamic>{'userId': 'user-2', 'role': 'member'},
+        ],
+      });
+
+      expect(g.memberCount, 2);
     });
 
     test('쓰기 경로는 유령 멤버를 거부한다 — 되쓰면 그 멤버가 문서에서 사라진다', () {
