@@ -173,7 +173,7 @@ void main() {
         id: 'g_expiry',
         name: '만료집',
         emoji: '🏠',
-        inviteCode: '654321',
+        inviteToken: '654321',
         inviteExpiresAt: expiresAt,
         members: <GroupMember>[
           GroupMember(
@@ -235,7 +235,7 @@ void main() {
 
     // 링크·코드 필드 탭 → 복사되지 않는다.
     await tester.tap(find.text(g.inviteUrl));
-    await tester.tap(find.text(g.inviteCode));
+    await tester.tap(find.text(g.inviteToken));
     await tester.pumpAndSettle();
     expect(clipboardWrites, isEmpty);
 

@@ -24,6 +24,7 @@ library;
 
 import '../models/gifticon.dart';
 import '../models/group.dart';
+import '../models/join_request.dart';
 import '../models/share.dart';
 
 /// 그룹/공유 데이터 계약.
@@ -46,7 +47,7 @@ abstract class ShareRepository {
   /// 새 그룹을 생성한다. 행위자가 방장([MemberRole.owner])이 된다.
   ///
   /// [maxMembers]는 그룹 인원 상한(방장 포함, 기본 [Group.defaultMaxMembers], 최소 1).
-  /// 함께 발급되는 초대코드는 생성 시점부터 [Group.inviteValidity](24시간) 동안만 유효하다
+  /// 함께 발급되는 초대 토큰은 생성 시점부터 [Group.inviteValidity](24시간) 동안만 유효하다
   /// ([Group.inviteExpiresAt]).
   /// 세션에 현재 사용자가 없으면 [StateError].
   Future<Group> createGroup({
@@ -55,13 +56,13 @@ abstract class ShareRepository {
     int maxMembers,
   });
 
-  /// 초대코드로 그룹에 참여한다. 행위자가 멤버([MemberRole.member])로 합류한다.
+  /// 초대 토큰으로 그룹에 참여한다. 행위자가 멤버([MemberRole.member])로 합류한다.
   ///
-  /// 가드: 초대코드에 해당하는 그룹이 없으면 [StateError]. 그룹의
+  /// 가드: 초대 토큰에 해당하는 그룹이 없으면 [StateError]. 그룹의
   /// [Group.inviteExpiresAt]가 지났으면([Group.isInviteExpired]) [StateError]로 거부한다.
   /// 정원이 찼으면([Group.isFull]) [StateError]로 거부한다.
   /// 이미 멤버면 no-op으로 현재 그룹을 반환한다(정원/만료 가드보다 우선).
-  Future<Group> joinGroup(String inviteCode);
+  Future<Group> joinGroup(String inviteToken);
 
   /// 그룹에서 나간다.
   ///
@@ -106,14 +107,101 @@ abstract class ShareRepository {
     required bool ownerOnly,
   });
 
-  /// 초대코드를 재발급한다 — 새 코드를 발급해 **기존 코드/링크를 무효화**한다.
+  /// 초대 토큰을 재발급한다 — 새 토큰을 발급해 **기존 링크를 무효화**한다.
   ///
   /// 만료([Group.inviteExpiresAt])는 재발급 시점 + [Group.inviteValidity](24시간)로 다시
   /// 계산된다. 만료된 초대를 되살리는 유일한 경로이며, 만료 기간 자체는 고를 수 없다.
   ///
   /// 가드: 방장 본인만 재발급할 수 있다. 위반/그룹 없음이면 [StateError].
   /// 성공 시 갱신된(새 코드·만료 갱신) 그룹을 반환한다.
-  Future<Group> regenerateInviteCode({required String groupId});
+  Future<Group> regenerateInviteToken({required String groupId});
+
+  // ── 참여 요청(초대 링크 → 방장 승인) ────────────────────────────────
+  /// 초대 링크의 토큰으로 그룹 참여를 **요청**한다(아직 멤버가 되지 않는다).
+  ///
+  /// 링크는 유출되면 그대로 참여 경로가 되므로, 링크 소지자는 참여가 아니라 **요청**만
+  /// 할 수 있고 [approveJoinRequest]로 방장이 최종 결정한다.
+  ///
+  /// 가드: 토큰에 해당하는 그룹이 없거나 초대가 만료됐으면([Group.isInviteExpired])
+  /// [StateError]. 행위자가 이미 멤버면 [StateError](요청할 이유가 없다).
+  /// 세션에 현재 사용자가 없으면 [StateError].
+  ///
+  /// **정원([Group.isFull])은 여기서 보지 않는다.** 대기자는 자리를 차지하지 않으며,
+  /// 정원 검사는 [approveJoinRequest] 시점에 한다 — 대기자가 자리를 선점하면 방장이
+  /// 정작 받고 싶은 사람을 못 넣는다.
+  ///
+  /// 멱등: 이미 [JoinRequestStatus.pending] 요청이 있으면 **새로 만들지 않고** 그것을
+  /// 반환한다(같은 링크를 두 번 눌러도 방장에게 요청이 두 개 쌓이지 않는다).
+  /// 이미 **결정이 끝난** 요청(거절당했거나, 승인된 뒤 강퇴당한 경우)이 남아 있으면 그
+  /// 요청이 다시 [JoinRequestStatus.pending]이 된다 — 오거절을 되돌리고 강퇴된 사람이
+  /// 다시 물어볼 경로가 이것뿐이기 때문이다(재요청 빈도 제한은 아직 없다).
+  ///
+  /// 그룹이 삭제되면 그 그룹의 요청도 함께 사라진다 — 남겨 두면 아무도 끝낼 수 없는
+  /// '대기 중'이 요청자 화면에 영원히 남는다.
+  ///
+  /// **알림 문서를 남기지 않는다.** 방장이 요청을 알아채는 신호는
+  /// [watchPendingJoinRequests] 하나뿐이며, 화면은 그 스트림의 길이로 배지를 그린다.
+  ///
+  /// 그룹 알림([GroupNotification])으로 알리지 않는 이유: 이 메서드의 행위자는 정의상
+  /// **비멤버**인데(바로 위 가드), 알림 문서는 멤버만 만들 수 있다. 규칙에 비멤버 예외를
+  /// 뚫으면 그룹의 알림 피드에 외부인이 쓰는 길이 열리고, 서버(Cloud Functions)로
+  /// 대신 쓰게 하려면 유료 플랜이 필요하다. 대기 목록이 이미 같은 정보를 갖고 있으므로
+  /// 둘 다 치르지 않는다 — 요청 문서 자체가 알림이다.
+  Future<JoinRequest> requestToJoin(String inviteToken);
+
+  /// [userId]가 보낸 참여 요청들을 반응형으로 관찰한다(최신순).
+  ///
+  /// 요청자 화면이 대기/거절 상태를 보여주는 근거다. 비멤버는 그룹 알림을 읽을 수 없으므로
+  /// 거절 결과를 알 수 있는 경로는 이것뿐이다.
+  Stream<List<JoinRequest>> watchMyJoinRequests(String userId);
+
+  /// [userId]가 보낸 참여 요청들을 1회성으로 조회한다(최신순).
+  Future<List<JoinRequest>> getMyJoinRequests(String userId);
+
+  /// [groupId]의 **대기 중** 참여 요청을 반응형으로 관찰한다(오래된 순).
+  ///
+  /// 방장의 승인 목록이 소비하며, 요청이 도착했음을 방장에게 알리는 **유일한 신호**다
+  /// ([requestToJoin] 참조 — 알림 문서는 만들지 않는다). 처리된
+  /// ([JoinRequestStatus.approved]/[JoinRequestStatus.rejected]) 요청은 포함하지 않는다.
+  ///
+  /// **읽기 권한: 그 그룹의 방장만.** 대기자 명단은 아직 멤버가 아닌 사람들의 이름이라
+  /// 일반 멤버에게도 열지 않는다. in-memory 구현은 이 제한을 강제하지 않으므로
+  /// (조회 메서드는 행위자를 받지 않는다) 실제 차단은 Firestore 보안 규칙이 맡는다 —
+  /// 규칙을 쓸 때 이 문장이 기준이다. 요청자 본인은 [watchMyJoinRequests]로 자기
+  /// 요청만 읽는다.
+  Stream<List<JoinRequest>> watchPendingJoinRequests(String groupId);
+
+  /// [groupId]의 대기 중 참여 요청을 1회성으로 조회한다(오래된 순).
+  Future<List<JoinRequest>> getPendingJoinRequests(String groupId);
+
+  /// 방장이 참여 요청을 승인한다 — 요청자가 [MemberRole.member]로 합류한다.
+  ///
+  /// 가드: 행위자가 그룹의 방장이어야 하고, 요청이 [JoinRequestStatus.pending]이어야 한다.
+  /// 승인 시점에 정원이 찼으면([Group.isFull]) [StateError]로 거부한다.
+  /// 요청/그룹 없음도 [StateError].
+  ///
+  /// 요청자가 그 사이 이미 멤버가 됐다면(다른 요청이 먼저 승인되는 등) 요청만
+  /// [JoinRequestStatus.approved]로 정리하고 멤버는 중복 추가하지 않는다.
+  ///
+  /// 성공 시 갱신된(요청자가 추가된) 그룹을 반환한다.
+  Future<Group> approveJoinRequest(String joinRequestId);
+
+  /// 방장이 참여 요청을 거절한다.
+  ///
+  /// 가드: 행위자가 그룹의 방장이어야 하고, 요청이 [JoinRequestStatus.pending]이어야 한다.
+  /// 위반/요청 없음이면 [StateError].
+  ///
+  /// 문서를 지우지 않고 [JoinRequestStatus.rejected]로 남긴다 — 요청자가 결과를 확인할
+  /// 유일한 경로다([watchMyJoinRequests]).
+  ///
+  /// 성공 시 갱신된 요청을 반환한다.
+  Future<JoinRequest> rejectJoinRequest(String joinRequestId);
+
+  /// 요청자가 자기 요청을 거둔다 — 문서를 **삭제**한다.
+  ///
+  /// 가드: 행위자가 요청자 본인이어야 한다. 위반/요청 없음이면 [StateError].
+  /// 거절당한 요청도 지울 수 있다(요청자가 결과를 확인한 뒤 치우는 경로).
+  Future<void> cancelJoinRequest(String joinRequestId);
 
   // ── 공유 기프티콘 ────────────────────────────────────────────────────
   /// 특정 그룹의 공유 기프티콘 목록을 반응형으로 관찰한다.

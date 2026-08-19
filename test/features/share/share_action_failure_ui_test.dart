@@ -106,10 +106,10 @@ class _BackendFailingShareRepository extends InMemoryShareRepository {
           : super.setInviteOwnerOnly(groupId: groupId, ownerOnly: ownerOnly);
 
   @override
-  Future<Group> regenerateInviteCode({required String groupId}) =>
-      failing.contains('regenerateInviteCode')
-          ? _boom('regenerateInviteCode')
-          : super.regenerateInviteCode(groupId: groupId);
+  Future<Group> regenerateInviteToken({required String groupId}) =>
+      failing.contains('regenerateInviteToken')
+          ? _boom('regenerateInviteToken')
+          : super.regenerateInviteToken(groupId: groupId);
 
   @override
   Future<SharedGifticon> shareGifticon({
@@ -216,7 +216,7 @@ void main() {
         id: 'g1',
         name: '가족',
         emoji: '🏠',
-        inviteCode: '123456',
+        inviteToken: '123456',
         members: <GroupMember>[
           GroupMember(
             userId: me,
@@ -392,7 +392,7 @@ void main() {
 
     testWidgets('초대코드 재발급 — 백엔드 실패는 재시도 안내로 구분한다', (WidgetTester tester) async {
       final Group g = await repo.createGroup(name: '가족', emoji: '🏠');
-      repo.failing.add('regenerateInviteCode');
+      repo.failing.add('regenerateInviteToken');
 
       await pump(tester, MemberInvitePage(groupId: g.id));
       await tester.tap(find.text('코드 재발급'));

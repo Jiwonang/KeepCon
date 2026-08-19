@@ -27,6 +27,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../../../models/gifticon.dart';
 import '../../../models/group.dart';
+import '../../../models/join_request.dart';
 import '../../../models/share.dart';
 import '../../../models/user.dart';
 import '../../../util/korean_particle.dart';
@@ -120,7 +121,7 @@ class FirebaseShareRepository implements ShareRepository {
       id: ref.id,
       name: name,
       emoji: emoji,
-      inviteCode: _randomCode(),
+      inviteToken: _randomToken(),
       maxMembers: maxMembers,
       members: <GroupMember>[
         GroupMember(
@@ -136,13 +137,21 @@ class FirebaseShareRepository implements ShareRepository {
   }
 
   @override
-  Future<Group> joinGroup(String inviteCode) async {
+  Future<Group> joinGroup(String inviteToken) async {
     final User me = _requireUser();
-    // 초대코드로 실제 그룹을 찾아 합류한다(mock의 가짜 그룹 생성과 달리 실 참여).
-    final QuerySnapshot<Map<String, dynamic>> q =
-        await _groups.where('inviteCode', isEqualTo: inviteCode).limit(1).get();
+    // 초대 토큰으로 실제 그룹을 찾아 합류한다(mock의 가짜 그룹 생성과 달리 실 참여).
+    //
+    // 레거시 `inviteCode` 필드는 **일부러 조회하지 않는다.** 읽기 매핑에는 폴백을 뒀지만
+    // 여기에까지 두 번째 질의를 붙이는 건 값이 없다 — 이 질의 자체가 보안 규칙에 막히기
+    // 때문이다. 비멤버는 `groups`를 읽을 수 없어서(`allow read`는 멤버 한정) 초대 토큰을
+    // 아는 것과 무관하게 결과가 permission-denied다. 즉 이 경로는 필드 이름과 상관없이
+    // 이미 동작하지 않으며, 승인제(`requestToJoin`)가 대체하면 통째로 사라진다.
+    final QuerySnapshot<Map<String, dynamic>> q = await _groups
+        .where('inviteToken', isEqualTo: inviteToken)
+        .limit(1)
+        .get();
     if (q.docs.isEmpty) {
-      throw StateError('No group for invite code: $inviteCode');
+      throw StateError('No group for invite token: $inviteToken');
     }
     final DocumentReference<Map<String, dynamic>> ref = q.docs.first.reference;
 
@@ -153,7 +162,7 @@ class FirebaseShareRepository implements ShareRepository {
       if (g.isMember(me.id)) return g; // 이미 멤버면 no-op.
       // 만료된 초대코드는 참여 거부(가드는 트랜잭션 안에서 최신 문서 기준으로 판정).
       if (g.isInviteExpired(DateTime.now())) {
-        throw StateError('Invite code expired: $inviteCode');
+        throw StateError('Invite token expired: $inviteToken');
       }
       // 정원 초과 참여 거부(트랜잭션 안에서 최신 멤버 수 기준으로 판정).
       if (g.isFull) {
@@ -319,7 +328,7 @@ class FirebaseShareRepository implements ShareRepository {
   }
 
   @override
-  Future<Group> regenerateInviteCode({required String groupId}) async {
+  Future<Group> regenerateInviteToken({required String groupId}) async {
     final User me = _requireUser();
     final DocumentReference<Map<String, dynamic>> ref = _groups.doc(groupId);
     // 만료 창은 재발급 시점부터 다시 24시간(트랜잭션 재시도에도 값이 흔들리지 않게 밖에서 고정).
@@ -333,14 +342,70 @@ class FirebaseShareRepository implements ShareRepository {
         throw StateError('Only the owner can regenerate invite code: $groupId');
       }
       final Group updated =
-          g.copyWith(inviteCode: _randomCode(), inviteExpiresAt: expiresAt);
+          g.copyWith(inviteToken: _randomToken(), inviteExpiresAt: expiresAt);
       tx.update(ref, <String, dynamic>{
-        'inviteCode': updated.inviteCode,
+        'inviteToken': updated.inviteToken,
         'inviteExpiresAt': Timestamp.fromDate(expiresAt),
       });
       return updated;
     });
   }
+
+  // ── 참여 요청(초대 링크 → 방장 승인) ────────────────────────────────
+  //
+  // **아직 구현하지 않았다.** 계약과 in-memory 구현을 먼저 확정하고, Firestore 구현은
+  // 다음 단계에서 스키마와 함께 넣는다. 이 경로는 저장소 스키마 결정에 통째로 매여 있다 —
+  // 비멤버는 보안 규칙상 `groups`를 읽을 수 없으므로 토큰으로 그룹을 찾으려면 토큰을
+  // 키로 하는 별도 조회 문서가 필요하고, 그 문서를 어떤 모양으로 둘지가 규칙·인덱스를
+  // 함께 정한다. 지금 지어 두면 그 결정이 내려질 때 통째로 다시 쓰게 된다.
+  //
+  // 그때까지 이 메서드들을 호출하는 화면은 없다(참여 요청 UI가 아직 없다). 조용히
+  // 아무 일도 안 하는 스텁 대신 [UnimplementedError]를 던지는 이유 — 배선이 먼저
+  // 들어왔을 때 즉시 드러나게 하려는 것이다.
+  static Never _joinRequestsNotOnFirebaseYet() => throw UnimplementedError(
+        '참여 요청은 Firestore 구현이 아직 없습니다. '
+        'InMemoryShareRepository(USE_DEMO)에서만 동작합니다.',
+      );
+
+  @override
+  Future<JoinRequest> requestToJoin(String inviteToken) async =>
+      _joinRequestsNotOnFirebaseYet();
+
+  @override
+  Stream<List<JoinRequest>> watchMyJoinRequests(String userId) async* {
+    // `async*`가 아니면 호출 지점에서 동기 throw가 되어, build나 initState
+    // 안에서 스트림을 만드는 순간 프레임이 죽는다. 나머지 6개(Future)는 에러가
+    // Future로 전달되므로 실패 방식을 여기에 맞춘다.
+    _joinRequestsNotOnFirebaseYet();
+  }
+
+  @override
+  Future<List<JoinRequest>> getMyJoinRequests(String userId) async =>
+      _joinRequestsNotOnFirebaseYet();
+
+  @override
+  Stream<List<JoinRequest>> watchPendingJoinRequests(String groupId) async* {
+    // `async*`가 아니면 호출 지점에서 동기 throw가 되어, build나 initState
+    // 안에서 스트림을 만드는 순간 프레임이 죽는다. 나머지 6개(Future)는 에러가
+    // Future로 전달되므로 실패 방식을 여기에 맞춘다.
+    _joinRequestsNotOnFirebaseYet();
+  }
+
+  @override
+  Future<List<JoinRequest>> getPendingJoinRequests(String groupId) async =>
+      _joinRequestsNotOnFirebaseYet();
+
+  @override
+  Future<Group> approveJoinRequest(String joinRequestId) async =>
+      _joinRequestsNotOnFirebaseYet();
+
+  @override
+  Future<JoinRequest> rejectJoinRequest(String joinRequestId) async =>
+      _joinRequestsNotOnFirebaseYet();
+
+  @override
+  Future<void> cancelJoinRequest(String joinRequestId) async =>
+      _joinRequestsNotOnFirebaseYet();
 
   // ── 공유 기프티콘 ─────────────────────────────────────────────────────
   @override
@@ -692,7 +757,7 @@ class FirebaseShareRepository implements ShareRepository {
   Map<String, dynamic> _groupToDoc(Group g) => <String, dynamic>{
         'name': g.name,
         'emoji': g.emoji,
-        'inviteCode': g.inviteCode,
+        'inviteToken': g.inviteToken,
         'inviteOwnerOnly': g.inviteOwnerOnly,
         'inviteExpiresAt': Timestamp.fromDate(g.inviteExpiresAt),
         'maxMembers': g.maxMembers,
@@ -762,7 +827,10 @@ class FirebaseShareRepository implements ShareRepository {
       id: doc.id,
       name: data['name'] as String? ?? '',
       emoji: data['emoji'] as String? ?? '🎁',
-      inviteCode: data['inviteCode'] as String? ?? '',
+      // 레거시 문서는 이 필드를 `inviteCode`로 갖고 있다(토큰으로 이름을 바꾸기 전).
+      // 읽을 때만 받아 주고, 그 그룹에 다음 쓰기가 일어나면 새 이름으로 옮겨간다.
+      inviteToken:
+          data['inviteToken'] as String? ?? data['inviteCode'] as String? ?? '',
       inviteOwnerOnly: data['inviteOwnerOnly'] as bool? ?? false,
       inviteExpiresAt: _inviteExpiresAtFrom(data['inviteExpiresAt']),
       maxMembers: maxMembers,
@@ -866,7 +934,7 @@ class FirebaseShareRepository implements ShareRepository {
   /// 값이 없거나(24시간 정책 이전에 만들어진 레거시 문서 = 만료 필드 없음/`null`)
   /// [Timestamp]·[DateTime]이 아닌 손상 값이면 이미 만료된 것(epoch)으로 취급해 참여를
   /// 거부한다. 레거시 그룹의 코드는 어차피 발급된 지 24시간이 지났으므로 정책상 만료가 맞고,
-  /// 방장이 `regenerateInviteCode`로 새 코드를 받으면 정상 복구된다.
+  /// 방장이 `regenerateInviteToken`로 새 코드를 받으면 정상 복구된다.
   DateTime _inviteExpiresAtFrom(Object? value) {
     if (value is Timestamp) return value.toDate();
     if (value is DateTime) return value;
@@ -890,7 +958,7 @@ class FirebaseShareRepository implements ShareRepository {
     return GroupNotificationType.registered;
   }
 
-  String _randomCode() {
+  String _randomToken() {
     // 6자리 코드. 원본 인스턴스가 시간/랜덤에 의존하지 않도록 문서 id 해시를 쓴다.
     final int h = _shared.doc().id.hashCode & 0x7fffffff;
     return (100000 + (h % 900000)).toString();

@@ -306,6 +306,10 @@ enum GroupNotificationType {
   /// 사용 완료.
   used('사용 완료');
 
+  // 참여 요청은 여기에 넣지 않는다 — 요청의 행위자는 비멤버인데 알림 문서는 멤버만
+  // 만들 수 있어, 클라이언트가 만들 수 없는 알림이 된다. 방장에게 요청을 알리는 신호는
+  // `ShareRepository.watchPendingJoinRequests` 하나다.
+
   const GroupNotificationType(this.label);
 
   /// 알림 유형 라벨.
