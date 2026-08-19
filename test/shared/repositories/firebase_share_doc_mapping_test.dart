@@ -376,8 +376,6 @@ void main() {
         <String, dynamic>{'emoji': 2},
         <String, dynamic>{'inviteToken': 3},
         <String, dynamic>{'inviteOwnerOnly': 'yes'},
-        <String, dynamic>{'maxMembers': 1e300},
-        <String, dynamic>{'inviteExpiresAt': 'nope'},
       ]) {
         final Map<String, dynamic> data = <String, dynamic>{
           'members': owner(),
@@ -472,24 +470,27 @@ void main() {
       );
     });
 
-    test('되쓰지 않는 경로는 손상 문서도 통과시킨다 — 삭제·나가기가 막히지 않게', () {
-      // `deleteGroup`(tx.delete)·`setInviteOwnerOnly`(인자값 한 필드)는 문서를 되쓰지
-      // 않으므로 폴백이 굳을 일이 없다. 여기에 강한 검증을 붙이면 손상 그룹을 앱에서
-      // 지울 수도, 설정을 되돌릴 수도 없어 콘솔 편집 말고는 복구 경로가 사라진다.
-      final Map<String, dynamic> data = <String, dynamic>{
-        'name': 1,
-        'inviteExpiresAt': 'nope',
-        'members': owner(),
-      };
-
-      // 불변식은 여전히 요구한다(멤버0·방장≠1이면 그룹이 아니다).
-      expect(
-          FirebaseShareRepository.groupFromDataOrNull('g1', data), isNotNull);
-      expect(
-        FirebaseShareRepository.groupFromDataOrNull(
-            'g1', <String, dynamic>{'members': 'not-a-list'}),
-        isNull,
-      );
+    test('되쓰면 잃는 것이 없는 필드는 전체 되쓰기도 막지 않는다', () {
+      // `maxMembers`·`inviteExpiresAt`은 docInt·docDate가 **결측과 손상에 같은 값**을 준다
+      // (기본값·epoch). 거부해도 최종 상태가 달라지지 않고, 잃는 것은 방장의 멤버 관리
+      // 능력뿐이다 — 그 문서에서 멤버를 못 내보낸다. `inviteCode`는 `_groupToDoc`이 쓰지도
+      // 않고, `inviteToken`이 정상이면 읽히지도 않는다.
+      for (final Map<String, dynamic> harmless in <Map<String, dynamic>>[
+        <String, dynamic>{'maxMembers': 1e300},
+        <String, dynamic>{'maxMembers': 'many'},
+        <String, dynamic>{'inviteExpiresAt': 'nope'},
+        <String, dynamic>{'inviteToken': 'ABC123', 'inviteCode': 12345},
+      ]) {
+        final Map<String, dynamic> data = <String, dynamic>{
+          'members': owner(),
+          ...harmless,
+        };
+        expect(
+          () => FirebaseShareRepository.requireGroupFromData('g1', data),
+          returnsNormally,
+          reason: harmless.keys.join('+'),
+        );
+      }
     });
 
     test('결측은 손상이 아니다 — 레거시 문서는 쓰기 경로도 통과한다', () {

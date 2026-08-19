@@ -923,27 +923,30 @@ class FirebaseShareRepository implements ShareRepository {
 
   /// 전체 되쓰기용 검증 — [_groupToDoc]이 싣는 필드의 **원본 타입**을 전부 확인한다.
   ///
-  /// [requireGroupMembershipFromData]의 멤버십 검사에 더해, 흡수된 폴백이 정상 값으로 굳는
-  /// 나머지 경로를 막는다:
+  /// [requireGroupMembershipFromData]의 멤버십 검사에 더해, 흡수된 폴백이 되쓰기로 굳으면
+  /// **실제로 무언가를 잃는** 필드를 막는다:
   ///
-  /// - 어긋난 `inviteOwnerOnly`가 `true`로 읽혀 되쓰이면 일반 멤버의 초대 권한이 영구히 닫힌다.
-  /// - 어긋난 `inviteExpiresAt`이 epoch로 굳으면 방장이 재발급하기 전까지 참여가 막힌다.
-  /// - 포화·손상된 `maxMembers`가 기본값으로 굳으면 방장이 정한 정원이 사라진다.
+  /// - `name`·`emoji`·`inviteToken` — 손상 값도 사람이 보면 원래 의도를 알 수 있는 정보인데,
+  ///   되쓰면 `''`로 지워진다(결측은 애초에 잃을 것이 없어 허용한다).
+  /// - `inviteOwnerOnly` — **결측(false)과 손상(true)의 결과가 다른 유일한 필드**다. 손상이
+  ///   굳으면 방장이 정하지 않은 정책이 문서에 박혀 일반 멤버의 초대가 영구히 닫힌다.
   ///
-  /// 하나라도 어긋나면 [StateError] — 트랜잭션이 실패하고 문서는 손상된 채 보존된다(고칠
-  /// 기회가 남는다). `ownerId`는 검사하지 않는다: 매퍼가 읽지 않고 [_groupToDoc]이
-  /// `g.owner.userId`로 항상 재계산하므로 손상 값은 굳는 게 아니라 복구된다.
+  /// **막지 않는 것과 그 이유** — `maxMembers`·`inviteExpiresAt`은 [docInt]·[docDate]가
+  /// 결측과 손상에 **똑같은 값**을 주므로(기본값·epoch), 거부해도 최종 상태가 달라지지 않고
+  /// 잃는 것은 방장의 멤버 관리 능력뿐이다(그 문서에서 멤버를 못 내보낸다). 만료가 깨진
+  /// 그룹의 복구 경로인 [regenerateInviteToken]은 되쓰지 않는 등급이라 이미 동작한다.
+  /// `inviteCode`는 [_groupToDoc]이 아예 쓰지 않고, `inviteToken`이 정상이면 읽히지도 않는다.
+  /// `ownerId`도 검사하지 않는다 — 매퍼가 읽지 않고 [_groupToDoc]이 `g.owner.userId`로 항상
+  /// 재계산하므로 손상 값은 굳는 게 아니라 복구된다.
+  ///
+  /// 어긋나면 [StateError] — 트랜잭션이 실패하고 문서는 손상된 채 보존된다(고칠 기회가 남는다).
   @visibleForTesting
   static Group requireGroupFromData(String id, Map<String, dynamic> data) {
     final Group g = requireGroupMembershipFromData(id, data);
     final bool typesOk = _absentOrString(data['name']) &&
         _absentOrString(data['emoji']) &&
         _absentOrString(data['inviteToken']) &&
-        _absentOrString(data['inviteCode']) &&
-        (data['inviteOwnerOnly'] == null || data['inviteOwnerOnly'] is bool) &&
-        (data['maxMembers'] == null || docInt(data['maxMembers']) != null) &&
-        (data['inviteExpiresAt'] == null ||
-            docDateOrNull(data['inviteExpiresAt']) != null);
+        (data['inviteOwnerOnly'] == null || data['inviteOwnerOnly'] is bool);
     if (!typesOk) throw StateError('Malformed group document: $id');
     return g;
   }
