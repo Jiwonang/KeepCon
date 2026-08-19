@@ -75,3 +75,26 @@ jobs:
         run: >-
           firebase emulators:exec --project demo-keepcon --only auth,firestore
           "bash tool/verify_firestore_rules.sh"
+
+  markdown:
+    name: Markdown lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # 문서 포맷은 리뷰가 반복해서 지적하기에 가장 아까운 축이다 — CodeRabbit이
+      # PR #47·#48·#63·#64·#84에서 같은 지적을 8회 반복했다(인용문 빈 줄, 코드 펜스
+      # 언어 누락, 표 앞뒤 빈 줄). 사람도 봇도 매번 다시 볼 필요가 없도록 게이트로
+      # 옮긴다. 켜는 룰은 `.markdownlint-cli2.jsonc`에 그 8회에 대응하는 5개뿐이다
+      # (고정 버전 기준 기본 룰셋 전체는 위반 924건 — 4분의 3이 MD013 줄 길이로,
+      #  이 저장소가 의도적으로 위반하는 축이다).
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Lint markdown
+        # 버전을 고정한다 — 안 하면 업스트림이 룰 판정을 바꾸는 날 문서를 한 줄도
+        # 건드리지 않은 PR에서 red가 뜨고, 원인이 diff에 없어 진단이 오래 걸린다.
+        run: npx --yes markdownlint-cli2@0.18.1

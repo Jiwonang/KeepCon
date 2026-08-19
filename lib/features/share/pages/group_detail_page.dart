@@ -5,7 +5,9 @@
 /// 색 하드코딩 없음(공유 팔레트·테마 토큰 소비). 상태 변경은 계약 [ShareRepository]에 반영된다.
 ///
 /// UI 게이팅은 모델 predicate([Group.isOwnedBy]/[Group.canInvite])로 사전 판정하고,
-/// 저장소 호출부는 가드 위반 시 [StateError]를 던지므로 try/catch로 스낵바 처리한다(이중 방어).
+/// 저장소 호출부는 실패를 예외로 알리므로 try/catch로 스낵바 처리한다(이중 방어).
+/// 이때 `on StateError`로 좁히지 않는다 — 가드 위반만 잡으면 백엔드 예외(권한 거부·
+/// 네트워크 등)가 그대로 빠져나가 **아무 안내 없이 버튼이 죽은 것처럼 보인다**.
 library;
 
 import 'package:flutter/material.dart';
@@ -250,17 +252,20 @@ class _GroupDetailBody extends ConsumerWidget {
       if (newOwner == null || !context.mounted) return;
       final NavigatorState navigator = Navigator.of(context);
       final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
+      // try는 **저장소 호출만** 감싼다. 성공 뒤의 pop·스낵바까지 넣으면, 이전은 됐는데
+      // 화면 정리에서 예외가 났을 때 실패 안내가 떠 사용자가 오해한다.
       try {
         await repo.transferOwnershipAndLeave(
           groupId: group.id,
           newOwnerUserId: newOwner.userId,
         );
-        // 이전 성공 시 그룹은 남지만 내 멤버십은 사라진다 → 상세를 명시적으로 닫는다.
-        navigator.pop();
-        _snack(messenger, '그룹에서 나갔어요.');
-      } on StateError {
+      } catch (_) {
         _snack(messenger, '지금은 나갈 수 없어요.');
+        return;
       }
+      // 이전 성공 시 그룹은 남지만 내 멤버십은 사라진다 → 상세를 명시적으로 닫는다.
+      navigator.pop();
+      _snack(messenger, '그룹에서 나갔어요.');
       return;
     }
 
@@ -270,10 +275,11 @@ class _GroupDetailBody extends ConsumerWidget {
     final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
     try {
       await repo.leaveGroup(group.id);
-      _snack(messenger, '그룹에서 나갔어요.');
-    } on StateError {
+    } catch (_) {
       _snack(messenger, '지금은 나갈 수 없어요.');
+      return;
     }
+    _snack(messenger, '그룹에서 나갔어요.');
   }
 
   Future<void> _onDelete(BuildContext context, WidgetRef ref) async {
@@ -283,10 +289,14 @@ class _GroupDetailBody extends ConsumerWidget {
     final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
     try {
       await ref.read(shareRepositoryProvider).deleteGroup(group.id);
-      _snack(messenger, '그룹을 삭제했어요.');
-    } on StateError {
-      _snack(messenger, '방장만 삭제할 수 있어요.');
+    } catch (_) {
+      // 원인을 특정하지 않는다 — catch를 넓힌 뒤로는 권한 외에 네트워크·서버 오류도
+      // 여기로 오므로, "방장만"이라고 단정하면 방장 본인이 오프라인일 때 거짓이 된다
+      // (_onRemoveMember와 동일 규약).
+      _snack(messenger, '그룹을 삭제하지 못했어요. 다시 시도해 주세요.');
+      return;
     }
+    _snack(messenger, '그룹을 삭제했어요.');
   }
 
   Future<void> _onRemoveMember(
@@ -306,12 +316,13 @@ class _GroupDetailBody extends ConsumerWidget {
             groupId: group.id,
             userId: member.userId,
           );
-      _snack(messenger, '"${member.displayName}"님을 내보냈어요.');
-    } on StateError {
-      // StateError는 권한 외에도 그룹 없음·이미 이탈한 멤버 등을 포함하므로
+    } catch (_) {
+      // 실패 원인은 권한 외에도 그룹 없음·이미 이탈한 멤버·백엔드 오류를 포함하므로
       // 원인을 특정하지 않는 일반 실패 메시지로 안내한다.
       _snack(messenger, '멤버를 내보낼 수 없어요. 다시 확인해 주세요.');
+      return;
     }
+    _snack(messenger, '"${member.displayName}"님을 내보냈어요.');
   }
 
   /// 소유권 이전 대상 멤버 선택 바텀시트.
