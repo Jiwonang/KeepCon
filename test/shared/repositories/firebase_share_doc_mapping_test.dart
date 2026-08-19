@@ -321,6 +321,9 @@ void main() {
 
       expect(g, isNotNull);
       expect(g!.memberCount, over);
+      // 서로 **다른** 멤버 over명이어야 한다 — 픽스처의 보간이 깨지면(예: `'user-\$i'`로
+      // 이스케이프) 전부 같은 id가 되어 이 단언이 잡는다.
+      expect(g.members.map((GroupMember m) => m.userId).toSet().length, over);
       // 불변식 maxMembers >= memberCount 유지.
       expect(g.maxMembers, over);
       expect(g.isFull, isTrue);
@@ -365,9 +368,9 @@ void main() {
       expect(g!.isInviteExpired(DateTime.now()), isTrue);
     });
 
-    test('쓰기 경로는 손상 필드를 거부한다 — 폴백이 되쓰기로 굳지 않게', () {
-      // 읽기(목록)는 통과하지만 쓰기는 거부하는 대비. `_groupToDoc`이 문서 전체를 되쓰므로
-      // 흡수한 값을 통과시키면 손상이 정상 값으로 굳는다.
+    test('전체 되쓰기 경로는 _groupToDoc이 싣는 필드의 손상을 거부한다', () {
+      // 읽기(목록)는 통과하지만 전체 되쓰기는 거부하는 대비. `_groupToDoc`이 문서 전체를
+      // 되쓰므로 흡수한 값을 통과시키면 손상이 정상 값으로 굳는다.
       for (final Map<String, dynamic> corrupt in <Map<String, dynamic>>[
         <String, dynamic>{'name': 1},
         <String, dynamic>{'emoji': 2},
@@ -375,7 +378,6 @@ void main() {
         <String, dynamic>{'inviteOwnerOnly': 'yes'},
         <String, dynamic>{'maxMembers': 1e300},
         <String, dynamic>{'inviteExpiresAt': 'nope'},
-        <String, dynamic>{'memberIds': 'not-a-list'},
       ]) {
         final Map<String, dynamic> data = <String, dynamic>{
           'members': owner(),
@@ -389,7 +391,15 @@ void main() {
         expect(
           () => FirebaseShareRepository.requireGroupFromData('g1', data),
           throwsStateError,
-          reason: '쓰기는 거부해야 한다',
+          reason: '전체 되쓰기는 거부해야 한다',
+        );
+        // 멤버십만 되쓰는 경로(나가기)는 이 필드들을 되쓰지 않으므로 막지 않는다 —
+        // 막으면 손상 그룹에서 나갈 수조차 없게 된다.
+        expect(
+          () => FirebaseShareRepository.requireGroupMembershipFromData(
+              'g1', data),
+          returnsNormally,
+          reason: '멤버십 되쓰기는 통과해야 한다',
         );
       }
     });
@@ -412,9 +422,14 @@ void main() {
         FirebaseShareRepository.groupFromDataOrNull('g1', data)!.memberCount,
         1,
       );
-      // 쓰기는 거부한다.
+      // 두 쓰기 경로 모두 거부한다 — 나가기(_memberIdsPatch)도 멤버십을 되쓴다.
       expect(
         () => FirebaseShareRepository.requireGroupFromData('g1', data),
+        throwsStateError,
+      );
+      expect(
+        () =>
+            FirebaseShareRepository.requireGroupMembershipFromData('g1', data),
         throwsStateError,
       );
     });
@@ -445,10 +460,35 @@ void main() {
         FirebaseShareRepository.groupFromDataOrNull('g1', data)!.memberCount,
         1,
       );
-      // 쓰기는 거부한다 — 걸러진 채 되쓰면 그 멤버가 영구히 사라진다.
+      // 두 쓰기 경로 모두 거부한다 — 걸러진 채 되쓰면 그 멤버가 영구히 사라진다.
       expect(
         () => FirebaseShareRepository.requireGroupFromData('g1', data),
         throwsStateError,
+      );
+      expect(
+        () =>
+            FirebaseShareRepository.requireGroupMembershipFromData('g1', data),
+        throwsStateError,
+      );
+    });
+
+    test('되쓰지 않는 경로는 손상 문서도 통과시킨다 — 삭제·나가기가 막히지 않게', () {
+      // `deleteGroup`(tx.delete)·`setInviteOwnerOnly`(인자값 한 필드)는 문서를 되쓰지
+      // 않으므로 폴백이 굳을 일이 없다. 여기에 강한 검증을 붙이면 손상 그룹을 앱에서
+      // 지울 수도, 설정을 되돌릴 수도 없어 콘솔 편집 말고는 복구 경로가 사라진다.
+      final Map<String, dynamic> data = <String, dynamic>{
+        'name': 1,
+        'inviteExpiresAt': 'nope',
+        'members': owner(),
+      };
+
+      // 불변식은 여전히 요구한다(멤버0·방장≠1이면 그룹이 아니다).
+      expect(
+          FirebaseShareRepository.groupFromDataOrNull('g1', data), isNotNull);
+      expect(
+        FirebaseShareRepository.groupFromDataOrNull(
+            'g1', <String, dynamic>{'members': 'not-a-list'}),
+        isNull,
       );
     });
 

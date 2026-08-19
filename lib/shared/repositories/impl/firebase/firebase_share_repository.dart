@@ -160,7 +160,7 @@ class FirebaseShareRepository implements ShareRepository {
     return _db.runTransaction<Group>((Transaction tx) async {
       final DocumentSnapshot<Map<String, dynamic>> doc = await tx.get(ref);
       if (!doc.exists) throw StateError('Group disappeared: ${ref.id}');
-      final Group g = _groupFromDoc(doc);
+      final Group g = _groupFromDocForFullWrite(doc);
       if (g.isMember(me.id)) return g; // 이미 멤버면 no-op.
       // 만료된 초대코드는 참여 거부(가드는 트랜잭션 안에서 최신 문서 기준으로 판정).
       if (g.isInviteExpired(DateTime.now())) {
@@ -194,7 +194,7 @@ class FirebaseShareRepository implements ShareRepository {
     await _db.runTransaction<void>((Transaction tx) async {
       final DocumentSnapshot<Map<String, dynamic>> doc = await tx.get(ref);
       if (!doc.exists) throw StateError('Group not found: $groupId');
-      final Group g = _groupFromDoc(doc);
+      final Group g = _groupFromDocForMembershipWrite(doc);
       if (!g.isMember(me.id)) {
         throw StateError('Not a member of group: $groupId');
       }
@@ -255,7 +255,7 @@ class FirebaseShareRepository implements ShareRepository {
     return _db.runTransaction<Group>((Transaction tx) async {
       final DocumentSnapshot<Map<String, dynamic>> doc = await tx.get(ref);
       if (!doc.exists) throw StateError('Group not found: $groupId');
-      final Group g = _groupFromDoc(doc);
+      final Group g = _groupFromDocForFullWrite(doc);
       if (!g.isOwnedBy(me.id)) {
         throw StateError('Only the owner can transfer ownership: $groupId');
       }
@@ -287,7 +287,7 @@ class FirebaseShareRepository implements ShareRepository {
     return _db.runTransaction<Group>((Transaction tx) async {
       final DocumentSnapshot<Map<String, dynamic>> doc = await tx.get(ref);
       if (!doc.exists) throw StateError('Group not found: $groupId');
-      final Group g = _groupFromDoc(doc);
+      final Group g = _groupFromDocForFullWrite(doc);
       if (!g.isOwnedBy(me.id)) {
         throw StateError('Only the owner can remove members: $groupId');
       }
@@ -868,33 +868,90 @@ class FirebaseShareRepository implements ShareRepository {
     );
   }
 
-  /// 유효한 그룹을 요구하는 문맥(트랜잭션 등)용 — 손상 문서면 [StateError].
-  Group _groupFromDoc(DocumentSnapshot<Map<String, dynamic>> doc) =>
+  /// 유효한 그룹을 요구하는 문맥용 — 불변식을 못 만족하면 [StateError].
+  ///
+  /// **되쓰지 않는 경로 전용이다**(삭제·권한 판정·인자로 받은 값만 갱신). 관대 매퍼의 폴백을
+  /// 그대로 받아들이는데, 그 값이 문서로 돌아가지 않으므로 굳을 일이 없다.
+  ///
+  /// 여기에 강한 검증을 붙이면 **손상 문서의 유일한 앱 내 탈출구가 막힌다** — 손상된 그룹을
+  /// 삭제하거나 나가려는 것마저 거부되어 콘솔 수동 편집 말고는 복구 경로가 없어진다.
+  /// 검증은 "무엇을 되쓰는가"에 맞춘다([_groupFromDocForMembershipWrite]·
+  /// [_groupFromDocForFullWrite]).
+  Group _groupFromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
+    final Group? g = _groupFromDocOrNull(doc);
+    if (g == null) throw StateError('Malformed group document: ${doc.id}');
+    return g;
+  }
+
+  /// 멤버십을 **파생해 되쓰는** 경로용([leaveGroup]의 [_memberIdsPatch]).
+  Group _groupFromDocForMembershipWrite(
+          DocumentSnapshot<Map<String, dynamic>> doc) =>
+      requireGroupMembershipFromData(
+          doc.id, doc.data() ?? const <String, dynamic>{});
+
+  /// 문서 **전체를 되쓰는** 경로용([_groupToDoc]).
+  Group _groupFromDocForFullWrite(DocumentSnapshot<Map<String, dynamic>> doc) =>
       requireGroupFromData(doc.id, doc.data() ?? const <String, dynamic>{});
 
-  /// [_groupFromDoc]의 순수 본체(문서 없이 맵만으로 동작 — 테스트 진입점).
+  /// 멤버십 되쓰기용 검증 — `members`·`memberIds`의 손상만 거부한다.
   ///
-  /// **읽기는 관대하게, 쓰기는 엄격하게.** [groupFromDataOrNull]의 폴백 흡수는 목록이
-  /// 문서 하나로 죽지 않게 하려는 것이지, 그 값으로 **쓰기를 진행해도 된다는 뜻이 아니다.**
-  /// 이 경로의 결과는 [_groupToDoc]으로 문서 **전체**에 되쓰이므로, 흡수한 값을 그대로
-  /// 통과시키면 손상이 정상 값으로 굳는다:
+  /// **읽기는 관대하게, 쓰기는 엄격하게.** [groupFromDataOrNull]의 폴백 흡수는 목록이 문서
+  /// 하나로 죽지 않게 하려는 것이지, 그 값으로 쓰기를 진행해도 된다는 뜻이 아니다. 멤버십은
+  /// 관대 매퍼가 두 번 걸러내는데(유령 멤버 필터, `memberIds` 교집합), 걸러진 결과를 되쓰면
+  /// **그 멤버가 문서에서 영구히 사라진다** — 표시 문제가 데이터 손실이 된다:
   ///
-  /// - 어긋난 `inviteOwnerOnly`가 `true`로 읽혀 되쓰이면 일반 멤버의 초대 권한이 영구히 닫힌다.
-  /// - `userId`를 못 읽은 멤버 항목은 유령 필터에 걸러지는데, 그 상태로 되쓰면 **그 멤버가
-  ///   문서에서 사라진다**(표시 문제가 데이터 손실이 된다).
-  /// - 어긋난 `inviteExpiresAt`이 epoch로 굳으면 방장이 재발급하기 전까지 참여가 막힌다.
+  /// - `userId`를 못 읽은 항목은 유령 필터에 걸린다.
+  /// - `memberIds` 원소가 손상되면 `rawIds.contains(userId)`가 실패해 **정상 멤버가 탈락**한다.
   ///
-  /// 그래서 [_groupToDoc]이 싣는 필드의 **원본 타입**을 확인하고 하나라도 어긋나면
-  /// [StateError]를 던진다 — 트랜잭션이 실패하고 문서는 손상된 채 보존된다(고칠 기회가 남는다).
+  /// 되쓰지 않는 필드(`name`·`emoji`·만료 등)는 여기서 보지 않는다 — 막아도 얻는 것 없이
+  /// 나가기만 못 하게 된다.
   ///
-  /// **결측은 손상이 아니다.** 레거시 문서엔 `memberIds`·`maxMembers`·`inviteExpiresAt`가
-  /// 없고, 그건 기본값을 쓰는 것이 맞다.
+  /// **결측은 손상이 아니다.** 레거시 문서엔 `memberIds`가 없고, 그건 `members`를 그대로
+  /// 믿는 것이 맞다.
   @visibleForTesting
-  static Group requireGroupFromData(String id, Map<String, dynamic> data) {
+  static Group requireGroupMembershipFromData(
+    String id,
+    Map<String, dynamic> data,
+  ) {
     final Group? g = groupFromDataOrNull(id, data);
     if (g == null) throw StateError('Malformed group document: $id');
+    if (!_membershipTypesOk(data)) {
+      throw StateError('Malformed group document: $id');
+    }
+    return g;
+  }
 
-    bool absentOrString(Object? v) => v == null || v is String;
+  /// 전체 되쓰기용 검증 — [_groupToDoc]이 싣는 필드의 **원본 타입**을 전부 확인한다.
+  ///
+  /// [requireGroupMembershipFromData]의 멤버십 검사에 더해, 흡수된 폴백이 정상 값으로 굳는
+  /// 나머지 경로를 막는다:
+  ///
+  /// - 어긋난 `inviteOwnerOnly`가 `true`로 읽혀 되쓰이면 일반 멤버의 초대 권한이 영구히 닫힌다.
+  /// - 어긋난 `inviteExpiresAt`이 epoch로 굳으면 방장이 재발급하기 전까지 참여가 막힌다.
+  /// - 포화·손상된 `maxMembers`가 기본값으로 굳으면 방장이 정한 정원이 사라진다.
+  ///
+  /// 하나라도 어긋나면 [StateError] — 트랜잭션이 실패하고 문서는 손상된 채 보존된다(고칠
+  /// 기회가 남는다). `ownerId`는 검사하지 않는다: 매퍼가 읽지 않고 [_groupToDoc]이
+  /// `g.owner.userId`로 항상 재계산하므로 손상 값은 굳는 게 아니라 복구된다.
+  @visibleForTesting
+  static Group requireGroupFromData(String id, Map<String, dynamic> data) {
+    final Group g = requireGroupMembershipFromData(id, data);
+    final bool typesOk = _absentOrString(data['name']) &&
+        _absentOrString(data['emoji']) &&
+        _absentOrString(data['inviteToken']) &&
+        _absentOrString(data['inviteCode']) &&
+        (data['inviteOwnerOnly'] == null || data['inviteOwnerOnly'] is bool) &&
+        (data['maxMembers'] == null || docInt(data['maxMembers']) != null) &&
+        (data['inviteExpiresAt'] == null ||
+            docDateOrNull(data['inviteExpiresAt']) != null);
+    if (!typesOk) throw StateError('Malformed group document: $id');
+    return g;
+  }
+
+  static bool _absentOrString(Object? v) => v == null || v is String;
+
+  /// 되쓰기로 멤버가 사라질 수 있는 두 필드의 원본 타입 검사.
+  static bool _membershipTypesOk(Map<String, dynamic> data) {
     final Object? rawMembers = data['members'];
     final bool membersOk = rawMembers == null ||
         (rawMembers is List<dynamic> &&
@@ -902,28 +959,13 @@ class FirebaseShareRepository implements ShareRepository {
                 m is Map<String, dynamic> &&
                 m['userId'] is String &&
                 (m['userId'] as String).isNotEmpty &&
-                absentOrString(m['displayName']) &&
-                absentOrString(m['avatarEmoji']) &&
-                absentOrString(m['role'])));
-
-    final bool typesOk = membersOk &&
-        absentOrString(data['name']) &&
-        absentOrString(data['emoji']) &&
-        absentOrString(data['inviteToken']) &&
-        absentOrString(data['inviteCode']) &&
-        (data['inviteOwnerOnly'] == null || data['inviteOwnerOnly'] is bool) &&
-        (data['maxMembers'] == null || docInt(data['maxMembers']) != null) &&
-        (data['inviteExpiresAt'] == null ||
-            docDateOrNull(data['inviteExpiresAt']) != null) &&
-        // 리스트인지만 보면 부족하다 — 원소가 손상되면 `rawIds.contains(userId)`가
-        // 실패해 **정상 멤버가 탈락**하고, 그 상태로 되쓰면 문서에서 영구히 사라진다
-        // (유령 멤버 검증이 막으려던 것과 같은 데이터 손실이 다른 경로로 들어온다).
-        (data['memberIds'] == null ||
-            (data['memberIds'] is List<dynamic> &&
-                (data['memberIds'] as List<dynamic>)
-                    .every((dynamic e) => e is String)));
-    if (!typesOk) throw StateError('Malformed group document: $id');
-    return g;
+                _absentOrString(m['displayName']) &&
+                _absentOrString(m['avatarEmoji']) &&
+                _absentOrString(m['role'])));
+    final Object? rawIds = data['memberIds'];
+    final bool idsOk = rawIds == null ||
+        (rawIds is List<dynamic> && rawIds.every((dynamic e) => e is String));
+    return membersOk && idsOk;
   }
 
   Map<String, dynamic> _sharedToDoc(SharedGifticon s) => <String, dynamic>{
