@@ -40,7 +40,7 @@ void main() {
             role: MemberRole.owner,
           ),
         ],
-        inviteCode: '482913',
+        inviteToken: '482913',
       );
       expect(
         parseDeepLink(Uri.parse(group.inviteUrl)),

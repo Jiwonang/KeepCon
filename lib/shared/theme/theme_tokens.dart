@@ -125,7 +125,7 @@ extension ThemeTokensX on BuildContext {
       fontSize: 26, fontWeight: FontWeight.w900, letterSpacing: -0.5);
 
   /// 멤버 초대코드(강조) — 24·w800·자간 2.
-  TextStyle? get inviteCodeStyle => _tt.titleLarge
+  TextStyle? get inviteTokenStyle => _tt.titleLarge
       ?.copyWith(fontSize: 24, fontWeight: FontWeight.w800, letterSpacing: 2);
 
   /// 멤버 초대 본문 타이틀("그룹명 그룹으로 초대") — 23·w900·자간 -0.5.

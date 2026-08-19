@@ -47,7 +47,7 @@ SEED_CREATED_AT='2026-01-01T00:00:00Z'
 # 시드 그룹. 문서 id·초대코드를 **고정**해 팀원 전원이 같은 값을 공유하게 한다
 # (앱의 createGroup은 문서 id 해시로 코드를 만들지만, 시드는 재현 가능해야 한다).
 SEED_GROUP_ID='seed-group-family'
-SEED_GROUP_INVITE_CODE='482913'
+SEED_GROUP_INVITE_TOKEN='482913'
 # GroupMember.avatarEmoji 기본값 — FirebaseShareRepository._defaultAvatar와 같은 값.
 SEED_AVATAR='🙂'
 
@@ -155,8 +155,8 @@ seed_group() {
   local member_uid="$4" member_name="$5"
   local code
 
-  printf '{"fields":{"name":{"stringValue":"%s"},"emoji":{"stringValue":"%s"},"inviteCode":{"stringValue":"%s"},"inviteOwnerOnly":{"booleanValue":false},"members":{"arrayValue":{"values":[{"mapValue":{"fields":{"userId":{"stringValue":"%s"},"displayName":{"stringValue":"%s"},"avatarEmoji":{"stringValue":"%s"},"role":{"stringValue":"owner"}}}},{"mapValue":{"fields":{"userId":{"stringValue":"%s"},"displayName":{"stringValue":"%s"},"avatarEmoji":{"stringValue":"%s"},"role":{"stringValue":"member"}}}}]}},"memberIds":{"arrayValue":{"values":[{"stringValue":"%s"},{"stringValue":"%s"}]}},"ownerId":{"stringValue":"%s"}}}' \
-    '우리 가족' '👪' "${SEED_GROUP_INVITE_CODE}" \
+  printf '{"fields":{"name":{"stringValue":"%s"},"emoji":{"stringValue":"%s"},"inviteToken":{"stringValue":"%s"},"inviteOwnerOnly":{"booleanValue":false},"members":{"arrayValue":{"values":[{"mapValue":{"fields":{"userId":{"stringValue":"%s"},"displayName":{"stringValue":"%s"},"avatarEmoji":{"stringValue":"%s"},"role":{"stringValue":"owner"}}}},{"mapValue":{"fields":{"userId":{"stringValue":"%s"},"displayName":{"stringValue":"%s"},"avatarEmoji":{"stringValue":"%s"},"role":{"stringValue":"member"}}}}]}},"memberIds":{"arrayValue":{"values":[{"stringValue":"%s"},{"stringValue":"%s"}]}},"ownerId":{"stringValue":"%s"}}}' \
+    '우리 가족' '👪' "${SEED_GROUP_INVITE_TOKEN}" \
     "${owner_uid}" "${owner_name}" "${SEED_AVATAR}" \
     "${member_uid}" "${member_name}" "${SEED_AVATAR}" \
     "${owner_uid}" "${member_uid}" \
@@ -173,7 +173,7 @@ seed_group() {
     return 1
   fi
 
-  echo "  ✓ 그룹 '우리 가족' id=${SEED_GROUP_ID} 초대코드=${SEED_GROUP_INVITE_CODE}"
+  echo "  ✓ 그룹 '우리 가족' id=${SEED_GROUP_ID} 초대코드=${SEED_GROUP_INVITE_TOKEN}"
 }
 
 # 개인 기프티콘 문서를 만든다(FirebaseGifticonRepository._toDoc과 같은 스키마).
@@ -407,5 +407,5 @@ echo
 echo "완료. ${SEED_DIR}/ 를 커밋하면 팀원 전원이 같은 계정·같은 그룹으로 시작합니다."
 echo "  방장   owner@keepcon.test  / ${SEED_PASSWORD}"
 echo "  파티원 member@keepcon.test / ${SEED_PASSWORD}"
-echo "  그룹   '우리 가족' (초대코드 ${SEED_GROUP_INVITE_CODE}) — 방장·파티원 모두 소속"
+echo "  그룹   '우리 가족' (초대코드 ${SEED_GROUP_INVITE_TOKEN}) — 방장·파티원 모두 소속"
 echo "  기프티콘 4개(방장 3 · 파티원 1), 그중 2개는 그룹에 공유됨"

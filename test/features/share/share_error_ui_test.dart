@@ -265,7 +265,7 @@ void main() {
         id: id,
         name: name,
         emoji: '🏠',
-        inviteCode: '123456',
+        inviteToken: '123456',
         members: <GroupMember>[
           GroupMember(
             userId: me,

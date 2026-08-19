@@ -48,7 +48,7 @@ import '../../../shared/providers/shared_gifticons_provider.dart';
 // `.when`을 쓰지 않는 이유·분기 순서(에러를 로딩보다 먼저 — 재시도 중 배너 유지)·
 // 미로그인 확정 = AsyncData(빈 값) 보존(알림 읽음 가드가 의존)은 정본 dartdoc이 규정한다.
 
-// 대기 중 초대코드(`pendingInviteCodeProvider`)는 계약 정본
+// 대기 중 초대코드(`pendingInviteTokenProvider`)는 계약 정본
 // `shared/providers/deep_link_providers.dart`의 `pendingDestinationProvider`로 승격됐다.
 // 초대는 이제 목적지 하나의 형태(`InviteDestination`)이며, 알림 탭 등 다른 신호와 같은
 // 통로를 쓴다. 별칭(재export shim)은 남기지 않는다 — 두 이름이 살아 있으면 수신부마다

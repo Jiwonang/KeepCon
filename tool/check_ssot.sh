@@ -31,7 +31,7 @@ scan() {
 }
 
 # 1) 공유 모델/enum/인터페이스 재정의 금지 (lib/shared 정본만 사용)
-SHARED_TYPES="Group|GroupMember|SharedGifticon|UsageLog|GroupNotification|MyGifticon|Gifticon|User|ShareStatus|MemberRole|InviteExpiry|GroupNotificationType|GifticonStatus|SortOption|FilterOption|ShareStatusTransition|GifticonStatusTransition|ShareRepository|GifticonRepository|AuthRepository|MyGroupsRetry"
+SHARED_TYPES="Group|GroupMember|SharedGifticon|UsageLog|GroupNotification|MyGifticon|Gifticon|User|JoinRequest|ShareStatus|MemberRole|JoinRequestStatus|GroupNotificationType|GifticonStatus|SortOption|FilterOption|ShareStatusTransition|GifticonStatusTransition|ShareRepository|GifticonRepository|AuthRepository|MyGroupsRetry"
 
 # 선행 수식어 `([a-z]+ )*`로 Dart 3 클래스 수식어를 모두 포괄한다:
 # abstract/base/interface/final/sealed/mixin(및 조합, 예: `abstract interface class`,

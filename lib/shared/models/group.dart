@@ -111,7 +111,7 @@ class Group {
     required this.name,
     required this.emoji,
     required List<GroupMember> members,
-    required this.inviteCode,
+    required this.inviteToken,
     this.inviteOwnerOnly = false,
     DateTime? inviteExpiresAt,
     this.maxMembers = defaultMaxMembers,
@@ -130,7 +130,7 @@ class Group {
   /// 초대 링크·코드의 유효 기간 — **모든 초대는 발급 시점부터 24시간만 유효하다.**
   ///
   /// 방장이 고르는 값이 아니라 앱 전체에 고정된 정책이다(선택 UI 없음). 초대가 만료되면
-  /// `ShareRepository.regenerateInviteCode`로 새 코드를 발급받아 창을 다시 연다.
+  /// `ShareRepository.regenerateInviteToken`로 새 코드를 발급받아 창을 다시 연다.
   static const Duration inviteValidity = Duration(hours: 24);
 
   /// 그룹 생성 시 고를 수 있는 인원 상한 프리셋(오름차순). 기본값([defaultMaxMembers])을 포함한다.
@@ -152,16 +152,16 @@ class Group {
   /// (`add`/`remove` 등은 예외). 멤버 변경은 [copyWith]로 새 인스턴스를 만든다.
   final List<GroupMember> members;
 
-  /// 초대코드. **non-nullable.**
-  final String inviteCode;
+  /// 초대 토큰 — 초대 링크에 실려 그룹을 가리키는 값. **non-nullable.**
+  final String inviteToken;
 
   /// 초대 권한 정책 — `true`면 방장만 멤버를 초대할 수 있다(기본 `false`, 누구나).
   /// 정책 변경은 방장만 가능하며 `ShareRepository.setInviteOwnerOnly`로만 바꾼다.
   final bool inviteOwnerOnly;
 
-  /// 초대코드 만료 시각. **non-nullable** — 만료 없는 초대는 없다.
+  /// 초대 토큰 만료 시각. **non-nullable** — 만료 없는 초대는 없다.
   ///
-  /// 코드가 발급되는 시점(그룹 생성 / `ShareRepository.regenerateInviteCode`)에
+  /// 코드가 발급되는 시점(그룹 생성 / `ShareRepository.regenerateInviteToken`)에
   /// `발급 시각 + [inviteValidity]`로 정해지며, 이 시각을 지나면
   /// `ShareRepository.joinGroup`이 [StateError]로 참여를 거부한다([isInviteExpired] 참조).
   final DateTime inviteExpiresAt;
@@ -185,8 +185,8 @@ class Group {
   /// 조용히 브라우저로 샌다).
   static const String inviteHost = 'keepcon-ab660.web.app';
 
-  /// 초대 URL(초대코드 기반 조립).
-  String get inviteUrl => 'https://$inviteHost/invite/$inviteCode';
+  /// 초대 URL(초대 토큰 기반 조립).
+  String get inviteUrl => 'https://$inviteHost/invite/$inviteToken';
 
   /// 정원이 찼는지(멤버 수 ≥ [maxMembers]). 참여 가능 여부 판정의 단일 진입점.
   bool get isFull => memberCount >= maxMembers;
@@ -197,7 +197,7 @@ class Group {
     return left < 0 ? 0 : left;
   }
 
-  /// [now] 기준으로 초대코드가 만료되었는지.
+  /// [now] 기준으로 초대 토큰이 만료되었는지.
   ///
   /// 만료 판정의 단일 진입점이며, UI 게이팅(참여 버튼 노출)과 구현체 가드가 모두 이
   /// predicate를 소비한다(로직 drift 방지).
@@ -242,7 +242,7 @@ class Group {
     String? name,
     String? emoji,
     List<GroupMember>? members,
-    String? inviteCode,
+    String? inviteToken,
     bool? inviteOwnerOnly,
     DateTime? inviteExpiresAt,
     int? maxMembers,
@@ -252,7 +252,7 @@ class Group {
       name: name ?? this.name,
       emoji: emoji ?? this.emoji,
       members: members ?? this.members,
-      inviteCode: inviteCode ?? this.inviteCode,
+      inviteToken: inviteToken ?? this.inviteToken,
       inviteOwnerOnly: inviteOwnerOnly ?? this.inviteOwnerOnly,
       inviteExpiresAt: inviteExpiresAt ?? this.inviteExpiresAt,
       maxMembers: maxMembers ?? this.maxMembers,
@@ -268,7 +268,7 @@ class Group {
           name == other.name &&
           emoji == other.emoji &&
           _memberListEquals(members, other.members) &&
-          inviteCode == other.inviteCode &&
+          inviteToken == other.inviteToken &&
           inviteOwnerOnly == other.inviteOwnerOnly &&
           inviteExpiresAt == other.inviteExpiresAt &&
           maxMembers == other.maxMembers;
@@ -279,7 +279,7 @@ class Group {
         name,
         emoji,
         Object.hashAll(members),
-        inviteCode,
+        inviteToken,
         inviteOwnerOnly,
         inviteExpiresAt,
         maxMembers,

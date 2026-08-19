@@ -130,7 +130,7 @@ member_val() {
 
 # 그룹 전체 문서. $1=ownerId, $2=members 원소들(콤마 구분), $3=memberIds 원소들, $4=초대코드
 group_full() {
-  printf '{"fields":{"ownerId":{"stringValue":"%s"},"name":{"stringValue":"가족"},"emoji":{"stringValue":"🎁"},"inviteCode":{"stringValue":"%s"},"inviteOwnerOnly":{"booleanValue":false},"inviteExpiresAt":{"timestampValue":"2030-01-01T00:00:00Z"},"maxMembers":{"integerValue":"10"},"members":{"arrayValue":{"values":[%s]}},"memberIds":{"arrayValue":{"values":[%s]}}}}' "$1" "$4" "$2" "$3"
+  printf '{"fields":{"ownerId":{"stringValue":"%s"},"name":{"stringValue":"가족"},"emoji":{"stringValue":"🎁"},"inviteToken":{"stringValue":"%s"},"inviteOwnerOnly":{"booleanValue":false},"inviteExpiresAt":{"timestampValue":"2030-01-01T00:00:00Z"},"maxMembers":{"integerValue":"10"},"members":{"arrayValue":{"values":[%s]}},"memberIds":{"arrayValue":{"values":[%s]}}}}' "$1" "$4" "$2" "$3"
 }
 
 # memberIds만 바꾸는 부분 갱신 — 앱의 '나가기'가 보내는 형태. $1=memberIds 원소들
@@ -151,7 +151,7 @@ MASK_MEMBERS='updateMask.fieldPaths=members&updateMask.fieldPaths=memberIds'
 MASK_IDS='updateMask.fieldPaths=memberIds'
 MASK_OWNER_MEMBERS="updateMask.fieldPaths=ownerId&${MASK_MEMBERS}"
 MASK_NAME='updateMask.fieldPaths=name'
-MASK_CODE='updateMask.fieldPaths=inviteCode'
+MASK_CODE='updateMask.fieldPaths=inviteToken'
 MASK_OWNER='updateMask.fieldPaths=ownerId'
 
 M_A=$(member_val "${UID_A}" "A" "owner")
@@ -210,7 +210,7 @@ G_META="${SEEDED_DOC}"
 check "B(멤버)가 그룹 이름 변경 → 차단" 403 -X PATCH "${DOCS}/${G_META}?${MASK_NAME}" \
   "${AUTH_B[@]}" "${JSON[@]}" -d '{"fields":{"name":{"stringValue":"납치된 그룹"}}}'
 check "A(방장)가 초대코드 재발급" 200 -X PATCH "${DOCS}/${G_META}?${MASK_CODE}" \
-  "${AUTH_A[@]}" "${JSON[@]}" -d '{"fields":{"inviteCode":{"stringValue":"771205"}}}'
+  "${AUTH_A[@]}" "${JSON[@]}" -d '{"fields":{"inviteToken":{"stringValue":"771205"}}}'
 
 # ── 방장은 운영 전반을 할 수 있지만, 방장 자리를 비울 수는 없다 ──────────
 seed_group remove "${M_A},${M_B}" "${ID_A},${ID_B}"

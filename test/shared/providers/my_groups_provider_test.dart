@@ -93,7 +93,7 @@ void main() {
       id: id,
       name: name,
       emoji: '🎁',
-      inviteCode: 'CODE$id',
+      inviteToken: 'CODE$id',
       members: <GroupMember>[
         GroupMember(
           userId: myId,
