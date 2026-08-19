@@ -431,7 +431,7 @@ class FirebaseShareRepository implements ShareRepository {
       if (!doc.exists) {
         throw StateError('Shared gifticon not found: $sharedGifticonId');
       }
-      final SharedGifticon item = _sharedFromDoc(doc);
+      final SharedGifticon item = _requireSharedFromDoc(doc);
       final SharedGifticon updated;
       if (item.reservedByUserId == me.id) {
         updated = item.copyWith(reservedByUserId: null); // 내 찜 해제
@@ -461,7 +461,7 @@ class FirebaseShareRepository implements ShareRepository {
       if (!doc.exists) {
         throw StateError('Shared gifticon not found: $sharedGifticonId');
       }
-      final SharedGifticon item = _sharedFromDoc(doc);
+      final SharedGifticon item = _requireSharedFromDoc(doc);
       if (item.status != ShareStatus.available) {
         throw StateError(
           'Only an available shared gifticon can be marked used: ${item.status}',
@@ -511,7 +511,7 @@ class FirebaseShareRepository implements ShareRepository {
       if (!doc.exists) {
         throw StateError('Shared gifticon not found: $sharedGifticonId');
       }
-      final SharedGifticon item = _sharedFromDoc(doc);
+      final SharedGifticon item = _requireSharedFromDoc(doc);
       if (item.sharedByUserId != me.id) {
         throw StateError('Only the sharer can cancel the share');
       }
@@ -818,14 +818,9 @@ class FirebaseShareRepository implements ShareRepository {
   /// ([watchSharedGifticons]/[getSharedGifticons])에서도 쓰이므로, 문서 하나가 예외를
   /// 던지면 그룹의 공유 목록 스트림 전체가 죽는다.
   ///
-  /// 폴백의 방향은 필드마다 다르다:
-  /// - `sharedByUserId` → 빈 문자열. [cancelShare]의 공유자 비교가 어떤 실제 uid와도
-  ///   매칭시키지 않으므로 **fail-closed**다.
-  /// - `status` → [ShareStatus.available]. 이쪽은 **fail-open이다.** [markUsed]의 상태
-  ///   가드가 바로 이 매퍼가 만든 값을 보기 때문에(같은 값을 읽는 판정자라 독립 검증이
-  ///   아니다), 손상된 `used` 문서가 available로 읽히면 사용 완료가 한 번 더 통과해
-  ///   [UsageLog]가 중복 적재된다. `firestore.rules`도 상태 전이는 검사하지 않아 서버
-  ///   백스톱이 없다 — 상태 불변식의 서버 강제는 미구현 과제로 남아 있다.
+  /// ⚠️ **이 관용은 읽기(목록) 전용이다.** 손상된 `status`가 [ShareStatus.available]로
+  /// 떨어지는 것은 화면에 한 줄 잘못 그리는 정도지만, 쓰기 경로에서는 사용 완료 가드를
+  /// 통과시켜 [UsageLog]를 중복 적재한다. 쓰기 트랜잭션은 [requireSharedFromData]를 쓴다.
   @visibleForTesting
   static SharedGifticon sharedFromData(String id, Map<String, dynamic> data) {
     return SharedGifticon(
@@ -841,6 +836,44 @@ class FirebaseShareRepository implements ShareRepository {
       reservedByUserId: docStringOrNull(data['reservedByUserId']),
       barcode: docStringOrNull(data['barcode']),
     );
+  }
+
+  /// 쓰기 트랜잭션용 매퍼 — 손상 문서면 [StateError].
+  SharedGifticon _requireSharedFromDoc(
+          DocumentSnapshot<Map<String, dynamic>> doc) =>
+      requireSharedFromData(doc.id, doc.data() ?? const <String, dynamic>{});
+
+  /// [_requireSharedFromDoc]의 순수 본체(문서 없이 맵만으로 동작 — 테스트 진입점).
+  ///
+  /// **읽기는 관대하게, 쓰기는 엄격하게.** [sharedFromData]의 기본값 흡수는 문서 하나가
+  /// 목록 스트림 전체를 죽이지 않게 하려는 것이지, 손상 문서로 **쓰기를 진행해도 된다는
+  /// 뜻이 아니다.** 그대로 쓰기에 쓰면:
+  ///
+  /// - 손상된 `status`가 [ShareStatus.available]로 읽혀 [markUsed]의 상태 가드를 통과한다
+  ///   (가드가 이 매퍼의 결과를 보므로 독립 검증이 아니다). 이미 사용한 항목이 한 번 더
+  ///   사용 완료되고 [UsageLog]가 중복 적재된다.
+  /// - 빈 `groupId`·`sharedGifticonId`가 이력·알림 문서에 그대로 적재된다.
+  /// - 빈 `gifticonId`가 `_syncOriginalUsed('')`로 흘러 빈 문서 경로를 만든다.
+  ///
+  /// 그래서 필수 식별자 셋과 `status`의 온전함을 확인하고, 하나라도 어긋나면 계약대로
+  /// [StateError]를 던진다(그룹의 [groupFromDataOrNull]/`_groupFromDoc` 짝과 같은 규약).
+  /// 정상 문서는 항상 이 넷을 갖는다 — `_sharedToDoc`과 시드가 모두 채워 쓴다.
+  @visibleForTesting
+  static SharedGifticon requireSharedFromData(
+    String id,
+    Map<String, dynamic> data,
+  ) {
+    final SharedGifticon item = sharedFromData(id, data);
+    final bool identifiersOk = item.groupId.isNotEmpty &&
+        item.gifticonId.isNotEmpty &&
+        item.sharedByUserId.isNotEmpty;
+    // status는 폴백이 available이라 결과값만으로는 손상을 알 수 없다 — 원본을 다시 본다.
+    final bool statusOk =
+        _shareStatusFromNameOrNull(docStringOrNull(data['status'])) != null;
+    if (!identifiersOk || !statusOk) {
+      throw StateError('Malformed shared gifticon document: $id');
+    }
+    return item;
   }
 
   UsageLog _logFromDoc(DocumentSnapshot<Map<String, dynamic>> doc) =>
@@ -918,12 +951,20 @@ class FirebaseShareRepository implements ShareRepository {
   static MemberRole _roleFromName(String? name) =>
       name == MemberRole.owner.name ? MemberRole.owner : MemberRole.member;
 
-  static ShareStatus _shareStatusFromName(String? name) {
+  /// 저장된 `status` 문자열 → [ShareStatus]. **알 수 없는 값이면 `null`.**
+  ///
+  /// 폴백을 붙이지 않은 변형이 따로 필요한 이유: [_shareStatusFromName]이 알 수 없는 값을
+  /// [ShareStatus.available]로 떨어뜨리므로, 결과값만 보면 "정상 available"과 "손상"을
+  /// 구분할 수 없다. 쓰기 경로의 검증([requireSharedFromData])은 그 구분이 필요하다.
+  static ShareStatus? _shareStatusFromNameOrNull(String? name) {
     for (final ShareStatus s in ShareStatus.values) {
       if (s.name == name) return s;
     }
-    return ShareStatus.available;
+    return null;
   }
+
+  static ShareStatus _shareStatusFromName(String? name) =>
+      _shareStatusFromNameOrNull(name) ?? ShareStatus.available;
 
   static GroupNotificationType _notifTypeFromName(String? name) {
     for (final GroupNotificationType t in GroupNotificationType.values) {

@@ -110,6 +110,84 @@ void main() {
     });
   });
 
+  group('쓰기 트랜잭션 매퍼 — 읽기는 관대하게, 쓰기는 엄격하게', () {
+    /// 정상 문서(필수 식별자 셋 + 알려진 status).
+    Map<String, dynamic> healthy([Map<String, dynamic> patch = const {}]) =>
+        <String, dynamic>{
+          'groupId': 'g1',
+          'gifticonId': 'gx-1',
+          'sharedByUserId': 'user-1',
+          'status': ShareStatus.available.name,
+          ...patch,
+        };
+
+    test('정상 문서는 통과한다(시드·_sharedToDoc이 쓰는 모양)', () {
+      final SharedGifticon s =
+          FirebaseShareRepository.requireSharedFromData('s1', healthy());
+      expect(s.groupId, 'g1');
+      expect(s.status, ShareStatus.available);
+    });
+
+    test('손상된 status는 available로 위장하지 못하고 StateError가 된다', () {
+      // 관용 매퍼는 available로 흡수한다 — 목록에는 그대로 그려도 된다.
+      expect(
+        FirebaseShareRepository.sharedFromData('s1', healthy({'status': 99}))
+            .status,
+        ShareStatus.available,
+      );
+      // 쓰기 경로는 거부한다. 흡수를 허용하면 이미 사용한 항목이 한 번 더 사용 완료되고
+      // UsageLog가 중복 적재된다(가드가 이 매퍼의 결과를 보므로 독립 검증이 아니다).
+      expect(
+        () => FirebaseShareRepository.requireSharedFromData(
+            's1', healthy({'status': 99})),
+        throwsStateError,
+      );
+      // 값은 문자열이지만 알 수 없는 이름인 경우도 같다.
+      expect(
+        () => FirebaseShareRepository.requireSharedFromData(
+            's1', healthy({'status': 'bogus'})),
+        throwsStateError,
+      );
+    });
+
+    test('필수 식별자가 비면 StateError — 빈 값이 이력·알림·잠금 경로로 새지 않게', () {
+      for (final String field in <String>[
+        'groupId',
+        'gifticonId',
+        'sharedByUserId',
+      ]) {
+        // 필드 누락
+        final Map<String, dynamic> missing = healthy()..remove(field);
+        expect(
+          () => FirebaseShareRepository.requireSharedFromData('s1', missing),
+          throwsStateError,
+          reason: '$field 누락',
+        );
+        // 타입 손상
+        expect(
+          () => FirebaseShareRepository.requireSharedFromData(
+              's1', healthy(<String, dynamic>{field: 42})),
+          throwsStateError,
+          reason: '$field 손상',
+        );
+      }
+    });
+
+    test('빈 문서는 당연히 거부한다', () {
+      expect(
+        () => FirebaseShareRepository.requireSharedFromData(
+            's1', const <String, dynamic>{}),
+        throwsStateError,
+      );
+      // 반면 목록용 매퍼는 같은 입력에 던지지 않는다 — 두 규약이 공존한다.
+      expect(
+        () => FirebaseShareRepository.sharedFromData(
+            's1', const <String, dynamic>{}),
+        returnsNormally,
+      );
+    });
+  });
+
   group('이력·알림 매퍼 — 손상 문서에도 던지지 않는다', () {
     test('사용 이력', () {
       final UsageLog l = FirebaseShareRepository.logFromData('l1', garbage);
