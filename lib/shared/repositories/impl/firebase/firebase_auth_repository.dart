@@ -12,6 +12,8 @@
 library;
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+
+import 'doc_read.dart';
 import 'package:firebase_auth/firebase_auth.dart' as fb;
 import 'package:flutter/foundation.dart';
 
@@ -253,8 +255,7 @@ class FirebaseAuthRepository implements AuthRepository {
       (DocumentSnapshot<Map<String, dynamic>> doc) {
         // 비문자열 값(수동 조작·타 클라이언트 오기록)도 free로 폴백 — cast로
         // 스트림에 TypeError를 흘리지 않는다(모르는 값 = free 계약).
-        final Object? v = doc.data()?['plan'];
-        return UserPlan.fromName(v is String ? v : null);
+        return UserPlan.fromName(docStringOrNull(doc.data()?['plan']));
       },
     );
   }

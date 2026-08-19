@@ -22,8 +22,10 @@
 library;
 
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart' show visibleForTesting;
 
 import '../../../models/gifticon.dart';
 import '../../../models/group.dart';
@@ -34,6 +36,7 @@ import '../../../util/korean_particle.dart';
 import '../../auth_repository.dart';
 import '../../gifticon_repository.dart';
 import '../../share_repository.dart';
+import 'doc_read.dart';
 
 /// `whereIn` 질의의 값 개수 상한(Firestore 제약). 사용자가 이보다 많은 그룹에 속하면
 /// 최신 [_whereInLimit]개 그룹의 이력/알림만 관찰한다(문서화된 한계).
@@ -493,7 +496,7 @@ class FirebaseShareRepository implements ShareRepository {
       if (!doc.exists) {
         throw StateError('Shared gifticon not found: $sharedGifticonId');
       }
-      final SharedGifticon item = _sharedFromDoc(doc);
+      final SharedGifticon item = _requireSharedFromDoc(doc);
       final SharedGifticon updated;
       if (item.reservedByUserId == me.id) {
         updated = item.copyWith(reservedByUserId: null); // 내 찜 해제
@@ -523,7 +526,7 @@ class FirebaseShareRepository implements ShareRepository {
       if (!doc.exists) {
         throw StateError('Shared gifticon not found: $sharedGifticonId');
       }
-      final SharedGifticon item = _sharedFromDoc(doc);
+      final SharedGifticon item = _requireSharedFromDoc(doc);
       if (item.status != ShareStatus.available) {
         throw StateError(
           'Only an available shared gifticon can be marked used: ${item.status}',
@@ -573,7 +576,7 @@ class FirebaseShareRepository implements ShareRepository {
       if (!doc.exists) {
         throw StateError('Shared gifticon not found: $sharedGifticonId');
       }
-      final SharedGifticon item = _sharedFromDoc(doc);
+      final SharedGifticon item = _requireSharedFromDoc(doc);
       if (item.sharedByUserId != me.id) {
         throw StateError('Only the sharer can cancel the share');
       }
@@ -582,7 +585,9 @@ class FirebaseShareRepository implements ShareRepository {
       }
       // 항목과 공유 잠금을 함께 제거해 재공유가 가능해지도록 한다.
       tx.delete(ref);
-      tx.delete(_locks.doc(item.gifticonId));
+      final DocumentReference<Map<String, dynamic>>? lock =
+          _lockRefOrNull(item.gifticonId);
+      if (lock != null) tx.delete(lock);
     });
   }
 
@@ -627,8 +632,9 @@ class FirebaseShareRepository implements ShareRepository {
       for (final QueryDocumentSnapshot<Map<String, dynamic>> d
           in docs.skip(i).take(chunkSize)) {
         batch.delete(d.reference);
-        final String? gifticonId = d.data()['gifticonId'] as String?;
-        if (gifticonId != null) batch.delete(_locks.doc(gifticonId));
+        final DocumentReference<Map<String, dynamic>>? lock =
+            _lockRefOrNull(docStringOrNull(d.data()['gifticonId']));
+        if (lock != null) batch.delete(lock);
       }
       await batch.commit();
     }
@@ -687,7 +693,7 @@ class FirebaseShareRepository implements ShareRepository {
   Stream<DateTime?> watchNotificationsReadAt(String userId) {
     return _notifReads.doc(userId).snapshots().map(
         (DocumentSnapshot<Map<String, dynamic>> d) =>
-            _readAtFrom(d.data()?['readAt']));
+            docDateOrNull(d.data()?['readAt']));
   }
 
   @override
@@ -789,25 +795,34 @@ class FirebaseShareRepository implements ShareRepository {
 
   /// 문서 → [Group]. **비멤버/멤버0/방장≠1** 등 [Group] 불변식을 못 만족하는 손상
   /// 문서는 `null`을 반환한다 — 목록 매핑에서 걸러 한 문서가 스트림 전체를 깨지 않게 한다.
-  Group? _groupFromDocOrNull(DocumentSnapshot<Map<String, dynamic>> doc) {
-    final Map<String, dynamic> data = doc.data() ?? const <String, dynamic>{};
+  Group? _groupFromDocOrNull(DocumentSnapshot<Map<String, dynamic>> doc) =>
+      groupFromDataOrNull(doc.id, doc.data() ?? const <String, dynamic>{});
+
+  /// [_groupFromDocOrNull]의 순수 본체(문서 없이 맵만으로 동작 — 테스트 진입점).
+  @visibleForTesting
+  static Group? groupFromDataOrNull(String id, Map<String, dynamic> data) {
     final List<dynamic> rawMembers =
-        (data['members'] as List<dynamic>?) ?? const <dynamic>[];
+        docListOrNull(data['members']) ?? const <dynamic>[];
     final List<GroupMember> parsed = rawMembers
         .whereType<Map<String, dynamic>>()
         .map((Map<String, dynamic> m) => GroupMember(
-              userId: m['userId'] as String? ?? '',
-              displayName: m['displayName'] as String? ?? '',
-              avatarEmoji: m['avatarEmoji'] as String? ?? _defaultAvatar,
-              role: _roleFromName(m['role'] as String?),
+              userId: docString(m['userId']),
+              displayName: docString(m['displayName']),
+              avatarEmoji: docString(m['avatarEmoji'], _defaultAvatar),
+              role: _roleFromName(docStringOrNull(m['role'])),
             ))
+        // userId를 못 읽은 항목(필드 없음/손상)은 유령이다 — 아무와도 매칭되지 않으면서
+        // [Group.isFull]의 정원 한 칸을 먹고 화면에 빈 이름으로 남는다.
+        .where((GroupMember m) => m.userId.isNotEmpty)
         .toList(growable: false);
     // 멤버십의 정본은 `memberIds`다 — 목록 쿼리(array-contains)와 보안 규칙의 멤버십
     // 판정이 모두 그 필드를 본다. 멤버 '나가기'는 규칙상 `memberIds`만 바꿀 수 있으므로
     // (`members`까지 열어 주면 나가면서 남을 지우는 조작이 통과한다) 떠난 사람의
     // 표시용 항목이 잠시 남는다. 여기서 걸러 두 필드의 불일치가 화면에 새지 않게 한다.
     // 남은 항목은 다음 방장 쓰기(`_groupToDoc`)에서 문서에서도 사라진다.
-    final List<dynamic>? rawIds = data['memberIds'] as List<dynamic>?;
+    // 손상 값(리스트가 아님)도 `null`과 같게 본다 — 여기서 터뜨려 봐야 목록 전체가
+    // 죽을 뿐이고, 멤버십의 실제 판정은 보안 규칙이 서버에서 한다.
+    final List<dynamic>? rawIds = docListOrNull(data['memberIds']);
     final List<GroupMember> members = rawIds == null
         // 레거시 문서엔 memberIds가 없을 수 있다 — 그때는 members를 그대로 믿는다.
         ? parsed
@@ -818,21 +833,43 @@ class FirebaseShareRepository implements ShareRepository {
     final int owners =
         members.where((GroupMember m) => m.role == MemberRole.owner).length;
     if (members.isEmpty || owners != 1) return null;
-    // 레거시 문서엔 maxMembers가 없어 기본값을 쓰고, 손상 값(현재 멤버 수보다 작음)은
-    // 현재 멤버 수로 끌어올려 불변식(>=1, >=memberCount)을 지킨다.
-    final int rawMax =
-        (data['maxMembers'] as num?)?.toInt() ?? Group.defaultMaxMembers;
-    final int maxMembers = rawMax < members.length ? members.length : rawMax;
+    // 레거시 문서엔 maxMembers가 없어 기본값을 쓴다. 손상 값은 **양쪽으로** 조인다:
+    // 아래로는 현재 멤버 수(불변식 >=1, >=memberCount), 위로는 프리셋 상한.
+    //
+    // 상한이 필요한 이유: [docInt]는 유한한 값만 통과시키지만 `1e300` 같은 거대 double은
+    // 유한하므로 통과하고 `toInt()`가 int64 최대값으로 **포화**한다. 그러면 [Group.isFull]이
+    // 영원히 false가 되어 정원 가드가 사라지고, 남은 자리가 19자리로 화면에 나오며,
+    // 방장이 그룹을 한 번 쓰면 [_groupToDoc]이 그 값을 문서에 되쓴다. 규칙에도 정원 검사가
+    // 없어 서버 백스톱이 없다. 앱이 만들 수 있는 값은 프리셋뿐이므로(그룹 생성 시트) 상한을
+    // 넘는 값은 손상으로 본다.
+    //
+    // 상한을 [math.max]로 한 번 더 감싸는 이유: 이미 프리셋 상한을 넘겨 멤버가 쌓인 문서가
+    // 있으면(정확히 위 포화 버그가 만들 수 있는 상태다) 하한이 상한을 넘어 [num.clamp]가
+    // [ArgumentError]를 던진다 — 그 역시 [Error]라 그룹 목록 스트림을 통째로 죽인다.
+    // 손상을 고치려는 코드가 손상 문서에서 터지는 것을 막는다.
+    final int rawMax = docInt(data['maxMembers']) ?? Group.defaultMaxMembers;
+    final int maxMembers = rawMax.clamp(
+      members.length,
+      math.max(members.length, Group.memberCapPresets.last),
+    );
     return Group(
-      id: doc.id,
-      name: data['name'] as String? ?? '',
-      emoji: data['emoji'] as String? ?? '🎁',
+      id: id,
+      name: docString(data['name']),
+      emoji: docString(data['emoji'], '🎁'),
       // 레거시 문서는 이 필드를 `inviteCode`로 갖고 있다(토큰으로 이름을 바꾸기 전).
       // 읽을 때만 받아 주고, 그 그룹에 다음 쓰기가 일어나면 새 이름으로 옮겨간다.
       inviteToken:
-          data['inviteToken'] as String? ?? data['inviteCode'] as String? ?? '',
-      inviteOwnerOnly: data['inviteOwnerOnly'] as bool? ?? false,
-      inviteExpiresAt: _inviteExpiresAtFrom(data['inviteExpiresAt']),
+          docStringOrNull(data['inviteToken']) ?? docString(data['inviteCode']),
+      // 결측(레거시)은 기본 정책(false)이지만, **손상은 true로 닫는다** —
+      // [Group.canInvite]는 `!inviteOwnerOnly`일 때 모든 멤버에게 열리므로 false가 더
+      // 허용적인 값이다. 뭉쳐서 false로 떨어뜨리면 방장이 잠가 둔 정책이 손상 하나로
+      // 조용히 풀린다.
+      inviteOwnerOnly:
+          docBool(data['inviteOwnerOnly'], ifAbsent: false, ifCorrupt: true),
+      // [docDate]의 epoch 폴백이 곧 **fail-closed**다 — 값이 없거나(24시간 정책 이전의
+      // 레거시 문서) 손상이면 이미 만료된 것으로 보고 참여를 거부한다. 레거시 토큰은
+      // 어차피 24시간이 지났고, 방장의 [regenerateInviteToken]이 복구 경로다.
+      inviteExpiresAt: docDate(data['inviteExpiresAt']),
       maxMembers: maxMembers,
       members: members,
     );
@@ -858,33 +895,87 @@ class FirebaseShareRepository implements ShareRepository {
         'barcode': s.barcode,
       };
 
-  SharedGifticon _sharedFromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
-    final Map<String, dynamic> data = doc.data() ?? const <String, dynamic>{};
+  SharedGifticon _sharedFromDoc(DocumentSnapshot<Map<String, dynamic>> doc) =>
+      sharedFromData(doc.id, doc.data() ?? const <String, dynamic>{});
+
+  /// [_sharedFromDoc]의 순수 본체(문서 없이 맵만으로 동작 — 테스트 진입점).
+  ///
+  /// 손상 문서라도 **던지지 않는다.** 이 매퍼는 목록 매핑
+  /// ([watchSharedGifticons]/[getSharedGifticons])에서도 쓰이므로, 문서 하나가 예외를
+  /// 던지면 그룹의 공유 목록 스트림 전체가 죽는다.
+  ///
+  /// ⚠️ **이 관용은 읽기(목록) 전용이다.** 손상된 `status`가 [ShareStatus.available]로
+  /// 떨어지는 것은 화면에 한 줄 잘못 그리는 정도지만, 쓰기 경로에서는 사용 완료 가드를
+  /// 통과시켜 [UsageLog]를 중복 적재한다. 쓰기 트랜잭션은 [requireSharedFromData]를 쓴다.
+  @visibleForTesting
+  static SharedGifticon sharedFromData(String id, Map<String, dynamic> data) {
     return SharedGifticon(
-      id: doc.id,
-      groupId: data['groupId'] as String? ?? '',
-      gifticonId: data['gifticonId'] as String? ?? '',
-      sharedByUserId: data['sharedByUserId'] as String? ?? '',
-      brand: data['brand'] as String? ?? '',
-      productName: data['productName'] as String? ?? '',
-      expiryDate: _toDate(data['expiryDate']),
-      status: _shareStatusFromName(data['status'] as String?),
-      lockedByUserId: data['lockedByUserId'] as String?,
-      reservedByUserId: data['reservedByUserId'] as String?,
-      barcode: data['barcode'] as String?,
+      id: id,
+      groupId: docString(data['groupId']),
+      gifticonId: docString(data['gifticonId']),
+      sharedByUserId: docString(data['sharedByUserId']),
+      brand: docString(data['brand']),
+      productName: docString(data['productName']),
+      expiryDate: docDate(data['expiryDate']),
+      status: _shareStatusFromName(docStringOrNull(data['status'])),
+      lockedByUserId: docStringOrNull(data['lockedByUserId']),
+      reservedByUserId: docStringOrNull(data['reservedByUserId']),
+      barcode: docStringOrNull(data['barcode']),
     );
   }
 
-  UsageLog _logFromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
-    final Map<String, dynamic> data = doc.data() ?? const <String, dynamic>{};
+  /// 쓰기 트랜잭션용 매퍼 — 손상 문서면 [StateError].
+  SharedGifticon _requireSharedFromDoc(
+          DocumentSnapshot<Map<String, dynamic>> doc) =>
+      requireSharedFromData(doc.id, doc.data() ?? const <String, dynamic>{});
+
+  /// [_requireSharedFromDoc]의 순수 본체(문서 없이 맵만으로 동작 — 테스트 진입점).
+  ///
+  /// **읽기는 관대하게, 쓰기는 엄격하게.** [sharedFromData]의 기본값 흡수는 문서 하나가
+  /// 목록 스트림 전체를 죽이지 않게 하려는 것이지, 손상 문서로 **쓰기를 진행해도 된다는
+  /// 뜻이 아니다.** 그대로 쓰기에 쓰면:
+  ///
+  /// - 손상된 `status`가 [ShareStatus.available]로 읽혀 [markUsed]의 상태 가드를 통과한다
+  ///   (가드가 이 매퍼의 결과를 보므로 독립 검증이 아니다). 이미 사용한 항목이 한 번 더
+  ///   사용 완료되고 [UsageLog]가 중복 적재된다.
+  /// - 빈 `groupId`·`sharedGifticonId`가 이력·알림 문서에 그대로 적재된다.
+  /// - 빈 `gifticonId`가 `_syncOriginalUsed('')`로 흘러 빈 문서 경로를 만든다.
+  ///
+  /// 그래서 관대 매퍼의 **결과가 아니라 원본 문서**를 다시 보고 필수 식별자 셋과 `status`의
+  /// 온전함을 확인하며, 하나라도 어긋나면 계약대로 [StateError]를 던진다. 정상 문서는 항상
+  /// 이 넷을 갖는다 — [_sharedToDoc]과 `tool/seed_emulator.sh`가 모두 채워 쓴다.
+  @visibleForTesting
+  static SharedGifticon requireSharedFromData(
+    String id,
+    Map<String, dynamic> data,
+  ) {
+    final SharedGifticon item = sharedFromData(id, data);
+    final bool identifiersOk = item.groupId.isNotEmpty &&
+        item.gifticonId.isNotEmpty &&
+        item.sharedByUserId.isNotEmpty;
+    // status는 폴백이 available이라 결과값만으로는 손상을 알 수 없다 — 원본을 다시 본다.
+    final bool statusOk =
+        _shareStatusFromNameOrNull(docStringOrNull(data['status'])) != null;
+    if (!identifiersOk || !statusOk) {
+      throw StateError('Malformed shared gifticon document: $id');
+    }
+    return item;
+  }
+
+  UsageLog _logFromDoc(DocumentSnapshot<Map<String, dynamic>> doc) =>
+      logFromData(doc.id, doc.data() ?? const <String, dynamic>{});
+
+  /// [_logFromDoc]의 순수 본체(문서 없이 맵만으로 동작 — 테스트 진입점).
+  @visibleForTesting
+  static UsageLog logFromData(String id, Map<String, dynamic> data) {
     return UsageLog(
-      id: doc.id,
-      groupId: data['groupId'] as String? ?? '',
-      userId: data['userId'] as String? ?? '',
-      sharedGifticonId: data['sharedGifticonId'] as String? ?? '',
-      brand: data['brand'] as String? ?? '',
-      productName: data['productName'] as String? ?? '',
-      usedAt: _toDate(data['usedAt']),
+      id: id,
+      groupId: docString(data['groupId']),
+      userId: docString(data['userId']),
+      sharedGifticonId: docString(data['sharedGifticonId']),
+      brand: docString(data['brand']),
+      productName: docString(data['productName']),
+      usedAt: docDate(data['usedAt']),
     );
   }
 
@@ -902,56 +993,53 @@ class FirebaseShareRepository implements ShareRepository {
         'createdAt': Timestamp.now(),
       };
 
-  GroupNotification _notifFromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
-    final Map<String, dynamic> data = doc.data() ?? const <String, dynamic>{};
+  GroupNotification _notifFromDoc(DocumentSnapshot<Map<String, dynamic>> doc) =>
+      notifFromData(doc.id, doc.data() ?? const <String, dynamic>{});
+
+  /// [_notifFromDoc]의 순수 본체(문서 없이 맵만으로 동작 — 테스트 진입점).
+  @visibleForTesting
+  static GroupNotification notifFromData(String id, Map<String, dynamic> data) {
     return GroupNotification(
-      id: doc.id,
-      groupId: data['groupId'] as String? ?? '',
-      type: _notifTypeFromName(data['type'] as String?),
-      title: data['title'] as String? ?? '',
-      message: data['message'] as String? ?? '',
-      createdAt: _toDate(data['createdAt']),
+      id: id,
+      groupId: docString(data['groupId']),
+      type: _notifTypeFromName(docStringOrNull(data['type'])),
+      title: docString(data['title']),
+      message: docString(data['message']),
+      createdAt: docDate(data['createdAt']),
     );
   }
 
-  DateTime _toDate(Object? value) {
-    if (value is Timestamp) return value.toDate();
-    if (value is DateTime) return value;
-    return DateTime.fromMillisecondsSinceEpoch(0);
-  }
-
-  /// 알림 마지막 읽음 시각 파서 — 없거나 손상 값이면 `null`(= 안 읽음). 안읽음 판정은
-  /// null을 "전부 안읽음"으로 안전하게 처리하므로 fail-open이 아니다.
-  DateTime? _readAtFrom(Object? value) {
-    if (value is Timestamp) return value.toDate();
-    if (value is DateTime) return value;
-    return null;
-  }
-
-  /// 초대코드 만료 시각을 문서 값에서 해석한다. **fail-closed** — 만료 검사를 우회하는
-  /// 값을 만들지 않는다.
+  /// 잠금 문서 참조 — [gifticonId]를 문서 id로 쓸 수 없으면 `null`.
   ///
-  /// 값이 없거나(24시간 정책 이전에 만들어진 레거시 문서 = 만료 필드 없음/`null`)
-  /// [Timestamp]·[DateTime]이 아닌 손상 값이면 이미 만료된 것(epoch)으로 취급해 참여를
-  /// 거부한다. 레거시 그룹의 코드는 어차피 발급된 지 24시간이 지났으므로 정책상 만료가 맞고,
-  /// 방장이 `regenerateInviteToken`로 새 코드를 받으면 정상 복구된다.
-  DateTime _inviteExpiresAtFrom(Object? value) {
-    if (value is Timestamp) return value.toDate();
-    if (value is DateTime) return value;
-    return DateTime.fromMillisecondsSinceEpoch(0);
-  }
+  /// `doc('')`은 [ArgumentError]를 던져, 손상 문서 하나가 **그룹 삭제·공유 회수를 영구히
+  /// 막는다**(재시도해도 문서가 그대로다). 지울 잠금을 못 찾으면 건너뛰는 편이 낫다.
+  ///
+  /// ⚠️ 잔여 위험: 빈 id에는 대응 잠금이 아예 없지만, `gifticonId` **필드가 타입 손상**이면
+  /// 원래 id를 알 수 없어 그 id로 만들어진 잠금이 **고아로 남는다** — 해당 기프티콘은
+  /// [shareGifticon]의 잠금 검사에 걸려 다시 공유할 수 없다. 전체 실패보다는 나은 절충이며,
+  /// 복구는 콘솔에서 잠금 문서를 지우는 것이다.
+  DocumentReference<Map<String, dynamic>>? _lockRefOrNull(String? gifticonId) =>
+      isUsableDocId(gifticonId) ? _locks.doc(gifticonId!) : null;
 
-  MemberRole _roleFromName(String? name) =>
+  static MemberRole _roleFromName(String? name) =>
       name == MemberRole.owner.name ? MemberRole.owner : MemberRole.member;
 
-  ShareStatus _shareStatusFromName(String? name) {
+  /// 저장된 `status` 문자열 → [ShareStatus]. **알 수 없는 값이면 `null`.**
+  ///
+  /// 폴백을 붙이지 않은 변형이 따로 필요한 이유: [_shareStatusFromName]이 알 수 없는 값을
+  /// [ShareStatus.available]로 떨어뜨리므로, 결과값만 보면 "정상 available"과 "손상"을
+  /// 구분할 수 없다. 쓰기 경로의 검증([requireSharedFromData])은 그 구분이 필요하다.
+  static ShareStatus? _shareStatusFromNameOrNull(String? name) {
     for (final ShareStatus s in ShareStatus.values) {
       if (s.name == name) return s;
     }
-    return ShareStatus.available;
+    return null;
   }
 
-  GroupNotificationType _notifTypeFromName(String? name) {
+  static ShareStatus _shareStatusFromName(String? name) =>
+      _shareStatusFromNameOrNull(name) ?? ShareStatus.available;
+
+  static GroupNotificationType _notifTypeFromName(String? name) {
     for (final GroupNotificationType t in GroupNotificationType.values) {
       if (t.name == name) return t;
     }
