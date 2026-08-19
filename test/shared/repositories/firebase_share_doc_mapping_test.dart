@@ -256,6 +256,21 @@ void main() {
       expect(g.members.single.userId, 'user-1');
     });
 
+    test('name·emoji가 손상돼도 던지지 않고 기본값이 된다', () {
+      // `garbage` 픽스처는 members 단락 때문에 이 두 필드에 **닿지 않는다** —
+      // 정상 members와 함께 넣어야 리더를 실제로 태운다.
+      final Group? g =
+          FirebaseShareRepository.groupFromDataOrNull('g1', <String, dynamic>{
+        'name': 1,
+        'emoji': <String>['x'],
+        'members': owner(),
+      });
+
+      expect(g, isNotNull);
+      expect(g!.name, '');
+      expect(g.emoji, '🎁');
+    });
+
     test('maxMembers가 손상 값이면 기본값으로 떨어진다', () {
       final Group? g = FirebaseShareRepository.groupFromDataOrNull(
         'g1',
@@ -265,41 +280,48 @@ void main() {
       expect(g!.maxMembers, Group.defaultMaxMembers);
     });
 
-    test('거대 숫자는 상한(프리셋 최대)으로 조인다 — 정원 가드가 무력해지지 않게', () {
-      // `1e300`은 유한해서 docInt를 통과하고 `toInt()`가 int64 최대값으로 **포화**한다.
-      // 그대로 두면 isFull이 영원히 false가 되어 정원 가드가 사라지고, 남은 자리가
-      // 19자리로 화면에 나오며, 방장이 그룹을 쓰면 그 값이 문서에 되쓰인다.
-      expect(1e300.isFinite, isTrue); // isFinite만으로는 못 막는다
+    test('포화하는 거대 double은 읽기 실패로 다뤄 기본값이 된다', () {
+      // `1e300`은 유한해서 isFinite만으로는 못 막고, toInt()가 int64 최대값으로 포화한다.
+      // 그대로 두면 isFull이 영원히 false가 되어 정원 가드가 사라진다.
+      expect(1e300.isFinite, isTrue);
 
       final Group? g = FirebaseShareRepository.groupFromDataOrNull(
         'g1',
         <String, dynamic>{'maxMembers': 1e300, 'members': owner()},
       );
 
-      expect(g!.maxMembers, Group.memberCapPresets.last);
-      expect(g.remainingSlots, Group.memberCapPresets.last - 1);
+      expect(g!.maxMembers, Group.defaultMaxMembers);
+      expect(g.isFull, isFalse);
     });
 
-    test('이미 프리셋 상한을 넘긴 그룹도 던지지 않는다 — clamp 인자 역전 방지', () {
-      // 위 포화 버그가 실제로 만들 수 있는 상태다: 정원 가드가 없던 동안 멤버가 상한을
-      // 넘겨 쌓인 문서. 상한을 프리셋으로 못박으면 하한(멤버 수) > 상한이 되어 clamp가
-      // ArgumentError를 던지고, 그 Error가 또 그룹 목록 스트림을 죽인다 — 손상을 고치려는
-      // 코드가 손상 문서에서 터지는 순환이다.
+    test('프리셋을 넘는 정상 값은 축소하지 않는다 — 계약에 상한이 없다', () {
+      // 리더가 프리셋으로 조이면 `createGroup(maxMembers: 30)`으로 만든 그룹이 20으로
+      // 읽혀, in-memory 구현과 갈라지고 방장이 한 번 쓰면 그 축소값이 문서에 굳는다.
+      final Group? g = FirebaseShareRepository.groupFromDataOrNull(
+        'g1',
+        <String, dynamic>{'maxMembers': 30, 'members': owner()},
+      );
+
+      expect(g!.maxMembers, 30);
+      expect(30, greaterThan(Group.memberCapPresets.last));
+    });
+
+    test('멤버가 정원보다 많아도 던지지 않고 하한으로 끌어올린다', () {
       final int over = Group.memberCapPresets.last + 5;
       final List<Map<String, dynamic>> many = <Map<String, dynamic>>[
         <String, dynamic>{'userId': 'user-1', 'role': 'owner'},
         for (int i = 2; i <= over; i++)
-          <String, dynamic>{'userId': 'user-$i', 'role': 'member'},
+          <String, dynamic>{'userId': 'user-\$i', 'role': 'member'},
       ];
 
       final Group? g = FirebaseShareRepository.groupFromDataOrNull(
         'g1',
-        <String, dynamic>{'maxMembers': 1e300, 'members': many},
+        <String, dynamic>{'maxMembers': 1, 'members': many},
       );
 
       expect(g, isNotNull);
       expect(g!.memberCount, over);
-      // 하한이 이겨서 현재 멤버 수로 떨어진다(불변식 maxMembers >= memberCount 유지).
+      // 불변식 maxMembers >= memberCount 유지.
       expect(g.maxMembers, over);
       expect(g.isFull, isTrue);
     });
@@ -341,6 +363,69 @@ void main() {
       );
 
       expect(g!.isInviteExpired(DateTime.now()), isTrue);
+    });
+
+    test('쓰기 경로는 손상 필드를 거부한다 — 폴백이 되쓰기로 굳지 않게', () {
+      // 읽기(목록)는 통과하지만 쓰기는 거부하는 대비. `_groupToDoc`이 문서 전체를 되쓰므로
+      // 흡수한 값을 통과시키면 손상이 정상 값으로 굳는다.
+      for (final Map<String, dynamic> corrupt in <Map<String, dynamic>>[
+        <String, dynamic>{'name': 1},
+        <String, dynamic>{'emoji': 2},
+        <String, dynamic>{'inviteToken': 3},
+        <String, dynamic>{'inviteOwnerOnly': 'yes'},
+        <String, dynamic>{'maxMembers': 1e300},
+        <String, dynamic>{'inviteExpiresAt': 'nope'},
+        <String, dynamic>{'memberIds': 'not-a-list'},
+      ]) {
+        final Map<String, dynamic> data = <String, dynamic>{
+          'members': owner(),
+          ...corrupt,
+        };
+        expect(
+          FirebaseShareRepository.groupFromDataOrNull('g1', data),
+          isNotNull,
+          reason: '읽기는 통과해야 한다',
+        );
+        expect(
+          () => FirebaseShareRepository.requireGroupFromData('g1', data),
+          throwsStateError,
+          reason: '쓰기는 거부해야 한다',
+        );
+      }
+    });
+
+    test('쓰기 경로는 유령 멤버를 거부한다 — 되쓰면 그 멤버가 문서에서 사라진다', () {
+      final Map<String, dynamic> data = <String, dynamic>{
+        'members': <dynamic>[
+          <String, dynamic>{'userId': 'user-1', 'role': 'owner'},
+          <String, dynamic>{'userId': 7, 'role': 'member'},
+        ],
+      };
+
+      // 읽기는 유령을 걸러 그룹을 보여 준다.
+      expect(
+        FirebaseShareRepository.groupFromDataOrNull('g1', data)!.memberCount,
+        1,
+      );
+      // 쓰기는 거부한다 — 걸러진 채 되쓰면 그 멤버가 영구히 사라진다.
+      expect(
+        () => FirebaseShareRepository.requireGroupFromData('g1', data),
+        throwsStateError,
+      );
+    });
+
+    test('결측은 손상이 아니다 — 레거시 문서는 쓰기 경로도 통과한다', () {
+      // memberIds·maxMembers·inviteExpiresAt이 없는 24시간 정책 이전 문서.
+      final Group g =
+          FirebaseShareRepository.requireGroupFromData('g1', <String, dynamic>{
+        'name': '가족',
+        'inviteCode': '123456',
+        'members': owner(),
+      });
+
+      expect(g.name, '가족');
+      expect(g.inviteToken, '123456');
+      expect(g.maxMembers, Group.defaultMaxMembers);
     });
 
     test('레거시 inviteCode를 inviteToken으로 받아 준다(둘 다 손상이면 빈 값)', () {

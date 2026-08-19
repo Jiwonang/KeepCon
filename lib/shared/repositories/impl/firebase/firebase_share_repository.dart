@@ -22,7 +22,6 @@
 library;
 
 import 'dart:async';
-import 'dart:math' as math;
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart' show visibleForTesting;
@@ -833,25 +832,19 @@ class FirebaseShareRepository implements ShareRepository {
     final int owners =
         members.where((GroupMember m) => m.role == MemberRole.owner).length;
     if (members.isEmpty || owners != 1) return null;
-    // 레거시 문서엔 maxMembers가 없어 기본값을 쓴다. 손상 값은 **양쪽으로** 조인다:
-    // 아래로는 현재 멤버 수(불변식 >=1, >=memberCount), 위로는 프리셋 상한.
+    // 레거시 문서엔 maxMembers가 없어 기본값을 쓰고, 손상 값(현재 멤버 수보다 작음)은
+    // 현재 멤버 수로 끌어올려 불변식(>=1, >=memberCount)을 지킨다.
     //
-    // 상한이 필요한 이유: [docInt]는 유한한 값만 통과시키지만 `1e300` 같은 거대 double은
-    // 유한하므로 통과하고 `toInt()`가 int64 최대값으로 **포화**한다. 그러면 [Group.isFull]이
-    // 영원히 false가 되어 정원 가드가 사라지고, 남은 자리가 19자리로 화면에 나오며,
-    // 방장이 그룹을 한 번 쓰면 [_groupToDoc]이 그 값을 문서에 되쓴다. 규칙에도 정원 검사가
-    // 없어 서버 백스톱이 없다. 앱이 만들 수 있는 값은 프리셋뿐이므로(그룹 생성 시트) 상한을
-    // 넘는 값은 손상으로 본다.
+    // **상한은 두지 않는다.** 계약([ShareRepository.createGroup])이 "최소 1"만 규정하고
+    // 상한이 없으며 [InMemoryShareRepository]도 값을 그대로 보관하므로, 여기서만 조이면
+    // 두 구현이 갈라진다(정원 30으로 만든 그룹이 20으로 읽히고, 방장이 한 번 쓰면
+    // [_groupToDoc]이 그 축소값을 문서에 굳힌다). 프리셋은 UI 선택지이지 계약 상한이 아니다.
     //
-    // 상한을 [math.max]로 한 번 더 감싸는 이유: 이미 프리셋 상한을 넘겨 멤버가 쌓인 문서가
-    // 있으면(정확히 위 포화 버그가 만들 수 있는 상태다) 하한이 상한을 넘어 [num.clamp]가
-    // [ArgumentError]를 던진다 — 그 역시 [Error]라 그룹 목록 스트림을 통째로 죽인다.
-    // 손상을 고치려는 코드가 손상 문서에서 터지는 것을 막는다.
+    // 포화(`1e300` → int64 최대값 → [Group.isFull]이 영원히 false)는 [docInt]가 정수로
+    // 정확히 읽히지 않는 double을 `null`로 떨어뜨려 막는다 — 값을 조이는 것이 아니라
+    // **읽기 실패**로 다루는 쪽이 계약을 침범하지 않는다.
     final int rawMax = docInt(data['maxMembers']) ?? Group.defaultMaxMembers;
-    final int maxMembers = rawMax.clamp(
-      members.length,
-      math.max(members.length, Group.memberCapPresets.last),
-    );
+    final int maxMembers = rawMax < members.length ? members.length : rawMax;
     return Group(
       id: id,
       name: docString(data['name']),
@@ -876,9 +869,54 @@ class FirebaseShareRepository implements ShareRepository {
   }
 
   /// 유효한 그룹을 요구하는 문맥(트랜잭션 등)용 — 손상 문서면 [StateError].
-  Group _groupFromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
-    final Group? g = _groupFromDocOrNull(doc);
-    if (g == null) throw StateError('Malformed group document: ${doc.id}');
+  Group _groupFromDoc(DocumentSnapshot<Map<String, dynamic>> doc) =>
+      requireGroupFromData(doc.id, doc.data() ?? const <String, dynamic>{});
+
+  /// [_groupFromDoc]의 순수 본체(문서 없이 맵만으로 동작 — 테스트 진입점).
+  ///
+  /// **읽기는 관대하게, 쓰기는 엄격하게.** [groupFromDataOrNull]의 폴백 흡수는 목록이
+  /// 문서 하나로 죽지 않게 하려는 것이지, 그 값으로 **쓰기를 진행해도 된다는 뜻이 아니다.**
+  /// 이 경로의 결과는 [_groupToDoc]으로 문서 **전체**에 되쓰이므로, 흡수한 값을 그대로
+  /// 통과시키면 손상이 정상 값으로 굳는다:
+  ///
+  /// - 어긋난 `inviteOwnerOnly`가 `true`로 읽혀 되쓰이면 일반 멤버의 초대 권한이 영구히 닫힌다.
+  /// - `userId`를 못 읽은 멤버 항목은 유령 필터에 걸러지는데, 그 상태로 되쓰면 **그 멤버가
+  ///   문서에서 사라진다**(표시 문제가 데이터 손실이 된다).
+  /// - 어긋난 `inviteExpiresAt`이 epoch로 굳으면 방장이 재발급하기 전까지 참여가 막힌다.
+  ///
+  /// 그래서 [_groupToDoc]이 싣는 필드의 **원본 타입**을 확인하고 하나라도 어긋나면
+  /// [StateError]를 던진다 — 트랜잭션이 실패하고 문서는 손상된 채 보존된다(고칠 기회가 남는다).
+  ///
+  /// **결측은 손상이 아니다.** 레거시 문서엔 `memberIds`·`maxMembers`·`inviteExpiresAt`가
+  /// 없고, 그건 기본값을 쓰는 것이 맞다.
+  @visibleForTesting
+  static Group requireGroupFromData(String id, Map<String, dynamic> data) {
+    final Group? g = groupFromDataOrNull(id, data);
+    if (g == null) throw StateError('Malformed group document: $id');
+
+    bool absentOrString(Object? v) => v == null || v is String;
+    final Object? rawMembers = data['members'];
+    final bool membersOk = rawMembers == null ||
+        (rawMembers is List<dynamic> &&
+            rawMembers.every((dynamic m) =>
+                m is Map<String, dynamic> &&
+                m['userId'] is String &&
+                (m['userId'] as String).isNotEmpty &&
+                absentOrString(m['displayName']) &&
+                absentOrString(m['avatarEmoji']) &&
+                absentOrString(m['role'])));
+
+    final bool typesOk = membersOk &&
+        absentOrString(data['name']) &&
+        absentOrString(data['emoji']) &&
+        absentOrString(data['inviteToken']) &&
+        absentOrString(data['inviteCode']) &&
+        (data['inviteOwnerOnly'] == null || data['inviteOwnerOnly'] is bool) &&
+        (data['maxMembers'] == null || docInt(data['maxMembers']) != null) &&
+        (data['inviteExpiresAt'] == null ||
+            docDateOrNull(data['inviteExpiresAt']) != null) &&
+        (data['memberIds'] == null || data['memberIds'] is List<dynamic>);
+    if (!typesOk) throw StateError('Malformed group document: $id');
     return g;
   }
 
@@ -1014,8 +1052,12 @@ class FirebaseShareRepository implements ShareRepository {
   /// `doc('')`은 [ArgumentError]를 던져, 손상 문서 하나가 **그룹 삭제·공유 회수를 영구히
   /// 막는다**(재시도해도 문서가 그대로다). 지울 잠금을 못 찾으면 건너뛰는 편이 낫다.
   ///
-  /// ⚠️ 잔여 위험: 빈 id에는 대응 잠금이 아예 없지만, `gifticonId` **필드가 타입 손상**이면
-  /// 원래 id를 알 수 없어 그 id로 만들어진 잠금이 **고아로 남는다** — 해당 기프티콘은
+  /// ⚠️ 호출부에 따라 의미가 다르다. [cancelShare]에서는 [requireSharedFromData]가 앞서
+  /// 빈 `gifticonId`를 걸러내므로 이 널 가지에 **도달하지 않는다** — 이 방어는 검증 없이
+  /// 원시 문서를 순회하는 [_cascadeDeleteGroupShares]를 위한 것이다.
+  ///
+  /// 그쪽의 잔여 위험: 빈 id에는 대응 잠금이 아예 없지만, `gifticonId` **필드가 타입 손상**
+  /// 이면 원래 id를 알 수 없어 그 id로 만들어진 잠금이 **고아로 남는다** — 해당 기프티콘은
   /// [shareGifticon]의 잠금 검사에 걸려 다시 공유할 수 없다. 전체 실패보다는 나은 절충이며,
   /// 복구는 콘솔에서 잠금 문서를 지우는 것이다.
   DocumentReference<Map<String, dynamic>>? _lockRefOrNull(String? gifticonId) =>

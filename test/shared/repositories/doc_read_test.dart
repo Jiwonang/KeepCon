@@ -88,11 +88,23 @@ void main() {
       expect(docInt(double.negativeInfinity), isNull);
     });
 
-    test('유한하지만 거대한 값은 통과한다 — 범위는 호출부 책임이다', () {
-      // 이 계약을 문서가 아니라 테스트로 못박는다. `docInt`만 믿고 상한을 안 두면
-      // 정원 같은 필드가 int64 최대값으로 포화한다.
+    test('정수로 정확히 못 읽는 double은 null — 포화는 읽기 실패다', () {
+      // `1e300`은 유한해서 isFinite만으로는 못 막고, toInt()는 int64 최대값으로 포화한다.
+      // 그 값이 정원에 들어가면 isFull이 영원히 false가 되어 가드가 통째로 사라진다.
       expect(1e300.isFinite, isTrue);
-      expect(docInt(1e300), 9223372036854775807);
+      expect(1e300.toInt(), 9223372036854775807);
+
+      expect(docInt(1e300), isNull);
+      expect(docInt(-1e300), isNull);
+      // 2^53 경계 — 여기까지는 double이 정수를 정확히 담는다.
+      expect(docInt(9007199254740992.0), 9007199254740992);
+      expect(docInt(9007199254740994.0), isNull);
+    });
+
+    test('int는 크기와 무관하게 그대로 통과한다 — 상한은 계약이 정한다', () {
+      // 리더가 정책 상한을 씌우면 계약(createGroup은 상한이 없다)과 갈라진다.
+      expect(docInt(9223372036854775807), 9223372036854775807);
+      expect(docInt(30), 30);
     });
   });
 

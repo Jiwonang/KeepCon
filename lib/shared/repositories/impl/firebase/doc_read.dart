@@ -45,16 +45,25 @@ bool docBool(Object? value, {required bool ifAbsent, required bool ifCorrupt}) {
 List<dynamic>? docListOrNull(Object? value) =>
     value is List<dynamic> ? value : null;
 
-/// 문서 필드 → [int]. 숫자가 아니거나 **유한하지 않으면** `null`.
+/// 문서 필드 → [int]. 정수로 **정확히** 읽을 수 없으면 `null`.
 ///
-/// [num.toInt]는 `NaN`·`±Infinity`에 [UnsupportedError]를 던진다 — 이 역시 [Error]라
-/// 캐스팅과 똑같이 목록 스트림을 죽인다. Firestore는 IEEE 754 double을 그대로 저장하므로
-/// `NaN`이 문서에 실제로 들어올 수 있다([num.isFinite]로 먼저 거른다).
+/// [int]는 그대로 통과시키고, [double]은 두 관문을 통과해야 한다:
 ///
-/// ⚠️ 유한해도 **범위는 보장하지 않는다.** `1e300`은 유한하므로 통과하고 `toInt()`가 int64
-/// 최대값으로 포화한다 — 상한이 의미를 갖는 필드(정원 등)는 호출부에서 함께 조여야 한다.
-int? docInt(Object? value) =>
-    (value is num && value.isFinite) ? value.toInt() : null;
+/// 1. **유한할 것.** [num.toInt]는 `NaN`·`±Infinity`에 [UnsupportedError]를 던진다 —
+///    이 역시 [Error]라 캐스팅과 똑같이 목록 스트림을 죽인다. Firestore는 IEEE 754 double을
+///    그대로 저장하므로 `NaN`이 문서에 실제로 들어올 수 있다.
+/// 2. **정수로 정확히 표현되는 범위(±2^53)일 것.** `1e300`은 유한하지만 `toInt()`가 int64
+///    최대값으로 **포화**한다. 그 값이 정원 같은 필드에 들어가면 `isFull`이 영원히 false가
+///    되어 가드가 통째로 사라진다. 포화는 "큰 수"가 아니라 **읽기 실패**이므로, 정책 상한을
+///    씌워 값을 조이는 대신 여기서 `null`(= 기본값 사용)로 떨어뜨린다 — 상한은 계약이 정할
+///    일이지 리더가 정할 일이 아니다.
+int? docInt(Object? value) {
+  if (value is int) return value;
+  if (value is! double || !value.isFinite) return null;
+  // 2^53 — 이보다 크면 double이 정수를 정확히 담지 못해 toInt()가 포화·반올림된다.
+  const double exactIntLimit = 9007199254740992.0;
+  return value.abs() <= exactIntLimit ? value.toInt() : null;
+}
 
 /// 문서 필드 → [DateTime]. [Timestamp]·[DateTime]이 아니면 epoch.
 ///
