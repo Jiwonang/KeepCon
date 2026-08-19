@@ -5,19 +5,25 @@
 /// 원격 수집으로 갈아끼울 때 그 사본만 옛 구현을 물고 남는다(승격 전 세션 provider가
 /// 페이지마다 갈라졌던 것과 같은 사고다).
 ///
-/// ## 소비
+/// ## 소비 — 이 provider를 **직접 읽지 마라**
 ///
-/// 실패를 잡는 자리에서 원본과 스택을 넘긴다. 사용자 안내는 하던 대로 띄운다.
+/// 잡는 자리에서는 항상 `reportHandledFailure`를 거친다. [WidgetRef.read]는 위젯이 폐기된 뒤
+/// 호출되면 **던지는데**(assert가 아니라 무조건 `StateError` — release 포함), 이 진단이
+/// 필요한 자리는 정확히 `await` 뒤의 catch라 그 사이 위젯이 사라지는 일이 흔하다. 그때
+/// 보고가 던지면 **catch 블록의 나머지(사용자 안내)가 실행되지 않는다** — share 화면이
+/// `catch (_)`까지 넓혀 가며 없앤 "아무 안내도 없이 버튼이 죽은 것처럼 보인다"가 되살아난다.
 ///
 /// ```dart
 /// try {
 ///   await ref.read(shareRepositoryProvider).leaveGroup(group.id);
 /// } catch (e, s) {
-///   ref.read(errorReporterProvider).report(e, s, context: 'GroupDetailPage.leaveGroup');
+///   reportHandledFailure(ref, e, s, context: 'GroupDetailPage.leaveGroup');
 ///   _snack(messenger, '지금은 나갈 수 없어요.');
 ///   return;
 /// }
 /// ```
+///
+/// 이 provider를 직접 읽는 곳은 그 래퍼 하나뿐이어야 한다.
 ///
 /// ## 원격 수집으로 갈아끼우기
 ///
