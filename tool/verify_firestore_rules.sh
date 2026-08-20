@@ -22,7 +22,11 @@
 set -uo pipefail
 
 PROJECT="${FIRESTORE_PROJECT:-demo-keepcon}"
-AUTH_HOST="${AUTH_EMULATOR_HOST:-localhost:9099}"
+# `emulators:exec`가 자식에게 넘기는 이름은 **`FIREBASE_` 접두가 붙은 쪽**이다 —
+# Firestore(`FIRESTORE_EMULATOR_HOST`)와 이름 규칙이 다르다. 접두 없는 이름만 읽으면
+# `firebase.json`에서 auth 포트를 바꾼 순간 죽은 9099로 붙어 토큰이 빈 문자열이 되고
+# 전 케이스가 401/403으로 무너진다(오늘은 기본값이 9099라 우연히 가려져 있었다).
+AUTH_HOST="${AUTH_EMULATOR_HOST:-${FIREBASE_AUTH_EMULATOR_HOST:-localhost:9099}}"
 FS_HOST="${FIRESTORE_EMULATOR_HOST:-localhost:8080}"
 DOCS="http://${FS_HOST}/v1/projects/${PROJECT}/databases/(default)/documents"
 
