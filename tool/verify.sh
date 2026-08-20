@@ -24,6 +24,7 @@ cd "$(dirname "$0")/.." || exit 1
 
 BASE="${BASE:-origin/develop}"
 fail=0
+rules_skipped=0
 declare -a failed=()
 
 step() {
@@ -57,37 +58,60 @@ step "SSOT guard"
 run "SSOT guard" bash tool/check_ssot.sh
 
 step "Markdown lint"
-run "Markdown lint" npx --yes markdownlint-cli2@0.18.1 "**/*.md"
+# 글로브·제외는 `.markdownlint-cli2.jsonc`가 정본이다 — CI와 완전히 같은 명령을 쓴다.
+run "Markdown lint" npx --yes markdownlint-cli2@0.18.1
 
-# ── 조건부 — 규칙이 바뀌었으면 반드시 ────────────────────────────────────
+# ── 조건부 — 규칙 계층 입력이 바뀌었으면 반드시 ─────────────────────────
 # 커밋된 변경(BASE 대비)과 아직 커밋 안 된 변경을 **둘 다** 본다. 커밋 전에 돌리는
 # 경우가 흔하므로 한쪽만 보면 그 판단이 다시 사람에게 돌아온다.
+#
+# 보는 파일이 `firestore.rules` 하나가 아닌 이유: CI의 `Firestore rules` 잡은 경로
+# 필터가 없어 **모든 PR에서** 돈다. 로컬 트리거를 규칙 파일 하나로 좁히면, 검증 케이스나
+# 에뮬레이터 설정만 고친 변경이 로컬에서는 건너뛰어지고 **CI에서 처음 빨개진다** —
+# 실제로 이 저장소가 그렇게 당했다(케이스 33건을 더한 PR이 그 파일만 건드렸다).
 #
 # ⚠️ BASE를 못 찾으면 **건너뛰지 말고 돌린다.** 커밋된 변경은 `git status`에 안 잡히므로
 #    감지가 전적으로 `git diff`에 달려 있는데, ref가 없으면(단일 브랜치 clone, 포크, 다른
 #    기본 브랜치 이름) 그 diff가 조용히 빈 결과를 낸다 — 이 스크립트가 없애려는 침묵
 #    실패가 바로 그 모양이다. 모를 때는 더 하는 쪽으로 닫는다.
+RULES_INPUTS=(firestore.rules tool/verify_firestore_rules.sh firebase.json)
+
 rules_changed() {
-  git status --porcelain -- firestore.rules 2>/dev/null | grep -q . && return 0
+  git status --porcelain -- "${RULES_INPUTS[@]}" 2>/dev/null | grep -q . && return 0
   if ! git rev-parse --verify --quiet "${BASE}" >/dev/null; then
-    echo "  ⚠️ BASE(${BASE})를 찾을 수 없다 — 커밋된 규칙 변경을 판별할 수 없으므로 규칙 검증을 돌린다."
-    echo "     (BASE=origin/main 처럼 지정하거나 \`git fetch\` 하면 이 경고가 사라진다)"
+    base_unknown=1
     return 0
   fi
-  git diff --name-only "${BASE}...HEAD" | grep -qx 'firestore.rules' && return 0
+  local changed path
+  changed=$(git diff --name-only "${BASE}...HEAD")
+  for path in "${RULES_INPUTS[@]}"; do
+    grep -qxF "${path}" <<<"${changed}" && return 0
+  done
   return 1
 }
 
+base_unknown=0
+
 if [[ "${SKIP_RULES:-}" == "1" ]]; then
-  echo
-  echo "▶ Firestore rules — SKIP_RULES=1 로 건너뜀"
-  echo "  ⚠️ 규칙 계층은 Dart 테스트가 원리상 못 잡는다. 푸시 전에 반드시 한 번은 돌려라."
+  step "Firestore rules — SKIP_RULES=1 로 건너뜀"
+  echo "  ⚠️ 규칙 계층은 Dart 테스트가 원리상 못 잡는다."
+  if rules_changed; then
+    # 규칙 입력이 실제로 바뀌었는데 건너뛰었다면 이 실행은 "통과"가 아니다. 검증하지
+    # 않은 상태에 통과 판정을 내면 이 스크립트의 산출물(푸시 가부)이 거짓이 된다.
+    echo "  ✗ 규칙 입력이 바뀌었는데 검증을 건너뛰었다 — 이 실행으로는 푸시 가부를 판정할 수 없다."
+    rules_skipped=1
+  fi
 elif rules_changed; then
-  step "Firestore rules (firestore.rules 변경 감지 — 에뮬레이터로 실검증)"
-  # 이미 떠 있는 에뮬레이터가 있으면 그걸 쓰고, 없으면 직접 띄운다.
+  if [[ "${base_unknown}" -eq 1 ]]; then
+    step "Firestore rules (BASE 판별 불가 — 안전하게 실검증)"
+    echo "  ⚠️ BASE(${BASE})를 찾을 수 없다 — 커밋된 규칙 변경을 판별할 수 없어 그냥 돌린다."
+    echo "     (BASE=origin/main 처럼 지정하거나 git fetch 하면 이 경고가 사라진다)"
+  else
+    step "Firestore rules (규칙 계층 입력 변경 감지 — 에뮬레이터로 실검증)"
+  fi
+
   # 규칙 스크립트는 Auth로 사용자 셋을 만들고 그 토큰으로 Firestore를 친다 — **둘 다**
-  # 떠 있어야 재사용할 수 있다. Firestore만 보고 판단하면(`--only firestore`로 띄운 흔한
-  # 경우) 셋업 문제가 규칙 실패처럼 보고된다.
+  # 떠 있어야 재사용할 수 있다.
   fs_up=1; auth_up=1
   curl -s -o /dev/null --max-time 3 "http://localhost:8080/" || fs_up=0
   curl -s -o /dev/null --max-time 3 "http://localhost:9099/" || auth_up=0
@@ -95,26 +119,30 @@ elif rules_changed; then
   if [[ "${fs_up}" -eq 1 && "${auth_up}" -eq 1 ]]; then
     echo "  (실행 중인 에뮬레이터 사용: localhost:8080 / 9099)"
     run "Firestore rules" bash tool/verify_firestore_rules.sh
+  elif [[ "${fs_up}" -eq 1 || "${auth_up}" -eq 1 ]]; then
+    # 한쪽만 떠 있으면 직접 띄우는 것도 **반드시** 포트 충돌로 죽는다. 그대로 돌리면
+    # 그 실패가 요약에 `✗ Firestore rules`로 찍혀 규칙 결함처럼 읽힌다 — 셋업 문제는
+    # 셋업 문제로 이름 붙인다(그렇다고 통과로 넘기지는 않는다).
+    echo "  ✗ 에뮬레이터가 절반만 떠 있다(firestore=${fs_up} auth=${auth_up}) — 규칙 검증을 돌릴 수 없다."
+    echo "     둘 다 띄우거나(bash tool/emulators.sh) 둘 다 내린 뒤 다시 돌려라."
+    fail=1
+    failed+=("Firestore rules — 에뮬레이터 셋업")
   else
-    if [[ "${fs_up}" -eq 1 || "${auth_up}" -eq 1 ]]; then
-      # 한쪽만 떠 있으면 직접 띄우는 것도 포트 충돌로 실패한다. 셋업 문제를 규칙
-      # 실패처럼 보고하지 않도록 무엇이 문제인지 먼저 말한다.
-      echo "  ⚠️ 에뮬레이터가 절반만 떠 있다(firestore=${fs_up} auth=${auth_up})."
-      echo "     둘 다 띄우거나 둘 다 내려라 — 지금 상태로는 포트 충돌로 실패한다."
-    else
-      echo "  (에뮬레이터를 직접 띄운다)"
-    fi
+    echo "  (에뮬레이터를 직접 띄운다)"
     run "Firestore rules" firebase emulators:exec --project demo-keepcon --only auth,firestore "bash tool/verify_firestore_rules.sh"
   fi
 else
   echo
-  echo "▶ Firestore rules — firestore.rules 변경 없음, 건너뜀"
+  echo "▶ Firestore rules — 규칙 계층 입력 변경 없음, 건너뜀"
 fi
 
 # ── 요약 ─────────────────────────────────────────────────────────────────
 echo
-if [[ "${fail}" -eq 0 ]]; then
+if [[ "${fail}" -eq 0 && "${rules_skipped}" -eq 0 ]]; then
   echo "✓ 로컬 검증 통과 — 푸시해도 된다."
+elif [[ "${fail}" -eq 0 ]]; then
+  echo "✗ 규칙 검증을 건너뛴 채로는 통과로 볼 수 없다 — 에뮬레이터를 띄우고 다시 돌려라."
+  fail=1
 else
   echo "✗ 실패: ${failed[*]}"
   echo "  고친 뒤 이 스크립트를 다시 돌려라(부분 실행은 이 스크립트가 막으려는 바로 그것이다)."
