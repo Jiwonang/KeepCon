@@ -88,6 +88,12 @@ fi
 UID_A=$(uid_of "${TOKEN_A}")
 UID_B=$(uid_of "${TOKEN_B}")
 UID_C=$(uid_of "${TOKEN_C}")
+# uid_of는 응답을 sed로 긁는다 — 형식이 바뀌거나 조회가 실패하면 빈 문자열이 되고,
+# 그러면 문서 id·memberIds가 통째로 어긋나 이후 케이스가 엉뚱한 이유로 결과를 낸다.
+if [[ -z "${UID_A}" || -z "${UID_B}" || -z "${UID_C}" ]]; then
+  echo "✗ 테스트 사용자 uid를 조회하지 못했습니다(A='${UID_A}' B='${UID_B}' C='${UID_C}')."
+  exit 1
+fi
 echo "  테스트 사용자: A=${UID_A}, B=${UID_B}, C=${UID_C}"
 
 AUTH_A=(-H "Authorization: Bearer ${TOKEN_A}")
@@ -256,9 +262,13 @@ jr_token_doc() {
   printf '{"fields":{"groupId":{"stringValue":"%s"},"expiresAt":{"timestampValue":"%s"}}}' "$1" "$2"
 }
 
+# 요청 시각 — 규칙이 `request.time` 근처만 허용하므로(대기 순서 조작 방지)
+# 픽스처도 고정값이 아니라 실행 시각을 쓴다. 하드코딩하면 규칙이 조여지는 순간 깨진다.
+NOW_TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
 # 참여 요청 문서. $1=groupId $2=userId $3=status
 jr_request_doc() {
-  printf '{"fields":{"groupId":{"stringValue":"%s"},"userId":{"stringValue":"%s"},"displayName":{"stringValue":"손님"},"avatarEmoji":{"stringValue":"🙂"},"requestedAt":{"timestampValue":"2030-01-01T00:00:00Z"},"status":{"stringValue":"%s"}}}' "$1" "$2" "$3"
+  printf '{"fields":{"groupId":{"stringValue":"%s"},"userId":{"stringValue":"%s"},"displayName":{"stringValue":"손님"},"avatarEmoji":{"stringValue":"🙂"},"requestedAt":{"timestampValue":"'"${NOW_TS}"'"},"status":{"stringValue":"%s"}}}' "$1" "$2" "$3"
 }
 
 # 대기 목록 질의(방장 전용이어야 한다). $1=groupId
@@ -353,6 +363,11 @@ check "요청자가 거절된 요청을 다시 대기로(재요청)" 200 -X PATC
 check "방장이 남의 요청 삭제(그룹 소멸 캐스케이드 경로)" 200 -X DELETE \
   "${DOCS}/joinRequests/${G_RE}_${UID_C}" "${AUTH_A[@]}"
 
+# 없는 요청 문서의 read·delete는 **403이 맞다**(규칙이 `resource.data`를 만진다).
+# 그 사실을 고정해 둔다 — 이걸 모르고 `get`으로 존재를 확인하려다 정리 경로가 통째로 죽었다.
+# 클라이언트(`_dropJoinRequest`)는 그래서 바로 지우고 권한 거부를 정상 종료로 삼는다.
+check "없는 요청 문서 조회 → 403" 403 -X GET "${DOCS}/joinRequests/absent-${JR_RUN}" "${AUTH_A[@]}"
+check "없는 요청 문서 삭제 → 403" 403 -X DELETE "${DOCS}/joinRequests/absent-${JR_RUN}" "${AUTH_A[@]}"
 check "일반 멤버(B)가 남의 요청 삭제 → 차단" 403 -X DELETE "${DOCS}/joinRequests/${G_JR}_${UID_C}" "${AUTH_B[@]}"
 check "요청자 본인이 취소" 200 -X DELETE "${DOCS}/joinRequests/${G_JR}_${UID_C}" "${AUTH_C[@]}"
 

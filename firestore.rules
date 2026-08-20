@@ -46,7 +46,13 @@ service cloud.firestore {
         && d.userId is string
         && d.displayName is string && d.displayName.size() <= 60
         && d.avatarEmoji is string && d.avatarEmoji.size() <= 8
-        && d.requestedAt is timestamp;
+        && d.requestedAt is timestamp
+        // 요청 시각은 대기 목록의 **정렬 기준**이다. 클라이언트가 정하는 값이라
+        // 과거로 적으면 남보다 앞줄에 설 수 있다. 서버 시각 근처로 좁혀 소급을 막는다
+        // (정확히 `request.time`을 요구하면 클라이언트가 값을 되읽어야 해서, 반환값이
+        //  실제 저장값과 어긋나지 않는 선에서 창을 둔다).
+        && d.requestedAt <= request.time
+        && d.requestedAt > request.time - duration.value(10, 'm');
     }
 
     // 참여를 **요청**할 자격 — 아직 멤버가 아니고 초대가 살아 있을 때.
@@ -205,6 +211,12 @@ service cloud.firestore {
         && request.resource.data.keys().hasOnly(['groupId', 'expiresAt'])
         && request.resource.data.groupId is string
         && request.resource.data.expiresAt is timestamp
+        // 만료의 **정본은 그룹 문서**다. 두 곳에 복제되는 값이라 어긋나면 클라이언트와
+        // 규칙의 판정이 갈린다 — 유효한 링크가 거부되거나 그 반대가 된다. 쓰기 시점에
+        // 같은 값만 허용해 복제본이 정본을 따르게 못박는다.
+        && request.resource.data.expiresAt ==
+             get(/databases/$(database)/documents/groups/$(request.resource.data.groupId))
+               .data.inviteExpiresAt
         && isGroupOwner(request.resource.data.groupId)
         // 이미 있는 문서를 다른 그룹으로 돌려쓰지 못하게 한다(토큰 탈취 방지).
         && (!exists(/databases/$(database)/documents/inviteTokens/$(token))

@@ -153,9 +153,17 @@ class FirebaseShareRepository implements ShareRepository {
     await ref.set(_groupToDoc(g));
     // 토큰 조회 문서는 **그룹 다음에** 쓴다 — 규칙이 `get(groups/{id}).ownerId`로
     // 소유권을 확인하므로 그룹이 아직 없으면 거부된다(배치로 묶어도 규칙은 커밋 전
-    // 상태를 본다). 실패하면 그대로 던진다 — 조용히 넘기면 링크가 아무도 못 여는
-    // 그룹이 생기고, 그 사실이 초대 화면에서는 드러나지 않는다.
-    await _inviteTokens.doc(g.inviteToken).set(_inviteTokenToDoc(g));
+    // 상태를 본다).
+    //
+    // 실패하면 **그룹 문서를 되돌린다.** 던지기만 하면 사용자는 실패 안내를 받는데
+    // `watchGroups`는 그 그룹을 계속 방출하고, 재시도하면 그룹이 하나 더 생긴다 —
+    // 게다가 링크가 아무도 못 여는 그룹이라 초대 화면에서는 그 사실이 드러나지 않는다.
+    try {
+      await _inviteTokens.doc(g.inviteToken).set(_inviteTokenToDoc(g));
+    } catch (_) {
+      await ref.delete();
+      rethrow;
+    }
     return g;
   }
 
@@ -229,39 +237,52 @@ class FirebaseShareRepository implements ShareRepository {
         preGroup = g;
         await _cascadeDeleteGroupJoinArtifacts(groupId, g.inviteToken);
       }
+      // ⚠️ 남는 경쟁 조건: 선행 읽기에서 멤버가 둘 이상이라 정리를 건너뛰었는데, 그사이
+      // 다른 멤버가 나가 트랜잭션이 그룹을 삭제하는 경우다. 그러면 요청·토큰이 고아로
+      // 남고 규칙상 아무도 지울 수 없다(소유권을 그룹 문서로 확인하므로).
+      // 근본 해결은 두 문서에 `ownerId`를 역정규화해 그룹 없이도 방장이 지울 수 있게 하는
+      // 것이고, 그건 스키마·규칙을 함께 바꾸므로 별도 작업으로 둔다. 지금 창은 좁다 —
+      // 마지막 멤버가 나가는 순간에만 열리고, 그 사람이 곧 방장이자 유일한 승인자다.
     }
 
-    await _db.runTransaction<void>((Transaction tx) async {
-      final DocumentSnapshot<Map<String, dynamic>> doc = await tx.get(ref);
-      if (!doc.exists) throw StateError('Group not found: $groupId');
-      final Group g = _groupFromDocForMembershipWrite(doc);
-      if (!g.isMember(me.id)) {
-        throw StateError('Not a member of group: $groupId');
-      }
-      if (g.isOwnedBy(me.id) && g.memberCount > 1) {
-        throw StateError(
-          'Owner must transfer ownership before leaving a non-empty group',
-        );
-      }
-      final List<GroupMember> remaining = g.members
-          .where((GroupMember m) => m.userId != me.id)
-          .toList(growable: false);
-      if (remaining.isEmpty) {
-        tx.delete(ref);
-        cascade = true;
-      } else {
-        // 전체 문서가 아니라 **memberIds 한 필드만** 쓴다. 보안 규칙의 '나가기'
-        // 분기가 그 필드만 허용하기 때문이다 — `members`(맵 배열)까지 열어 주면 규칙이
-        // "지워진 원소가 정말 본인인가"를 확인할 수 없어, 나가면서 남을 지우는 조작이
-        // 통과한다. 떠난 멤버의 표시용 항목은 `_groupFromDocOrNull`이 읽을 때 걸러내고,
-        // 다음 방장 쓰기에서 문서에서도 정리된다.
-        //
-        // 전체 문서를 다시 쓰지 않는 또 다른 이유: 레거시 문서에 없던 필드(inviteExpiresAt·
-        // maxMembers 등)가 기본값으로 채워지며 함께 변경돼 규칙 조건이 깨진다. 팀 공용
-        // 시드 그룹이 정확히 그 모양이라, 전체 쓰기로는 아무도 그룹을 나갈 수 없다.
-        tx.update(ref, _memberIdsPatch(remaining));
-      }
-    });
+    try {
+      await _db.runTransaction<void>((Transaction tx) async {
+        final DocumentSnapshot<Map<String, dynamic>> doc = await tx.get(ref);
+        if (!doc.exists) throw StateError('Group not found: $groupId');
+        final Group g = _groupFromDocForMembershipWrite(doc);
+        if (!g.isMember(me.id)) {
+          throw StateError('Not a member of group: $groupId');
+        }
+        if (g.isOwnedBy(me.id) && g.memberCount > 1) {
+          throw StateError(
+            'Owner must transfer ownership before leaving a non-empty group',
+          );
+        }
+        final List<GroupMember> remaining = g.members
+            .where((GroupMember m) => m.userId != me.id)
+            .toList(growable: false);
+        if (remaining.isEmpty) {
+          tx.delete(ref);
+          cascade = true;
+        } else {
+          // 전체 문서가 아니라 **memberIds 한 필드만** 쓴다. 보안 규칙의 '나가기'
+          // 분기가 그 필드만 허용하기 때문이다 — `members`(맵 배열)까지 열어 주면 규칙이
+          // "지워진 원소가 정말 본인인가"를 확인할 수 없어, 나가면서 남을 지우는 조작이
+          // 통과한다. 떠난 멤버의 표시용 항목은 `_groupFromDocOrNull`이 읽을 때 걸러내고,
+          // 다음 방장 쓰기에서 문서에서도 정리된다.
+          //
+          // 전체 문서를 다시 쓰지 않는 또 다른 이유: 레거시 문서에 없던 필드(inviteExpiresAt·
+          // maxMembers 등)가 기본값으로 채워지며 함께 변경돼 규칙 조건이 깨진다. 팀 공용
+          // 시드 그룹이 정확히 그 모양이라, 전체 쓰기로는 아무도 그룹을 나갈 수 없다.
+          tx.update(ref, _memberIdsPatch(remaining));
+        }
+      });
+    } catch (_) {
+      // 나가기가 무산됐다 — 사라질 줄 알고 미리 거둔 링크를 되살린다.
+      // (참여 요청은 되살릴 수 없다. `_cascadeDeleteGroupJoinArtifacts` 주석 참조.)
+      if (preGroup != null) await _restoreInviteToken(preGroup);
+      rethrow;
+    }
 
     if (cascade) {
       await _cascadeDeleteGroupShares(groupId);
@@ -1126,14 +1147,22 @@ class FirebaseShareRepository implements ShareRepository {
   /// 멤버십이 끊긴 사람의 참여 요청을 거둔다(나가기·강퇴·소유권 이전).
   ///
   /// in-memory의 `_dropJoinRequest`와 같은 이유다 — 남기면 그룹에 없는 사람의 화면에
-  /// "승인됨"이 계속 보인다. **문서가 없는 것이 정상 경로다**(요청 없이 방장이 직접 넣은
-  /// 멤버). `joinRequests`의 delete 규칙에는 `resource == null` 예외를 두지 않았으므로
-  /// (두면 200/403이 문서 존재 오라클이 된다) 읽어 보고 있을 때만 지운다.
+  /// "승인됨"이 계속 보인다.
+  ///
+  /// **문서가 없는 것이 정상 경로다**(요청 없이 방장이 직접 넣은 멤버, 그리고 이 기능
+  /// 이전부터 있던 모든 멤버). 그런데 `joinRequests`의 read·delete 규칙은 둘 다
+  /// `resource.data`를 만지므로, 문서가 없으면 **읽기도 삭제도 403**이다 — `get`으로
+  /// 존재를 확인하려던 시도가 바로 그 이유로 실패한다. 규칙에 `resource == null` 예외를
+  /// 두지 않는 이유는 따로 있다: 두면 200/403이 문서 존재 오라클이 된다.
+  ///
+  /// 그래서 바로 지우고 **권한 거부를 정상 종료로 삼는다.** 이 경로에서 거부는 "없는
+  /// 문서" 또는 "지울 권한 없음" 둘 중 하나인데, 어느 쪽이든 정리로서는 할 일이 없다.
   Future<void> _dropJoinRequest(String groupId, String userId) async {
-    final DocumentReference<Map<String, dynamic>> ref =
-        _joinRequests.doc(_joinRequestId(groupId, userId));
-    final DocumentSnapshot<Map<String, dynamic>> doc = await ref.get();
-    if (doc.exists) await ref.delete();
+    try {
+      await _joinRequests.doc(_joinRequestId(groupId, userId)).delete();
+    } on FirebaseException catch (e) {
+      if (e.code != 'permission-denied') rethrow;
+    }
   }
 
   /// 멤버 이탈만 반영하는 부분 갱신 페이로드([leaveGroup] 전용).

@@ -17,9 +17,11 @@ void main() {
     for (int i = 0; i < 200; i++) {
       final String t = newInviteToken();
       expect(safe.hasMatch(t), isTrue, reason: '안전하지 않은 문자: $t');
-      // Firestore 문서 id 제약 — `.`/`..`/`__`로 시작·끝나는 이름과 `/`를 금지한다.
+      // Firestore 문서 id 제약 — `/`와 `__...__` 패턴을 금지한다.
+      // `startsWith('__')`로 쓰면 안 된다: base64url은 균등하므로 200회 중 앞 두 글자가
+      // `__`일 확률이 약 4.8%다 — 금지 패턴이 아닌 것을 잡아 테스트만 간헐 실패한다.
       expect(t.contains('/'), isFalse);
-      expect(t.startsWith('__'), isFalse);
+      expect(RegExp(r'^__.*__$').hasMatch(t), isFalse);
     }
   });
 
