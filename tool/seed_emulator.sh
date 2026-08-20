@@ -48,6 +48,8 @@ SEED_CREATED_AT='2026-01-01T00:00:00Z'
 # (앱의 createGroup은 문서 id 해시로 코드를 만들지만, 시드는 재현 가능해야 한다).
 SEED_GROUP_ID='seed-group-family'
 SEED_GROUP_INVITE_TOKEN='482913'
+# 시드 그룹의 초대 만료 — 팀 공용 데이터라 수시로 만료되면 곳난하니 멀리 둔다.
+SEED_INVITE_EXPIRES_AT='2035-01-01T00:00:00Z'
 # GroupMember.avatarEmoji 기본값 — FirebaseShareRepository._defaultAvatar와 같은 값.
 SEED_AVATAR='🙂'
 
@@ -155,7 +157,7 @@ seed_group() {
   local member_uid="$4" member_name="$5"
   local code
 
-  printf '{"fields":{"name":{"stringValue":"%s"},"emoji":{"stringValue":"%s"},"inviteToken":{"stringValue":"%s"},"inviteOwnerOnly":{"booleanValue":false},"members":{"arrayValue":{"values":[{"mapValue":{"fields":{"userId":{"stringValue":"%s"},"displayName":{"stringValue":"%s"},"avatarEmoji":{"stringValue":"%s"},"role":{"stringValue":"owner"}}}},{"mapValue":{"fields":{"userId":{"stringValue":"%s"},"displayName":{"stringValue":"%s"},"avatarEmoji":{"stringValue":"%s"},"role":{"stringValue":"member"}}}}]}},"memberIds":{"arrayValue":{"values":[{"stringValue":"%s"},{"stringValue":"%s"}]}},"ownerId":{"stringValue":"%s"}}}' \
+  printf '{"fields":{"name":{"stringValue":"%s"},"emoji":{"stringValue":"%s"},"inviteToken":{"stringValue":"%s"},"inviteOwnerOnly":{"booleanValue":false},"inviteExpiresAt":{"timestampValue":"'"${SEED_INVITE_EXPIRES_AT}"'"},"members":{"arrayValue":{"values":[{"mapValue":{"fields":{"userId":{"stringValue":"%s"},"displayName":{"stringValue":"%s"},"avatarEmoji":{"stringValue":"%s"},"role":{"stringValue":"owner"}}}},{"mapValue":{"fields":{"userId":{"stringValue":"%s"},"displayName":{"stringValue":"%s"},"avatarEmoji":{"stringValue":"%s"},"role":{"stringValue":"member"}}}}]}},"memberIds":{"arrayValue":{"values":[{"stringValue":"%s"},{"stringValue":"%s"}]}},"ownerId":{"stringValue":"%s"}}}' \
     '우리 가족' '👪' "${SEED_GROUP_INVITE_TOKEN}" \
     "${owner_uid}" "${owner_name}" "${SEED_AVATAR}" \
     "${member_uid}" "${member_name}" "${SEED_AVATAR}" \
@@ -173,7 +175,18 @@ seed_group() {
     return 1
   fi
 
-  echo "  ✓ 그룹 '우리 가족' id=${SEED_GROUP_ID} 초대코드=${SEED_GROUP_INVITE_TOKEN}"
+  # 초대 토큰 조회 문서 — 비멤버가 토큰으로 그룹을 찾는 유일한 경로다.
+  # 이게 없으면 시드 그룹은 링크로 참여 요청을 받지 못한다(방장이 재발급해야 생긴다).
+  code=$(curl -s -o /dev/null -w '%{http_code}' -X PATCH \
+    "${DOCS}/inviteTokens/${SEED_GROUP_INVITE_TOKEN}" \
+    -H "Authorization: Bearer ${owner_token}" -H 'Content-Type: application/json' \
+    -d "{\"fields\":{\"groupId\":{\"stringValue\":\"${SEED_GROUP_ID}\"},\"expiresAt\":{\"timestampValue\":\"${SEED_INVITE_EXPIRES_AT}\"}}}")
+  if [[ "${code}" != "200" ]]; then
+    echo "  ✗ 초대 토큰 조회 문서 생성 실패 (HTTP ${code})"
+    return 1
+  fi
+
+  echo "  ✓ 그룹 '우리 가족' id=${SEED_GROUP_ID} 초대토큰=${SEED_GROUP_INVITE_TOKEN}"
 }
 
 # 개인 기프티콘 문서를 만든다(FirebaseGifticonRepository._toDoc과 같은 스키마).
