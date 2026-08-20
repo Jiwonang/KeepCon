@@ -125,9 +125,16 @@ gh pr view <번호> --json comments,reviews --jq '[.comments[], .reviews[]] | ma
 # 창이 열리는 시각 = 저장소 전체 마지막 성공 리뷰 + 1시간 (+ 여유 2분)
 # --limit은 저장소 전체 PR 수 이상으로 — 오래된 PR을 재트리거해도 같은 풀을 쓰므로
 # 상한이 낮으면 그 리뷰를 놓쳐 창을 이르게 계산한다. (PR 40개당 약 25초)
-for n in $(gh pr list --state all --limit 200 --json number --jq '.[].number'); do
-  gh api repos/Jiwonang/KeepCon/pulls/$n/reviews --jq '.[] | select(.user.login=="coderabbitai[bot]") | .submitted_at' 2>/dev/null
-done | sort | tail -1
+# stderr를 죽이지 않는다 — API 오류를 "리뷰 0건"으로 오인하면 창이 닫힌 채 트리거해 슬롯을 버린다.
+last=$(for n in $(gh pr list --state all --limit 200 --json number --jq '.[].number'); do
+  gh api "repos/Jiwonang/KeepCon/pulls/$n/reviews"     --jq '.[] | select(.user.login=="coderabbitai[bot]") | .submitted_at'
+done | sort | tail -1)
+
+if [ -z "$last" ]; then
+  echo "리뷰 0건이거나 조회가 실패했다 — 원인을 확인하기 전에는 트리거하지 마라"
+else
+  python -c "import sys,datetime as d;t=d.datetime.fromisoformat(sys.argv[1].replace('Z','+00:00'))+d.timedelta(hours=1,minutes=2);print('마지막 리뷰',sys.argv[1],'→ 트리거 가능',t.strftime('%Y-%m-%dT%H:%M:%SZ'))" "$last"
+fi
 ```
 
 > ⚠️ **한도는 PR별이 아니라 계정 단위 공유 풀이다.** 이 계정의 실효 한도는 시간당 1건이며(봇이 리뷰 본문에 `Your plan provides up to 1 included review per hour`라고 적는다 — 플랜 상한인 Pro+ 시간당 10건이 아니라 fair-usage로 조여진 값이다), **저장소의 다른 PR이 같은 슬롯을 가져간다.**
@@ -150,6 +157,8 @@ gh pr view <번호> --json headRefOid --jq .headRefOid
 두 SHA가 같으면 `CURRENT`, 다르면 `STALE`이다. `STALE`이면 **그 뒤 커밋은 리뷰되지 않았다** — `@coderabbitai review`로 재트리거한다. `CURRENT`일 때만 4층(CodeRabbit)이 채워진 것이다.
 
 > ⚠️ **시각(timestamp)으로 비교하지 마라.** 리뷰 게시 시각과 `commits[].committedDate`를 견주는 방식은 틀린다 — `committedDate`는 푸시 시각이 아니라 **작성자 로컬 시계의 커밋 생성 시각**이다. 리뷰를 기다리는 몇 분 사이에 커밋해 두고 리뷰가 올라온 뒤 푸시하면(흔한 작업 흐름) 커밋이 리뷰보다 **이르게** 찍혀 `CURRENT`로 통과한다 — 3b가 막으려던 바로 그것이다. 작성자 시계가 앞서 있으면 반대로 늘 `STALE`이 되어 소음이 된다. SHA 비교는 시계·푸시 지연과 무관하다.
+>
+> ⚠️ **3단계는 `comments`와 `reviews`를 둘 다 보는데 3b는 `reviews`만 본다.** 리뷰 본문이 SHA 없는 일반 코멘트로만 올라오면 여기서 `NO_REVIEW`가 되어 영원히 `CURRENT`가 될 수 없다. 그때는 **`CURRENT`로 치지 마라** — 재트리거해서 `reviews`에 실리게 하거나, 그래도 안 되면 4번 폴백으로 기록을 남긴다. (2026-08-20 기준 최근 40개 PR에서 리뷰 본문이 일반 코멘트로만 온 사례는 0건이지만, 3단계가 그 가능성을 명시하므로 규칙을 비워 두지 않는다.)
 >
 > ⚠️ 3단계의 로그인 이름은 `coderabbitai`인데 **여기서는 `coderabbitai[bot]`이다.** REST(`/pulls/N/reviews`)와 GraphQL(`gh pr view`)이 봇 계정을 다르게 표기한다 — 섞어 쓰면 항상 `NO_REVIEW`가 나온다.
 
@@ -199,6 +208,10 @@ EOF
 2. `keepcon-code-reviewer` 지적을 반영 완료 (2번 — 정상 경로에서는 푸시 전에 끝나 있다) **그리고**
    그 뒤 푸시한 커밋이 없다: PR 본문의 `에이전트 리뷰: <SHA>` == `gh pr view <번호> --json headRefOid --jq .headRefOid`.
    다르면 3b와 같은 이유로 **그 뒤 커밋은 기본 층을 안 거쳤다** — 2번에서 그 범위(`<리뷰한 SHA>...<head>`)만 다시 리뷰한다.
+   ⚠️ **이 대조는 기계적 게이트가 아니라 자기 신고다.** PR 본문의 SHA는 작성자가 고칠 수 있고,
+   그 SHA에서 에이전트가 실제로 돌았다는 증거는 어디에도 남지 않는다(보호된 상태 체크도 봇 코멘트도
+   없다). 두는 이유는 **조작을 막기 위해서가 아니라 빠뜨림을 잡기 위해서**다. 기계화하려면 리뷰
+   결과를 PR 코멘트로 남기고 그 코멘트가 인용한 SHA를 대조해야 한다(미도입).
    ⚠️ **CodeRabbit 지적을 고쳐 푸시한 커밋이 정확히 여기 해당한다.** 옛 순서에서는 2번의 "수정 → 푸시 → 1번으로"
    루프가 그것을 다시 태웠는데, 에이전트를 앞으로 옮기면서 그 효과가 사라졌다 — 실제로 #95의 `a1b60a5`,
    #101의 `592d28f`·`d0ec216`이 어느 리뷰어도 안 본 채 머지됐다.
