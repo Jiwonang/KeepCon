@@ -147,7 +147,7 @@ gh pr view <번호> --json comments,reviews --jq '[.comments[], .reviews[]] | ma
     #    2026-08-20 실측: #105의 마지막 리뷰가 comments에 10:06:26Z로 실렸는데 reviews에는
     #    07:41:38Z뿐이라, 이 스캔이 창을 **54분 이르게** 잡았다. 그대로 트리거하면 튕겨서
     #    슬롯을 버린다(그 실패는 창을 앞당겨 주지도 않는다).
-    gh api "repos/Jiwonang/KeepCon/issues/$n/comments" --jq '.[] | select(.user.login=="coderabbitai[bot]") | select(.body | test("Actionable comments posted|No actionable comments")) | .updated_at' >> "$tmp" || { echo "PR #$n 코멘트 조회 실패 — 트리거하지 마라"; rm -f "$tmp"; exit 1; }
+    gh api --paginate "repos/Jiwonang/KeepCon/issues/$n/comments" --jq '.[] | select(.user.login=="coderabbitai[bot]") | select(.body | test("Actionable comments posted|No actionable comments")) | .updated_at' >> "$tmp" || { echo "PR #$n 코멘트 조회 실패 — 트리거하지 마라"; rm -f "$tmp"; exit 1; }
   done
   last=$(sort "$tmp" | tail -1); rm -f "$tmp"
 
@@ -182,7 +182,15 @@ gh pr view <번호> --json headRefOid --jq .headRefOid
 > 그때는 **코멘트 본문에서 SHA를 읽어라.** CodeRabbit은 `📥 Commits` 절에 리뷰 범위를 적는다:
 >
 > ```bash
-> gh api repos/Jiwonang/KeepCon/issues/<번호>/comments --jq '.[] | select(.user.login=="coderabbitai[bot]") | .body' | grep -o 'between [0-9a-f]\{40\} and [0-9a-f]\{40\}' | tail -1
+> # ⚠️ `--paginate` 없으면 첫 30건만 본다 — 코멘트가 쌓인 PR에서 **최신 리뷰를 놓친다.**
+> # ⚠️ 판정 문구가 **있는** 코멘트로 먼저 좁힌다. `between …` 커밋 범위는 리뷰가 끝나기 전
+> #    `Currently processing new changes in this PR` 안내에도 실린다 — 범위만 보고 판정하면
+> #    **리뷰가 없는데 `CURRENT`로 통과한다**(2026-08-20 #106에서 실제로 그렇게 오판했다).
+> gh api --paginate repos/Jiwonang/KeepCon/issues/<번호>/comments \
+>   --jq '.[] | select(.user.login=="coderabbitai[bot]")
+>         | select(.body | test("Actionable comments posted|No actionable comments were generated"))
+>         | .body' \
+>   | grep -o 'between [0-9a-f]\{40\} and [0-9a-f]\{40\}' | tail -1
 > ```
 >
 > 뒤쪽 SHA가 `headRefOid`와 같으면 `CURRENT`다 — API 필드보다 **더 강한 증거**다(봇이 실제로 무엇을 읽었는지 자기가 적은 것이다). 본문에도 SHA가 없으면 그때는 **`CURRENT`로 치지 마라** — 재트리거하거나 4번 폴백으로 기록을 남긴다.
@@ -217,8 +225,10 @@ gh pr comment <번호> --body "$(cat <<'EOF'
 🔁 **CodeRabbit 없이 머지 — 대체 리뷰 경로**
 
 - CodeRabbit 상태: `RATE_LIMITED` (재트리거 후에도 유지)
-- 대체 리뷰: `keepcon-code-reviewer` — 지적 N건 (🔴 a / 🟠 b / 🟡 c, + 🔵 d) · 형제 미고침 k건 / 미확인 m건, 전부 반영
+- 대체 리뷰: `keepcon-code-reviewer` — 지적 N건 (🔴 a / 🟠 b / 🟡 c, + 🔵 d) · 형제 미고침 k건 / 미확인 m건
   (요약 줄은 **에이전트가 낸 그대로** 옮긴다 — 필드를 줄이면 남은 미고침·미확인이 기록에서 사라진다)
+- 반영: `k=0 && m=0`일 때만 `전부 반영`이라고 적는다. 하나라도 남았으면 **무엇이 왜 남았는지**
+  적는다 — 미고침·미확인을 세어 놓고 `전부 반영`으로 마무리하면 그 숫자가 장식이 된다
 - CI: `Format · Analyze · Test` · `Firestore rules` · `Markdown lint` 전부 green
 
 (사유: CodeRabbit 체크는 리뷰 여부와 무관하게 항상 pass라 게이트가 아니며, 이 기록이 어느 경로로 통과했는지를 남기는 유일한 수단이다.)
