@@ -197,7 +197,8 @@ gh pr comment <번호> --body "$(cat <<'EOF'
 🔁 **CodeRabbit 없이 머지 — 대체 리뷰 경로**
 
 - CodeRabbit 상태: `RATE_LIMITED` (재트리거 후에도 유지)
-- 대체 리뷰: `keepcon-code-reviewer` — 지적 N건 (🔴 a / 🟠 b / 🟡 c), 전부 반영
+- 대체 리뷰: `keepcon-code-reviewer` — 지적 N건 (🔴 a / 🟠 b / 🟡 c, + 🔵 d) · 형제 미고침 k건 / 미확인 m건, 전부 반영
+  (요약 줄은 **에이전트가 낸 그대로** 옮긴다 — 필드를 줄이면 남은 미고침·미확인이 기록에서 사라진다)
 - CI: `Format · Analyze · Test` · `Firestore rules` · `Markdown lint` 전부 green
 
 (사유: CodeRabbit 체크는 리뷰 여부와 무관하게 항상 pass라 게이트가 아니며, 이 기록이 어느 경로로 통과했는지를 남기는 유일한 수단이다.)
