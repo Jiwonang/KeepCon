@@ -22,8 +22,10 @@ import 'package:share_plus/share_plus.dart';
 import '../../../shared/models/group.dart';
 import '../../../shared/models/user.dart';
 import '../../../shared/diagnostics/report_handled_failure.dart';
+import '../../../shared/providers/invite_link_providers.dart';
 import '../../../shared/providers/repositories.dart';
 import '../../../shared/providers/session_provider.dart';
+import '../../../shared/util/invite_link.dart';
 import '../../../shared/util/korean_particle.dart';
 import '../state/share_providers.dart';
 import '../widgets/share_format.dart';
@@ -87,12 +89,12 @@ class _MemberInvitePageState extends ConsumerState<MemberInvitePage> {
   /// [ShareParams.mailToFallbackEnabled]를 꺼서 예외로 받아낸다.
   ///
   /// iPad 팝오버 기준점([ShareParams.sharePositionOrigin])은 이번 범위에서 다루지 않는다.
-  Future<void> _share(Group g) async {
+  Future<void> _share(Group g, String inviteUrl) async {
     final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
     try {
       await SharePlus.instance.share(
         ShareParams(
-          text: '"${g.name}" 그룹에 초대합니다.\n${g.inviteUrl}',
+          text: '"${g.name}" 그룹에 초대합니다.\n$inviteUrl',
           subject: '"${g.name}" 그룹 초대',
           mailToFallbackEnabled: false,
         ),
@@ -100,7 +102,7 @@ class _MemberInvitePageState extends ConsumerState<MemberInvitePage> {
     } catch (e, s) {
       reportHandledFailure(ref, e, s, context: 'MemberInvitePage.shareInvite');
       // 시트 미지원·실패 — 링크만 클립보드에 넣고 이유를 알린다.
-      await Clipboard.setData(ClipboardData(text: g.inviteUrl));
+      await Clipboard.setData(ClipboardData(text: inviteUrl));
       messenger
         ..hideCurrentSnackBar()
         ..showSnackBar(
@@ -227,6 +229,12 @@ class _MemberInvitePageState extends ConsumerState<MemberInvitePage> {
     );
     final bool iAmOwner = uid != null && g.isOwnedBy(uid);
     final bool expired = g.isInviteExpired(DateTime.now());
+    // 초대 링크의 도메인은 백엔드마다 다르고, 없는 실행도 있다(안드로이드 + 로컬
+    // 에뮬레이터). `null`이면 링크 없이 코드만 공유한다.
+    final String? origin = ref.watch(inviteOriginProvider);
+    final String? inviteUrl = origin == null
+        ? null
+        : inviteUrlFrom(origin: origin, inviteToken: g.inviteToken);
     // 화면을 열어 둔 채 유효기간이 끝나도 복사·공유가 살아 있지 않게, 만료 시각에
     // 리빌드를 예약한다(재발급으로 만료가 밀리면 새 시각으로 다시 건다).
     _scheduleExpiryRefresh(g.inviteExpiresAt);
@@ -243,16 +251,26 @@ class _MemberInvitePageState extends ConsumerState<MemberInvitePage> {
               style: context.inviteTitleStyle,
             ),
             const SizedBox(height: 8),
-            Text('아래 링크나 코드를 공유하세요.', style: theme.textTheme.bodyLarge),
+            Text(
+              inviteUrl == null ? '아래 코드를 공유하세요.' : '아래 링크나 코드를 공유하세요.',
+              style: theme.textTheme.bodyLarge,
+            ),
             const SizedBox(height: 28),
 
             // 초대 링크 / 초대코드. 만료된 코드는 배포해봐야 참여가 거부되므로
             // 복사 자체를 막는다(재발급이 유일한 유효 경로).
-            _CopyField(
-              label: '초대 링크',
-              value: g.inviteUrl,
-              onCopy: expired ? null : () => _copy(g.inviteUrl, '초대 링크'),
-            ),
+            //
+            // 링크 자체가 없는 실행도 있다(안드로이드 + 로컬 에뮬레이터 — App Links를
+            // 검증해 줄 도메인이 없다). 그때 빈 칸이나 그럴듯한 가짜 링크를 보여주면
+            // 눌렀을 때 아무 일도 안 일어나거나 **다른 백엔드로 간다.** 사실을 적는다.
+            if (inviteUrl == null)
+              _NoInviteLinkNotice(theme: theme)
+            else
+              _CopyField(
+                label: '초대 링크',
+                value: inviteUrl,
+                onCopy: expired ? null : () => _copy(inviteUrl, '초대 링크'),
+              ),
             const SizedBox(height: 16),
             _CopyField(
               label: '초대코드',
@@ -343,9 +361,15 @@ class _MemberInvitePageState extends ConsumerState<MemberInvitePage> {
         child: Padding(
           padding: const EdgeInsets.fromLTRB(24, 8, 24, 16),
           child: ElevatedButton.icon(
-            onPressed: expired ? null : () => _share(g),
+            onPressed: (expired || inviteUrl == null)
+                ? null
+                : () => _share(g, inviteUrl),
             icon: const Icon(Icons.share, size: 20),
-            label: Text(expired ? '만료된 초대는 공유할 수 없어요' : '어플로 공유하기'),
+            label: Text(switch ((expired, inviteUrl)) {
+              (true, _) => '만료된 초대는 공유할 수 없어요',
+              (_, null) => '이 환경에서는 링크를 공유할 수 없어요',
+              _ => '어플로 공유하기',
+            }),
             style: ElevatedButton.styleFrom(
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(AppRadii.button),
@@ -364,6 +388,43 @@ class _MemberInvitePageState extends ConsumerState<MemberInvitePage> {
 /// 라벨 + 값 + 복사 버튼 필드(아웃라인). [emphasize]면 값이 코드처럼 크게(자간 포함).
 ///
 /// [onCopy]가 `null`이면 비활성(만료된 초대) — 흐리게 표시하고 탭·복사 버튼을 막는다.
+/// 초대 링크를 만들 수 없는 실행에서 그 사실과 대안을 알린다.
+///
+/// 빈 칸이나 그럴듯한 가짜 링크 대신 이걸 보여주는 이유: 링크가 없다는 것은 결함이 아니라
+/// 이 조합(안드로이드 + 로컬 에뮬레이터)의 성질이고, 코드 공유라는 대안이 실제로 있다.
+class _NoInviteLinkNotice extends StatelessWidget {
+  const _NoInviteLinkNotice({required this.theme});
+
+  final ThemeData theme;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(AppRadii.card),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Icon(Icons.link_off,
+              size: 20, color: theme.colorScheme.onSurfaceVariant),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              '이 환경에서는 초대 링크를 만들 수 없어요.\n아래 초대코드를 공유해 주세요.',
+              style: theme.textTheme.bodyMedium
+                  ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _CopyField extends StatelessWidget {
   const _CopyField({
     required this.label,

@@ -8,6 +8,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:keepcon/shared/deeplink/app_destination.dart';
 import 'package:keepcon/shared/deeplink/deep_link_parser.dart';
 import 'package:keepcon/shared/models/group.dart';
+import 'package:keepcon/shared/util/invite_link.dart';
 
 void main() {
   group('초대 링크', () {
@@ -43,7 +44,10 @@ void main() {
         inviteToken: '482913',
       );
       expect(
-        parseDeepLink(Uri.parse(group.inviteUrl)),
+        parseDeepLink(Uri.parse(inviteUrlFrom(
+          origin: 'https://keepcon-dev.web.app',
+          inviteToken: group.inviteToken,
+        ))),
         const InviteDestination('482913'),
       );
     });

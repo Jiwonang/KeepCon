@@ -1,7 +1,7 @@
-// 초대 링크 파서(parseInviteToken) 단위 테스트 (P3).
+// 초대 링크 조립(inviteUrlFrom)·파싱(parseInviteToken) 단위 테스트.
 //
-// Group.inviteUrl(경로형)과 쿼리형에서 초대코드를 역추출하는 순수 함수 검증 +
-// Group.inviteUrl과의 라운드트립(빌더-파서 형식 drift 방지).
+// 경로형/쿼리형에서 토큰을 역추출하는 순수 함수 검증 + 조립-파싱 라운드트립
+// (빌더와 파서의 형식이 갈라지면 링크가 조용히 죽는다).
 
 import 'package:flutter_test/flutter_test.dart';
 
@@ -68,7 +68,51 @@ void main() {
           ),
         ],
       );
-      expect(parseInviteToken(Uri.parse(g.inviteUrl)), g.inviteToken);
+      expect(
+        parseInviteToken(Uri.parse(inviteUrlFrom(
+          origin: 'https://keepcon-dev.web.app',
+          inviteToken: g.inviteToken,
+        ))),
+        g.inviteToken,
+      );
+    });
+  });
+
+  group('inviteUrlFrom', () {
+    test('origin + /invite/<token>으로 조립한다', () {
+      expect(
+        inviteUrlFrom(
+            origin: 'https://keepcon-dev.web.app', inviteToken: 'AbC123'),
+        'https://keepcon-dev.web.app/invite/AbC123',
+      );
+    });
+
+    test('로컬 개발 origin(포트 포함)도 그대로 쓴다', () {
+      expect(
+        inviteUrlFrom(origin: 'http://localhost:5000', inviteToken: 'AbC123'),
+        'http://localhost:5000/invite/AbC123',
+      );
+    });
+
+    test('끝의 슬래시를 정리한다 — 안 하면 경로가 한 칸 밀려 파서가 못 찾는다', () {
+      const String token = 'AbC123';
+      final String url = inviteUrlFrom(
+          origin: 'https://keepcon-dev.web.app/', inviteToken: token);
+      expect(url, 'https://keepcon-dev.web.app/invite/$token');
+      // 회귀의 본질은 문자열 모양이 아니라 **파싱 실패**다. 거기까지 고정한다.
+      expect(parseInviteToken(Uri.parse(url)), token);
+    });
+
+    test('조립한 링크는 파서가 되돌린다(라운드트립)', () {
+      const String token = '9Xk2QpLmNrTvWzYb4A';
+      for (final String origin in <String>[
+        'https://keepcon-ab660.web.app',
+        'https://keepcon-dev.web.app',
+        'http://localhost:5000',
+      ]) {
+        final String url = inviteUrlFrom(origin: origin, inviteToken: token);
+        expect(parseInviteToken(Uri.parse(url)), token, reason: origin);
+      }
     });
   });
 }

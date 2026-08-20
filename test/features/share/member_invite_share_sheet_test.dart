@@ -24,11 +24,13 @@ import 'package:keepcon/features/share/pages/member_invite_page.dart';
 import 'package:keepcon/shared/models/group.dart';
 import 'package:keepcon/shared/diagnostics/error_reporter.dart';
 import 'package:keepcon/shared/providers/error_reporter_provider.dart';
+import 'package:keepcon/shared/providers/invite_link_providers.dart';
 import 'package:keepcon/shared/providers/repositories.dart';
 import 'package:keepcon/shared/repositories/impl/in_memory_auth_repository.dart';
 import 'package:keepcon/shared/repositories/impl/in_memory_gifticon_repository.dart';
 import 'package:keepcon/shared/repositories/impl/in_memory_share_repository.dart';
 import 'package:keepcon/shared/repositories/share_repository.dart';
+import 'package:keepcon/shared/util/invite_link.dart';
 
 /// `watchGroups`만 지원하는 최소 스텁 — 만료된 초대를 가진 그룹을 주입한다.
 ///
@@ -62,6 +64,14 @@ class _SpyErrorReporter implements ErrorReporter {
     contexts.add(context);
   }
 }
+
+/// 테스트가 쓰는 초대 링크 origin. 화면은 `inviteOriginProvider`로 이 값을 받는다 —
+/// 예전처럼 모델이 prod 도메인을 들고 있지 않으므로 여기서 정해 주입해야 한다.
+const String testInviteOrigin = 'https://keepcon-dev.web.app';
+
+/// [g]의 초대 링크(화면이 만드는 것과 같은 규칙).
+String inviteUrlOf(Group g) =>
+    inviteUrlFrom(origin: testInviteOrigin, inviteToken: g.inviteToken);
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -142,6 +152,7 @@ void main() {
           gifticonRepositoryProvider.overrideWithValue(gifticons),
           errorReporterProvider.overrideWithValue(reporter),
           shareRepositoryProvider.overrideWithValue(share),
+          inviteOriginProvider.overrideWithValue(testInviteOrigin),
         ],
         child: MaterialApp(home: MemberInvitePage(groupId: group.id)),
       ),
@@ -158,7 +169,7 @@ void main() {
 
     expect(shareCalls, hasLength(1));
     // 링크만이 아니라 "어느 그룹인지"까지 전달한다 — 받는 쪽 맥락.
-    expect(shareCalls.single['text'], contains(group.inviteUrl));
+    expect(shareCalls.single['text'], contains(inviteUrlOf(group)));
     expect(shareCalls.single['text'], contains('우리집'));
     // 복사 경로가 함께 타면 CTA가 다시 복사 버튼이 된 것이다(회귀 고정).
     expect(clipboardWrites, isEmpty);
@@ -172,7 +183,7 @@ void main() {
     await tester.tap(find.text('어플로 공유하기'));
     await tester.pumpAndSettle();
 
-    expect(clipboardWrites, <String>[group.inviteUrl]);
+    expect(clipboardWrites, <String>[inviteUrlOf(group)]);
     expect(find.text('공유 시트를 열 수 없어 초대 링크를 복사했어요.'), findsOneWidget);
     // 폴백으로 넘어간 이유도 개발자에게 남는다 — 웹에서 실제로 타는 경로다.
     expect(reporter.contexts, <String>['MemberInvitePage.shareInvite']);
@@ -182,10 +193,10 @@ void main() {
       (WidgetTester tester) async {
     await pumpInvitePage(tester);
 
-    await tester.tap(find.text(group.inviteUrl));
+    await tester.tap(find.text(inviteUrlOf(group)));
     await tester.pumpAndSettle();
 
-    expect(clipboardWrites, <String>[group.inviteUrl]);
+    expect(clipboardWrites, <String>[inviteUrlOf(group)]);
     expect(shareCalls, isEmpty);
   });
 
@@ -216,6 +227,7 @@ void main() {
           errorReporterProvider.overrideWithValue(reporter),
           shareRepositoryProvider
               .overrideWithValue(_FixedGroupsShareRepository(<Group>[g])),
+          inviteOriginProvider.overrideWithValue(testInviteOrigin),
         ],
         child: MaterialApp(home: MemberInvitePage(groupId: g.id)),
       ),
@@ -240,7 +252,7 @@ void main() {
     expect(find.text('만료됨'), findsOneWidget);
     expect(find.text('만료된 초대는 공유할 수 없어요'), findsOneWidget);
 
-    await tester.tap(find.text(g.inviteUrl));
+    await tester.tap(find.text(inviteUrlOf(g)));
     await tester.tap(find.text('만료된 초대는 공유할 수 없어요'));
     await tester.pumpAndSettle();
     expect(clipboardWrites, isEmpty);
@@ -256,7 +268,7 @@ void main() {
     expect(find.text('만료됨'), findsOneWidget);
 
     // 링크·코드 필드 탭 → 복사되지 않는다.
-    await tester.tap(find.text(g.inviteUrl));
+    await tester.tap(find.text(inviteUrlOf(g)));
     await tester.tap(find.text(g.inviteToken));
     await tester.pumpAndSettle();
     expect(clipboardWrites, isEmpty);

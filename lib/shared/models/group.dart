@@ -172,21 +172,20 @@ class Group {
   /// 전이는 만들어지지 않는다(참여 가드가 유일한 증가 경로).
   final int maxMembers;
 
-  /// 초대 링크가 걸리는 도메인.
-  ///
-  /// **`keepcon.app`이 아니라 Firebase Hosting 도메인인 이유:** 안드로이드 App Links는
-  /// 그 도메인 루트의 `/.well-known/assetlinks.json`을 시스템이 직접 받아 앱 서명과
-  /// 대조해야 링크가 앱으로 온다. `keepcon.app`은 소유하지 않은 도메인이라 그 파일을
-  /// 올릴 수 없고, 그래서 링크를 눌러도 브라우저만 열렸다. 이미 가진 Firebase 프로젝트의
-  /// 호스팅 도메인은 추가 비용 없이 검증을 통과시킬 수 있다.
-  ///
-  /// 바꾸려면 `android/app/src/main/AndroidManifest.xml`의 인텐트 필터 host와
-  /// `firebase.json`의 hosting 설정을 **함께** 바꿔야 한다(셋 중 하나만 바뀌면 링크가
-  /// 조용히 브라우저로 샌다).
-  static const String inviteHost = 'keepcon-ab660.web.app';
-
-  /// 초대 URL(초대 토큰 기반 조립).
-  String get inviteUrl => 'https://$inviteHost/invite/$inviteToken';
+  // 초대 URL은 여기서 만들지 않는다.
+  //
+  // 예전에는 `inviteHost` 상수와 `inviteUrl` getter가 이 모델에 있었는데, 그 호스트는
+  // prod(`keepcon-ab660.web.app`) 하나로 박혀 있었다. 그래서 **에뮬레이터나 dev에서
+  // 띄운 앱이 실서비스 도메인을 가리키는 링크를 발급**했다 — 받은 사람이 누르면 남의
+  // 실서비스 그룹으로 간다.
+  //
+  // 모델은 순수해서 "지금 어느 백엔드인지"를 알 수 없으므로, 조립을
+  // `inviteOriginProvider` + `inviteUrlFrom()`으로 옮겼다
+  // (`lib/shared/providers/invite_link_providers.dart`, `lib/shared/util/invite_link.dart`).
+  //
+  // ⚠️ 안드로이드에서 도메인을 바꾸려면 `AndroidManifest.xml`의 인텐트 필터 host와
+  //    그 도메인의 `/.well-known/assetlinks.json`을 **함께** 손봐야 한다. 하나만 바뀌면
+  //    링크가 조용히 브라우저로 샌다(App Links 검증은 실패해도 오류를 내지 않는다).
 
   /// 정원이 찼는지(멤버 수 ≥ [maxMembers]). 참여 가능 여부 판정의 단일 진입점.
   bool get isFull => memberCount >= maxMembers;
