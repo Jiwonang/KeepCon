@@ -125,16 +125,23 @@ gh pr view <번호> --json comments,reviews --jq '[.comments[], .reviews[]] | ma
 # 창이 열리는 시각 = 저장소 전체 마지막 성공 리뷰 + 1시간 (+ 여유 2분)
 # --limit은 저장소 전체 PR 수 이상으로 — 오래된 PR을 재트리거해도 같은 풀을 쓰므로
 # 상한이 낮으면 그 리뷰를 놓쳐 창을 이르게 계산한다. (PR 40개당 약 25초)
-# stderr를 죽이지 않는다 — API 오류를 "리뷰 0건"으로 오인하면 창이 닫힌 채 트리거해 슬롯을 버린다.
-last=$(for n in $(gh pr list --state all --limit 200 --json number --jq '.[].number'); do
-  gh api "repos/Jiwonang/KeepCon/pulls/$n/reviews"     --jq '.[] | select(.user.login=="coderabbitai[bot]") | .submitted_at'
-done | sort | tail -1)
+#
+# 실패를 삼키면 안 된다. 일부 PR 조회만 실패해도 나머지로 "마지막 리뷰"가 계산돼
+# 창을 이르게 잡고, 그러면 트리거가 튕겨 슬롯을 버린다. 한 건이라도 실패하면 멈춘다.
+# (전체를 서브셸로 감싸 exit이 사용자 셸을 닫지 않게 한다.)
+(
+  set -o pipefail
+  nums=$(gh pr list --state all --limit 200 --json number --jq '.[].number') || { echo "PR 목록 조회 실패 — 트리거하지 마라"; exit 1; }
 
-if [ -z "$last" ]; then
-  echo "리뷰 0건이거나 조회가 실패했다 — 원인을 확인하기 전에는 트리거하지 마라"
-else
+  tmp=$(mktemp)
+  for n in $nums; do
+    gh api "repos/Jiwonang/KeepCon/pulls/$n/reviews" --jq '.[] | select(.user.login=="coderabbitai[bot]") | .submitted_at' >> "$tmp" || { echo "PR #$n 조회 실패 — 부분 결과로 계산하면 창을 이르게 잡는다. 트리거하지 마라"; rm -f "$tmp"; exit 1; }
+  done
+  last=$(sort "$tmp" | tail -1); rm -f "$tmp"
+
+  [ -n "$last" ] || { echo "리뷰 0건 — 원인을 확인하기 전에는 트리거하지 마라"; exit 1; }
   python -c "import sys,datetime as d;t=d.datetime.fromisoformat(sys.argv[1].replace('Z','+00:00'))+d.timedelta(hours=1,minutes=2);print('마지막 리뷰',sys.argv[1],'→ 트리거 가능',t.strftime('%Y-%m-%dT%H:%M:%SZ'))" "$last"
-fi
+)
 ```
 
 > ⚠️ **한도는 PR별이 아니라 계정 단위 공유 풀이다.** 이 계정의 실효 한도는 시간당 1건이며(봇이 리뷰 본문에 `Your plan provides up to 1 included review per hour`라고 적는다 — 플랜 상한인 Pro+ 시간당 10건이 아니라 fair-usage로 조여진 값이다), **저장소의 다른 PR이 같은 슬롯을 가져간다.**
