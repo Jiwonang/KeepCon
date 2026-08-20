@@ -72,10 +72,11 @@ run "Markdown lint" npx --yes markdownlint-cli2@0.18.1
 # 에뮬레이터 설정만 고친 변경이 로컬에서는 건너뛰어지고 **CI에서 처음 빨개진다** —
 # 실제로 이 저장소가 그렇게 당했다(케이스 33건을 더한 PR이 그 파일만 건드렸다).
 #
-# ⚠️ BASE를 못 찾으면 **건너뛰지 말고 돌린다.** 커밋된 변경은 `git status`에 안 잡히므로
-#    감지가 전적으로 `git diff`에 달려 있는데, ref가 없으면(단일 브랜치 clone, 포크, 다른
-#    기본 브랜치 이름) 그 diff가 조용히 빈 결과를 낸다 — 이 스크립트가 없애려는 침묵
-#    실패가 바로 그 모양이다. 모를 때는 더 하는 쪽으로 닫는다.
+# ⚠️ BASE 기준을 판별하지 못하면 **건너뛰지 말고 돌린다.** 커밋된 변경은 `git status`에
+#    안 잡히므로 감지가 전적으로 `git diff`에 달려 있는데, 그 diff는 두 가지 이유로 조용히
+#    빈 결과를 낸다 — ①ref가 없거나(단일 브랜치 clone, 포크, 다른 기본 브랜치 이름)
+#    ②ref는 있는데 merge base가 없다(얕은 클론, 관련 없는 히스토리). 둘 다 이 스크립트가
+#    없애려는 침묵 실패의 모양이다. 모를 때는 더 하는 쪽으로 닫는다.
 RULES_INPUTS=(firestore.rules tool/verify_firestore_rules.sh firebase.json)
 
 rules_changed() {
@@ -84,13 +85,27 @@ rules_changed() {
     base_unknown=1
     return 0
   fi
+  # ⚠️ ref가 **있어도** merge base가 없으면(얕은 클론, 관련 없는 히스토리) triple-dot이
+  #    exit 128로 죽으면서 stdout은 비어 있다 — 그대로 두면 "변경 없음"으로 읽혀 조용히
+  #    건너뛴다. ref 존재 검사만으로는 이 경우를 못 거른다(실측: `no merge base`).
   local changed path
-  changed=$(git diff --name-only "${BASE}...HEAD")
+  if ! changed=$(git diff --name-only "${BASE}...HEAD" 2>/dev/null); then
+    base_unknown=1
+    return 0
+  fi
   for path in "${RULES_INPUTS[@]}"; do
     grep -qxF "${path}" <<<"${changed}" && return 0
   done
   return 1
 }
+
+# 포트는 `firebase.json`이 정본이다. 8080/9099를 스크립트에 박아 두면 포트를 바꾼 순간
+# ①떠 있는 에뮬레이터를 못 찾고 ②재사용 경로가 죽은 기본 포트로 붙는다(`emulators:exec`
+# 경로만 환경변수를 받으므로 그쪽은 살아 있어 한쪽만 조용히 깨진다).
+read -r FS_PORT AUTH_PORT <<<"$(node -e '
+  const c = require("./firebase.json").emulators || {};
+  process.stdout.write(`${(c.firestore||{}).port||8080} ${(c.auth||{}).port||9099}`);
+' 2>/dev/null || echo "8080 9099")"
 
 base_unknown=0
 
@@ -102,8 +117,8 @@ if [[ "${SKIP_RULES:-}" == "1" ]]; then
     # 단 "바뀌었다"와 "판별하지 못했다"는 다른 사실이므로 섞어 말하지 않는다 — 후자에게
     # 전자의 진단을 주면 있지도 않은 규칙 변경을 자기 diff에서 찾게 된다.
     if [[ "${base_unknown}" -eq 1 ]]; then
-      echo "  ✗ BASE(${BASE})를 찾을 수 없어 규칙 입력 변경 여부를 판별하지 못했다 — 건너뛴 채로는 푸시 가부를 판정할 수 없다."
-      echo "     (BASE=origin/main 처럼 지정하거나 git fetch 하면 판별이 정확해진다)"
+      echo "  ✗ BASE(${BASE}) 기준 변경을 판별하지 못했다(ref 부재 또는 merge base 없음) — 건너뛴 채로는 푸시 가부를 판정할 수 없다."
+      echo "     (BASE=origin/main 처럼 지정하거나 git fetch --unshallow 하면 판별이 정확해진다)"
     else
       echo "  ✗ 규칙 입력이 바뀌었는데 검증을 건너뛰었다 — 이 실행으로는 푸시 가부를 판정할 수 없다."
     fi
@@ -115,8 +130,8 @@ if [[ "${SKIP_RULES:-}" == "1" ]]; then
 elif rules_changed; then
   if [[ "${base_unknown}" -eq 1 ]]; then
     step "Firestore rules (BASE 판별 불가 — 안전하게 실검증)"
-    echo "  ⚠️ BASE(${BASE})를 찾을 수 없다 — 커밋된 규칙 변경을 판별할 수 없어 그냥 돌린다."
-    echo "     (BASE=origin/main 처럼 지정하거나 git fetch 하면 이 경고가 사라진다)"
+    echo "  ⚠️ BASE(${BASE}) 기준 변경을 판별할 수 없다(ref 부재 또는 merge base 없음) — 그냥 돌린다."
+    echo "     (BASE=origin/main 처럼 지정하거나 git fetch --unshallow 하면 이 경고가 사라진다)"
   else
     step "Firestore rules (규칙 계층 입력 변경 감지 — 에뮬레이터로 실검증)"
   fi
@@ -124,12 +139,17 @@ elif rules_changed; then
   # 규칙 스크립트는 Auth로 사용자 셋을 만들고 그 토큰으로 Firestore를 친다 — **둘 다**
   # 떠 있어야 재사용할 수 있다.
   fs_up=1; auth_up=1
-  curl -s -o /dev/null --max-time 3 "http://localhost:8080/" || fs_up=0
-  curl -s -o /dev/null --max-time 3 "http://localhost:9099/" || auth_up=0
+  curl -s -o /dev/null --max-time 3 "http://localhost:${FS_PORT}/" || fs_up=0
+  curl -s -o /dev/null --max-time 3 "http://localhost:${AUTH_PORT}/" || auth_up=0
 
   if [[ "${fs_up}" -eq 1 && "${auth_up}" -eq 1 ]]; then
-    echo "  (실행 중인 에뮬레이터 사용: localhost:8080 / 9099)"
-    run "Firestore rules" bash tool/verify_firestore_rules.sh
+    echo "  (실행 중인 에뮬레이터 사용: localhost:${FS_PORT} / ${AUTH_PORT})"
+    # 재사용 경로에는 `emulators:exec`가 없으므로 호스트를 직접 넘긴다 — 안 넘기면 검증
+    # 스크립트가 자기 기본값(8080/9099)으로 붙어, 포트를 바꾼 순간 여기만 조용히 깨진다.
+    run "Firestore rules" env \
+      "FIRESTORE_EMULATOR_HOST=localhost:${FS_PORT}" \
+      "FIREBASE_AUTH_EMULATOR_HOST=localhost:${AUTH_PORT}" \
+      bash tool/verify_firestore_rules.sh
   elif [[ "${fs_up}" -eq 1 || "${auth_up}" -eq 1 ]]; then
     # 한쪽만 떠 있으면 직접 띄우는 것도 **반드시** 포트 충돌로 죽는다. 그대로 돌리면
     # 그 실패가 요약에 `✗ Firestore rules`로 찍혀 규칙 결함처럼 읽힌다 — 셋업 문제는
