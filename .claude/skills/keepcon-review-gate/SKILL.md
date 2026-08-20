@@ -43,9 +43,7 @@ CodeRabbit   pass   0s   "Review skipped: manual review required for this OSS re
 ```text
 /code-review          ← 커밋 전 (내장 — 일반적 정확성·단순화)
 커밋
-로컬 검증              ← dart format · analyze · test · check_ssot · markdownlint · (규칙 변경 시) verify_firestore_rules
-                         (CI `Format · Analyze · Test` 잡의 네 스텝과 1:1 — `dart format`은 별개 스텝이라
-                          `analyze`만 돌리면 놓친다. 그 잡이 유일한 룰셋 필수 체크다)
+로컬 검증              ← bash tool/verify.sh   (Windows: tool\verify.cmd)
 keepcon-code-reviewer ← 푸시 전 (전용 — 저장소 맥락·실행 검증·뮤테이션)
 반영 → 푸시 → PR   ← **PR 본문에 `에이전트 리뷰: <리뷰한 SHA>`를 적는다**(5번에서 대조)
 [여기부터 이 스킬] CI → CodeRabbit → 3b(SHA) → (STALE이면 반영 후 재트리거) → 머지
@@ -67,9 +65,18 @@ keepcon-code-reviewer ← 푸시 전 (전용 — 저장소 맥락·실행 검증
 있고 `git status --porcelain`이 비어 있을 것"을 요구한다 — **커밋 전에 돌리면 그 수단이
 원리상 죽는다.**
 
-CI를 아직 못 본다는 것이 유일한 손해인데 실질적이지 않다. 위 로컬 검증이 CI 세 잡과 같은
-것들을 돌린다(`Firestore rules`는 규칙을 건드린 PR에서만 로컬로 돌리므로, 그 경우가 아니면
-CI 쪽이 한 겹 더 본다).
+CI를 아직 못 본다는 것이 유일한 손해인데 실질적이지 않다. `tool/verify.sh`가 CI 세 잡과
+같은 도구를 돌리고, **규칙 계층 입력**(`firestore.rules`·`tool/verify_firestore_rules.sh`·
+`firebase.json`)이 바뀌었으면 규칙 검증까지 자동으로 붙인다.
+
+⚠️ 트리거를 규칙 파일 하나로 좁히지 않은 이유: CI의 `Firestore rules` 잡은 경로 필터가
+없어 **모든 PR에서** 돈다. 로컬이 더 좁으면 검증 케이스만 고친 변경이 로컬에서 통과하고
+CI에서 처음 빨개진다.
+
+그 자동 판단이 이 스크립트의 존재 이유다. 예전에는 규칙 검증이 "규칙을 바꿨을 때만" 도는
+조건부라 매번 사람이 판단했고, PR #104에서 규칙을 세 번 고치는 동안 **세 번 다 건너뛰었다** —
+규칙이 자기 픽스처를 깨거나 없는 문서 접근이 403이 되어 정리 경로가 죽는 결함이 매번 다음
+리뷰 라운드에 가서야 드러났다. 판단을 사람에게 남겨 두면 그 판단이 실패한다.
 
 ## 절차
 
