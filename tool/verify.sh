@@ -83,6 +83,8 @@ rules_changed() {
   git status --porcelain -- "${RULES_INPUTS[@]}" 2>/dev/null | grep -q . && return 0
   if ! git rev-parse --verify --quiet "${BASE}" >/dev/null; then
     base_unknown=1
+    base_unknown_why="ref 부재"
+    base_unknown_fix="git fetch origin develop:refs/remotes/origin/develop"
     return 0
   fi
   # ⚠️ ref가 **있어도** merge base가 없으면(얕은 클론, 관련 없는 히스토리) triple-dot이
@@ -91,6 +93,8 @@ rules_changed() {
   local changed path
   if ! changed=$(git diff --name-only "${BASE}...HEAD" 2>/dev/null); then
     base_unknown=1
+    base_unknown_why="merge base 없음(얕은 클론·무관한 히스토리)"
+    base_unknown_fix="git fetch --unshallow"
     return 0
   fi
   for path in "${RULES_INPUTS[@]}"; do
@@ -101,13 +105,27 @@ rules_changed() {
 
 # 포트는 `firebase.json`이 정본이다. 8080/9099를 스크립트에 박아 두면 포트를 바꾼 순간
 # ①떠 있는 에뮬레이터를 못 찾고 ②재사용 경로가 죽은 기본 포트로 붙는다(`emulators:exec`
-# 경로만 환경변수를 받으므로 그쪽은 살아 있어 한쪽만 조용히 깨진다).
-read -r FS_PORT AUTH_PORT <<<"$(node -e '
+# 경로는 CLI가 환경변수를 주입하므로 살아 있어, 한쪽만 조용히 깨진다).
+#
+# ⚠️ 지금 이 정본을 따르는 것은 **이 스크립트뿐**이다. `tool/seed_emulator.sh`(9099/8080
+#    하드코딩)와 `lib/shared/firebase/firebase_bootstrap.dart`의 `kAuthEmulatorPort`·
+#    `kFirestoreEmulatorPort`는 아직 각자 값을 들고 있어, 포트를 바꾸면 그 둘은 따로 고쳐야
+#    한다. 주석은 게이트가 아니므로 이것만으로는 부족하다 — 셸 쪽 파싱 공용화와
+#    `tool/check_ssot.sh`의 포트 대조는 별도 PR로 뺀다.
+if ! _ports=$(node -e '
   const c = require("./firebase.json").emulators || {};
   process.stdout.write(`${(c.firestore||{}).port||8080} ${(c.auth||{}).port||9099}`);
-' 2>/dev/null || echo "8080 9099")"
+' 2>/dev/null); then
+  # 폴백이 조용하면 커스텀 포트 환경에서 "에뮬레이터가 절반만 떠 있다"는 엉뚱한 진단이 나온다
+  # — 원인은 포트를 못 읽은 것인데 진단은 에뮬레이터를 가리킨다.
+  echo "⚠️ firebase.json에서 에뮬레이터 포트를 읽지 못했다(node 부재 또는 JSON 파손) — 기본값 8080/9099로 진행한다."
+  _ports="8080 9099"
+fi
+read -r FS_PORT AUTH_PORT <<<"${_ports}"
 
 base_unknown=0
+base_unknown_why=""
+base_unknown_fix=""
 
 if [[ "${SKIP_RULES:-}" == "1" ]]; then
   step "Firestore rules — SKIP_RULES=1 로 건너뜀"
@@ -117,8 +135,8 @@ if [[ "${SKIP_RULES:-}" == "1" ]]; then
     # 단 "바뀌었다"와 "판별하지 못했다"는 다른 사실이므로 섞어 말하지 않는다 — 후자에게
     # 전자의 진단을 주면 있지도 않은 규칙 변경을 자기 diff에서 찾게 된다.
     if [[ "${base_unknown}" -eq 1 ]]; then
-      echo "  ✗ BASE(${BASE}) 기준 변경을 판별하지 못했다(ref 부재 또는 merge base 없음) — 건너뛴 채로는 푸시 가부를 판정할 수 없다."
-      echo "     (BASE=origin/main 처럼 지정하거나 git fetch --unshallow 하면 판별이 정확해진다)"
+      echo "  ✗ BASE(${BASE}) 기준 변경을 판별하지 못했다(${base_unknown_why}) — 건너뛴 채로는 푸시 가부를 판정할 수 없다."
+      echo "     (BASE=origin/main 처럼 지정하거나 \`${base_unknown_fix}\` 하면 판별이 정확해진다)"
     else
       echo "  ✗ 규칙 입력이 바뀌었는데 검증을 건너뛰었다 — 이 실행으로는 푸시 가부를 판정할 수 없다."
     fi
@@ -130,8 +148,8 @@ if [[ "${SKIP_RULES:-}" == "1" ]]; then
 elif rules_changed; then
   if [[ "${base_unknown}" -eq 1 ]]; then
     step "Firestore rules (BASE 판별 불가 — 안전하게 실검증)"
-    echo "  ⚠️ BASE(${BASE}) 기준 변경을 판별할 수 없다(ref 부재 또는 merge base 없음) — 그냥 돌린다."
-    echo "     (BASE=origin/main 처럼 지정하거나 git fetch --unshallow 하면 이 경고가 사라진다)"
+    echo "  ⚠️ BASE(${BASE}) 기준 변경을 판별할 수 없다(${base_unknown_why}) — 그냥 돌린다."
+    echo "     (BASE=origin/main 처럼 지정하거나 \`${base_unknown_fix}\` 하면 이 경고가 사라진다)"
   else
     step "Firestore rules (규칙 계층 입력 변경 감지 — 에뮬레이터로 실검증)"
   fi
@@ -146,9 +164,12 @@ elif rules_changed; then
     echo "  (실행 중인 에뮬레이터 사용: localhost:${FS_PORT} / ${AUTH_PORT})"
     # 재사용 경로에는 `emulators:exec`가 없으므로 호스트를 직접 넘긴다 — 안 넘기면 검증
     # 스크립트가 자기 기본값(8080/9099)으로 붙어, 포트를 바꾼 순간 여기만 조용히 깨진다.
+    # auth는 `AUTH_EMULATOR_HOST`(저장소 자체 노브)로 넘긴다. 수신 측이 그것을
+    # `FIREBASE_AUTH_EMULATOR_HOST`(CLI가 주입하는 이름)보다 **먼저** 보므로, 사용자 셸에
+    # 그 변수가 남아 있어도 여기서 넘긴 값이 이긴다 — 낮은 쪽으로 넘기면 조용히 진다.
     run "Firestore rules" env \
       "FIRESTORE_EMULATOR_HOST=localhost:${FS_PORT}" \
-      "FIREBASE_AUTH_EMULATOR_HOST=localhost:${AUTH_PORT}" \
+      "AUTH_EMULATOR_HOST=localhost:${AUTH_PORT}" \
       bash tool/verify_firestore_rules.sh
   elif [[ "${fs_up}" -eq 1 || "${auth_up}" -eq 1 ]]; then
     # 한쪽만 떠 있으면 직접 띄우는 것도 **반드시** 포트 충돌로 죽는다. 그대로 돌리면
