@@ -124,9 +124,13 @@ extension ThemeTokensX on BuildContext {
   TextStyle? get pageHeaderStyle => _tt.headlineSmall?.copyWith(
       fontSize: 26, fontWeight: FontWeight.w900, letterSpacing: -0.5);
 
-  /// 멤버 초대코드(강조) — 24·w800·자간 2.
+  /// 멤버 초대 토큰(강조) — 15·w700·자간 0.3.
+  ///
+  /// 예전에는 24pt·자간 2였다. 그때 값은 사람이 눈으로 읽고 손으로 옮겨 적는 6자리
+  /// 숫자였기 때문이다. 지금은 **추측 불가능한 128비트 토큰**이라 22자이고, 쓰는 방법도
+  /// 옆의 복사 버튼뿐이다 — 큰 글씨·넓은 자간은 값을 잘리게만 만든다.
   TextStyle? get inviteTokenStyle => _tt.titleLarge
-      ?.copyWith(fontSize: 24, fontWeight: FontWeight.w800, letterSpacing: 2);
+      ?.copyWith(fontSize: 15, fontWeight: FontWeight.w700, letterSpacing: 0.3);
 
   /// 멤버 초대 본문 타이틀("그룹명 그룹으로 초대") — 23·w900·자간 -0.5.
   TextStyle? get inviteTitleStyle => _tt.headlineSmall?.copyWith(
