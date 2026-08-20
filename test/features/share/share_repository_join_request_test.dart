@@ -122,11 +122,65 @@ void main() {
       );
     });
 
-    // 만료된 초대에 대한 거부는 여기서 검증하지 못한다 — in-memory 구현에 시계를
-    // 주입할 방법이 없어 `inviteExpiresAt`을 과거로 만든 그룹을 만들 수 없다(같은
-    // 이유로 기존 `joinGroup`의 만료 가드도 미검증 상태다). 만료 판정 자체는 모델의
-    // `Group.isInviteExpired`가 단일 진입점이며 `requestToJoin`이 그것을 그대로
-    // 소비한다. 실제 거부는 Firestore 구현과 함께 규칙 검증에서 확인한다.
+    test('만료된 초대로는 요청할 수 없다', () async {
+      // 시계를 앞으로 돌려 정상 생성된 그룹의 초대를 만료시킨다 — 저장소에 과거
+      // 만료를 가진 그룹을 직접 넣을 방법이 없어서 이 주입이 유일한 검증 경로다.
+      DateTime clockNow = DateTime.now();
+      final InMemoryShareRepository aged = InMemoryShareRepository(
+        authRepository: auth,
+        gifticonRepository: gifticons,
+        now: () => clockNow,
+      );
+      addTearDown(aged.dispose);
+
+      final Group g = await aged.createGroup(name: '우리집', emoji: '🏠');
+      expect(g.isInviteExpired(clockNow), isFalse);
+
+      clockNow = clockNow.add(Group.inviteValidity * 2);
+      await asGuest();
+      await expectLater(
+        aged.requestToJoin(g.inviteToken),
+        throwsA(isA<StateError>()),
+      );
+    });
+
+    test('만료된 초대는 joinGroup도 거부한다(기존 가드 — 처음으로 고정)', () async {
+      DateTime clockNow = DateTime.now();
+      final InMemoryShareRepository aged = InMemoryShareRepository(
+        authRepository: auth,
+        gifticonRepository: gifticons,
+        now: () => clockNow,
+      );
+      addTearDown(aged.dispose);
+
+      final Group g = await aged.createGroup(name: '우리집', emoji: '🏠');
+      clockNow = clockNow.add(Group.inviteValidity * 2);
+
+      await asGuest();
+      await expectLater(
+        aged.joinGroup(g.inviteToken),
+        throwsA(isA<StateError>()),
+      );
+    });
+
+    test('재발급하면 만료 창이 다시 열린다', () async {
+      DateTime clockNow = DateTime.now();
+      final InMemoryShareRepository aged = InMemoryShareRepository(
+        authRepository: auth,
+        gifticonRepository: gifticons,
+        now: () => clockNow,
+      );
+      addTearDown(aged.dispose);
+
+      final Group g = await aged.createGroup(name: '우리집', emoji: '🏠');
+      clockNow = clockNow.add(Group.inviteValidity * 2);
+      final Group fresh = await aged.regenerateInviteToken(groupId: g.id);
+      expect(fresh.isInviteExpired(clockNow), isFalse);
+
+      await asGuest();
+      final JoinRequest req = await aged.requestToJoin(fresh.inviteToken);
+      expect(req.isPending, isTrue);
+    });
 
     test('이미 멤버면 요청할 수 없다', () async {
       final Group g = await createOwnedGroup();

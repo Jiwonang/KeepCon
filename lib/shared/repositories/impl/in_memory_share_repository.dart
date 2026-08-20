@@ -32,17 +32,29 @@ class InMemoryShareRepository implements ShareRepository {
   /// 세션([AuthRepository])·원본 기프티콘([GifticonRepository]) 저장소를 주입해 생성한다.
   ///
   /// [seed]가 `true`면 데모용 시드 그룹/공유/이력/알림을 채운다(현재 사용자 기준).
+  /// [now]는 **만료 판정에만** 쓰는 시계다(기본 [DateTime.now]).
+  ///
+  /// 이것이 없으면 초대 만료 가드를 어떤 테스트도 고정하지 못한다 — 저장소에 과거
+  /// 만료를 가진 그룹을 넣을 방법이 없기 때문이다. 유출된 링크의 유효기간을 강제하는
+  /// 가드라 회귀가 조용히 통과하면 안 된다. 시계를 앞으로 돌리면 정상 생성된 그룹이
+  /// 만료된 것으로 보이므로, 그 경로를 그대로 검증할 수 있다.
   InMemoryShareRepository({
     required AuthRepository authRepository,
     required GifticonRepository gifticonRepository,
     bool seed = true,
+    DateTime Function()? now,
   })  : _auth = authRepository,
-        _gifticons = gifticonRepository {
+        _gifticons = gifticonRepository,
+        _now = now ?? DateTime.now {
     if (seed) _seed();
   }
 
   final AuthRepository _auth;
   final GifticonRepository _gifticons;
+
+  /// 만료 판정용 시계. 표시·기록용 시각은 여전히 [DateTime.now]를 쓴다 —
+  /// 주입 범위를 만료로 좁혀 두어야 무엇을 검증하는 장치인지 흐려지지 않는다.
+  final DateTime Function() _now;
 
   final List<Group> _groups = <Group>[];
   final Map<String, List<SharedGifticon>> _sharedByGroup =
@@ -168,15 +180,15 @@ class InMemoryShareRepository implements ShareRepository {
   Future<Group> joinGroup(String inviteToken) async {
     final User me = _requireUser();
 
-    // 저장된 그룹을 초대코드로 먼저 조회한다(계약 준수 — Firebase 구현과 동일하게
+    // 저장된 그룹을 초대 토큰으로 먼저 조회한다(계약 준수 — Firebase 구현과 동일하게
     // 만료·멤버십을 검증). 실제 그룹이 있으면 그 그룹에 합류한다.
     final int existing =
         _groups.indexWhere((Group g) => g.inviteToken == inviteToken);
     if (existing >= 0) {
       final Group g = _groups[existing];
       if (g.isMember(me.id)) return g; // 이미 멤버면 no-op.
-      if (g.isInviteExpired(DateTime.now())) {
-        throw StateError('Invite code expired: $inviteToken');
+      if (g.isInviteExpired(_now())) {
+        throw StateError('Invite token expired: $inviteToken');
       }
       if (g.isFull) {
         throw StateError('Group is full: ${g.id}');
@@ -334,12 +346,12 @@ class InMemoryShareRepository implements ShareRepository {
     final User me = _requireUser();
     final Group g = _requireGroup(groupId);
     if (!g.isOwnedBy(me.id)) {
-      throw StateError('Only the owner can regenerate invite code: $groupId');
+      throw StateError('Only the owner can regenerate invite token: $groupId');
     }
     // 새 코드 발급 + 만료 창 갱신(재발급 시점부터 다시 24시간).
     final Group updated = g.copyWith(
       inviteToken: _nextToken(),
-      inviteExpiresAt: DateTime.now().add(Group.inviteValidity),
+      inviteExpiresAt: _now().add(Group.inviteValidity),
     );
     _groups[_groupIndex(groupId)] = updated;
     _emit();
@@ -389,7 +401,7 @@ class InMemoryShareRepository implements ShareRepository {
     if (g == null) {
       throw StateError('No group for invite token: $inviteToken');
     }
-    if (g.isInviteExpired(DateTime.now())) {
+    if (g.isInviteExpired(_now())) {
       throw StateError('Invite token expired: $inviteToken');
     }
     if (g.isMember(me.id)) {

@@ -64,6 +64,17 @@ class FirebaseShareRepository implements ShareRepository {
   static const String shareLocksCollection = 'shareLocks';
   static const String notificationReadsCollection = 'notificationReads';
 
+  /// 참여 요청. 문서 id는 `{groupId}_{userId}` — (그룹, 사용자)당 하나라는 계약을
+  /// 저장소 차원에서 강제한다(멱등 재요청이 새 문서를 만들지 않는다).
+  static const String joinRequestsCollection = 'joinRequests';
+
+  /// 초대 토큰 → 그룹 조회 문서. 문서 id가 곧 토큰이다.
+  ///
+  /// **비멤버는 `groups`를 읽을 수 없으므로**(보안 규칙) 토큰만으로 그룹을 찾으려면
+  /// 이 문서가 필요하다. 담는 것은 `groupId`와 만료 시각뿐이다 — 그룹명·이모지·인원은
+  /// 승인 전 요청자에게 보여주지 않는 정책이라 저장하지 않는다(저장하면 언젠가 샌다).
+  static const String inviteTokensCollection = 'inviteTokens';
+
   static const String _defaultAvatar = '🙂';
 
   CollectionReference<Map<String, dynamic>> get _groups =>
@@ -78,6 +89,10 @@ class FirebaseShareRepository implements ShareRepository {
       _db.collection(notificationReadsCollection);
   CollectionReference<Map<String, dynamic>> get _locks =>
       _db.collection(shareLocksCollection);
+  CollectionReference<Map<String, dynamic>> get _joinRequests =>
+      _db.collection(joinRequestsCollection);
+  CollectionReference<Map<String, dynamic>> get _inviteTokens =>
+      _db.collection(inviteTokensCollection);
 
   User _requireUser() {
     final User? user = _auth.currentUser;
@@ -135,6 +150,11 @@ class FirebaseShareRepository implements ShareRepository {
       ],
     );
     await ref.set(_groupToDoc(g));
+    // 토큰 조회 문서는 **그룹 다음에** 쓴다 — 규칙이 `get(groups/{id}).ownerId`로
+    // 소유권을 확인하므로 그룹이 아직 없으면 거부된다(배치로 묶어도 규칙은 커밋 전
+    // 상태를 본다). 실패하면 그대로 던진다 — 조용히 넘기면 링크가 아무도 못 여는
+    // 그룹이 생기고, 그 사실이 초대 화면에서는 드러나지 않는다.
+    await _inviteTokens.doc(g.inviteToken).set(_inviteTokenToDoc(g));
     return g;
   }
 
@@ -191,6 +211,21 @@ class FirebaseShareRepository implements ShareRepository {
     final DocumentReference<Map<String, dynamic>> ref = _groups.doc(groupId);
     bool cascade = false;
 
+    // 그룹이 사라질 참이면 참여 요청·토큰을 **먼저** 거둔다 — 삭제 뒤에는 규칙의
+    // 소유권 검사가 통째로 거짓이 되어 손도 못 댄다(`_cascadeDeleteGroupJoinArtifacts`).
+    // 트랜잭션 밖의 선행 읽기라 그사이 누가 합류하면 헛되이 지울 수 있는데, 여기 오는
+    // 사람은 정의상 마지막 멤버이자 방장이고 승인 권한도 그 사람뿐이라 실질 위험이 없다.
+    final DocumentSnapshot<Map<String, dynamic>> pre = await ref.get();
+    if (pre.exists) {
+      final Group? g = _groupFromDocOrNull(pre);
+      final bool willVanish = g != null &&
+          g.isMember(me.id) &&
+          g.members.where((GroupMember m) => m.userId != me.id).isEmpty;
+      if (willVanish) {
+        await _cascadeDeleteGroupJoinArtifacts(groupId, g.inviteToken);
+      }
+    }
+
     await _db.runTransaction<void>((Transaction tx) async {
       final DocumentSnapshot<Map<String, dynamic>> doc = await tx.get(ref);
       if (!doc.exists) throw StateError('Group not found: $groupId');
@@ -230,6 +265,18 @@ class FirebaseShareRepository implements ShareRepository {
   Future<void> deleteGroup(String groupId) async {
     final User me = _requireUser();
     final DocumentReference<Map<String, dynamic>> ref = _groups.doc(groupId);
+
+    // 참여 요청·토큰은 그룹이 살아 있을 때만 지울 수 있다(규칙이 소유권을 그룹 문서로
+    // 확인한다). 그래서 삭제 **앞**에 거둔다. 소유권은 아래 트랜잭션이 다시 검사하므로
+    // 이 선행 검사는 "권한 없는 사람이 남의 그룹 요청을 지우는 것"만 막으면 된다 —
+    // 규칙도 같은 것을 막지만, 여기서 걸러야 헛된 왕복이 없다.
+    final DocumentSnapshot<Map<String, dynamic>> pre = await ref.get();
+    if (pre.exists) {
+      final Group? g = _groupFromDocOrNull(pre);
+      if (g != null && g.isOwnedBy(me.id)) {
+        await _cascadeDeleteGroupJoinArtifacts(groupId, g.inviteToken);
+      }
+    }
 
     await _db.runTransaction<void>((Transaction tx) async {
       final DocumentSnapshot<Map<String, dynamic>> doc = await tx.get(ref);
@@ -336,78 +383,294 @@ class FirebaseShareRepository implements ShareRepository {
     // 만료 창은 재발급 시점부터 다시 24시간(트랜잭션 재시도에도 값이 흔들리지 않게 밖에서 고정).
     final DateTime expiresAt = DateTime.now().add(Group.inviteValidity);
 
-    return _db.runTransaction<Group>((Transaction tx) async {
+    String? oldToken;
+    final Group updated =
+        await _db.runTransaction<Group>((Transaction tx) async {
       final DocumentSnapshot<Map<String, dynamic>> doc = await tx.get(ref);
       if (!doc.exists) throw StateError('Group not found: $groupId');
       final Group g = _groupFromDoc(doc);
       if (!g.isOwnedBy(me.id)) {
-        throw StateError('Only the owner can regenerate invite code: $groupId');
+        throw StateError(
+            'Only the owner can regenerate invite token: $groupId');
       }
-      final Group updated =
+      oldToken = g.inviteToken;
+      final Group next =
           g.copyWith(inviteToken: _randomToken(), inviteExpiresAt: expiresAt);
       tx.update(ref, <String, dynamic>{
-        'inviteToken': updated.inviteToken,
+        'inviteToken': next.inviteToken,
         'inviteExpiresAt': Timestamp.fromDate(expiresAt),
       });
-      return updated;
+      return next;
     });
+
+    // 옛 토큰 조회 문서를 **먼저** 지운다. 재발급의 계약은 "기존 링크 무효화"인데,
+    // 새 문서를 먼저 쓰면 둘 다 열리는 창이 생긴다. 반대로 지우고 나서 쓰기가
+    // 실패하면 링크가 잠깐 죽을 뿐이고, 그건 다시 재발급하면 복구된다(fail-closed).
+    if (oldToken != null && oldToken != updated.inviteToken) {
+      await _inviteTokens.doc(oldToken!).delete();
+    }
+    await _inviteTokens
+        .doc(updated.inviteToken)
+        .set(_inviteTokenToDoc(updated));
+    return updated;
   }
 
   // ── 참여 요청(초대 링크 → 방장 승인) ────────────────────────────────
   //
-  // **아직 구현하지 않았다.** 계약과 in-memory 구현을 먼저 확정하고, Firestore 구현은
-  // 다음 단계에서 스키마와 함께 넣는다. 이 경로는 저장소 스키마 결정에 통째로 매여 있다 —
-  // 비멤버는 보안 규칙상 `groups`를 읽을 수 없으므로 토큰으로 그룹을 찾으려면 토큰을
-  // 키로 하는 별도 조회 문서가 필요하고, 그 문서를 어떤 모양으로 둘지가 규칙·인덱스를
-  // 함께 정한다. 지금 지어 두면 그 결정이 내려질 때 통째로 다시 쓰게 된다.
-  //
-  // 그때까지 이 메서드들을 호출하는 화면은 없다(참여 요청 UI가 아직 없다). 조용히
-  // 아무 일도 안 하는 스텁 대신 [UnimplementedError]를 던지는 이유 — 배선이 먼저
-  // 들어왔을 때 즉시 드러나게 하려는 것이다.
-  static Never _joinRequestsNotOnFirebaseYet() => throw UnimplementedError(
-        '참여 요청은 Firestore 구현이 아직 없습니다. '
-        'InMemoryShareRepository(USE_DEMO)에서만 동작합니다.',
+  // 비멤버는 보안 규칙상 `groups`를 읽을 수 없다. 그래서 토큰으로 그룹을 찾는 일은
+  // `inviteTokens/{token}` 문서가 대신한다 — 그 문서는 `groupId`와 만료 시각만 담고,
+  // 규칙은 **get만 허용하고 list는 막는다**(토큰을 모르면 목록으로 훑을 수 없다).
+
+  /// (그룹, 사용자)당 요청 하나를 강제하는 결정론적 문서 id.
+  String _joinRequestId(String groupId, String userId) => '${groupId}_$userId';
+
+  Map<String, dynamic> _inviteTokenToDoc(Group g) => <String, dynamic>{
+        'groupId': g.id,
+        'expiresAt': Timestamp.fromDate(g.inviteExpiresAt),
+      };
+
+  /// 손상 문서를 `null`로 흘려보내는 **읽기 전용** 매퍼(목록이 통째로 죽지 않게).
+  /// 쓰기 판정에는 이 결과를 그대로 믿지 않는다 — 승인·거절은 원본 필드를 다시 본다.
+  JoinRequest? _joinRequestFromDocOrNull(
+    DocumentSnapshot<Map<String, dynamic>> doc,
+  ) {
+    final Map<String, dynamic> d = doc.data() ?? const <String, dynamic>{};
+    final Object? groupId = d['groupId'];
+    final Object? userId = d['userId'];
+    final Object? requestedAt = d['requestedAt'];
+    if (groupId is! String || groupId.isEmpty) return null;
+    if (userId is! String || userId.isEmpty) return null;
+    if (requestedAt is! Timestamp) return null;
+    return JoinRequest(
+      id: doc.id,
+      groupId: groupId,
+      userId: userId,
+      displayName: d['displayName'] is String ? d['displayName'] as String : '',
+      avatarEmoji: d['avatarEmoji'] is String
+          ? d['avatarEmoji'] as String
+          : _defaultAvatar,
+      requestedAt: requestedAt.toDate(),
+      status: _joinRequestStatusFrom(d['status']),
+    );
+  }
+
+  /// 상태 문자열 → enum. **판정 불가는 거절로 닫는다(fail-closed).**
+  ///
+  /// 대기로 읽으면 처리가 끝난 요청이 방장의 대기 목록에 되살아나 같은 사람을 두 번
+  /// 승인하게 된다 — 안전한 쪽은 "이미 끝난 것으로 본다"이다.
+  JoinRequestStatus _joinRequestStatusFrom(Object? raw) {
+    for (final JoinRequestStatus s in JoinRequestStatus.values) {
+      if (s.name == raw) return s;
+    }
+    return JoinRequestStatus.rejected;
+  }
+
+  List<JoinRequest> _joinRequestsFrom(
+    QuerySnapshot<Map<String, dynamic>> snap,
+  ) =>
+      List<JoinRequest>.unmodifiable(
+        snap.docs.map(_joinRequestFromDocOrNull).whereType<JoinRequest>(),
       );
 
   @override
-  Future<JoinRequest> requestToJoin(String inviteToken) async =>
-      _joinRequestsNotOnFirebaseYet();
+  Future<JoinRequest> requestToJoin(String inviteToken) async {
+    final User me = _requireUser();
+
+    final DocumentSnapshot<Map<String, dynamic>> tokenDoc =
+        await _inviteTokens.doc(inviteToken).get();
+    final Map<String, dynamic> t = tokenDoc.data() ?? const <String, dynamic>{};
+    final Object? groupId = t['groupId'];
+    if (!tokenDoc.exists || groupId is! String || groupId.isEmpty) {
+      throw StateError('No group for invite token: $inviteToken');
+    }
+    // 만료는 토큰 문서가 들고 있다(비멤버가 그룹을 못 읽으므로). 값이 없거나 손상이면
+    // 만료로 닫는다 — 레거시 문서를 만료로 읽는 기존 규약과 같은 fail-closed다.
+    final Object? expiresAt = t['expiresAt'];
+    if (expiresAt is! Timestamp ||
+        !DateTime.now().isBefore(expiresAt.toDate())) {
+      throw StateError('Invite token expired: $inviteToken');
+    }
+
+    // 이미 멤버인지 — 멤버는 그룹을 읽을 수 있고 비멤버는 규칙에 막힌다. 그 차이를
+    // 그대로 판정에 쓴다(읽지 못하는 것이 비멤버의 정상 경로다).
+    try {
+      final Group? g = await getGroupById(groupId);
+      if (g != null && g.isMember(me.id)) {
+        throw StateError('Already a member of group: $groupId');
+      }
+    } on FirebaseException {
+      // 읽기 거부 = 비멤버. 요청을 계속 진행한다.
+    }
+
+    final DocumentReference<Map<String, dynamic>> ref =
+        _joinRequests.doc(_joinRequestId(groupId, me.id));
+
+    return _db.runTransaction<JoinRequest>((Transaction tx) async {
+      final DocumentSnapshot<Map<String, dynamic>> prev = await tx.get(ref);
+      final JoinRequest? existing =
+          prev.exists ? _joinRequestFromDocOrNull(prev) : null;
+      if (existing != null && existing.isPending) {
+        return existing; // 멱등 — 같은 링크를 두 번 눌러도 요청이 쌓이지 않는다.
+      }
+      // 결정이 끝난 요청(거절, 또는 승인 후 강퇴)은 다시 대기로 되돌린다.
+      final JoinRequest req = JoinRequest(
+        id: ref.id,
+        groupId: groupId,
+        userId: me.id,
+        displayName: me.displayName,
+        avatarEmoji: _defaultAvatar,
+        requestedAt: DateTime.now(),
+      );
+      tx.set(ref, <String, dynamic>{
+        'groupId': req.groupId,
+        'userId': req.userId,
+        'displayName': req.displayName,
+        'avatarEmoji': req.avatarEmoji,
+        'requestedAt': Timestamp.fromDate(req.requestedAt),
+        'status': req.status.name,
+      });
+      return req;
+    });
+  }
 
   @override
-  Stream<List<JoinRequest>> watchMyJoinRequests(String userId) async* {
-    // `async*`가 아니면 호출 지점에서 동기 throw가 되어, build나 initState
-    // 안에서 스트림을 만드는 순간 프레임이 죽는다. 나머지 6개(Future)는 에러가
-    // Future로 전달되므로 실패 방식을 여기에 맞춘다.
-    _joinRequestsNotOnFirebaseYet();
-  }
+  Stream<List<JoinRequest>> watchMyJoinRequests(String userId) => _joinRequests
+      .where('userId', isEqualTo: userId)
+      .orderBy('requestedAt', descending: true)
+      .snapshots()
+      .map(_joinRequestsFrom);
 
   @override
   Future<List<JoinRequest>> getMyJoinRequests(String userId) async =>
-      _joinRequestsNotOnFirebaseYet();
+      _joinRequestsFrom(await _joinRequests
+          .where('userId', isEqualTo: userId)
+          .orderBy('requestedAt', descending: true)
+          .get());
 
   @override
-  Stream<List<JoinRequest>> watchPendingJoinRequests(String groupId) async* {
-    // `async*`가 아니면 호출 지점에서 동기 throw가 되어, build나 initState
-    // 안에서 스트림을 만드는 순간 프레임이 죽는다. 나머지 6개(Future)는 에러가
-    // Future로 전달되므로 실패 방식을 여기에 맞춘다.
-    _joinRequestsNotOnFirebaseYet();
-  }
+  Stream<List<JoinRequest>> watchPendingJoinRequests(String groupId) =>
+      _pendingQuery(groupId).snapshots().map(_joinRequestsFrom);
 
   @override
   Future<List<JoinRequest>> getPendingJoinRequests(String groupId) async =>
-      _joinRequestsNotOnFirebaseYet();
+      _joinRequestsFrom(await _pendingQuery(groupId).get());
+
+  /// 대기 중 요청 — 오래된 순(먼저 기다린 사람이 위). **읽기 권한은 방장뿐**이다.
+  Query<Map<String, dynamic>> _pendingQuery(String groupId) => _joinRequests
+      .where('groupId', isEqualTo: groupId)
+      .where('status', isEqualTo: JoinRequestStatus.pending.name)
+      .orderBy('requestedAt');
 
   @override
-  Future<Group> approveJoinRequest(String joinRequestId) async =>
-      _joinRequestsNotOnFirebaseYet();
+  Future<Group> approveJoinRequest(String joinRequestId) async {
+    final User me = _requireUser();
+    final DocumentReference<Map<String, dynamic>> reqRef =
+        _joinRequests.doc(joinRequestId);
+
+    return _db.runTransaction<Group>((Transaction tx) async {
+      final DocumentSnapshot<Map<String, dynamic>> reqDoc =
+          await tx.get(reqRef);
+      if (!reqDoc.exists) {
+        throw StateError('Join request not found: $joinRequestId');
+      }
+      final JoinRequest? req = _joinRequestFromDocOrNull(reqDoc);
+      if (req == null) {
+        throw StateError('Malformed join request: $joinRequestId');
+      }
+      final DocumentReference<Map<String, dynamic>> groupRef =
+          _groups.doc(req.groupId);
+      final DocumentSnapshot<Map<String, dynamic>> groupDoc =
+          await tx.get(groupRef);
+      if (!groupDoc.exists) throw StateError('Group not found: ${req.groupId}');
+      // 아래에서 `_groupToDoc`으로 문서 **전체**를 되쓰므로 엄격 매퍼로 읽는다 —
+      // 관대 매퍼로 읽으면 그 폴백(정원 클램프·초대 정책·만료)이 되쓰기로 굳는다.
+      final Group g = _groupFromDocForFullWrite(groupDoc);
+
+      // 가드를 **전부** 통과한 뒤에 쓴다 — 중간에 던지면 요청만 승인으로 남고
+      // 멤버는 안 들어간 어긋난 상태가 된다.
+      if (!g.isOwnedBy(me.id)) {
+        throw StateError('Only the owner can approve join requests: ${g.id}');
+      }
+      if (!req.isPending) {
+        throw StateError('Join request is already decided: $joinRequestId');
+      }
+      final bool alreadyMember = g.isMember(req.userId);
+      if (!alreadyMember && g.isFull) {
+        throw StateError('Group is full: ${g.id}');
+      }
+
+      tx.update(reqRef, <String, dynamic>{
+        'status': JoinRequestStatus.approved.name,
+      });
+      if (alreadyMember) {
+        // 다른 경로로 이미 멤버가 됐다면 요청만 정리한다(중복 추가 금지).
+        return g;
+      }
+
+      final Group updated = g.copyWith(
+        members: <GroupMember>[
+          ...g.members,
+          GroupMember(
+            userId: req.userId,
+            displayName: req.displayName,
+            avatarEmoji: req.avatarEmoji,
+            role: MemberRole.member,
+          ),
+        ],
+      );
+      tx.update(groupRef, _groupToDoc(updated));
+      return updated;
+    });
+  }
 
   @override
-  Future<JoinRequest> rejectJoinRequest(String joinRequestId) async =>
-      _joinRequestsNotOnFirebaseYet();
+  Future<JoinRequest> rejectJoinRequest(String joinRequestId) async {
+    final User me = _requireUser();
+    final DocumentReference<Map<String, dynamic>> reqRef =
+        _joinRequests.doc(joinRequestId);
+
+    return _db.runTransaction<JoinRequest>((Transaction tx) async {
+      final DocumentSnapshot<Map<String, dynamic>> reqDoc =
+          await tx.get(reqRef);
+      if (!reqDoc.exists) {
+        throw StateError('Join request not found: $joinRequestId');
+      }
+      final JoinRequest? req = _joinRequestFromDocOrNull(reqDoc);
+      if (req == null) {
+        throw StateError('Malformed join request: $joinRequestId');
+      }
+      final DocumentSnapshot<Map<String, dynamic>> groupDoc =
+          await tx.get(_groups.doc(req.groupId));
+      if (!groupDoc.exists) throw StateError('Group not found: ${req.groupId}');
+      if (!_groupFromDoc(groupDoc).isOwnedBy(me.id)) {
+        throw StateError(
+          'Only the owner can reject join requests: ${req.groupId}',
+        );
+      }
+      if (!req.isPending) {
+        throw StateError('Join request is already decided: $joinRequestId');
+      }
+      tx.update(reqRef, <String, dynamic>{
+        'status': JoinRequestStatus.rejected.name,
+      });
+      return req.copyWith(status: JoinRequestStatus.rejected);
+    });
+  }
 
   @override
-  Future<void> cancelJoinRequest(String joinRequestId) async =>
-      _joinRequestsNotOnFirebaseYet();
+  Future<void> cancelJoinRequest(String joinRequestId) async {
+    final User me = _requireUser();
+    final DocumentReference<Map<String, dynamic>> ref =
+        _joinRequests.doc(joinRequestId);
+    final DocumentSnapshot<Map<String, dynamic>> doc = await ref.get();
+    if (!doc.exists) {
+      throw StateError('Join request not found: $joinRequestId');
+    }
+    if (doc.data()?['userId'] != me.id) {
+      throw StateError('Only the requester can cancel: $joinRequestId');
+    }
+    await ref.delete();
+  }
 
   // ── 공유 기프티콘 ─────────────────────────────────────────────────────
   @override
@@ -618,6 +881,40 @@ class FirebaseShareRepository implements ShareRepository {
   /// ⚠️ 트랜잭션 밖 best-effort다(트랜잭션은 쿼리 불가). 중간에 실패하면 잔여 share/lock이
   /// 남을 수 있으므로, 항목당 (share, lock)을 **같은 배치**에 넣어 원자적으로 지우고,
   /// Firestore 500-op 한도를 넘지 않도록 청크로 나눈다.
+  /// 그룹이 **사라지기 전에** 참여 요청과 토큰 조회 문서를 거둔다.
+  ///
+  /// ⚠️ **반드시 그룹 삭제보다 먼저 부른다.** 두 컬렉션의 규칙은 소유권을
+  /// `get(groups/{id}).ownerId`로 확인하는데, 그룹이 이미 없으면 그 검사가 통째로
+  /// 거짓이 되어 읽기도 삭제도 막힌다 — 정리를 뒤에 두면 영원히 못 지운다.
+  ///
+  /// 요청을 남기면 안 되는 이유: 요청은 멤버십이 아니라 `userId`로 조회되므로,
+  /// 사라진 그룹을 가리키는 "대기 중"이 요청자 화면에 영원히 남는다(승인·거절은 그룹을
+  /// 못 찾아 던지고 방장도 없어서 아무도 끝낼 수 없다). in-memory의 `_dropJoinRequest`와
+  /// 같은 이유다. 토큰을 남기면 죽은 그룹을 가리키는 링크가 계속 열린다.
+  ///
+  /// 토큰은 **문서 id로** 지운다 — `inviteTokens`는 `list`가 막혀 있어(토큰을 모르는
+  /// 사람이 전부 훑어 그룹 id를 얻는 것을 막는 규칙) `where` 질의 자체가 거부된다.
+  Future<void> _cascadeDeleteGroupJoinArtifacts(
+    String groupId,
+    String inviteToken,
+  ) async {
+    final QuerySnapshot<Map<String, dynamic>> reqs =
+        await _joinRequests.where('groupId', isEqualTo: groupId).get();
+    const int chunkSize = 400;
+    final List<QueryDocumentSnapshot<Map<String, dynamic>>> docs = reqs.docs;
+    for (int i = 0; i < docs.length; i += chunkSize) {
+      final WriteBatch batch = _db.batch();
+      for (final QueryDocumentSnapshot<Map<String, dynamic>> d
+          in docs.skip(i).take(chunkSize)) {
+        batch.delete(d.reference);
+      }
+      await batch.commit();
+    }
+    if (inviteToken.isNotEmpty) {
+      await _inviteTokens.doc(inviteToken).delete();
+    }
+  }
+
   Future<void> _cascadeDeleteGroupShares(String groupId) async {
     final QuerySnapshot<Map<String, dynamic>> snap =
         await _shared.where('groupId', isEqualTo: groupId).get();

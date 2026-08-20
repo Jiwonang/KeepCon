@@ -78,16 +78,21 @@ fi
 
 TOKEN_A=$(signup "rules-a@keepcon.test")
 TOKEN_B=$(signup "rules-b@keepcon.test")
-if [[ -z "${TOKEN_A}" || -z "${TOKEN_B}" ]]; then
+# C는 어느 그룹에도 속하지 않는 제3자다 — 참여 요청의 행위자는 정의상 비멤버라
+# 멤버 역할을 겸하는 B로는 그 경로를 검증할 수 없다.
+TOKEN_C=$(signup "rules-c@keepcon.test")
+if [[ -z "${TOKEN_A}" || -z "${TOKEN_B}" || -z "${TOKEN_C}" ]]; then
   echo "✗ Auth 에뮬레이터에서 테스트 사용자를 만들지 못했습니다."
   exit 1
 fi
 UID_A=$(uid_of "${TOKEN_A}")
 UID_B=$(uid_of "${TOKEN_B}")
-echo "  테스트 사용자: A=${UID_A}, B=${UID_B}"
+UID_C=$(uid_of "${TOKEN_C}")
+echo "  테스트 사용자: A=${UID_A}, B=${UID_B}, C=${UID_C}"
 
 AUTH_A=(-H "Authorization: Bearer ${TOKEN_A}")
 AUTH_B=(-H "Authorization: Bearer ${TOKEN_B}")
+AUTH_C=(-H "Authorization: Bearer ${TOKEN_C}")
 JSON=(-H 'Content-Type: application/json')
 
 # Firestore REST 형식의 기프티콘 문서를 만든다. $1 = ownerId(이 값이 규칙 판정 대상).
@@ -228,6 +233,100 @@ check "A(방장)가 그냥 나가서 방장 자리를 비움 → 차단" 403 -X 
 check "A(방장)가 B에게 소유권을 넘기고 나가기" 200 -X PATCH "${DOCS}/${G_TR}?${MASK_OWNER_MEMBERS}" \
   "${AUTH_A[@]}" "${JSON[@]}" \
   -d "{\"fields\":{\"ownerId\":{\"stringValue\":\"${UID_B}\"},\"members\":{\"arrayValue\":{\"values\":[${M_B_OWNER}]}},\"memberIds\":{\"arrayValue\":{\"values\":[${ID_B}]}}}}"
+
+echo "inviteTokens / joinRequests — 초대 링크 참여 요청"
+
+# 참여 요청 계층은 문서 두 종류가 맞물린다.
+#   inviteTokens/{token} : 비멤버가 토큰으로 그룹을 찾는 유일한 다리(groupId + 만료만)
+#   joinRequests/{groupId}_{userId} : 승인 대기 문서
+# 규칙이 잘못되면 두 방향으로 샌다 — 토큰 목록을 훑어 모든 그룹 id를 얻거나,
+# 대기자 명단(아직 멤버가 아닌 사람들의 이름)이 일반 멤버에게 열린다.
+
+# 만료 시각. 미래/과거 두 개를 쓴다.
+FUT='2035-01-01T00:00:00Z'
+PAST='2020-01-01T00:00:00Z'
+
+# 그룹 문서(방장 A, 멤버는 인자로). $1=memberIds 원소들, $2=members 원소들, $3=만료
+jr_group_doc() {
+  printf '{"fields":{"ownerId":{"stringValue":"%s"},"name":{"stringValue":"가족"},"emoji":{"stringValue":"🎁"},"inviteToken":{"stringValue":"tok-%s"},"inviteOwnerOnly":{"booleanValue":false},"inviteExpiresAt":{"timestampValue":"%s"},"maxMembers":{"integerValue":"10"},"members":{"arrayValue":{"values":[%s]}},"memberIds":{"arrayValue":{"values":[%s]}}}}' \
+    "${UID_A}" "$4" "$3" "$2" "$1"
+}
+
+jr_token_doc() {
+  printf '{"fields":{"groupId":{"stringValue":"%s"},"expiresAt":{"timestampValue":"%s"}}}' "$1" "$2"
+}
+
+# 참여 요청 문서. $1=groupId $2=userId $3=status
+jr_request_doc() {
+  printf '{"fields":{"groupId":{"stringValue":"%s"},"userId":{"stringValue":"%s"},"displayName":{"stringValue":"손님"},"avatarEmoji":{"stringValue":"🙂"},"requestedAt":{"timestampValue":"2030-01-01T00:00:00Z"},"status":{"stringValue":"%s"}}}' "$1" "$2" "$3"
+}
+
+# 대기 목록 질의(방장 전용이어야 한다). $1=groupId
+jr_pending_query() {
+  printf '{"structuredQuery":{"from":[{"collectionId":"joinRequests"}],"where":{"compositeFilter":{"op":"AND","filters":[{"fieldFilter":{"field":{"fieldPath":"groupId"},"op":"EQUAL","value":{"stringValue":"%s"}}},{"fieldFilter":{"field":{"fieldPath":"status"},"op":"EQUAL","value":{"stringValue":"pending"}}}]}},"orderBy":[{"field":{"fieldPath":"requestedAt"}}]}}' "$1"
+}
+
+JR_RUN="jr-$$-${RANDOM}"
+G_JR="grp-${JR_RUN}"          # A 방장 · B 멤버
+G_EXP="grpexp-${JR_RUN}"      # 만료된 초대
+
+# 시드 — A가 만든다(생성 규칙: ownerId==본인 && 본인이 멤버).
+check "  (준비) 참여요청용 그룹 생성" 200 -X PATCH "${DOCS}/groups/${G_JR}" \
+  "${AUTH_A[@]}" "${JSON[@]}" -d "$(jr_group_doc "${ID_A},${ID_B}" "${M_A},${M_B}" "${FUT}" "${G_JR}")"
+check "  (준비) 만료 그룹 생성" 200 -X PATCH "${DOCS}/groups/${G_EXP}" \
+  "${AUTH_A[@]}" "${JSON[@]}" -d "$(jr_group_doc "${ID_A}" "${M_A}" "${PAST}" "${G_EXP}")"
+
+# ── inviteTokens ─────────────────────────────────────────────────────
+check "방장이 토큰 조회 문서 발급" 200 -X PATCH "${DOCS}/inviteTokens/tok-${G_JR}" \
+  "${AUTH_A[@]}" "${JSON[@]}" -d "$(jr_token_doc "${G_JR}" "${FUT}")"
+check "방장이 만료 그룹 토큰 발급" 200 -X PATCH "${DOCS}/inviteTokens/tok-${G_EXP}" \
+  "${AUTH_A[@]}" "${JSON[@]}" -d "$(jr_token_doc "${G_EXP}" "${PAST}")"
+check "비멤버가 토큰 문서를 id로 조회(다리 역할)" 200 -X GET "${DOCS}/inviteTokens/tok-${G_JR}" "${AUTH_C[@]}"
+check "비방장이 토큰 문서 발급 → 차단" 403 -X PATCH "${DOCS}/inviteTokens/tok-forged-${JR_RUN}" \
+  "${AUTH_C[@]}" "${JSON[@]}" -d "$(jr_token_doc "${G_JR}" "${FUT}")"
+check "토큰 문서에 여분 필드 → 차단" 403 -X PATCH "${DOCS}/inviteTokens/tok-extra-${JR_RUN}" \
+  "${AUTH_A[@]}" "${JSON[@]}" -d "{\"fields\":{\"groupId\":{\"stringValue\":\"${G_JR}\"},\"expiresAt\":{\"timestampValue\":\"${FUT}\"},\"name\":{\"stringValue\":\"가족\"}}}"
+check "기존 토큰을 다른 그룹으로 돌려쓰기 → 차단" 403 -X PATCH "${DOCS}/inviteTokens/tok-${G_JR}" \
+  "${AUTH_A[@]}" "${JSON[@]}" -d "$(jr_token_doc "${G_EXP}" "${FUT}")"
+
+# ── joinRequests 생성 ────────────────────────────────────────────────
+check "비멤버(C)가 참여 요청 생성" 200 -X PATCH "${DOCS}/joinRequests/${G_JR}_${UID_C}" \
+  "${AUTH_C[@]}" "${JSON[@]}" -d "$(jr_request_doc "${G_JR}" "${UID_C}" pending)"
+check "남의 이름으로 요청 생성 → 차단" 403 -X PATCH "${DOCS}/joinRequests/${G_JR}_${UID_B}" \
+  "${AUTH_C[@]}" "${JSON[@]}" -d "$(jr_request_doc "${G_JR}" "${UID_B}" pending)"
+check "문서 id 규약을 어긴 요청 → 차단" 403 -X PATCH "${DOCS}/joinRequests/wrong-${JR_RUN}" \
+  "${AUTH_C[@]}" "${JSON[@]}" -d "$(jr_request_doc "${G_JR}" "${UID_C}" pending)"
+check "처음부터 승인 상태로 생성 → 차단" 403 -X PATCH "${DOCS}/joinRequests/${G_EXP}_${UID_C}" \
+  "${AUTH_C[@]}" "${JSON[@]}" -d "$(jr_request_doc "${G_EXP}" "${UID_C}" approved)"
+check "이미 멤버(B)가 요청 → 차단" 403 -X PATCH "${DOCS}/joinRequests/${G_JR}_${UID_B}" \
+  "${AUTH_B[@]}" "${JSON[@]}" -d "$(jr_request_doc "${G_JR}" "${UID_B}" pending)"
+check "만료된 초대로 요청 → 차단" 403 -X PATCH "${DOCS}/joinRequests/${G_EXP}_${UID_C}" \
+  "${AUTH_C[@]}" "${JSON[@]}" -d "$(jr_request_doc "${G_EXP}" "${UID_C}" pending)"
+
+# ── joinRequests 읽기 — 요청자 본인과 방장만 ─────────────────────────
+check "방장이 대기 목록 질의" 200 -X POST "${DOCS}:runQuery" \
+  "${AUTH_A[@]}" "${JSON[@]}" -d "$(jr_pending_query "${G_JR}")"
+check "일반 멤버(B)가 대기 목록 질의 → 차단" 403 -X POST "${DOCS}:runQuery" \
+  "${AUTH_B[@]}" "${JSON[@]}" -d "$(jr_pending_query "${G_JR}")"
+check "요청자 본인이 자기 요청 조회" 200 -X GET "${DOCS}/joinRequests/${G_JR}_${UID_C}" "${AUTH_C[@]}"
+check "일반 멤버(B)가 남의 요청 조회 → 차단" 403 -X GET "${DOCS}/joinRequests/${G_JR}_${UID_C}" "${AUTH_B[@]}"
+
+# ── joinRequests 결정 — 방장만, 대기 중인 것만, status 한 필드만 ─────
+MASK_STATUS='updateMask.fieldPaths=status'
+check "요청자가 자기 요청을 승인 → 차단" 403 -X PATCH "${DOCS}/joinRequests/${G_JR}_${UID_C}?${MASK_STATUS}" \
+  "${AUTH_C[@]}" "${JSON[@]}" -d '{"fields":{"status":{"stringValue":"approved"}}}'
+check "일반 멤버(B)가 승인 → 차단" 403 -X PATCH "${DOCS}/joinRequests/${G_JR}_${UID_C}?${MASK_STATUS}" \
+  "${AUTH_B[@]}" "${JSON[@]}" -d '{"fields":{"status":{"stringValue":"approved"}}}'
+check "방장이 status 외 필드까지 변경 → 차단" 403 -X PATCH "${DOCS}/joinRequests/${G_JR}_${UID_C}?updateMask.fieldPaths=status&updateMask.fieldPaths=userId" \
+  "${AUTH_A[@]}" "${JSON[@]}" -d "{\"fields\":{\"status\":{\"stringValue\":\"approved\"},\"userId\":{\"stringValue\":\"${UID_B}\"}}}"
+check "방장이 승인" 200 -X PATCH "${DOCS}/joinRequests/${G_JR}_${UID_C}?${MASK_STATUS}" \
+  "${AUTH_A[@]}" "${JSON[@]}" -d '{"fields":{"status":{"stringValue":"approved"}}}'
+check "이미 처리된 요청을 방장이 다시 결정 → 차단" 403 -X PATCH "${DOCS}/joinRequests/${G_JR}_${UID_C}?${MASK_STATUS}" \
+  "${AUTH_A[@]}" "${JSON[@]}" -d '{"fields":{"status":{"stringValue":"rejected"}}}'
+
+# ── joinRequests 삭제 — 요청자의 취소, 방장의 정리 ───────────────────
+check "일반 멤버(B)가 남의 요청 삭제 → 차단" 403 -X DELETE "${DOCS}/joinRequests/${G_JR}_${UID_C}" "${AUTH_B[@]}"
+check "요청자 본인이 취소" 200 -X DELETE "${DOCS}/joinRequests/${G_JR}_${UID_C}" "${AUTH_C[@]}"
 
 echo
 echo "결과: 통과 ${pass} / 실패 ${fail}"
