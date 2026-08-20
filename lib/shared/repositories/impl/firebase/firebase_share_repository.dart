@@ -31,6 +31,7 @@ import '../../../models/group.dart';
 import '../../../models/join_request.dart';
 import '../../../models/share.dart';
 import '../../../models/user.dart';
+import '../../../util/invite_token.dart';
 import '../../../util/korean_particle.dart';
 import '../../auth_repository.dart';
 import '../../gifticon_repository.dart';
@@ -216,12 +217,16 @@ class FirebaseShareRepository implements ShareRepository {
     // 트랜잭션 밖의 선행 읽기라 그사이 누가 합류하면 헛되이 지울 수 있는데, 여기 오는
     // 사람은 정의상 마지막 멤버이자 방장이고 승인 권한도 그 사람뿐이라 실질 위험이 없다.
     final DocumentSnapshot<Map<String, dynamic>> pre = await ref.get();
+    Group? preGroup;
     if (pre.exists) {
+      // 판정 기준을 트랜잭션과 맞춘다 — 트랜잭션은 `_groupFromDocForMembershipWrite`가
+      // 읽은 멤버로 판단하므로, 여기서 관대 매퍼의 접힌 목록을 세면 두 값이 갈릴 수 있다.
       final Group? g = _groupFromDocOrNull(pre);
       final bool willVanish = g != null &&
           g.isMember(me.id) &&
           g.members.where((GroupMember m) => m.userId != me.id).isEmpty;
       if (willVanish) {
+        preGroup = g;
         await _cascadeDeleteGroupJoinArtifacts(groupId, g.inviteToken);
       }
     }
@@ -258,7 +263,14 @@ class FirebaseShareRepository implements ShareRepository {
       }
     });
 
-    if (cascade) await _cascadeDeleteGroupShares(groupId);
+    if (cascade) {
+      await _cascadeDeleteGroupShares(groupId);
+    } else {
+      // 그룹이 남는 분기 — 떠난 사람의 승인 기록만 거둔다.
+      await _dropJoinRequest(groupId, me.id);
+      // 사라질 줄 알고 미리 거뒀는데 그룹이 남았다면(그사이 누가 합류) 링크를 되살린다.
+      if (preGroup != null) await _restoreInviteToken(preGroup);
+    }
   }
 
   @override
@@ -271,22 +283,31 @@ class FirebaseShareRepository implements ShareRepository {
     // 이 선행 검사는 "권한 없는 사람이 남의 그룹 요청을 지우는 것"만 막으면 된다 —
     // 규칙도 같은 것을 막지만, 여기서 걸러야 헛된 왕복이 없다.
     final DocumentSnapshot<Map<String, dynamic>> pre = await ref.get();
+    Group? preGroup;
     if (pre.exists) {
-      final Group? g = _groupFromDocOrNull(pre);
-      if (g != null && g.isOwnedBy(me.id)) {
-        await _cascadeDeleteGroupJoinArtifacts(groupId, g.inviteToken);
+      preGroup = _groupFromDocOrNull(pre);
+      if (preGroup != null && preGroup.isOwnedBy(me.id)) {
+        await _cascadeDeleteGroupJoinArtifacts(groupId, preGroup.inviteToken);
+      } else {
+        preGroup = null; // 정리하지 않았으므로 되돌릴 것도 없다.
       }
     }
 
-    await _db.runTransaction<void>((Transaction tx) async {
-      final DocumentSnapshot<Map<String, dynamic>> doc = await tx.get(ref);
-      if (!doc.exists) throw StateError('Group not found: $groupId');
-      final Group g = _groupFromDoc(doc);
-      if (!g.isOwnedBy(me.id)) {
-        throw StateError('Only the owner can delete the group: $groupId');
-      }
-      tx.delete(ref);
-    });
+    try {
+      await _db.runTransaction<void>((Transaction tx) async {
+        final DocumentSnapshot<Map<String, dynamic>> doc = await tx.get(ref);
+        if (!doc.exists) throw StateError('Group not found: $groupId');
+        final Group g = _groupFromDoc(doc);
+        if (!g.isOwnedBy(me.id)) {
+          throw StateError('Only the owner can delete the group: $groupId');
+        }
+        tx.delete(ref);
+      });
+    } catch (_) {
+      // 삭제가 무산됐다 — 그룹은 남는데 링크만 죽은 상태를 남기지 않는다.
+      if (preGroup != null) await _restoreInviteToken(preGroup);
+      rethrow;
+    }
 
     await _cascadeDeleteGroupShares(groupId);
   }
@@ -299,7 +320,8 @@ class FirebaseShareRepository implements ShareRepository {
     final User me = _requireUser();
     final DocumentReference<Map<String, dynamic>> ref = _groups.doc(groupId);
 
-    return _db.runTransaction<Group>((Transaction tx) async {
+    final Group handedOver =
+        await _db.runTransaction<Group>((Transaction tx) async {
       final DocumentSnapshot<Map<String, dynamic>> doc = await tx.get(ref);
       if (!doc.exists) throw StateError('Group not found: $groupId');
       final Group g = _groupFromDocForFullWrite(doc);
@@ -321,6 +343,9 @@ class FirebaseShareRepository implements ShareRepository {
       tx.update(ref, _groupToDoc(updated));
       return updated;
     });
+    // 소유권을 넘기는 쪽도 그룹을 떠난다 — 나가기·강퇴와 같은 정리가 필요하다.
+    await _dropJoinRequest(groupId, me.id);
+    return handedOver;
   }
 
   @override
@@ -331,7 +356,8 @@ class FirebaseShareRepository implements ShareRepository {
     final User me = _requireUser();
     final DocumentReference<Map<String, dynamic>> ref = _groups.doc(groupId);
 
-    return _db.runTransaction<Group>((Transaction tx) async {
+    final Group removed =
+        await _db.runTransaction<Group>((Transaction tx) async {
       final DocumentSnapshot<Map<String, dynamic>> doc = await tx.get(ref);
       if (!doc.exists) throw StateError('Group not found: $groupId');
       final Group g = _groupFromDocForFullWrite(doc);
@@ -353,6 +379,9 @@ class FirebaseShareRepository implements ShareRepository {
       tx.update(ref, _groupToDoc(updated));
       return updated;
     });
+    // 강퇴당한 사람의 승인 기록도 거둔다(나가기·소유권 이전과 같은 정리).
+    await _dropJoinRequest(groupId, userId);
+    return removed;
   }
 
   @override
@@ -894,6 +923,11 @@ class FirebaseShareRepository implements ShareRepository {
   ///
   /// 토큰은 **문서 id로** 지운다 — `inviteTokens`는 `list`가 막혀 있어(토큰을 모르는
   /// 사람이 전부 훑어 그룹 id를 얻는 것을 막는 규칙) `where` 질의 자체가 거부된다.
+  ///
+  /// ⚠️ **참여 요청은 복원할 수 없다.** 이 정리 뒤에 그룹 삭제가 실패하면(동시에 소유권이
+  /// 넘어가는 등) 그룹은 남고 대기 목록만 비는 상태가 된다. 토큰 문서는 [_restoreInviteToken]
+  /// 으로 되돌리지만 요청은 못 되돌린다 — 요청자는 다시 요청해야 한다. 그 대신 삭제가
+  /// 성공했을 때 아무것도 남지 않는 쪽을 택했다(남으면 아무도 끝낼 수 없다).
   Future<void> _cascadeDeleteGroupJoinArtifacts(
     String groupId,
     String inviteToken,
@@ -913,6 +947,15 @@ class FirebaseShareRepository implements ShareRepository {
     if (inviteToken.isNotEmpty) {
       await _inviteTokens.doc(inviteToken).delete();
     }
+  }
+
+  /// 선행 정리 뒤 그룹 삭제가 실패했을 때 초대 링크를 되살린다.
+  ///
+  /// 되돌리지 못하면 그룹은 살아 있는데 링크만 죽은 상태가 남고, 방장이 재발급을 누르기
+  /// 전까지 아무도 참여를 요청할 수 없다.
+  Future<void> _restoreInviteToken(Group g) async {
+    if (g.inviteToken.isEmpty) return;
+    await _inviteTokens.doc(g.inviteToken).set(_inviteTokenToDoc(g));
   }
 
   Future<void> _cascadeDeleteGroupShares(String groupId) async {
@@ -1079,6 +1122,19 @@ class FirebaseShareRepository implements ShareRepository {
         // 모든 그룹 write가 _groupToDoc을 거치므로 멤버 변경 시 자동으로 동기화된다.
         'ownerId': g.owner.userId,
       };
+
+  /// 멤버십이 끊긴 사람의 참여 요청을 거둔다(나가기·강퇴·소유권 이전).
+  ///
+  /// in-memory의 `_dropJoinRequest`와 같은 이유다 — 남기면 그룹에 없는 사람의 화면에
+  /// "승인됨"이 계속 보인다. **문서가 없는 것이 정상 경로다**(요청 없이 방장이 직접 넣은
+  /// 멤버). `joinRequests`의 delete 규칙에는 `resource == null` 예외를 두지 않았으므로
+  /// (두면 200/403이 문서 존재 오라클이 된다) 읽어 보고 있을 때만 지운다.
+  Future<void> _dropJoinRequest(String groupId, String userId) async {
+    final DocumentReference<Map<String, dynamic>> ref =
+        _joinRequests.doc(_joinRequestId(groupId, userId));
+    final DocumentSnapshot<Map<String, dynamic>> doc = await ref.get();
+    if (doc.exists) await ref.delete();
+  }
 
   /// 멤버 이탈만 반영하는 부분 갱신 페이로드([leaveGroup] 전용).
   ///
@@ -1436,9 +1492,6 @@ class FirebaseShareRepository implements ShareRepository {
     return GroupNotificationType.registered;
   }
 
-  String _randomToken() {
-    // 6자리 코드. 원본 인스턴스가 시간/랜덤에 의존하지 않도록 문서 id 해시를 쓴다.
-    final int h = _shared.doc().id.hashCode & 0x7fffffff;
-    return (100000 + (h % 900000)).toString();
-  }
+  /// 새 초대 토큰. 생성 규칙은 공유 유틸 하나에서만 정한다(두 구현이 갈리지 않게).
+  String _randomToken() => newInviteToken();
 }

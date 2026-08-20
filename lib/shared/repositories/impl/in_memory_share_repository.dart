@@ -22,6 +22,7 @@ import '../../models/group.dart';
 import '../../models/join_request.dart';
 import '../../models/share.dart';
 import '../../models/user.dart';
+import '../../util/invite_token.dart';
 import '../../util/korean_particle.dart';
 import '../auth_repository.dart';
 import '../gifticon_repository.dart';
@@ -209,7 +210,15 @@ class InMemoryShareRepository implements ShareRepository {
       return updated;
     }
 
-    // 미발견 코드는 데모용으로 가짜 그룹을 만들어 합류를 시연한다(in-memory 한정 스텁).
+    // ⚠️ **계약 위반이다.** `ShareRepository.joinGroup`은 토큰에 해당하는 그룹이 없으면
+    // [StateError]를 요구하는데, 여기서는 데모용 가짜 그룹을 만들어 합류시킨다 —
+    // 오타 난 토큰도 성공한 참여처럼 보인다(리뷰에서 두 번 지적된 자리다).
+    //
+    // 지금 걷어내지 않는 이유: `joinGroup` 자체가 승인제로 대체되며 삭제될 메서드이고,
+    // 이 스텁에 기대는 기존 테스트가 여섯 개다(`share_repository_group_guard_test`·
+    // `share_repository_invite_guard_test`·`share_repository_member_cap_test`).
+    // **그 메서드를 지우는 단계에서 이 블록과 테스트를 함께 정리한다.**
+    // 새 경로(`requestToJoin`)는 없는 토큰에 대해 계약대로 [StateError]를 던진다.
     final Group g = Group(
       id: _nextId('g'),
       name: '초대받은 그룹',
@@ -350,7 +359,7 @@ class InMemoryShareRepository implements ShareRepository {
     }
     // 새 코드 발급 + 만료 창 갱신(재발급 시점부터 다시 24시간).
     final Group updated = g.copyWith(
-      inviteToken: _nextToken(),
+      inviteToken: _randomToken(),
       inviteExpiresAt: _now().add(Group.inviteValidity),
     );
     _groups[_groupIndex(groupId)] = updated;
@@ -790,17 +799,11 @@ class InMemoryShareRepository implements ShareRepository {
   /// [User]가 아직 아바타를 갖지 않으므로 현재 사용자 멤버의 기본 아바타.
   static const String _defaultAvatar = '🙂';
 
-  String _randomToken() {
-    final int base = 100000 + (_seq * 37) % 900000;
-    return base.toString();
-  }
-
-  /// 매 호출마다 다른 코드 — 재발급용. [_randomToken]는 [_seq]에 결정적이므로
-  /// 시퀀스를 먼저 진행시켜 이전 코드와 겹치지 않게 한다.
-  String _nextToken() {
-    _seq++;
-    return _randomToken();
-  }
+  /// 새 초대 토큰. 생성 규칙은 공유 유틸 하나에서만 정한다(두 구현이 갈리지 않게).
+  ///
+  /// 예전에는 `_seq` 기반 결정론적 6자리였다. 128비트 난수로 바뀌면서 재발급 전용
+  /// [_nextToken]이 필요 없어졌다 — 같은 값이 다시 나올 일이 없다.
+  String _randomToken() => newInviteToken();
 
   // ── 시드 데이터 ──────────────────────────────────────────────────────
   void _seed() {

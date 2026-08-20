@@ -36,6 +36,19 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/groups/$(groupId)).data.ownerId == uid();
     }
 
+    // 참여 요청 문서의 하한·타입. 승인 시 displayName·avatarEmoji가 그룹 문서로
+    // 옮겨 가므로 길이도 제한한다(멤버 목록에 긴 문자열이 박히는 것을 막는다).
+    function isWellFormedJoinRequest(d) {
+      return d.keys().hasAll(
+               ['groupId', 'userId', 'displayName', 'avatarEmoji',
+                'requestedAt', 'status'])
+        && d.groupId is string
+        && d.userId is string
+        && d.displayName is string && d.displayName.size() <= 60
+        && d.avatarEmoji is string && d.avatarEmoji.size() <= 8
+        && d.requestedAt is timestamp;
+    }
+
     // 참여를 **요청**할 자격 — 아직 멤버가 아니고 초대가 살아 있을 때.
     // 같은 그룹 문서를 두 번 묻지 않도록 한 함수에서 한 번만 읽는다.
     function canRequestJoin(groupId) {
@@ -130,11 +143,13 @@ service cloud.firestore {
       //    groupId만 알면 초대 없이, 심지어 자기 role을 owner로 써넣고 합류할 수 있었다.
       //    합류는 '방장 승인'을 거치도록 바꿀 예정이므로(참여 요청 → 승인) 이 예외는 삭제한다.
       //
-      //    ⚠️ 그 승인 흐름은 **아직 구현되지 않았다.** 즉 지금 이 규칙 아래에서는 비멤버가
-      //    그룹에 합류할 경로가 없다 — `ShareRepository.joinGroup(inviteToken)`은 비멤버가
-      //    inviteToken으로 groups를 조회하는 것부터 위 `allow read`(멤버만)에 막힌다.
-      //    (이 읽기 제약은 이번 변경 이전부터 있었으므로, Firebase 경로의 초대코드 참여는
-      //    원래부터 동작하지 않았다. 팀 테스트는 시드로 미리 넣어 둔 그룹을 써 왔다.)
+      //    승인 흐름은 아래 `inviteTokens`·`joinRequests`에 있다. 비멤버가 그룹에 들어오는
+      //    유일한 경로는 **방장의 승인 쓰기**(isGroupOwnerUpdate)이며, 요청자 본인은 groups
+      //    문서에 손댈 수 없다.
+      //
+      //    옛 경로 `ShareRepository.joinGroup(inviteToken)`은 비멤버가 inviteToken으로
+      //    groups를 조회하는 것부터 위 `allow read`(멤버만)에 막혀 여전히 동작하지 않는다 —
+      //    우회로가 아니다. 화면에서 걷어낼 때 구현도 함께 지운다.
       allow update: if isSignedIn()
         && uid() in resource.data.memberIds
         && (isGroupOwnerUpdate() || isSelfLeave());
@@ -194,7 +209,13 @@ service cloud.firestore {
         // 이미 있는 문서를 다른 그룹으로 돌려쓰지 못하게 한다(토큰 탈취 방지).
         && (!exists(/databases/$(database)/documents/inviteTokens/$(token))
             || resource.data.groupId == request.resource.data.groupId);
-      allow delete: if isSignedIn() && isGroupOwner(resource.data.groupId);
+      // 없는 문서의 삭제는 **no-op이어야 한다.** `resource`가 null인데 `resource.data`를
+      // 만지면 규칙 평가가 오류로 죽고, 오류는 곧 거부다. 레거시 그룹에는 이 문서가
+      // 없으므로 그대로 두면 그룹 삭제·나가기·재발급이 통째로 막힌다(기존 데이터 전부).
+      // 존재 여부가 새지 않는가? `allow get`이 이미 로그인 사용자에게 열려 있어 새 정보가
+      // 아니다 — joinRequests 쪽은 그렇지 않으므로 거기엔 이 예외를 두지 않는다.
+      allow delete: if isSignedIn()
+        && (resource == null || isGroupOwner(resource.data.groupId));
     }
 
     // 참여 요청 — 초대 링크를 받은 **비멤버**가 방장의 승인을 기다리는 문서.
@@ -223,6 +244,10 @@ service cloud.firestore {
         && request.resource.data.keys().hasOnly(
              ['groupId', 'userId', 'displayName', 'avatarEmoji',
               'requestedAt', 'status'])
+        // `hasOnly`는 **상한만** 정한다. 빠뜨린 필드는 읽기 매퍼의 폴백(`''`)이 되고,
+        // 승인 시 그 값이 그대로 그룹 문서의 멤버 이름으로 굳는다 — 표시 문제가 아니라
+        // 멤버 전원이 보는 문서에 박히는 데이터다. 하한과 타입도 함께 못박는다.
+        && isWellFormedJoinRequest(request.resource.data)
         && canRequestJoin(request.resource.data.groupId);
 
       // 변경은 둘뿐이다 — 요청자의 재요청, 방장의 결정.
@@ -234,6 +259,9 @@ service cloud.firestore {
           && request.resource.data.status == 'pending'
           && request.resource.data.diff(resource.data).affectedKeys()
               .hasOnly(['status', 'displayName', 'avatarEmoji', 'requestedAt'])
+          // 재요청도 표시 스냅샷을 다시 쓰므로 같은 타입 검사를 건다 — 없으면 거절 뒤
+          // 재요청으로 같은 값을 우회 주입할 수 있다.
+          && isWellFormedJoinRequest(request.resource.data)
           && canRequestJoin(resource.data.groupId)
         )
         // ② 방장이 대기 중인 요청을 승인하거나 거절한다. **status 한 필드만** 바뀐다.

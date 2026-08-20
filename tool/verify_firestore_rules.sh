@@ -246,7 +246,7 @@ echo "inviteTokens / joinRequests — 초대 링크 참여 요청"
 FUT='2035-01-01T00:00:00Z'
 PAST='2020-01-01T00:00:00Z'
 
-# 그룹 문서(방장 A, 멤버는 인자로). $1=memberIds 원소들, $2=members 원소들, $3=만료
+# 그룹 문서(방장 A). $1=memberIds 원소들, $2=members 원소들, $3=만료, $4=groupId(토큰 접미)
 jr_group_doc() {
   printf '{"fields":{"ownerId":{"stringValue":"%s"},"name":{"stringValue":"가족"},"emoji":{"stringValue":"🎁"},"inviteToken":{"stringValue":"tok-%s"},"inviteOwnerOnly":{"booleanValue":false},"inviteExpiresAt":{"timestampValue":"%s"},"maxMembers":{"integerValue":"10"},"members":{"arrayValue":{"values":[%s]}},"memberIds":{"arrayValue":{"values":[%s]}}}}' \
     "${UID_A}" "$4" "$3" "$2" "$1"
@@ -325,6 +325,34 @@ check "이미 처리된 요청을 방장이 다시 결정 → 차단" 403 -X PAT
   "${AUTH_A[@]}" "${JSON[@]}" -d '{"fields":{"status":{"stringValue":"rejected"}}}'
 
 # ── joinRequests 삭제 — 요청자의 취소, 방장의 정리 ───────────────────
+# ── inviteTokens 열거·삭제 — 설계의 핵심 불변식 ──────────────────────
+# `list`를 막는 것이 이 스키마의 전제다(토큰을 몰라도 훑으면 모든 그룹 id를 얻는다).
+Q_TOKENS='{"structuredQuery":{"from":[{"collectionId":"inviteTokens"}]}}'
+check "토큰 컬렉션 훑기(list) → 차단" 403 -X POST "${DOCS}:runQuery"   "${AUTH_C[@]}" "${JSON[@]}" -d "${Q_TOKENS}"
+check "방장도 토큰 컬렉션은 훑을 수 없다" 403 -X POST "${DOCS}:runQuery"   "${AUTH_A[@]}" "${JSON[@]}" -d "${Q_TOKENS}"
+check "비방장이 토큰 문서 삭제 → 차단" 403 -X DELETE "${DOCS}/inviteTokens/tok-${G_EXP}" "${AUTH_C[@]}"
+# 레거시 그룹에는 이 문서가 아예 없다. no-op 삭제가 막히면 그룹 삭제·나가기·재발급이
+# 통째로 죽는다 — 규칙에서 `resource == null`을 빠뜨리면 여기서 잡힌다.
+check "없는 토큰 문서 삭제는 no-op" 200 -X DELETE "${DOCS}/inviteTokens/tok-absent-${JR_RUN}" "${AUTH_A[@]}"
+check "방장이 토큰 문서 삭제" 200 -X DELETE "${DOCS}/inviteTokens/tok-${G_EXP}" "${AUTH_A[@]}"
+
+# ── 재요청(거절 → 대기)과 방장의 정리 ───────────────────
+# 전용 그룹을 쓴다 — 재요청자는 비멤버여야 하고(canRequestJoin), 문서 id는
+# `{groupId}_{userId}` 규약을 지켜야 한다.
+G_RE="grpre-${JR_RUN}"
+check "  (준비) 재요청용 그룹 생성" 200 -X PATCH "${DOCS}/groups/${G_RE}" \
+  "${AUTH_A[@]}" "${JSON[@]}" -d "$(jr_group_doc "${ID_A}" "${M_A}" "${FUT}" "${G_RE}")"
+check "  (준비) 재요청용 토큰 발급" 200 -X PATCH "${DOCS}/inviteTokens/tok-${G_RE}" \
+  "${AUTH_A[@]}" "${JSON[@]}" -d "$(jr_token_doc "${G_RE}" "${FUT}")"
+check "  (준비) C가 요청" 200 -X PATCH "${DOCS}/joinRequests/${G_RE}_${UID_C}" \
+  "${AUTH_C[@]}" "${JSON[@]}" -d "$(jr_request_doc "${G_RE}" "${UID_C}" pending)"
+check "방장이 거절" 200 -X PATCH "${DOCS}/joinRequests/${G_RE}_${UID_C}?${MASK_STATUS}" \
+  "${AUTH_A[@]}" "${JSON[@]}" -d '{"fields":{"status":{"stringValue":"rejected"}}}'
+check "요청자가 거절된 요청을 다시 대기로(재요청)" 200 -X PATCH "${DOCS}/joinRequests/${G_RE}_${UID_C}" \
+  "${AUTH_C[@]}" "${JSON[@]}" -d "$(jr_request_doc "${G_RE}" "${UID_C}" pending)"
+check "방장이 남의 요청 삭제(그룹 소멸 캐스케이드 경로)" 200 -X DELETE \
+  "${DOCS}/joinRequests/${G_RE}_${UID_C}" "${AUTH_A[@]}"
+
 check "일반 멤버(B)가 남의 요청 삭제 → 차단" 403 -X DELETE "${DOCS}/joinRequests/${G_JR}_${UID_C}" "${AUTH_B[@]}"
 check "요청자 본인이 취소" 200 -X DELETE "${DOCS}/joinRequests/${G_JR}_${UID_C}" "${AUTH_C[@]}"
 
