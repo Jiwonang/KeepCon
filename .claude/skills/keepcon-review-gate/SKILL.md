@@ -143,6 +143,11 @@ gh pr view <번호> --json comments,reviews --jq '[.comments[], .reviews[]] | ma
   tmp=$(mktemp)
   for n in $nums; do
     gh api "repos/Jiwonang/KeepCon/pulls/$n/reviews" --jq '.[] | select(.user.login=="coderabbitai[bot]") | .submitted_at' >> "$tmp" || { echo "PR #$n 조회 실패 — 부분 결과로 계산하면 창을 이르게 잡는다. 트리거하지 마라"; rm -f "$tmp"; exit 1; }
+    # ⚠️ `reviews`만 보면 안 된다 — 3단계가 이미 경고하듯 리뷰 본문은 **일반 코멘트로도** 온다.
+    #    2026-08-20 실측: #105의 마지막 리뷰가 comments에 10:06:26Z로 실렸는데 reviews에는
+    #    07:41:38Z뿐이라, 이 스캔이 창을 **54분 이르게** 잡았다. 그대로 트리거하면 튕겨서
+    #    슬롯을 버린다(그 실패는 창을 앞당겨 주지도 않는다).
+    gh api "repos/Jiwonang/KeepCon/issues/$n/comments" --jq '.[] | select(.user.login=="coderabbitai[bot]") | select(.body | test("Actionable comments posted|No actionable comments")) | .updated_at' >> "$tmp" || { echo "PR #$n 코멘트 조회 실패 — 트리거하지 마라"; rm -f "$tmp"; exit 1; }
   done
   last=$(sort "$tmp" | tail -1); rm -f "$tmp"
 
@@ -172,7 +177,15 @@ gh pr view <번호> --json headRefOid --jq .headRefOid
 
 > ⚠️ **시각(timestamp)으로 비교하지 마라.** 리뷰 게시 시각과 `commits[].committedDate`를 견주는 방식은 틀린다 — `committedDate`는 푸시 시각이 아니라 **작성자 로컬 시계의 커밋 생성 시각**이다. 리뷰를 기다리는 몇 분 사이에 커밋해 두고 리뷰가 올라온 뒤 푸시하면(흔한 작업 흐름) 커밋이 리뷰보다 **이르게** 찍혀 `CURRENT`로 통과한다 — 3b가 막으려던 바로 그것이다. 작성자 시계가 앞서 있으면 반대로 늘 `STALE`이 되어 소음이 된다. SHA 비교는 시계·푸시 지연과 무관하다.
 >
-> ⚠️ **3단계는 `comments`와 `reviews`를 둘 다 보는데 3b는 `reviews`만 본다.** 리뷰 본문이 SHA 없는 일반 코멘트로만 올라오면 여기서 `NO_REVIEW`가 되어 영원히 `CURRENT`가 될 수 없다. 그때는 **`CURRENT`로 치지 마라** — 재트리거해서 `reviews`에 실리게 하거나, 그래도 안 되면 4번 폴백으로 기록을 남긴다. (2026-08-20 기준 최근 40개 PR에서 리뷰 본문이 일반 코멘트로만 온 사례는 0건이지만, 3단계가 그 가능성을 명시하므로 규칙을 비워 두지 않는다.)
+> ⚠️ **3단계는 `comments`와 `reviews`를 둘 다 보는데 3b는 `reviews`만 본다.** 리뷰 본문이 일반 코멘트로만 올라오면 여기서 `NO_REVIEW`가 되어 `CURRENT`가 될 수 없다. **2026-08-20 #105에서 실제로 일어났다** — 재트리거한 리뷰가 `comments`에만 실렸다.
+>
+> 그때는 **코멘트 본문에서 SHA를 읽어라.** CodeRabbit은 `📥 Commits` 절에 리뷰 범위를 적는다:
+>
+> ```bash
+> gh api repos/Jiwonang/KeepCon/issues/<번호>/comments --jq '.[] | select(.user.login=="coderabbitai[bot]") | .body' | grep -o 'between [0-9a-f]\{40\} and [0-9a-f]\{40\}' | tail -1
+> ```
+>
+> 뒤쪽 SHA가 `headRefOid`와 같으면 `CURRENT`다 — API 필드보다 **더 강한 증거**다(봇이 실제로 무엇을 읽었는지 자기가 적은 것이다). 본문에도 SHA가 없으면 그때는 **`CURRENT`로 치지 마라** — 재트리거하거나 4번 폴백으로 기록을 남긴다.
 >
 > ⚠️ 3단계의 로그인 이름은 `coderabbitai`인데 **여기서는 `coderabbitai[bot]`이다.** REST(`/pulls/N/reviews`)와 GraphQL(`gh pr view`)이 봇 계정을 다르게 표기한다 — 섞어 쓰면 항상 `NO_REVIEW`가 나온다.
 
