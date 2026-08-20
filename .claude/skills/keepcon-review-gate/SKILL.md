@@ -13,7 +13,7 @@ description: "KeepCon PR을 머지해도 되는지 판정하는 스킬. 트리�
 CodeRabbit   pass   0s   "Review skipped: manual review required for this OSS repository"
 ```
 
-리뷰를 실제로 돌린 PR도, 한 번도 안 돌린 PR도 똑같이 `pass`다. 그래서 **CodeRabbit은 게이트가 아니며, 필수 상태 체크로 등록해도 아무것도 막지 못한다.** 초록만 보고 머지하면 3층 방어 중 2층이 빈 채로 통과한다 — red보다 위험한 실패 양상이다(red는 보이고 미실행은 안 보인다).
+리뷰를 실제로 돌린 PR도, 한 번도 안 돌린 PR도 똑같이 `pass`다. 그래서 **CodeRabbit은 게이트가 아니며, 필수 상태 체크로 등록해도 아무것도 막지 못한다.** 초록만 보고 머지하면 방어 층 하나가 빈 채로 통과한다 — red보다 위험한 실패 양상이다(red는 보이고 미실행은 안 보인다).
 
 이 스킬은 그 판정을 사람의 기억이 아니라 절차로 옮긴다.
 
@@ -23,14 +23,49 @@ CodeRabbit   pass   0s   "Review skipped: manual review required for this OSS re
 
 그래서 뒤집는다:
 
-| 층 | 담당 | 성격 |
-|---|---|---|
-| 1 | CI 세 잡 (`Format · Analyze · Test` · `Firestore rules` · `Markdown lint`) | 셋 다 자동 실행. **다만 룰셋 필수 체크는 `Format · Analyze · Test` 하나뿐** — 나머지 둘은 red여도 머지가 막히지 않으니 눈으로 확인한다 |
-| 2 | `keepcon-code-reviewer` 에이전트 | **기본 리뷰 — 항상 돈다** |
-| 3 | CodeRabbit | 두 번째 의견 — 할당량이 있을 때만 |
-| 4 | 릴리스 전 `/security-review` | 주기적 |
+번호는 **도는 순서**다(CLAUDE.md의 "코드 리뷰(4층 중첩)"과 같은 번호를 쓴다).
 
-3층이 빠져도 리뷰 없는 PR은 생기지 않는다. 대신 3층은 **다른 벤더의 다른 모델**이라는 독립성을 주므로, 돌 수 있으면 반드시 돌린다.
+| 층 | 담당 | 언제 | 성격 |
+|---|---|---|---|
+| 1 | `/code-review` (내장) | 커밋 **전** | 일반적 정확성·단순화 |
+| 2 | `keepcon-code-reviewer` 에이전트 | 커밋 후·푸시 **전** | **기본 리뷰 — 항상 돈다** |
+| 3 | CI 세 잡 (`Format · Analyze · Test` · `Firestore rules` · `Markdown lint`) | PR 후 | 자동 실행. **다만 룰셋 필수 체크는 `Format · Analyze · Test` 하나뿐** — 나머지 둘은 red여도 머지가 막히지 않으니 눈으로 확인한다 |
+| 4 | CodeRabbit | PR 후 1회 | 두 번째 의견 — 할당량이 있을 때만 |
+| — | 릴리스 전 `/security-review` | 주기적 | |
+
+4층이 빠져도 리뷰 없는 PR은 생기지 않는다. 대신 4층은 **다른 벤더의 다른 모델**이라는 독립성을 주므로, 돌 수 있으면 반드시 돌린다.
+
+## 이 스킬보다 먼저 오는 것 — 에이전트 리뷰는 **푸시 전**에 돈다
+
+게이트는 PR이 올라온 뒤 "머지해도 되는가"를 판정한다. 그런데 **기본 리뷰(2층)는 그보다 앞,
+커밋 후·푸시 전에 돌아야 한다.** 작업 순서는 이렇다.
+
+```text
+/code-review          ← 커밋 전 (내장 — 일반적 정확성·단순화)
+커밋
+로컬 검증              ← analyze · test · check_ssot · markdownlint · (규칙 변경 시) verify_firestore_rules
+keepcon-code-reviewer ← 푸시 전 (전용 — 저장소 맥락·실행 검증·뮤테이션)
+반영 → 푸시 → PR
+[여기부터 이 스킬] CI → CodeRabbit 1회 → 3b(SHA) → 머지
+```
+
+**왜 푸시 전인가 — 두 가지 실측 근거.**
+
+1. **CodeRabbit 슬롯이 라운드 수만큼 곱해진다.** PR을 올린 뒤 리뷰하고 고치면 head가 움직여
+   봇 리뷰가 `STALE`이 되고, 라운드마다 재트리거가 필요하다. 이 계정의 실효 한도는 **시간당
+   1건**이고 **계정 단위 공유 풀**이라 다른 PR과 슬롯을 다툰다 — PR #95는 3라운드, #101은
+   2라운드를 썼고 2026-08-19 하루에 재트리거 대기로만 두 시간 넘게 썼다.
+2. **틀린 주장이 공개된 뒤에 정정된다.** PR #101은 본문·제목·커밋 메시지에 "같은 diff를
+   나란히 리뷰했다"고 적은 채 공개됐고, 에이전트가 그 전제를 무너뜨린 것은 그 뒤였다.
+   푸시 전에 리뷰했다면 애초에 쓰지 않았을 문장이다.
+
+**커밋 후·푸시 전**인 이유는 따로 있다. 에이전트 정의는 뮤테이션 검증에 "대상이 체크아웃돼
+있고 `git status --porcelain`이 비어 있을 것"을 요구한다 — **커밋 전에 돌리면 그 수단이
+원리상 죽는다.**
+
+CI를 아직 못 본다는 것이 유일한 손해인데 실질적이지 않다. 위 로컬 검증이 CI 세 잡과 같은
+것들을 돌린다(`Firestore rules`는 규칙을 건드린 PR에서만 로컬로 돌리므로, 그 경우가 아니면
+CI 쪽이 한 겹 더 본다).
 
 ## 절차
 
@@ -42,7 +77,11 @@ gh pr checks <번호>
 
 CI 잡이 하나라도 red면 **여기서 멈춘다.** ⚠️ **`Firestore rules`·`Markdown lint`는 룰셋 필수 체크가 아니라 red여도 머지 버튼이 열려 있다** — 게이트가 막아 주지 않으므로 이 단계에서 사람이 본다(현재 필수 체크는 `Format · Analyze · Test`와 `CodeRabbit` 둘뿐이다: `gh api repos/Jiwonang/KeepCon/rulesets/18610485 --jq '.rules[] | select(.type=="required_status_checks") | .parameters.required_status_checks'`). 원인을 진단해 수정 → 커밋 → 푸시를 전부 green이 될 때까지 반복한다(CLAUDE.md의 수정 루프). `CodeRabbit` 행의 pass는 **무시한다** — 위에 적은 이유로 정보가 없다.
 
-### 2. 기본 리뷰 (항상)
+### 2. 기본 리뷰가 돌았는지 확인
+
+**정상 경로에서는 푸시 전에 이미 끝나 있다**(위 절 참조). 이 단계는 그 사실을 확인하는
+자리다 — 지적과 반영 내역이 있는지 본다. 남의 PR이거나 다른 경로로 올라와 리뷰가 없으면
+**여기서 돌린다**(리뷰 없이 머지되는 경로를 막는 것이 이 스킬의 목적이므로, 늦더라도 돈다).
 
 `keepcon-code-reviewer` 에이전트로 변경 diff를 리뷰한다. **작성자가 자기 코드를 리뷰하는 것이 아니라, 맥락을 공유하지 않는 에이전트가 처음부터 읽게 한다** — 잘못 읽어서 생긴 전제가 전달되지 않는 것이 이 층의 존재 이유다.
 
@@ -70,7 +109,21 @@ gh pr view <번호> --json comments,reviews --jq '[.comments[], .reviews[]] | ma
 >
 > ⚠️ `REVIEWED`는 **"언젠가 리뷰됐다"는 뜻이지 "지금 head를 리뷰했다"는 뜻이 아니다.** CodeRabbit은 증분 리뷰라 이미 본 커밋을 다시 보지 않는다. 리뷰가 게시된 뒤 커밋을 더 푸시했다면 그 변경은 리뷰되지 않은 것이므로, `@coderabbitai review`로 다시 트리거한다.
 
-`RATE_LIMITED`는 시간 창(rolling window) 제한이라 곧 풀린다. 봇이 남은 시간을 알려주며, `@coderabbitai rate limit`으로 잔량을 물어볼 수 있다. **바로 폴백으로 넘어가지 말고 안내된 시간만큼 기다렸다 다시 트리거한다.**
+`RATE_LIMITED`는 시간 창(rolling window) 제한이라 곧 풀린다. 바로 폴백으로 넘어가지 말고 기다렸다 다시 트리거한다. **단, 봇 안내 문구를 그대로 믿지 마라.**
+
+```bash
+# 창이 열리는 시각 = 저장소 전체 마지막 성공 리뷰 + 1시간 (+ 여유 2분)
+# --limit은 넉넉히 — 오래된 PR을 재트리거해도 같은 풀을 쓰므로 상한이 낮으면 창을 이르게 계산한다.
+for n in $(gh pr list --state all --limit 40 --json number --jq '.[].number'); do
+  gh api repos/Jiwonang/KeepCon/pulls/$n/reviews --jq '.[] | select(.user.login=="coderabbitai[bot]") | .submitted_at' 2>/dev/null
+done | sort | tail -1
+```
+
+> ⚠️ **한도는 PR별이 아니라 계정 단위 공유 풀이다.** 이 계정의 실효 한도는 시간당 1건이며(봇이 리뷰 본문에 `Your plan provides up to 1 included review per hour`라고 적는다 — 플랜 상한인 Pro+ 시간당 10건이 아니라 fair-usage로 조여진 값이다), **저장소의 다른 PR이 같은 슬롯을 가져간다.**
+>
+> ⚠️ `@coderabbitai rate limit`이 알려주는 "N분 뒤"는 **조회 시점 기준의 근사치라 경계에서 진다.** 2026-08-19 실측: 안내받은 29분을 기다려 트리거했으나 창이 열리기 **16초 전**이라 튕겼고, 3분 뒤 열린 슬롯을 다른 PR(#102)이 가져갔다. 실패한 트리거는 창을 앞당겨 주지도 않는다.
+>
+> 그래서 **위 명령으로 계산한 시각 + 2분**에 트리거하고, 기다리는 동안 **다른 PR을 트리거하지 않는다**(같은 풀을 다툰다).
 
 ### 3b. 리뷰가 지금 head를 봤는지 확인 (필수)
 
@@ -88,6 +141,22 @@ gh pr view <번호> --json headRefOid --jq .headRefOid
 > ⚠️ 3단계의 로그인 이름은 `coderabbitai`인데 **여기서는 `coderabbitai[bot]`이다.** REST(`/pulls/N/reviews`)와 GraphQL(`gh pr view`)이 봇 계정을 다르게 표기한다 — 섞어 쓰면 항상 `NO_REVIEW`가 나온다.
 
 이 검사가 없으면 눈으로는 못 잡는다. 도입 시점에 돌려 보니 **PR #93·#95 둘 다 `STALE`이었고, #93은 그 상태로 머지됐다**(#93: 리뷰 커밋 `3568d64f` ≠ head `3ff2eb7d`). "리뷰 본문이 있는지"만 확인하는 규칙으로는 여기까지 못 간다.
+
+### 3c. 리뷰어끼리 어긋나면 — 입력→결과를 댄 쪽이 이긴다
+
+`/code-review`·에이전트·CodeRabbit이 같은 지점에 **다른 심각도나 다른 처방**을 낼 수 있다.
+기준은 "나중에 본 쪽"도 "우리 것"도 아니다 — **구체적 입력·상태 → 잘못된 결과를 실제로 댄
+쪽**을 따른다. 근거의 종류가 우선순위를 정한다.
+
+1. 실행으로 재현한 것(에뮬레이터 403, 실패하는 테스트, 뮤테이션)
+2. 코드·이력을 인용해 경로를 짚은 것
+3. 일반론·원칙만 든 것
+
+PR #98이 사례다. 에이전트는 매퍼 순환을 정확히 짚고도 처방을 `🟡 주석 수정`으로 냈고,
+CodeRabbit은 같은 지점을 `🟠 쓰기 경로에서 거부`로 냈다 — **봇이 맞았다.** 손상 문서가 빈
+식별자로 사용 이력에 적재되는 경로를 댈 수 있었기 때문이다.
+
+어느 쪽도 입력→결과를 못 대면 **둘 다 🟡로 내리고** 왜 그렇게 판단했는지 PR에 적는다.
 
 ### 4. 폴백 — 기다려도 안 될 때만
 
@@ -112,8 +181,8 @@ EOF
 
 다음이 모두 참일 때만 머지한다.
 
-1. CI 세 잡 green (1번)
-2. `keepcon-code-reviewer` 지적을 반영 완료 (2번)
+1. CI 세 잡 green (1번 — `gh pr checks`의 네 번째 행 `CodeRabbit`은 CI 잡이 아니다)
+2. `keepcon-code-reviewer` 지적을 반영 완료 (2번 — 정상 경로에서는 푸시 전에 끝나 있다)
 3. 3번이 `REVIEWED` **이고** 3b가 `CURRENT` — 또는 4번의 폴백 기록이 PR에 남아 있음
 
 ## 하지 말 것
