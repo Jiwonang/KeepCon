@@ -25,9 +25,9 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    // 참여 시트가 열리고(고유 CTA '참여하기') 코드가 미리 채워져 있어야 한다.
+    // 참여 요청 시트가 열리고(고유 CTA '참여 요청 보내기') 토큰이 미리 채워져 있어야 한다.
     // ('그룹 참여하기'는 공유 탭 버튼과 겹치므로 시트 고유 표식으로 검증한다.)
-    expect(find.widgetWithText(ElevatedButton, '참여하기'), findsOneWidget);
+    expect(find.widgetWithText(ElevatedButton, '참여 요청 보내기'), findsOneWidget);
     expect(find.text('ABC123'), findsOneWidget);
   });
 
@@ -43,7 +43,7 @@ void main() {
     await tester.pumpAndSettle();
 
     // 참여 시트가 열리지 않았어야 한다(시트 고유 CTA 부재로 검증).
-    expect(find.widgetWithText(ElevatedButton, '참여하기'), findsNothing);
+    expect(find.widgetWithText(ElevatedButton, '참여 요청 보내기'), findsNothing);
   });
 
   testWidgets('앱이 떠 있는 중에 도착한 링크도 참여 시트를 연다', (WidgetTester tester) async {
@@ -59,14 +59,14 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(find.widgetWithText(ElevatedButton, '참여하기'), findsNothing);
+    expect(find.widgetWithText(ElevatedButton, '참여 요청 보내기'), findsNothing);
 
     // 앱이 이미 떠 있는 상태에서 딥링크가 도착한다.
     container.read(pendingDestinationProvider.notifier).state =
         const InviteDestination('LATE99');
     await tester.pumpAndSettle();
 
-    expect(find.widgetWithText(ElevatedButton, '참여하기'), findsOneWidget);
+    expect(find.widgetWithText(ElevatedButton, '참여 요청 보내기'), findsOneWidget);
     expect(find.text('LATE99'), findsOneWidget);
   });
 }

@@ -215,6 +215,12 @@ class _JoinGroupSheetState extends ConsumerState<_JoinGroupSheet> {
   late final TextEditingController _codeCtrl =
       TextEditingController(text: widget.initialToken ?? '');
 
+  /// 요청을 보내는 중(버튼 중복 탭 차단).
+  bool _sending = false;
+
+  /// 요청이 접수됐다 — 시트 내용을 대기 안내로 바꾼다.
+  bool _requested = false;
+
   @override
   void dispose() {
     _codeCtrl.dispose();
@@ -222,38 +228,71 @@ class _JoinGroupSheetState extends ConsumerState<_JoinGroupSheet> {
   }
 
   Future<void> _submit() async {
-    final String code = _codeCtrl.text.trim();
-    if (code.isEmpty) return;
-    final NavigatorState navigator = Navigator.of(context);
+    final String token = _codeCtrl.text.trim();
+    if (token.isEmpty || _sending) return;
     final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
-    // try는 **저장소 호출만** 감싼다. 성공 뒤의 pop·스낵바까지 넣으면, 참여는 됐는데
-    // 화면 정리에서 예외가 났을 때 실패 안내가 떠 사용자가 참여에 실패했다고 오해한다.
+    setState(() => _sending = true);
+    // try는 **저장소 호출만** 감싼다. 성공 뒤의 화면 전환까지 넣으면, 요청은 접수됐는데
+    // 화면 정리에서 예외가 났을 때 실패 안내가 떠 사용자가 실패했다고 오해한다.
     try {
-      await ref.read(shareRepositoryProvider).joinGroup(code);
+      await ref.read(shareRepositoryProvider).requestToJoin(token);
     } catch (e, s) {
-      reportHandledFailure(ref, e, s, context: 'JoinGroupSheet.joinGroup');
+      reportHandledFailure(ref, e, s, context: 'JoinGroupSheet.requestToJoin');
       // `on StateError`로 좁히면 백엔드가 던지는 예외(권한 거부·네트워크 등)가 그대로
       // 빠져나가 **아무 안내도 없이 시트가 멈춘다** — 사용자에겐 버튼이 죽은 것으로만
       // 보인다. 실패 원인과 무관하게 항상 결과를 알려준다.
       // (예외 타입으로 백엔드를 구분하지 않으므로 UI가 firebase에 의존하지 않는다.)
+      //
+      // ⚠️ 정원은 여기서 말하지 않는다 — 계약상 정원 검사는 **승인 시점**이라
+      //    요청 단계의 실패 사유가 아니다(대기자가 자리를 선점하지 못하게 한 설계).
+      if (mounted) setState(() => _sending = false);
       messenger
         ..hideCurrentSnackBar()
         ..showSnackBar(const SnackBar(
-          content: Text('참여할 수 없어요. 코드가 틀렸거나 만료됐거나 정원이 찼을 수 있어요.'),
+          content: Text('요청을 보낼 수 없어요. 링크가 잘못됐거나 만료됐을 수 있어요.'),
         ));
       return;
     }
-    navigator.pop();
-    messenger
-      ..hideCurrentSnackBar()
-      ..showSnackBar(const SnackBar(content: Text('그룹에 참여했어요.')));
+    if (!mounted) return;
+    setState(() {
+      _sending = false;
+      _requested = true;
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
+    if (_requested) {
+      return _SheetScaffold(
+        title: '참여 요청을 보냈어요',
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            // ⚠️ 그룹 이름·이모지·멤버 수를 **여기에 넣지 마세요.** 요청자는 아직 멤버가
+            //    아니고, 링크는 유출될 수 있다. 링크만 쥐면 그룹 정보를 알 수 있게 되면
+            //    승인제를 넣은 의미가 절반 사라진다(계약: `JoinRequest`가 그룹 표시
+            //    정보를 담지 않는 것과 같은 이유).
+            Icon(Icons.hourglass_top,
+                size: 40, color: theme.colorScheme.primary),
+            const SizedBox(height: 16),
+            Text(
+              '방장이 승인하기 전까지는 참여할 수 없어요.\n승인되면 공유 탭에 그룹이 나타나요.',
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodyLarge,
+            ),
+            const SizedBox(height: 24),
+            ElevatedButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('확인'),
+            ),
+          ],
+        ),
+      );
+    }
+
     return _SheetScaffold(
-      title: '그룹 참여하기',
+      title: '그룹 참여 요청',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
@@ -262,13 +301,15 @@ class _JoinGroupSheetState extends ConsumerState<_JoinGroupSheet> {
           TextField(
             controller: _codeCtrl,
             autofocus: true,
-            keyboardType: TextInputType.number,
             textInputAction: TextInputAction.done,
-            decoration: const InputDecoration(hintText: '6자리 코드 입력'),
+            decoration: const InputDecoration(hintText: '초대코드 입력'),
             onSubmitted: (_) => _submit(),
           ),
           const SizedBox(height: 20),
-          ElevatedButton(onPressed: _submit, child: const Text('참여하기')),
+          ElevatedButton(
+            onPressed: _sending ? null : _submit,
+            child: Text(_sending ? '보내는 중…' : '참여 요청 보내기'),
+          ),
         ],
       ),
     );
