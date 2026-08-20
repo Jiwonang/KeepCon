@@ -8,15 +8,18 @@
 #   자기 픽스처를 깨거나(요청 시각 제한), 없는 문서 접근이 403이 되어 정리 경로가 통째로
 #   죽는 결함이 매번 **다음 리뷰 라운드에 가서야** 드러났다.
 #
-#   그래서 판단을 없앤다. 이 스크립트는 항상 같은 것을 돌리고, `firestore.rules`가
-#   바뀌었으면 규칙 검증을 **자동으로** 덧붙인다.
+#   그래서 판단을 없앤다. 이 스크립트는 항상 같은 것을 돌리고, **규칙 계층 입력**
+#   (`firestore.rules`·`tool/verify_firestore_rules.sh`·`firebase.json`)이 바뀌었으면
+#   규칙 검증을 **자동으로** 덧붙인다.
 #
 # 실행:
 #   bash tool/verify.sh              # develop 기준으로 변경 감지
 #   BASE=origin/main bash tool/verify.sh
-#   SKIP_RULES=1 bash tool/verify.sh # 규칙 검증만 건너뛴다(에뮬레이터가 없을 때)
+#   SKIP_RULES=1 bash tool/verify.sh # 규칙 검증을 건너뛴다. **규칙 입력이 바뀐 상태라면
+#                                    #   이 실행은 실패로 끝난다** — 검증하지 않은 것에
+#                                    #   통과 판정을 내지 않는다.
 #
-# 종료 코드: 하나라도 실패하면 1. 실패해도 나머지는 끝까지 돌린다 — 한 번에 다 보는 것이
+# 종료 코드: 하나라도 실패하면 1(규칙 입력이 바뀐 채 검증을 건너뛴 경우 포함). 실패해도 나머지는 끝까지 돌린다 — 한 번에 다 보는 것이
 #   이 스크립트의 목적이고, 첫 실패에서 멈추면 왕복이 늘어난다.
 set -uo pipefail
 
@@ -24,7 +27,6 @@ cd "$(dirname "$0")/.." || exit 1
 
 BASE="${BASE:-origin/develop}"
 fail=0
-rules_skipped=0
 declare -a failed=()
 
 step() {
@@ -96,10 +98,19 @@ if [[ "${SKIP_RULES:-}" == "1" ]]; then
   step "Firestore rules — SKIP_RULES=1 로 건너뜀"
   echo "  ⚠️ 규칙 계층은 Dart 테스트가 원리상 못 잡는다."
   if rules_changed; then
-    # 규칙 입력이 실제로 바뀌었는데 건너뛰었다면 이 실행은 "통과"가 아니다. 검증하지
-    # 않은 상태에 통과 판정을 내면 이 스크립트의 산출물(푸시 가부)이 거짓이 된다.
-    echo "  ✗ 규칙 입력이 바뀌었는데 검증을 건너뛰었다 — 이 실행으로는 푸시 가부를 판정할 수 없다."
-    rules_skipped=1
+    # 검증하지 않은 상태에 통과 판정을 내면 이 스크립트의 산출물(푸시 가부)이 거짓이 된다.
+    # 단 "바뀌었다"와 "판별하지 못했다"는 다른 사실이므로 섞어 말하지 않는다 — 후자에게
+    # 전자의 진단을 주면 있지도 않은 규칙 변경을 자기 diff에서 찾게 된다.
+    if [[ "${base_unknown}" -eq 1 ]]; then
+      echo "  ✗ BASE(${BASE})를 찾을 수 없어 규칙 입력 변경 여부를 판별하지 못했다 — 건너뛴 채로는 푸시 가부를 판정할 수 없다."
+      echo "     (BASE=origin/main 처럼 지정하거나 git fetch 하면 판별이 정확해진다)"
+    else
+      echo "  ✗ 규칙 입력이 바뀌었는데 검증을 건너뛰었다 — 이 실행으로는 푸시 가부를 판정할 수 없다."
+    fi
+    # 별도 플래그가 아니라 `failed`에 넣는다 — 다른 스텝이 함께 실패하면 요약 줄에서
+    # 이 건만 사라져, 고치고 다시 돌린 다음 라운드에야 드러난다.
+    fail=1
+    failed+=("Firestore rules — SKIP_RULES=1 로 미검증")
   fi
 elif rules_changed; then
   if [[ "${base_unknown}" -eq 1 ]]; then
@@ -138,11 +149,8 @@ fi
 
 # ── 요약 ─────────────────────────────────────────────────────────────────
 echo
-if [[ "${fail}" -eq 0 && "${rules_skipped}" -eq 0 ]]; then
+if [[ "${fail}" -eq 0 ]]; then
   echo "✓ 로컬 검증 통과 — 푸시해도 된다."
-elif [[ "${fail}" -eq 0 ]]; then
-  echo "✗ 규칙 검증을 건너뛴 채로는 통과로 볼 수 없다 — 에뮬레이터를 띄우고 다시 돌려라."
-  fail=1
 else
   echo "✗ 실패: ${failed[*]}"
   echo "  고친 뒤 이 스크립트를 다시 돌려라(부분 실행은 이 스크립트가 막으려는 바로 그것이다)."

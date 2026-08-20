@@ -370,8 +370,8 @@ gh api -X POST repos/Jiwonang/KeepCon/rulesets --input ruleset.json
 `/code-review → 커밋 → tool/verify.sh → keepcon-code-reviewer → 반영 → 푸시 → PR → CI → CodeRabbit`
 
 
-- **푸시 전 로컬 검증 — [`tool/verify.sh`](tool/verify.sh) (명령 하나):** `dart format`·`analyze`·`test`·`SSOT guard`·`Markdown lint`를 항상 돌리고, **`firestore.rules`가 바뀌었으면 에뮬레이터 규칙 검증까지 자동으로** 붙입니다. 예전에는 규칙 검증이 조건부라 매번 사람이 판단했는데 그 판단이 실제로 세 번 연속 실패했습니다 — 그래서 판단을 없앴습니다.
-  - 실행: `bash tool/verify.sh` / cmd·PowerShell은 `toolerify.cmd`(PowerShell은 `.	oolerify.cmd`).
+- **푸시 전 로컬 검증 — [`tool/verify.sh`](tool/verify.sh) (명령 하나):** `dart format`·`analyze`·`test`·`SSOT guard`·`Markdown lint`를 항상 돌리고, **규칙 계층 입력이 바뀌었으면 에뮬레이터 규칙 검증까지 자동으로** 붙입니다. 예전에는 규칙 검증이 조건부라 매번 사람이 판단했는데 그 판단이 실제로 세 번 연속 실패했습니다 — 그래서 판단을 없앴습니다.
+  - 실행: `bash tool/verify.sh` / cmd·PowerShell은 `tool\verify.cmd`(PowerShell은 `.\tool\verify.cmd`).
   - 감시 대상은 `firestore.rules`뿐 아니라 `tool/verify_firestore_rules.sh`·`firebase.json`도 포함합니다 — CI의 `Firestore rules` 잡은 **모든 PR에서** 돌기 때문에, 로컬 트리거가 좁으면 CI에서 처음 빨개집니다.
   - 에뮬레이터는 세 상태를 구분합니다: 둘 다(Firestore·Auth) 떠 있으면 재사용, 둘 다 없으면 직접 기동, **절반만 떠 있으면 포트 충돌이 확실하므로 셋업 문제로 보고**합니다.
   - `SKIP_RULES=1`로 규칙 검증을 건너뛸 수 있지만, 규칙 입력이 실제로 바뀐 상태라면 **검증 결과를 실패로 냅니다** — 검증하지 않은 상태에 통과 판정을 내지 않기 위해서입니다.

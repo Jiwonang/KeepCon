@@ -13,7 +13,10 @@ rem and this script is the gate every push is supposed to pass.
 rem
 rem Usage (from anywhere in the repo):
 rem   tool\verify.cmd
-rem   set BASE=origin/main ^& tool\verify.cmd
+rem   set "BASE=origin/main" ^& tool\verify.cmd
+rem   set "SKIP_RULES=1" ^& tool\verify.cmd
+rem   Quote the assignment - `set BASE=x & ...` puts the space before & INTO the
+rem   value, so the ref is never found and the run silently falls back.
 rem
 rem IMPORTANT - THIS FILE MUST STAY PURE ASCII, COMMENTS INCLUDED.
 rem   See the note in tool/emulators.cmd for why.

@@ -43,7 +43,7 @@ CodeRabbit   pass   0s   "Review skipped: manual review required for this OSS re
 ```text
 /code-review          ← 커밋 전 (내장 — 일반적 정확성·단순화)
 커밋
-로컬 검증              ← bash tool/verify.sh   (판단 없이 한 번에)
+로컬 검증              ← bash tool/verify.sh   (Windows: tool\verify.cmd)
 keepcon-code-reviewer ← 푸시 전 (전용 — 저장소 맥락·실행 검증·뮤테이션)
 반영 → 푸시 → PR   ← **PR 본문에 `에이전트 리뷰: <리뷰한 SHA>`를 적는다**(5번에서 대조)
 [여기부터 이 스킬] CI → CodeRabbit → 3b(SHA) → (STALE이면 반영 후 재트리거) → 머지
