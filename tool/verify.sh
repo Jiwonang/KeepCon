@@ -77,14 +77,26 @@ run "Markdown lint" npx --yes markdownlint-cli2@0.18.1
 #    빈 결과를 낸다 — ①ref가 없거나(단일 브랜치 clone, 포크, 다른 기본 브랜치 이름)
 #    ②ref는 있는데 merge base가 없다(얕은 클론, 관련 없는 히스토리). 둘 다 이 스크립트가
 #    없애려는 침묵 실패의 모양이다. 모를 때는 더 하는 쪽으로 닫는다.
-RULES_INPUTS=(firestore.rules tool/verify_firestore_rules.sh firebase.json)
+# ⚠️ `tool/verify.sh`(자기 자신)도 목록에 있다 — 검증기에 넘기는 호스트·환경변수 이름이
+#    여기 있어서 이 파일이 곧 규칙 계층의 **호출 계약**이다. 게다가 CI의 `Firestore rules`
+#    잡은 이 스크립트를 거치지 않고 `emulators:exec`를 직접 부르므로, 여기가 깨져도
+#    **아무 데서도 빨개지지 않는다**(70-73행의 "로컬이 좁으면 CI에서 빨개진다"가 여기서는
+#    성립하지 않는다).
+RULES_INPUTS=(firestore.rules tool/verify_firestore_rules.sh firebase.json tool/verify.sh)
 
 rules_changed() {
   git status --porcelain -- "${RULES_INPUTS[@]}" 2>/dev/null | grep -q . && return 0
   if ! git rev-parse --verify --quiet "${BASE}" >/dev/null; then
     base_unknown=1
     base_unknown_why="ref 부재"
-    base_unknown_fix="git fetch origin develop:refs/remotes/origin/develop"
+    # 처방은 **없다고 말한 그 ref**를 만들어야 한다. develop을 하드코딩하면
+    # `BASE=origin/main`으로 돌린 사람에게 "origin/main을 지정하라"면서 develop을 받아오라는
+    # 자기모순 안내가 나가고, 그대로 실행해도 다음 번에 같은 메시지가 반복된다.
+    if [[ "${BASE}" == origin/* ]]; then
+      base_unknown_fix="git fetch origin ${BASE#origin/}:refs/remotes/${BASE}"
+    else
+      base_unknown_fix="BASE=<이 클론에 존재하는 ref> 로 지정"
+    fi
     return 0
   fi
   # ⚠️ ref가 **있어도** merge base가 없으면(얕은 클론, 관련 없는 히스토리) triple-dot이
@@ -93,8 +105,16 @@ rules_changed() {
   local changed path
   if ! changed=$(git diff --name-only "${BASE}...HEAD" 2>/dev/null); then
     base_unknown=1
-    base_unknown_why="merge base 없음(얕은 클론·무관한 히스토리)"
-    base_unknown_fix="git fetch --unshallow"
+    # 이 분기도 원인이 둘이고 **처방이 정반대다** — 얕은 클론에만 `--unshallow`가 통하고,
+    # 완전 클론(orphan 브랜치·무관한 remote)에서는 같은 명령이 fatal로 거부된다. 바로 위
+    # 분기에서 고친 것과 똑같은 결함이라, 여기서도 기계적으로 가른다.
+    if [[ "$(git rev-parse --is-shallow-repository 2>/dev/null)" == "true" ]]; then
+      base_unknown_why="merge base 없음(얕은 클론)"
+      base_unknown_fix="git fetch --unshallow"
+    else
+      base_unknown_why="merge base 없음(무관한 히스토리 — 완전 클론)"
+      base_unknown_fix="BASE=<HEAD와 공통 조상이 있는 ref> 로 지정"
+    fi
     return 0
   fi
   for path in "${RULES_INPUTS[@]}"; do
@@ -108,20 +128,24 @@ rules_changed() {
 # 경로는 CLI가 환경변수를 주입하므로 살아 있어, 한쪽만 조용히 깨진다).
 #
 # ⚠️ 지금 이 정본을 따르는 것은 **이 스크립트뿐**이다. `tool/seed_emulator.sh`(9099/8080
-#    하드코딩)와 `lib/shared/firebase/firebase_bootstrap.dart`의 `kAuthEmulatorPort`·
-#    `kFirestoreEmulatorPort`는 아직 각자 값을 들고 있어, 포트를 바꾸면 그 둘은 따로 고쳐야
+#    기본값), `tool/verify_firestore_rules.sh`(같은 기본값 — README가 안내하는 **단독 실행**
+#    에서는 아무도 env를 안 넘기므로 그 값이 곧 판정이다), 그리고
+#    `lib/shared/firebase/firebase_bootstrap.dart`의 `kAuthEmulatorPort`·
+#    `kFirestoreEmulatorPort`는 아직 각자 값을 들고 있어, 포트를 바꾸면 그 셋은 따로 고쳐야
 #    한다. 주석은 게이트가 아니므로 이것만으로는 부족하다 — 셸 쪽 파싱 공용화와
 #    `tool/check_ssot.sh`의 포트 대조는 별도 PR로 뺀다.
-if ! _ports=$(node -e '
-  const c = require("./firebase.json").emulators || {};
-  process.stdout.write(`${(c.firestore||{}).port||8080} ${(c.auth||{}).port||9099}`);
-' 2>/dev/null); then
-  # 폴백이 조용하면 커스텀 포트 환경에서 "에뮬레이터가 절반만 떠 있다"는 엉뚱한 진단이 나온다
-  # — 원인은 포트를 못 읽은 것인데 진단은 에뮬레이터를 가리킨다.
-  echo "⚠️ firebase.json에서 에뮬레이터 포트를 읽지 못했다(node 부재 또는 JSON 파손) — 기본값 8080/9099로 진행한다."
-  _ports="8080 9099"
-fi
-read -r FS_PORT AUTH_PORT <<<"${_ports}"
+read_emulator_ports() {
+  if ! _ports=$(node -e '
+    const c = require("./firebase.json").emulators || {};
+    process.stdout.write(`${(c.firestore||{}).port||8080} ${(c.auth||{}).port||9099}`);
+  ' 2>/dev/null); then
+    # 폴백이 조용하면 커스텀 포트 환경에서 "에뮬레이터가 절반만 떠 있다"는 엉뚱한 진단이 나온다
+    # — 원인은 포트를 못 읽은 것인데 진단은 에뮬레이터를 가리킨다.
+    echo "  ⚠️ firebase.json에서 에뮬레이터 포트를 읽지 못했다(node 부재·firebase.json 부재·JSON 파손) — 기본값 8080/9099로 진행한다." >&2
+    _ports="8080 9099"
+  fi
+  read -r FS_PORT AUTH_PORT <<<"${_ports}"
+}
 
 base_unknown=0
 base_unknown_why=""
@@ -154,6 +178,10 @@ elif rules_changed; then
     step "Firestore rules (규칙 계층 입력 변경 감지 — 에뮬레이터로 실검증)"
   fi
 
+  # 포트는 여기서 읽는다 — 규칙 검증을 안 돌리는 실행(대다수)에서는 쓰이지도 않는데
+  # 폴백 경고만 떠서 "무엇이 잘못됐나" 오해를 부른다.
+  read_emulator_ports
+
   # 규칙 스크립트는 Auth로 사용자 셋을 만들고 그 토큰으로 Firestore를 친다 — **둘 다**
   # 떠 있어야 재사용할 수 있다.
   fs_up=1; auth_up=1
@@ -181,7 +209,11 @@ elif rules_changed; then
     failed+=("Firestore rules — 에뮬레이터 셋업")
   else
     echo "  (에뮬레이터를 직접 띄운다)"
-    run "Firestore rules" firebase emulators:exec --project demo-keepcon --only auth,firestore "bash tool/verify_firestore_rules.sh"
+    # ⚠️ 여기서는 함정이 **반대 방향**이다. CLI는 `FIREBASE_AUTH_EMULATOR_HOST`만 주입하는데
+    #    수신 측은 `AUTH_EMULATOR_HOST`를 먼저 보므로, 셸에 남은 값이 CLI를 이겨 죽은 포트로
+    #    붙는다(`tool/seed_emulator.sh`가 쓰는 노브라 실제로 남아 있을 수 있다). 지워서 넘긴다.
+    run "Firestore rules" env -u AUTH_EMULATOR_HOST \
+      firebase emulators:exec --project demo-keepcon --only auth,firestore "bash tool/verify_firestore_rules.sh"
   fi
 else
   echo
