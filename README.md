@@ -365,12 +365,16 @@ gh api -X POST repos/Jiwonang/KeepCon/rulesets --input ruleset.json
 
 ### 코드 리뷰 정책
 
-**네 층**으로 품질을 관리합니다 (층위가 서로 달라 **중첩 운영**):
+**네 층**으로 품질을 관리합니다 (층위가 서로 달라 **중첩 운영**). **번호는 도는 순서**입니다 — `CLAUDE.md`·[`keepcon-review-gate`](.claude/skills/keepcon-review-gate/SKILL.md)와 같은 번호를 씁니다:
 
-- **1층 · CI 게이트 (필수·자동):** 모든 PR에서 **세 잡**이 돕니다 — `Format · Analyze · Test`(**SSOT guard** · dart format · flutter analyze · flutter test), `Firestore rules`, `Markdown lint`. `SSOT guard`는 첫 잡의 **스텝**이라 `gh pr checks`에 별도 항목으로 뜨지 않습니다. ⚠️ **셋 중 룰셋 필수 체크는 `Format · Analyze · Test` 하나뿐입니다** — 나머지 둘은 red여도 머지 버튼이 열려 있으니, 게이트로 승격할 때까지는 눈으로 확인하세요(위 "추가 하드 백스톱" 참조). `SSOT guard`([`tool/check_ssot.sh`](tool/check_ssot.sh))는 `lib/features`에서 공유 계약 타입·provider를 재정의/재선언하면 실패시켜 SSOT를 기계적으로 강제합니다. `Markdown lint`([`.markdownlint-cli2.jsonc`](.markdownlint-cli2.jsonc))는 리뷰가 반복해서 지적하던 문서 포맷을 기계로 옮긴 것입니다 — 켜는 룰은 실제 지적에 대응하는 5개뿐입니다(기본 룰셋 전체는 위반 2,500건이라 소음이 됩니다).
-- **2층 · 에이전트 리뷰 — [`keepcon-code-reviewer`](.claude/agents/keepcon-code-reviewer.md) (기본 리뷰, 항상):** 변경 diff를 6개 축(기능 정확성·유지보수성·데이터 정합성·안정성·보안·성능)으로 리뷰합니다. 분류와 검증 방식은 CodeRabbit이 이 저장소 PR #40~#95에 남긴 **인라인 지적 122건을 분석해** 물려받았습니다. 코드를 쓴 맥락을 공유하지 않는 에이전트가 처음부터 읽는 것이 이 층의 존재 이유입니다.
+`/code-review → 커밋 → 로컬 검증 → keepcon-code-reviewer → 반영 → 푸시 → PR → CI → CodeRabbit`
+
+
+- **1층 · 커밋 전 자체 리뷰 — `/code-review` (온디맨드):** Claude Code로 작업할 때 **커밋 전** 변경 diff를 리뷰·수정한 뒤 커밋합니다. 일반적 정확성·단순화를 봅니다.
+- **2층 · 에이전트 리뷰 — [`keepcon-code-reviewer`](.claude/agents/keepcon-code-reviewer.md) (기본 리뷰, 항상 · 커밋 후 **푸시 전**):** 변경 diff를 6개 축(기능 정확성·유지보수성·데이터 정합성·안정성·보안·성능)으로 리뷰합니다. 분류와 검증 방식은 CodeRabbit이 이 저장소 PR #40~#95에 남긴 **인라인 지적 122건을 분석해** 물려받았습니다. 코드를 쓴 맥락을 공유하지 않는 에이전트가 처음부터 읽는 것이 이 층의 존재 이유입니다.
   - 봇이 못 하던 **실행 검증**이 이 층의 우위입니다 — `flutter test`를 돌리고, 보안 규칙이 얽히면 에뮬레이터로 실제 요청을 보내 재현합니다(`firestore.rules`의 권한 위조 구멍은 이 방법으로만 드러났습니다 — 그 PR #89는 CodeRabbit이 할당량에 걸려 한 번도 리뷰하지 못했습니다).
-- **3층 · AI 리뷰 — CodeRabbit (두 번째 의견, ⚠️ 수동 트리거):** 협업 규칙 준수·버그를 리뷰합니다. 설정은 [`.coderabbit.yaml`](.coderabbit.yaml)에 한국어로 정의(별도 API 키·워크플로 불필요). **단, 설정 파일만으로는 동작하지 않습니다** — CodeRabbit은 **GitHub App**이라 저장소에 설치·접근 허용되어야 합니다.
+- **3층 · CI 게이트 (필수·자동 · PR 후):** 모든 PR에서 **세 잡**이 돕니다 — `Format · Analyze · Test`(**SSOT guard** · dart format · flutter analyze · flutter test), `Firestore rules`, `Markdown lint`. `SSOT guard`는 첫 잡의 **스텝**이라 `gh pr checks`에 별도 항목으로 뜨지 않습니다. ⚠️ **셋 중 룰셋 필수 체크는 `Format · Analyze · Test` 하나뿐입니다** — 나머지 둘은 red여도 머지 버튼이 열려 있으니, 게이트로 승격할 때까지는 눈으로 확인하세요(위 "추가 하드 백스톱" 참조). `SSOT guard`([`tool/check_ssot.sh`](tool/check_ssot.sh))는 `lib/features`에서 공유 계약 타입·provider를 재정의/재선언하면 실패시켜 SSOT를 기계적으로 강제합니다. `Markdown lint`([`.markdownlint-cli2.jsonc`](.markdownlint-cli2.jsonc))는 리뷰가 반복해서 지적하던 문서 포맷을 기계로 옮긴 것입니다 — 켜는 룰은 실제 지적에 대응하는 5개뿐입니다(기본 룰셋 전체는 위반 2,500건이라 소음이 됩니다).
+- **4층 · AI 리뷰 — CodeRabbit (두 번째 의견, ⚠️ 수동 트리거 · PR 후):** 협업 규칙 준수·버그를 리뷰합니다. 설정은 [`.coderabbit.yaml`](.coderabbit.yaml)에 한국어로 정의(별도 API 키·워크플로 불필요). **단, 설정 파일만으로는 동작하지 않습니다** — CodeRabbit은 **GitHub App**이라 저장소에 설치·접근 허용되어야 합니다.
   - **⚠️ 이 층은 자주 빕니다 — 그래서 예비입니다.** ①**PR을 열어도 자동으로 리뷰하지 않습니다**(스타 10개 미만 저장소는 수동 트리거로 전환됨) ②트리거해도 시간 창 **할당량**에 걸려 `Review rate limited`로 튕깁니다(PR #90이 써서 #92가 두 번 튕겼습니다). 리뷰가 없는 PR이 생기지 않도록 **2층을 기본으로 두고 이 층을 얹는** 순서입니다.
     - **돌리는 법:** PR에 `@coderabbitai review` 댓글, 또는 봇 코멘트의 **`🔍 Trigger review` 체크박스**. 잔량은 `@coderabbitai rate limit`.
     - **🚧 머지 기준은 리뷰 본문입니다.** `Review triggered`는 접수 확인일 뿐입니다. `Actionable comments posted: N`이 있어도 **그 뒤 푸시한 커밋은 리뷰되지 않았습니다**(증분 리뷰) — 재트리거하세요.
@@ -378,7 +382,8 @@ gh api -X POST repos/Jiwonang/KeepCon/rulesets --input ruleset.json
     - **원래대로 되돌리려면:** 스타가 **10개 이상이면** 자동 리뷰로 복귀합니다(할당량 제한은 별개라 그대로 남습니다).
   - **활성화(1회, 소유자):** [github.com/settings/installations](https://github.com/settings/installations) → CodeRabbit → *Configure* → *Repository access*에 `Jiwonang/KeepCon` 추가(*All repositories*도 가능). 계정에 아직 App이 없으면 [github.com/apps/coderabbitai](https://github.com/apps/coderabbitai)에서 설치.
   - **비용:** **Public 저장소는 무료**, Private는 유료(Pro)·무료 체험. KeepCon은 Public이라 App 범위에만 추가하면 무료로 동작합니다. (동작 여부=App 접근 범위, 비용=공개여부 — 별개.)
-- **4층 · 커밋 전 자체 리뷰 — `/code-review` (온디맨드):** Claude Code로 작업할 때 **커밋 전** 변경 diff를 리뷰·수정한 뒤 커밋합니다. 릴리스 전 `/security-review`로 보안 점검.
+- 릴리스 전 `/security-review`로 보안 점검(층 밖 · 주기적).
+- **에이전트 리뷰를 푸시 전에 두는 이유:** PR을 올린 뒤 리뷰하고 고치면 head가 움직여 CodeRabbit 리뷰가 무효(`STALE`)가 되고, 라운드마다 재트리거가 필요합니다 — 한도가 **계정 단위 공유 풀에 시간당 1건**이라 라운드 수만큼 시간이 곱해집니다. 그리고 틀린 주장이 공개된 뒤에 정정되는 일이 실제로 있었습니다(PR #101).
 
 ---
 
