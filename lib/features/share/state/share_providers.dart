@@ -25,6 +25,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../shared/models/gifticon.dart';
 import '../../../shared/models/group.dart';
+import '../../../shared/models/join_request.dart';
 import '../../../shared/models/share.dart';
 import '../../../shared/models/user.dart';
 import '../../../shared/providers/my_groups_provider.dart';
@@ -441,4 +442,39 @@ class MemberNames {
 /// 로딩 중이거나 에러 발생 시 빈 리스트를 반환하여 UI 안전성을 보장한다.
 final scanTargetGroupsProvider = Provider<List<Group>>((ref) {
   return ref.watch(myGroupsProvider).valueOrNull ?? const <Group>[];
+});
+
+// ─── 참여 요청 ────────────────────────────────────────────────────────────
+//
+// 두 방향이 있고 **읽을 수 있는 사람이 서로 다르다.**
+//  - 내가 보낸 요청([myJoinRequestsProvider]) — 요청자 본인만 읽는다.
+//  - 그룹에 들어온 요청([pendingJoinRequestsProvider]) — **방장만** 읽는다.
+//    일반 멤버에게도 열지 않는다(아직 멤버가 아닌 사람들의 이름이다 — 계약 참조).
+
+/// 특정 사용자가 보낸 참여 요청 스트림(내부용).
+final _myJoinRequestsByUserProvider =
+    StreamProvider.family<List<JoinRequest>, String>((ref, userId) {
+  return ref.watch(shareRepositoryProvider).watchMyJoinRequests(userId);
+});
+
+/// 내가 보낸 참여 요청(대기·거절 포함).
+///
+/// 거절도 여기 남는다 — 비멤버는 그룹 알림을 못 읽으므로 **요청자가 결과를 알 유일한
+/// 경로**다(계약: 거절은 상태로 남기고, 취소는 삭제한다).
+final joinRequestsProvider = Provider<AsyncValue<List<JoinRequest>>>((ref) {
+  return foldSessionUser<List<JoinRequest>>(
+    ref.watch(sessionUserProvider),
+    (User user) => ref.watch(_myJoinRequestsByUserProvider(user.id)),
+    signedOut: const <JoinRequest>[],
+  );
+});
+
+/// 특정 그룹의 대기 중 참여 요청(방장 전용).
+///
+/// 방장에게 "요청이 도착했다"를 알리는 신호는 **이 스트림 하나**다 — 알림 문서로 알리려면
+/// 비멤버가 `notifications`에 써야 하는데 규칙이 막는다(계약 참조). 화면은 이 스트림의
+/// 길이로 배지를 그린다.
+final pendingJoinRequestsProvider =
+    StreamProvider.family<List<JoinRequest>, String>((ref, groupId) {
+  return ref.watch(shareRepositoryProvider).watchPendingJoinRequests(groupId);
 });
