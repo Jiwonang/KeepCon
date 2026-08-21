@@ -132,8 +132,10 @@ gh pr view <번호> --json comments,reviews --jq '[.comments[], .reviews[]] | ma
 # 창이 열리는 시각 = 저장소 전체 마지막 성공 리뷰 + 1시간 (+ 여유 2분)
 # --limit은 저장소 전체 PR 수 이상으로 — 오래된 PR을 재트리거해도 같은 풀을 쓰므로
 # 상한이 낮으면 그 리뷰를 놓쳐 창을 이르게 계산한다.
-# PR당 API 왕복 2회다 — PR 40개당 약 45초, 106개면 2분 남짓. 중간에 끊지 마라
-# (2분 타임아웃에 실제로 걸린다 — 창이 안 열린 줄 알고 끊으면 처음부터 다시 돈다).
+# PR당 API 왕복 **최소** 2회이고 `--paginate`는 응답 페이지마다 한 번씩 더 부른다 —
+# 소요는 PR 수 × 페이지 수에 비례한다. 현 저장소(대부분 1페이지) 실측 20 PR = 25초,
+# 40개 약 50초, 106개 2분 남짓. **중간에 끊지 마라** — 2분 타임아웃에 실제로 걸렸고,
+# 창이 안 열린 줄 알고 끊으면 처음부터 다시 돈다.
 #
 # 실패를 삼키면 안 된다. 일부 PR 조회만 실패해도 나머지로 "마지막 리뷰"가 계산돼
 # 창을 이르게 잡고, 그러면 트리거가 튕겨 슬롯을 버린다. 한 건이라도 실패하면 멈춘다.
@@ -142,14 +144,20 @@ gh pr view <번호> --json comments,reviews --jq '[.comments[], .reviews[]] | ma
   set -o pipefail
   nums=$(gh pr list --state all --limit 200 --json number --jq '.[].number') || { echo "PR 목록 조회 실패 — 트리거하지 마라"; exit 1; }
 
-  sub=$(mktemp); cre=$(mktemp); upd=$(mktemp)
-  trap 'rm -f "$sub" "$cre" "$upd"' EXIT   # 중간 실패로 빠져나가도 남기지 않는다
+  sub=$(mktemp); cre=$(mktemp); upd=$(mktemp); raw=$(mktemp)
+  trap 'rm -f "$sub" "$cre" "$upd" "$raw"' EXIT   # 중간 실패로 빠져나가도 남기지 않는다
   for n in $nums; do
     gh api --paginate "repos/Jiwonang/KeepCon/pulls/$n/reviews" --jq '.[] | select(.user.login=="coderabbitai[bot]") | .submitted_at' >> "$sub" || { echo "PR #$n 조회 실패 — 부분 결과로 계산하면 창을 이르게 잡는다. 트리거하지 마라"; exit 1; }
     # ⚠️ `reviews`만 보면 안 된다 — 3단계가 이미 경고하듯 리뷰 본문은 **일반 코멘트로도** 온다.
     #    2026-08-20 실측: #105의 마지막 리뷰가 comments에 10:06:26Z로 실렸는데 reviews에는
     #    07:41:38Z뿐이라, 이 스캔이 창을 **54분 이르게** 잡았다.
-    gh api --paginate "repos/Jiwonang/KeepCon/issues/$n/comments" --jq '.[] | select(.user.login=="coderabbitai[bot]") | select(.body | test("Actionable comments posted|No actionable comments")) | "\(.created_at) \(.updated_at)"'       | tee >(cut -d' ' -f1 >> "$cre") | cut -d' ' -f2 >> "$upd" || { echo "PR #$n 코멘트 조회 실패 — 트리거하지 마라"; exit 1; }
+    #
+    # ⚠️ 두 값을 `tee >(...)`로 가르지 마라. 프로세스 치환은 파이프라인의 대기·상태 전파
+    #    **밖**이라 ①뒤의 `sort`가 기록보다 먼저 돌 수 있고 ②그 안의 실패가 `||`에 안 잡힌다.
+    #    파일로 받아 성공을 확인한 뒤 순차로 가른다.
+    gh api --paginate "repos/Jiwonang/KeepCon/issues/$n/comments" --jq '.[] | select(.user.login=="coderabbitai[bot]") | select(.body | test("Actionable comments posted|No actionable comments")) | "\(.created_at) \(.updated_at)"' > "$raw" || { echo "PR #$n 코멘트 조회 실패 — 트리거하지 마라"; exit 1; }
+    cut -d' ' -f1 < "$raw" >> "$cre"
+    cut -d' ' -f2 < "$raw" >> "$upd"
   done
   for f in "$sub" "$cre" "$upd"; do sort -o "$f" "$f"; done
 
@@ -194,7 +202,12 @@ gh pr view <번호> --json comments,reviews --jq '[.comments[], .reviews[]] | ma
 `REVIEWED`는 "언젠가 리뷰됐다"는 뜻일 뿐이다. **CodeRabbit이 리뷰한 커밋과 현재 head를 비교한다:**
 
 ```bash
-gh api --paginate repos/Jiwonang/KeepCon/pulls/<번호>/reviews --jq '[.[] | select(.user.login=="coderabbitai[bot]") | .commit_id] | last // "NO_REVIEW"'
+# ⚠️ `--paginate`는 **페이지마다 `--jq`를 따로 적용**한다 — `[...] | last`로 쓰면 페이지별로
+#    계산돼 여러 줄이 나온다. 배열로 모으지 말고 **스트리밍한 뒤 `tail -1`** 로 집는다.
+#    (외부 `jq -s`로 페이지를 합치는 방법도 있지만 **이 환경에는 독립 `jq`가 없다** —
+#     `gh --jq`만 쓸 수 있다. 아래 형태는 그 제약 안에서 같은 결과를 낸다.)
+sha=$(gh api --paginate repos/Jiwonang/KeepCon/pulls/<번호>/reviews \n        --jq '.[] | select(.user.login=="coderabbitai[bot]") | .commit_id' | tail -1)
+echo "${sha:-NO_REVIEW}"
 gh pr view <번호> --json headRefOid --jq .headRefOid
 ```
 
