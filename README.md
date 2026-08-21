@@ -615,7 +615,7 @@ tool\deploy_rules.cmd all
 
 ## 🔗 초대 딥링크 (Android App Links)
 
-초대 링크(dev `https://keepcon-dev.web.app/invite/<token>`, prod `https://keepcon-ab660.web.app/invite/<token>`)를 휴대폰에서 누르면 **앱의 참여 요청 시트가 바로 열립니다.** 브라우저로 새지 않게 하려면 네 곳이 맞아야 하고, 하나라도 어긋나면 **에러 없이 조용히 브라우저가 열립니다.**
+초대 링크(dev `https://keepcon-dev.web.app/invite/<token>`, prod `https://keepcon-ab660.web.app/invite/<token>`)를 휴대폰에서 누르면 **앱의 참여 요청 시트가 바로 열립니다.** 브라우저로 새지 않게 하려면 다섯 곳이 맞아야 하고, 하나라도 어긋나면 **에러 없이 조용히 브라우저가 열립니다.**
 
 | 위치 | 내용 |
 |------|------|
@@ -623,6 +623,7 @@ tool\deploy_rules.cmd all
 | [`android/app/src/main/AndroidManifest.xml`](android/app/src/main/AndroidManifest.xml) | `<data android:host=...>` — 링크를 받는 쪽(dev·prod 둘 다 등록) |
 | [`web/.well-known/assetlinks.json`](web/.well-known/assetlinks.json) | 도메인이 이 앱을 인증하는 쪽 |
 | [`firebase.json`](firebase.json) | hosting이 `build/web`(Flutter 웹 빌드)을 서빙 — 링크를 열면 앱이 뜬다 |
+| [`tool/deploy_hosting.sh`](tool/deploy_hosting.sh) | 배포 후 200을 확인할 **도메인**(`host=`). 매니페스트에 그 host가 없으면 배포를 거부한다 |
 
 > ⚠️ **Android 11(API 30) 이하는 인텐트 필터 안 _모든_ host가 검증돼야 합니다.** dev 호스트를 매니페스트에 넣어 두고 그 도메인에 `assetlinks.json`을 배포하지 않으면, **prod 링크까지 함께 미검증**이 되어 지금까지 되던 링크가 브라우저로 샙니다(minSdk 24라 해당 기기가 지원 범위 안입니다). 매니페스트에 host를 추가하기 전에 그 도메인부터 배포하세요.
 
@@ -638,7 +639,9 @@ bash tool/deploy_hosting.sh dev     # Windows: tool\deploy_hosting.cmd dev
 bash tool/deploy_hosting.sh prod    # 확인 프롬프트 있음
 ```
 
-> ⚠️ **`firebase deploy --only hosting`을 직접 치지 마세요.** hosting 루트가 `build/web`(gitignore된 **빌드 산출물**)이라, 배포되는 것은 "직전에 어떤 플래그로 빌드했는가"에 달려 있습니다. 플래그 없이 빌드한 뒤 배포하면 **에뮬레이터 타깃 앱**이 올라가 방문자에게는 안내 화면만 뜨고 모든 초대 링크가 거기서 죽습니다 — 그런데 **배포는 성공하고 `assetlinks.json`도 200이라 아무 신호가 없습니다.** 위 스크립트는 대상에서 플래그를 도출해 **항상 새로 빌드한 뒤** 배포하고, 끝에 `assetlinks.json`이 200인지까지 확인합니다.
+> ⚠️ hosting 루트가 `build/web`(gitignore된 **빌드 산출물**)이라, 배포되는 것은 "직전에 어떤 플래그로 빌드했는가"에 달려 있습니다. 플래그 없이 빌드한 뒤 배포하면 **에뮬레이터 타깃 앱**이 올라가 방문자에게는 안내 화면만 뜨고 모든 초대 링크가 거기서 죽는데, **배포는 성공하고 `assetlinks.json`도 200이라 아무 신호가 없습니다.**
+>
+> 그래서 짝을 강제하는 것은 위 스크립트가 아니라 **`firebase.json`의 `hosting.predeploy` 훅**입니다([`tool/predeploy_hosting.js`](tool/predeploy_hosting.js)). CLI가 어느 경로로 불리든 — 맨손 `firebase deploy`를 포함해 — 배포 직전에 `GCLOUD_PROJECT`를 읽어 **대상에 맞는 플래그로 다시 빌드**합니다. 스크립트는 규약이지만 훅은 게이트입니다(실측: 무플래그 빌드 후 맨손 배포 → 훅이 재빌드해 dev 타깃으로 올라감).
 
 배포 후 `https://<도메인>/.well-known/assetlinks.json`이 **200**으로 열리는지 확인하세요(스크립트가 자동으로 합니다). 404면 App Links는 **절대** 검증되지 않습니다.
 

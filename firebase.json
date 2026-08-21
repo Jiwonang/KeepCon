@@ -5,6 +5,9 @@
   },
   "hosting": {
     "public": "build/web",
+    "predeploy": [
+      "node tool/predeploy_hosting.js"
+    ],
     "ignore": [
       "**/node_modules/**",
       "**/.last_build_id"

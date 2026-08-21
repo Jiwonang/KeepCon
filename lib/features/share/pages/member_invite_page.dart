@@ -235,6 +235,10 @@ class _MemberInvitePageState extends ConsumerState<MemberInvitePage> {
     final String? inviteUrl = origin == null
         ? null
         : inviteUrlFrom(origin: origin, inviteToken: g.inviteToken);
+    // 링크가 **있어도** 이 PC 밖에서는 안 열리는 조합이 있다(웹 + 로컬 에뮬레이터).
+    // 딥링크 개발 루프에 필요하니 링크는 남기되, 공유하라고 말하지는 않는다 —
+    // 그러지 않으면 이 화면이 스스로 금지한 '그럴듯한 가짜 링크'를 내미는 셈이 된다.
+    final bool localOnlyLink = origin != null && !isSharableOrigin(origin);
     // 화면을 열어 둔 채 유효기간이 끝나도 복사·공유가 살아 있지 않게, 만료 시각에
     // 리빌드를 예약한다(재발급으로 만료가 밀리면 새 시각으로 다시 건다).
     _scheduleExpiryRefresh(g.inviteExpiresAt);
@@ -252,7 +256,9 @@ class _MemberInvitePageState extends ConsumerState<MemberInvitePage> {
             ),
             const SizedBox(height: 8),
             Text(
-              inviteUrl == null ? '아래 코드를 공유하세요.' : '아래 링크나 코드를 공유하세요.',
+              (inviteUrl == null || localOnlyLink)
+                  ? '아래 코드를 공유하세요.'
+                  : '아래 링크나 코드를 공유하세요.',
               style: theme.textTheme.bodyLarge,
             ),
             const SizedBox(height: 28),
@@ -270,6 +276,16 @@ class _MemberInvitePageState extends ConsumerState<MemberInvitePage> {
                 label: '초대 링크',
                 value: inviteUrl,
                 onCopy: expired ? null : () => _copy(inviteUrl, '초대 링크'),
+              ),
+            if (localOnlyLink)
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Text(
+                  '이 링크는 이 PC에서만 열려요(로컬 에뮬레이터). '
+                  '다른 사람에게는 아래 초대코드를 보내세요.',
+                  style: theme.textTheme.bodySmall
+                      ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                ),
               ),
             const SizedBox(height: 16),
             _CopyField(

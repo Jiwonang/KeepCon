@@ -19,6 +19,24 @@ String inviteUrlFrom({required String origin, required String inviteToken}) {
   return '$base/invite/$inviteToken';
 }
 
+/// [origin]이 **다른 기기에서도 열리는지**. 로컬 개발 서버 주소는 아니다.
+///
+/// emulator + 웹은 진입 origin(`http://localhost:<포트>`)을 쓰는데, 그 링크는 발급한 PC
+/// 안에서만 통한다. 받은 사람이 누르면 연결 거부이거나, 더 나쁘게는 자기 로컬 앱이 열려
+/// "링크가 잘못됐거나 만료됐을 수 있어요"가 뜬다 — 링크는 멀쩡한데 원인을 정반대로 말한다.
+///
+/// 그 갈래를 없애지 않는 이유는 **웹에서 딥링크를 손으로 확인할 유일한 경로**여서다.
+/// 대신 화면이 사실을 적을 수 있도록 판정을 여기 둔다 — 화면이 매직 스트링으로 재구현하면
+/// 판정이 두 벌이 된다(계약 규약: 공유 판정은 `lib/shared` 정본).
+bool isSharableOrigin(String origin) {
+  final String host = Uri.tryParse(origin)?.host ?? '';
+  return host.isNotEmpty &&
+      host != 'localhost' &&
+      host != '127.0.0.1' &&
+      host != '::1' &&
+      !host.endsWith('.localhost');
+}
+
 /// [uri]에서 초대 토큰을 추출한다. 초대 링크가 아니면 `null`.
 ///
 /// 지원 형태:
