@@ -631,23 +631,19 @@ tool\deploy_rules.cmd all
 초대 링크가 가리키는 도메인에는 **Flutter 웹 빌드가 올라가 있어야** 합니다 — 링크를 열면 앱이 뜨고, 딥링크 파서가 토큰을 집어 참여 요청 흐름을 잇습니다. `assetlinks.json`은 `web/.well-known/`에 있어 빌드 산출물에 자동으로 포함됩니다.
 
 ```bash
-flutter build web --release --dart-define=USE_FIREBASE=true
-firebase deploy --only hosting --project keepcon-dev
+bash tool/deploy_hosting.sh dev     # Windows: tool\deploy_hosting.cmd dev
 ```
 
 ```bash
-flutter build web --release --dart-define=USE_FIREBASE_PROD=true
-firebase deploy --only hosting --project keepcon-ab660
+bash tool/deploy_hosting.sh prod    # 확인 프롬프트 있음
 ```
 
-⚠️ **빌드 플래그와 배포 대상이 짝이 맞아야 합니다.** 플래그 없이 빌드하면 에뮬레이터 구성이 배포되어, 배포된 앱이 방문자의 `localhost`를 두드리다 영원히 로딩합니다.
+> ⚠️ **`firebase deploy --only hosting`을 직접 치지 마세요.** hosting 루트가 `build/web`(gitignore된 **빌드 산출물**)이라, 배포되는 것은 "직전에 어떤 플래그로 빌드했는가"에 달려 있습니다. 플래그 없이 빌드한 뒤 배포하면 **에뮬레이터 타깃 앱**이 올라가 방문자에게는 안내 화면만 뜨고 모든 초대 링크가 거기서 죽습니다 — 그런데 **배포는 성공하고 `assetlinks.json`도 200이라 아무 신호가 없습니다.** 위 스크립트는 대상에서 플래그를 도출해 **항상 새로 빌드한 뒤** 배포하고, 끝에 `assetlinks.json`이 200인지까지 확인합니다.
 
-배포 후 `https://<도메인>/.well-known/assetlinks.json`이 **200**으로 열리는지 확인하세요. 404면 App Links는 **절대** 검증되지 않습니다.
+배포 후 `https://<도메인>/.well-known/assetlinks.json`이 **200**으로 열리는지 확인하세요(스크립트가 자동으로 합니다). 404면 App Links는 **절대** 검증되지 않습니다.
 
-```bash
-curl -sI https://keepcon-dev.web.app/.well-known/assetlinks.json | head -1
-```
-
+> ⚠️ **알려진 한계 — 교차 백엔드 링크는 열리되 실패합니다.** 매니페스트는 dev·prod 호스트를 빌드와 무관하게 **둘 다** 받습니다(Android 11 이하가 필터 안 모든 host의 검증을 요구하기 때문입니다). 그래서 dev 링크를 prod APK가 열면 앱은 뜨지만 토큰이 그 백엔드에 없어 "링크가 잘못됐거나 만료됐을 수 있어요"로 안내됩니다 — 링크는 멀쩡한데 원인을 정반대로 말합니다. 토큰이 128비트 랜덤이라 **오합류는 일어나지 않습니다**(fail-closed). 근본 해결은 빌드 플레이버별 `manifestPlaceholders`로 host를 하나만 넣는 것입니다.
+>
 > ⚠️ `firebase.json`의 hosting `ignore`에서 기본 패턴 `**/.*`를 **일부러 뺐습니다.** 그 패턴은 `.well-known` 디렉터리째 배포에서 제외해, 설정이 전부 맞는데도 검증만 실패하는 상태를 만듭니다.
 
 ### 팀원 지문 추가 (필수)

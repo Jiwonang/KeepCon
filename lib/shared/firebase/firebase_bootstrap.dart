@@ -158,9 +158,9 @@ Future<List<Override>> initFirebaseAndBuildOverrides({
 
   return <Override>[
     ...firebaseProviderOverrides(),
-    // 초대 링크가 가리킬 곳은 백엔드마다 다르다 — 안 덮어쓰면 안드로이드에서 링크가
-    // 만들어지지 않고(웹은 진입 origin이라 기본값으로도 맞다), 옛 코드처럼 prod로
-    // 고정하면 에뮬레이터·dev에서 실서비스 링크를 발급한다.
+    // 초대 링크가 가리킬 곳은 백엔드마다 다르다 — 기본값이 `null`이라 **안 덮어쓰면
+    // 어느 플랫폼에서도 링크가 만들어지지 않고**(데모의 의도된 상태다), 옛 코드처럼
+    // prod로 고정하면 에뮬레이터·dev에서 실서비스 링크를 발급한다.
     inviteOriginProvider.overrideWithValue(inviteOriginFor(target)),
   ];
 }

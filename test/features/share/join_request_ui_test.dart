@@ -254,6 +254,7 @@ void main() {
       // B가 A의 `_busy = true`를 물려받는다 — 방장이 두 번째 요청을 영영 처리 못 한다.
       final _StubShareRepository share = _StubShareRepository()
         ..useController = true;
+      addTearDown(share.pendingController.close);
       // 공용 pump는 pumpAndSettle을 쓰는데, 첫 방출 전에는 스피너가 계속 돌아
       // 정착하지 않는다 — 여기서는 구독만 시키고 프레임 단위로 진행한다.
       await tester.pumpWidget(

@@ -52,8 +52,8 @@ void main() {
     });
   });
 
-  group('Group.inviteUrl 라운드트립', () {
-    test('inviteUrl을 파싱하면 원래 inviteToken을 얻는다', () {
+  group('inviteUrlFrom 라운드트립', () {
+    test('조립한 링크를 파싱하면 원래 inviteToken을 얻는다', () {
       final Group g = Group(
         id: 'g',
         name: '가족',

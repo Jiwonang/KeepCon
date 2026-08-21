@@ -11,6 +11,7 @@
 /// 백엔드로 가거나 조용히 아무 일도 안 일어난다).
 library;
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../firebase/firebase_bootstrap.dart' show FirebaseTarget;
@@ -39,15 +40,19 @@ final Provider<String?> inviteOriginProvider =
 /// `/.well-known/assetlinks.json`으로 서명을 검증해 줘야 한다. 그래서:
 ///
 ///   - prod·dev — 각 Firebase Hosting 도메인. 매니페스트에 **둘 다** 등록돼 있어야 한다.
-///   - emulator — **`null`(웹·안드로이드 모두).** 에뮬레이터 데이터는 그 기기 안에만
-///     있어 애초에 공유 대상이 아니고, 서빙할 도메인도 없다. 여기서 dev나 prod 도메인을
-///     빌려 쓰면 **링크를 누른 사람이 다른 백엔드의 그룹에 참여 요청**을 보내게 된다.
-///     에뮬레이터에서 합류를 시연하려면 초대**코드**를 쓴다 — 화면이 링크 대신 코드를
+///   - emulator + 안드로이드 — **`null`.** App Links를 검증해 줄 도메인이 없고, AVD는
+///     호스트에 `10.0.2.2`로만 닿는다. dev·prod 도메인을 빌려 쓰면 **링크를 누른 사람이
+///     다른 백엔드의 그룹에 참여 요청**을 보내게 된다. 화면이 링크 대신 초대코드를
 ///     안내한다(`_NoInviteLinkNotice`).
+///   - emulator + 웹 — **진입 origin.** 그 기기 안에서만 통하는 링크지만 **그것이 정확히
+///     에뮬레이터 데이터의 범위**다(둘 다 그 PC 안에만 있다). dev·prod는 위 표를 쓰므로
+///     로컬 개발 서버 주소가 배포 링크로 새지 않는다 — 그게 이 함수가 고친 문제다.
+///     이 조합이 웹에서 딥링크 파싱→참여 시트를 손으로 확인할 **유일한 경로**라 남긴다
+///     (플래그 없는 `flutter run -d chrome`이 규약상 기본 백엔드다).
 String? inviteOriginFor(FirebaseTarget target) {
   return switch (target) {
     FirebaseTarget.prod => 'https://keepcon-ab660.web.app',
     FirebaseTarget.dev => 'https://keepcon-dev.web.app',
-    FirebaseTarget.emulator => null,
+    FirebaseTarget.emulator => kIsWeb ? Uri.base.origin : null,
   };
 }
