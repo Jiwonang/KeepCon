@@ -47,7 +47,7 @@ if [ -n "$defs" ]; then
 fi
 
 # 2) SSOT provider 재선언 금지 (소비 ref.watch(...)는 허용, 선언은 금지)
-SSOT_PROVIDERS="authRepositoryProvider|gifticonRepositoryProvider|shareRepositoryProvider|themeModeProvider|myGroupsProvider|myGroupsRetryProvider|sessionUserProvider|errorReporterProvider"
+SSOT_PROVIDERS="authRepositoryProvider|gifticonRepositoryProvider|shareRepositoryProvider|themeModeProvider|myGroupsProvider|myGroupsRetryProvider|sessionUserProvider|errorReporterProvider|inviteOriginProvider"
 
 # 선택적 `late`, 선택적 타입(`Provider<T> ` 등)을 포괄해 `final NAME =`,
 # `late final NAME =`, `final Provider<T> NAME =` 형태를 모두 잡는다.
@@ -69,7 +69,7 @@ fi
 # 시분초를 절삭해 같은 기프티콘을 두고 화면과 통계가 다른 답을 냈다. 가정이 아니라
 # 이미 발생한 재발이라 기계적 가드에 넣는다. 만료 임박 알림이 이 판정 위에 올라가므로
 # 재분기하면 알림까지 어긋난다.
-SSOT_FUNCTIONS="retryMyGroups|foldSessionUser|daysUntilExpiry|isExpiringSoon|isExpiredByDate"
+SSOT_FUNCTIONS="retryMyGroups|foldSessionUser|daysUntilExpiry|isExpiringSoon|isExpiredByDate|inviteUrlFrom|inviteOriginFor"
 
 # 선언 형태 두 갈래를 잡는다(호출 `retryMyGroups(ref);`·`return foldSessionUser<...>(...)`는
 # 둘 다 통과):

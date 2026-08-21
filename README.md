@@ -615,21 +615,38 @@ tool\deploy_rules.cmd all
 
 ## 🔗 초대 딥링크 (Android App Links)
 
-초대 링크(`https://keepcon-ab660.web.app/invite/<code>`)를 휴대폰에서 누르면 **앱의 그룹 참여 시트가 바로 열립니다.** 브라우저로 새지 않게 하려면 세 곳이 맞아야 하고, 하나라도 어긋나면 **에러 없이 조용히 브라우저가 열립니다.**
+초대 링크(dev `https://keepcon-dev.web.app/invite/<token>`, prod `https://keepcon-ab660.web.app/invite/<token>`)를 휴대폰에서 누르면 **앱의 참여 요청 시트가 바로 열립니다.** 브라우저로 새지 않게 하려면 네 곳이 맞아야 하고, 하나라도 어긋나면 **에러 없이 조용히 브라우저가 열립니다.**
 
 | 위치 | 내용 |
 |------|------|
-| [`lib/shared/models/group.dart`](lib/shared/models/group.dart) | `Group.inviteHost` — 링크를 만드는 쪽 |
-| [`android/app/src/main/AndroidManifest.xml`](android/app/src/main/AndroidManifest.xml) | `<data android:host=...>` — 링크를 받는 쪽 |
-| [`public/.well-known/assetlinks.json`](public/.well-known/assetlinks.json) | 도메인이 이 앱을 인증하는 쪽 |
+| [`lib/shared/providers/invite_link_providers.dart`](lib/shared/providers/invite_link_providers.dart) | `inviteOriginFor(target)` — 백엔드별로 링크를 만드는 쪽 |
+| [`android/app/src/main/AndroidManifest.xml`](android/app/src/main/AndroidManifest.xml) | `<data android:host=...>` — 링크를 받는 쪽(dev·prod 둘 다 등록) |
+| [`web/.well-known/assetlinks.json`](web/.well-known/assetlinks.json) | 도메인이 이 앱을 인증하는 쪽 |
+| [`firebase.json`](firebase.json) | hosting이 `build/web`(Flutter 웹 빌드)을 서빙 — 링크를 열면 앱이 뜬다 |
 
-### 배포 (한 번만)
+> ⚠️ **Android 11(API 30) 이하는 인텐트 필터 안 _모든_ host가 검증돼야 합니다.** dev 호스트를 매니페스트에 넣어 두고 그 도메인에 `assetlinks.json`을 배포하지 않으면, **prod 링크까지 함께 미검증**이 되어 지금까지 되던 링크가 브라우저로 샙니다(minSdk 24라 해당 기기가 지원 범위 안입니다). 매니페스트에 host를 추가하기 전에 그 도메인부터 배포하세요.
+
+### 배포
+
+초대 링크가 가리키는 도메인에는 **Flutter 웹 빌드가 올라가 있어야** 합니다 — 링크를 열면 앱이 뜨고, 딥링크 파서가 토큰을 집어 참여 요청 흐름을 잇습니다. `assetlinks.json`은 `web/.well-known/`에 있어 빌드 산출물에 자동으로 포함됩니다.
 
 ```bash
+flutter build web --release --dart-define=USE_FIREBASE=true
+firebase deploy --only hosting --project keepcon-dev
+```
+
+```bash
+flutter build web --release --dart-define=USE_FIREBASE_PROD=true
 firebase deploy --only hosting --project keepcon-ab660
 ```
 
-배포 후 `https://keepcon-ab660.web.app/.well-known/assetlinks.json`이 열리는지 확인하세요. 404면 App Links는 **절대** 검증되지 않습니다.
+⚠️ **빌드 플래그와 배포 대상이 짝이 맞아야 합니다.** 플래그 없이 빌드하면 에뮬레이터 구성이 배포되어, 배포된 앱이 방문자의 `localhost`를 두드리다 영원히 로딩합니다.
+
+배포 후 `https://<도메인>/.well-known/assetlinks.json`이 **200**으로 열리는지 확인하세요. 404면 App Links는 **절대** 검증되지 않습니다.
+
+```bash
+curl -sI https://keepcon-dev.web.app/.well-known/assetlinks.json | head -1
+```
 
 > ⚠️ `firebase.json`의 hosting `ignore`에서 기본 패턴 `**/.*`를 **일부러 뺐습니다.** 그 패턴은 `.well-known` 디렉터리째 배포에서 제외해, 설정이 전부 맞는데도 검증만 실패하는 상태를 만듭니다.
 

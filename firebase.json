@@ -4,15 +4,28 @@
     "indexes": "firestore.indexes.json"
   },
   "hosting": {
-    "public": "public",
-    "ignore": ["firebase.json", "**/node_modules/**"],
+    "public": "build/web",
+    "ignore": [
+      "firebase.json",
+      "**/node_modules/**"
+    ],
     "headers": [
       {
         "source": "/.well-known/assetlinks.json",
-        "headers": [{ "key": "Content-Type", "value": "application/json" }]
+        "headers": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ]
       }
     ],
-    "rewrites": [{ "source": "/invite/**", "destination": "/index.html" }]
+    "rewrites": [
+      {
+        "source": "/invite/**",
+        "destination": "/index.html"
+      }
+    ]
   },
   "emulators": {
     "auth": {

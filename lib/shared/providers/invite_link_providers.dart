@@ -11,37 +11,40 @@
 /// 백엔드로 가거나 조용히 아무 일도 안 일어난다).
 library;
 
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../firebase/firebase_bootstrap.dart' show FirebaseTarget;
 
 /// 현재 실행의 초대 링크 origin. `null`이면 링크를 만들 수 없다.
 ///
-/// 기본값은 웹의 진입 origin이고, Firebase 조립부가 [inviteOriginFor]로 덮어쓴다.
-/// 데모(in-memory) 실행은 덮어쓰지 않으므로 이 기본값이 그대로 쓰인다.
+/// 기본값은 `null`이다 — 덮어쓰지 않는 실행은 in-memory 데모뿐이고, 그 데이터는 앱
+/// 프로세스 안에만 있어 **공유할 링크가 원리상 없다.** Firebase 조립부가
+/// [inviteOriginFor]로 덮어쓴다.
 final Provider<String?> inviteOriginProvider =
-    Provider<String?>((Ref ref) => kIsWeb ? Uri.base.origin : null);
+    Provider<String?>((Ref ref) => null);
 
 /// [target]에 붙은 실행에서 쓸 초대 링크 origin.
 ///
-/// **웹은 대상과 무관하게 진입 origin을 쓴다.** 앱이 서빙된 그 자리가 곧 링크가 가리켜야
-/// 할 자리이기 때문이다 — 에뮬레이터(`http://localhost:5000`)·dev·prod가 한 규칙으로
-/// 풀린다. 호스트를 대상별로 하드코딩하면 로컬에서 띄운 앱의 링크가 배포 도메인을
-/// 가리키게 된다.
+/// **웹·안드로이드 모두 백엔드 도메인을 쓴다.** 링크가 가리켜야 할 곳은 앱이 뜬 자리가
+/// 아니라 **데이터가 있는 자리**다. 웹에서 `Uri.base.origin`을 쓰면 로컬 개발 서버
+/// (`http://localhost:8083` 등)가 그대로 링크에 실려, 받는 사람에게는 자기 기기의
+/// 죽은 주소가 된다 — 한 기기 안에서만 통하는 링크다.
+///
+/// 그 도메인에는 `flutter build web` 산출물이 배포돼 있어(`firebase.json`의 hosting이
+/// `build/web`을 가리킨다), 링크를 열면 앱이 뜨고 딥링크 파서가 토큰을 집어 요청 흐름을
+/// 잇는다. 배포를 빠뜨리면 링크가 404가 되므로 **호스팅 배포와 이 표는 함께 움직인다.**
 ///
 /// **안드로이드는 App Links라 도메인이 빌드 시점에 고정된다.** `AndroidManifest.xml`의
 /// 인텐트 필터에 적힌 host만 앱으로 오고, 그 도메인이
 /// `/.well-known/assetlinks.json`으로 서명을 검증해 줘야 한다. 그래서:
 ///
 ///   - prod·dev — 각 Firebase Hosting 도메인. 매니페스트에 **둘 다** 등록돼 있어야 한다.
-///   - emulator — **`null`.** 로컬 에뮬레이터에는 그 파일을 서빙할 도메인이 없고,
-///     AVD는 호스트에 `10.0.2.2`로만 닿아 검증 대상 도메인이 될 수 없다. 여기서 dev나
-///     prod 도메인을 빌려 쓰면 **링크를 누른 사람이 다른 백엔드의 그룹에 참여 요청**을
-///     보내게 된다(에뮬레이터 데이터는 그 기기 안에만 있으므로 애초에 공유 대상이 아니다).
-///     이 조합에서 링크 시연이 필요하면 **웹으로** 한다.
+///   - emulator — **`null`(웹·안드로이드 모두).** 에뮬레이터 데이터는 그 기기 안에만
+///     있어 애초에 공유 대상이 아니고, 서빙할 도메인도 없다. 여기서 dev나 prod 도메인을
+///     빌려 쓰면 **링크를 누른 사람이 다른 백엔드의 그룹에 참여 요청**을 보내게 된다.
+///     에뮬레이터에서 합류를 시연하려면 초대**코드**를 쓴다 — 화면이 링크 대신 코드를
+///     안내한다(`_NoInviteLinkNotice`).
 String? inviteOriginFor(FirebaseTarget target) {
-  if (kIsWeb) return Uri.base.origin;
   return switch (target) {
     FirebaseTarget.prod => 'https://keepcon-ab660.web.app',
     FirebaseTarget.dev => 'https://keepcon-dev.web.app',

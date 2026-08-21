@@ -132,8 +132,10 @@ void main() {
     );
     // "참여했다"고 오해할 문구가 남아 있으면 안 된다.
     expect(find.textContaining('그룹에 참여했어요'), findsNothing);
-    // 스텁이 그룹 정보를 주지 않으므로 화면에 그룹명이 뜰 수 없다는 것까지 고정한다.
-    expect(find.textContaining('우리집'), findsNothing);
+    // 요청 결과가 화면으로 새지 않는지 — **스텁이 실제로 돌려주는 값**으로 고정한다.
+    // (`groupId: 'g1'`, `id: 'g1_u1'` — Firestore 문서 id에 groupId가 박히므로 둘 다 걸린다.)
+    // 없는 문자열을 찾으면 항진명제가 되어 회귀를 못 잡는다.
+    expect(find.textContaining('g1'), findsNothing);
   });
 
   testWidgets('요청이 실패하면 이유를 알리되 정원은 말하지 않는다', (WidgetTester tester) async {

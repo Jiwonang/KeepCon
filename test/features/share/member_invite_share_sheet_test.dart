@@ -189,6 +189,35 @@ void main() {
     expect(reporter.contexts, <String>['MemberInvitePage.shareInvite']);
   });
 
+  testWidgets('origin이 없는 실행은 링크 대신 초대코드를 안내한다', (WidgetTester tester) async {
+    // 안드로이드 + 로컬 에뮬레이터 — assetlinks.json을 서빙할 도메인이 없어
+    // 만들 수 있는 링크가 없다. 빈 칸이나 그럴듯한 가짜 링크를 보여주면 눌렀을 때
+    // 아무 일도 안 일어나거나 다른 백엔드로 간다.
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: <Override>[
+          authRepositoryProvider.overrideWithValue(auth),
+          gifticonRepositoryProvider.overrideWithValue(gifticons),
+          errorReporterProvider.overrideWithValue(reporter),
+          shareRepositoryProvider.overrideWithValue(share),
+          inviteOriginProvider.overrideWithValue(null),
+        ],
+        child: MaterialApp(home: MemberInvitePage(groupId: group.id)),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('이 환경에서는 초대 링크를 만들 수 없어요'), findsOneWidget);
+    // 링크 복사 필드가 없다 — 토큰만 남는다.
+    expect(find.textContaining('/invite/'), findsNothing);
+    expect(find.text(group.inviteToken), findsOneWidget);
+    // 공유 CTA는 비활성이고 이유를 말한다.
+    final ElevatedButton cta = tester.widget<ElevatedButton>(
+      find.widgetWithText(ElevatedButton, '이 환경에서는 링크를 공유할 수 없어요'),
+    );
+    expect(cta.onPressed, isNull);
+  });
+
   testWidgets('상단 "초대 링크" 필드의 복사는 그대로다(공유와 별개 경로)',
       (WidgetTester tester) async {
     await pumpInvitePage(tester);

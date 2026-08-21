@@ -25,8 +25,22 @@ class MyJoinRequestsCard extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final AsyncValue<List<JoinRequest>> async = ref.watch(joinRequestsProvider);
+    // 에러를 빈 목록으로 접지 않는다 — 이 카드가 **거절 통보의 유일한 경로**라
+    // (비멤버는 그룹 알림을 못 읽는다), 조용히 사라지면 요청자는 결과를 영영 모른다.
+    // 형제인 PendingJoinRequestsSection과 같은 규약이다.
+    if (async.hasError) {
+      final ThemeData t = Theme.of(context);
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 16),
+        child: Text(
+          '보낸 참여 요청을 불러오지 못했어요.',
+          style: t.textTheme.bodyMedium?.copyWith(color: t.colorScheme.error),
+        ),
+      );
+    }
     final List<JoinRequest> requests =
-        ref.watch(joinRequestsProvider).valueOrNull ?? const <JoinRequest>[];
+        async.valueOrNull ?? const <JoinRequest>[];
     // 승인된 요청은 그룹 목록에 이미 그룹으로 나타나므로 여기서 중복 표시하지 않는다.
     final List<JoinRequest> visible = requests
         .where((JoinRequest r) => r.status != JoinRequestStatus.approved)

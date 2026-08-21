@@ -8,6 +8,8 @@
 // 두 축 모두 "문구"가 아니라 **무엇이 화면에 있고 없는가**로 검증한다.
 library;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -46,18 +48,34 @@ class _StubShareRepository implements ShareRepository {
   /// `null`이면 스트림을 열어 둔 채 값을 주지 않는다(로딩 상태 재현).
   final List<JoinRequest>? pending;
 
+  /// 목록을 여러 번 방출해야 하는 테스트용(예: 한 건 처리 후 줄어드는 목록).
+  final StreamController<List<JoinRequest>> pendingController =
+      StreamController<List<JoinRequest>>.broadcast();
+
+  /// `true`면 [pending] 대신 [pendingController]를 흘린다.
+  bool useController = false;
+
+  /// `true`면 두 스트림이 에러를 방출한다(인덱스 미배포·규칙 거부 재현).
+  bool failStreams = false;
+
   final List<String> approved = <String>[];
   final List<String> rejected = <String>[];
 
   @override
-  Stream<List<JoinRequest>> watchMyJoinRequests(String userId) =>
-      Stream<List<JoinRequest>>.value(mine);
+  Stream<List<JoinRequest>> watchMyJoinRequests(String userId) => failStreams
+      ? Stream<List<JoinRequest>>.error(StateError('인덱스 없음'))
+      : Stream<List<JoinRequest>>.value(mine);
 
   @override
-  Stream<List<JoinRequest>> watchPendingJoinRequests(String groupId) =>
-      pending == null
-          ? const Stream<List<JoinRequest>>.empty()
-          : Stream<List<JoinRequest>>.value(pending!);
+  Stream<List<JoinRequest>> watchPendingJoinRequests(String groupId) {
+    if (failStreams) {
+      return Stream<List<JoinRequest>>.error(StateError('규칙 거부'));
+    }
+    if (useController) return pendingController.stream;
+    return pending == null
+        ? const Stream<List<JoinRequest>>.empty()
+        : Stream<List<JoinRequest>>.value(pending!);
+  }
 
   @override
   Future<void> cancelJoinRequest(String id) async {}
@@ -153,6 +171,15 @@ void main() {
     });
   });
 
+  testWidgets('요청자 카드도 에러를 삼키지 않는다 — 거절 통보의 유일한 경로다',
+      (WidgetTester tester) async {
+    final _StubShareRepository share = _StubShareRepository()
+      ..failStreams = true;
+    await pump(tester, share, child: const MyJoinRequestsCard());
+
+    expect(find.text('보낸 참여 요청을 불러오지 못했어요.'), findsOneWidget);
+  });
+
   group('방장 승인 목록', () {
     testWidgets('대기 요청을 이름과 함께 보여준다', (WidgetTester tester) async {
       final _StubShareRepository share = _StubShareRepository(
@@ -220,6 +247,59 @@ void main() {
 
       expect(share.rejected, <String>['a']);
       expect(share.approved, isEmpty); // 두 버튼이 뒤바뀌지 않았다
+    });
+
+    testWidgets('한 건을 처리해도 남은 요청의 버튼이 잠기지 않는다', (WidgetTester tester) async {
+      // key가 없으면 목록이 [A,B]→[B]로 줄 때 Flutter가 index 0의 State를 재사용해
+      // B가 A의 `_busy = true`를 물려받는다 — 방장이 두 번째 요청을 영영 처리 못 한다.
+      final _StubShareRepository share = _StubShareRepository()
+        ..useController = true;
+      // 공용 pump는 pumpAndSettle을 쓰는데, 첫 방출 전에는 스피너가 계속 돌아
+      // 정착하지 않는다 — 여기서는 구독만 시키고 프레임 단위로 진행한다.
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: <Override>[
+            authRepositoryProvider.overrideWithValue(auth),
+            shareRepositoryProvider.overrideWithValue(share),
+            errorReporterProvider.overrideWithValue(reporter),
+          ],
+          child: const MaterialApp(
+            home: Scaffold(
+              body: PendingJoinRequestsSection(groupId: 'g-secret'),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+
+      share.pendingController.add(<JoinRequest>[
+        _req('a', displayName: '가나'),
+        _req('b', displayName: '다라'),
+      ]);
+      await tester.pumpAndSettle();
+      expect(find.text('가나'), findsOneWidget);
+
+      // 첫 행 거절 → 목록이 한 건으로 줄어든다.
+      await tester.tap(find.widgetWithText(TextButton, '거절').first);
+      await tester.pumpAndSettle();
+      share.pendingController.add(<JoinRequest>[_req('b', displayName: '다라')]);
+      await tester.pumpAndSettle();
+
+      expect(find.text('다라'), findsOneWidget);
+      final FilledButton approve =
+          tester.widget<FilledButton>(find.widgetWithText(FilledButton, '승인'));
+      expect(approve.onPressed, isNotNull,
+          reason: '남은 행의 승인 버튼이 앞 행의 처리 중 상태를 물려받았다');
+    });
+
+    testWidgets('에러를 빈 목록으로 접지 않는다 — 방장이 대기자를 지나치면 안 된다',
+        (WidgetTester tester) async {
+      final _StubShareRepository share = _StubShareRepository()
+        ..failStreams = true;
+      await pump(tester, share,
+          child: const PendingJoinRequestsSection(groupId: 'g-secret'));
+
+      expect(find.text('참여 요청을 불러오지 못했어요.'), findsOneWidget);
     });
 
     testWidgets('요청이 없으면 아무것도 그리지 않는다', (WidgetTester tester) async {

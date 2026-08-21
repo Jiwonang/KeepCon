@@ -59,7 +59,11 @@ class PendingJoinRequestsSection extends ConsumerWidget {
                   ],
                 ),
                 const SizedBox(height: 8),
-                for (final JoinRequest r in requests) _PendingRow(request: r),
+                // ⚠️ key가 없으면 목록이 [A,B]→[B]로 줄 때 Flutter가 index 0의 State를
+                //    재사용해 **B가 A의 `_busy = true`를 물려받는다** — 남은 요청의
+                //    버튼이 영구히 잠긴다(실측 재현). 요청 id는 계약상 유일하다.
+                for (final JoinRequest r in requests)
+                  _PendingRow(key: ValueKey<String>(r.id), request: r),
               ],
             );
           },
@@ -68,7 +72,7 @@ class PendingJoinRequestsSection extends ConsumerWidget {
 }
 
 class _PendingRow extends ConsumerStatefulWidget {
-  const _PendingRow({required this.request});
+  const _PendingRow({super.key, required this.request});
 
   final JoinRequest request;
 
