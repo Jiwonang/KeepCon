@@ -131,7 +131,9 @@ gh pr view <번호> --json comments,reviews --jq '[.comments[], .reviews[]] | ma
 ```bash
 # 창이 열리는 시각 = 저장소 전체 마지막 성공 리뷰 + 1시간 (+ 여유 2분)
 # --limit은 저장소 전체 PR 수 이상으로 — 오래된 PR을 재트리거해도 같은 풀을 쓰므로
-# 상한이 낮으면 그 리뷰를 놓쳐 창을 이르게 계산한다. (PR 40개당 약 25초)
+# 상한이 낮으면 그 리뷰를 놓쳐 창을 이르게 계산한다.
+# PR당 API 왕복 2회다 — PR 40개당 약 45초, 106개면 2분 남짓. 중간에 끊지 마라
+# (2분 타임아웃에 실제로 걸린다 — 창이 안 열린 줄 알고 끊으면 처음부터 다시 돈다).
 #
 # 실패를 삼키면 안 된다. 일부 PR 조회만 실패해도 나머지로 "마지막 리뷰"가 계산돼
 # 창을 이르게 잡고, 그러면 트리거가 튕겨 슬롯을 버린다. 한 건이라도 실패하면 멈춘다.
@@ -140,22 +142,45 @@ gh pr view <번호> --json comments,reviews --jq '[.comments[], .reviews[]] | ma
   set -o pipefail
   nums=$(gh pr list --state all --limit 200 --json number --jq '.[].number') || { echo "PR 목록 조회 실패 — 트리거하지 마라"; exit 1; }
 
-  tmp=$(mktemp)
+  sub=$(mktemp); cre=$(mktemp); upd=$(mktemp)
+  trap 'rm -f "$sub" "$cre" "$upd"' EXIT   # 중간 실패로 빠져나가도 남기지 않는다
   for n in $nums; do
-    gh api "repos/Jiwonang/KeepCon/pulls/$n/reviews" --jq '.[] | select(.user.login=="coderabbitai[bot]") | .submitted_at' >> "$tmp" || { echo "PR #$n 조회 실패 — 부분 결과로 계산하면 창을 이르게 잡는다. 트리거하지 마라"; rm -f "$tmp"; exit 1; }
+    gh api --paginate "repos/Jiwonang/KeepCon/pulls/$n/reviews" --jq '.[] | select(.user.login=="coderabbitai[bot]") | .submitted_at' >> "$sub" || { echo "PR #$n 조회 실패 — 부분 결과로 계산하면 창을 이르게 잡는다. 트리거하지 마라"; exit 1; }
     # ⚠️ `reviews`만 보면 안 된다 — 3단계가 이미 경고하듯 리뷰 본문은 **일반 코멘트로도** 온다.
     #    2026-08-20 실측: #105의 마지막 리뷰가 comments에 10:06:26Z로 실렸는데 reviews에는
-    #    07:41:38Z뿐이라, 이 스캔이 창을 **54분 이르게** 잡았다. 그대로 트리거하면 튕겨서
-    #    슬롯을 버린다(그 실패는 창을 앞당겨 주지도 않는다).
-    gh api --paginate "repos/Jiwonang/KeepCon/issues/$n/comments" --jq '.[] | select(.user.login=="coderabbitai[bot]") | select(.body | test("Actionable comments posted|No actionable comments")) | .updated_at' >> "$tmp" || { echo "PR #$n 코멘트 조회 실패 — 트리거하지 마라"; rm -f "$tmp"; exit 1; }
+    #    07:41:38Z뿐이라, 이 스캔이 창을 **54분 이르게** 잡았다.
+    gh api --paginate "repos/Jiwonang/KeepCon/issues/$n/comments" --jq '.[] | select(.user.login=="coderabbitai[bot]") | select(.body | test("Actionable comments posted|No actionable comments")) | "\(.created_at) \(.updated_at)"'       | tee >(cut -d' ' -f1 >> "$cre") | cut -d' ' -f2 >> "$upd" || { echo "PR #$n 코멘트 조회 실패 — 트리거하지 마라"; exit 1; }
   done
-  last=$(sort "$tmp" | tail -1); rm -f "$tmp"
+  for f in "$sub" "$cre" "$upd"; do sort -o "$f" "$f"; done
 
-  [ -n "$last" ] || { echo "리뷰 0건 — 원인을 확인하기 전에는 트리거하지 마라"; exit 1; }
+  [ -s "$sub" ] || [ -s "$upd" ] || { echo "리뷰 0건 — 원인을 확인하기 전에는 트리거하지 마라"; exit 1; }
+  printf 'reviews.submitted_at  최댓값: %s
+' "$(tail -1 "$sub")"
+  printf 'comments.created_at   최댓값: %s
+' "$(tail -1 "$cre")"
+  printf 'comments.updated_at   최댓값: %s  <- 창 계산에 쓰는 값
+' "$(tail -1 "$upd")"
+  last=$(printf '%s
+%s
+' "$(tail -1 "$sub")" "$(tail -1 "$upd")" | sort | tail -1)
   python -c "import sys,datetime as d;t=d.datetime.fromisoformat(sys.argv[1].replace('Z','+00:00'))+d.timedelta(hours=1,minutes=2);print('마지막 리뷰',sys.argv[1],'→ 트리거 가능',t.strftime('%Y-%m-%dT%H:%M:%SZ'))" "$last"
 )
 ```
 
+> ⚠️ **`updated_at`이 항상 리뷰 시각인 것은 아니다 — 세 값이 벌어지면 사람이 판단하라.**
+> CodeRabbit은 **머지 직전에 요약 코멘트를 편집**한다. #84 실측: 마지막 커밋이
+> `2026-08-10T03:01:50Z`, 코멘트가 담은 리뷰 범위도 그 커밋 하나뿐인데 `updated_at`은
+> `2026-08-11T05:51:55Z`(머지 21분 전)다 — 그 사이 커밋이 없으니 리뷰였을 수 없다.
+> 스캔이 저장소 전체 최댓값을 쓰므로 **옛 PR 하나를 머지하는 것만으로** 창이 최대 27시간
+> 밀려, 슬롯이 비어 있는데 트리거를 거부한다.
+>
+> 그렇다고 `created_at`으로 바꾸면 **역행한다** — 제자리 재리뷰(#105 +11분, #92 +26분)를
+> 놓쳐 창을 이르게 잡는다. 그래서 위 스크립트는 세 후보를 **모두 찍는다.**
+> `updated_at`이 나머지 둘보다 **한 시간 이상** 앞서 있으면 리뷰가 아니라 머지 편집일
+> 공산이 크니, 그 값 대신 나머지 둘의 최댓값으로 계산하라. 관측된 실제 재리뷰는 전부
+> 54초~26분 안에 들어온다. (자동 판별은 별도 PR — 후보의 head SHA로 커밋 시각을 조회해
+> 하한을 잡는 3단계 해법이 있다.)
+>
 > ⚠️ **한도는 PR별이 아니라 계정 단위 공유 풀이다.** 이 계정의 실효 한도는 시간당 1건이며(봇이 리뷰 본문에 `Your plan provides up to 1 included review per hour`라고 적는다 — 플랜 상한인 Pro+ 시간당 10건이 아니라 fair-usage로 조여진 값이다), **저장소의 다른 PR이 같은 슬롯을 가져간다.**
 >
 > ⚠️ `@coderabbitai rate limit`이 알려주는 "N분 뒤"는 **조회 시점 기준의 근사치라 경계에서 진다.** 2026-08-19 실측: 안내받은 29분을 기다려 #101을 트리거했으나 창(07:30:01Z)이 열리기 **16초 전**이라 튕겼다. 실패한 트리거는 창을 앞당겨 주지도 않는다.
@@ -169,7 +194,7 @@ gh pr view <번호> --json comments,reviews --jq '[.comments[], .reviews[]] | ma
 `REVIEWED`는 "언젠가 리뷰됐다"는 뜻일 뿐이다. **CodeRabbit이 리뷰한 커밋과 현재 head를 비교한다:**
 
 ```bash
-gh api repos/Jiwonang/KeepCon/pulls/<번호>/reviews --jq '[.[] | select(.user.login=="coderabbitai[bot]") | .commit_id] | last // "NO_REVIEW"'
+gh api --paginate repos/Jiwonang/KeepCon/pulls/<번호>/reviews --jq '[.[] | select(.user.login=="coderabbitai[bot]") | .commit_id] | last // "NO_REVIEW"'
 gh pr view <번호> --json headRefOid --jq .headRefOid
 ```
 
@@ -188,7 +213,7 @@ gh pr view <번호> --json headRefOid --jq .headRefOid
 > #    **리뷰가 없는데 `CURRENT`로 통과한다**(2026-08-20 #106에서 실제로 그렇게 오판했다).
 > gh api --paginate repos/Jiwonang/KeepCon/issues/<번호>/comments \
 >   --jq '.[] | select(.user.login=="coderabbitai[bot]")
->         | select(.body | test("Actionable comments posted|No actionable comments were generated"))
+>         | select(.body | test("Actionable comments posted|No actionable comments"))
 >         | .body' \
 >   | grep -o 'between [0-9a-f]\{40\} and [0-9a-f]\{40\}' | tail -1
 > ```
