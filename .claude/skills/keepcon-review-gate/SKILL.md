@@ -141,7 +141,8 @@ gh pr view <번호> --json comments,reviews --jq '[.comments[], .reviews[]] | ma
 # 창을 이르게 잡고, 그러면 트리거가 튕겨 슬롯을 버린다. 한 건이라도 실패하면 멈춘다.
 # (전체를 서브셸로 감싸 exit이 사용자 셸을 닫지 않게 한다.)
 (
-  set -o pipefail
+  set -e -o pipefail   # set -e 가 없으면 아래 cut·sort 실패가 조용히 지나가
+                       # 일부 PR이 빠진 채 창을 이르게 계산한다.
   nums=$(gh pr list --state all --limit 200 --json number --jq '.[].number') || { echo "PR 목록 조회 실패 — 트리거하지 마라"; exit 1; }
 
   sub=$(mktemp); cre=$(mktemp); upd=$(mktemp); raw=$(mktemp)
@@ -206,8 +207,16 @@ gh pr view <번호> --json comments,reviews --jq '[.comments[], .reviews[]] | ma
 #    계산돼 여러 줄이 나온다. 배열로 모으지 말고 **스트리밍한 뒤 `tail -1`** 로 집는다.
 #    (외부 `jq -s`로 페이지를 합치는 방법도 있지만 **이 환경에는 독립 `jq`가 없다** —
 #     `gh --jq`만 쓸 수 있다. 아래 형태는 그 제약 안에서 같은 결과를 낸다.)
-sha=$(gh api --paginate repos/Jiwonang/KeepCon/pulls/<번호>/reviews \n        --jq '.[] | select(.user.login=="coderabbitai[bot]") | .commit_id' | tail -1)
-echo "${sha:-NO_REVIEW}"
+#
+# ⚠️ 조회 실패를 `NO_REVIEW`로 읽지 마라. 파이프라인 종료 코드는 `tail`의 0이고,
+#    `gh api --jq`는 HTTP 오류 **본문을 stdout에** 쓴다. 가드가 없으면 "명령이 깨졌다"가
+#    "봇이 안 돌았다"로 번역되어 시간당 1건짜리 슬롯을 태운다.
+if sha=$(set -o pipefail
+         gh api --paginate repos/Jiwonang/KeepCon/pulls/<번호>/reviews \
+           --jq '.[] | select(.user.login=="coderabbitai[bot]") | .commit_id' | tail -1)
+then echo "${sha:-NO_REVIEW}"
+else echo "조회 실패 — 이 실행으로는 판정 불가. NO_REVIEW로 읽지 마라(재트리거는 슬롯을 버린다)"
+fi
 gh pr view <번호> --json headRefOid --jq .headRefOid
 ```
 
@@ -224,11 +233,20 @@ gh pr view <번호> --json headRefOid --jq .headRefOid
 > # ⚠️ 판정 문구가 **있는** 코멘트로 먼저 좁힌다. `between …` 커밋 범위는 리뷰가 끝나기 전
 > #    `Currently processing new changes in this PR` 안내에도 실린다 — 범위만 보고 판정하면
 > #    **리뷰가 없는데 `CURRENT`로 통과한다**(2026-08-20 #106에서 실제로 그렇게 오판했다).
-> gh api --paginate repos/Jiwonang/KeepCon/issues/<번호>/comments \
->   --jq '.[] | select(.user.login=="coderabbitai[bot]")
->         | select(.body | test("Actionable comments posted|No actionable comments"))
->         | .body' \
->   | grep -o 'between [0-9a-f]\{40\} and [0-9a-f]\{40\}' | tail -1
+> # ⚠️ 여기도 `gh` 실패를 구분해야 한다 — 실패 시 404 JSON이 `grep`에 걸리지 않아
+> #    **빈 출력**이 되고, 그건 "본문에 SHA 없음"과 같은 모양이다.
+> #    단 `grep`의 no-match(exit 1)는 **정상**이므로 `gh`와 한 파이프에 묶지 않는다
+> #    (묶으면 pipefail이 "SHA 없음"을 "조회 실패"로 읽는다 — 실측으로 확인).
+> if bodies=$(gh api --paginate repos/Jiwonang/KeepCon/issues/<번호>/comments \
+>              --jq '.[] | select(.user.login=="coderabbitai[bot]")
+>                    | select(.body | test("Actionable comments posted|No actionable comments"))
+>                    | .body')
+> then
+>   sha=$(printf '%s\n' "$bodies" | grep -o 'between [0-9a-f]\{40\} and [0-9a-f]\{40\}' | tail -1)
+>   echo "${sha:-본문에 SHA 없음}"
+> else
+>   echo "조회 실패 — 판정 불가(빈 결과와 구분하라)"
+> fi
 > ```
 >
 > 뒤쪽 SHA가 `headRefOid`와 같으면 `CURRENT`다 — API 필드보다 **더 강한 증거**다(봇이 실제로 무엇을 읽었는지 자기가 적은 것이다). 본문에도 SHA가 없으면 그때는 **`CURRENT`로 치지 마라** — 재트리거하거나 4번 폴백으로 기록을 남긴다.
