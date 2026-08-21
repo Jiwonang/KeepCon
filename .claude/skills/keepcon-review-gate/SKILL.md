@@ -131,26 +131,65 @@ gh pr view <번호> --json comments,reviews --jq '[.comments[], .reviews[]] | ma
 ```bash
 # 창이 열리는 시각 = 저장소 전체 마지막 성공 리뷰 + 1시간 (+ 여유 2분)
 # --limit은 저장소 전체 PR 수 이상으로 — 오래된 PR을 재트리거해도 같은 풀을 쓰므로
-# 상한이 낮으면 그 리뷰를 놓쳐 창을 이르게 계산한다. (PR 40개당 약 25초)
+# 상한이 낮으면 그 리뷰를 놓쳐 창을 이르게 계산한다.
+# PR당 API 왕복 **최소** 2회이고 `--paginate`는 응답 페이지마다 한 번씩 더 부른다 —
+# 소요는 PR 수 × 페이지 수에 비례한다. 현 저장소(대부분 1페이지) 실측 20 PR = 25초,
+# 40개 약 50초, 106개 2분 남짓. **중간에 끊지 마라** — 2분 타임아웃에 실제로 걸렸고,
+# 창이 안 열린 줄 알고 끊으면 처음부터 다시 돈다.
 #
 # 실패를 삼키면 안 된다. 일부 PR 조회만 실패해도 나머지로 "마지막 리뷰"가 계산돼
 # 창을 이르게 잡고, 그러면 트리거가 튕겨 슬롯을 버린다. 한 건이라도 실패하면 멈춘다.
 # (전체를 서브셸로 감싸 exit이 사용자 셸을 닫지 않게 한다.)
 (
-  set -o pipefail
+  set -e -o pipefail   # set -e 가 없으면 아래 cut·sort 실패가 조용히 지나가
+                       # 일부 PR이 빠진 채 창을 이르게 계산한다.
   nums=$(gh pr list --state all --limit 200 --json number --jq '.[].number') || { echo "PR 목록 조회 실패 — 트리거하지 마라"; exit 1; }
 
-  tmp=$(mktemp)
+  sub=$(mktemp); cre=$(mktemp); upd=$(mktemp); raw=$(mktemp)
+  trap 'rm -f "$sub" "$cre" "$upd" "$raw"' EXIT   # 중간 실패로 빠져나가도 남기지 않는다
   for n in $nums; do
-    gh api "repos/Jiwonang/KeepCon/pulls/$n/reviews" --jq '.[] | select(.user.login=="coderabbitai[bot]") | .submitted_at' >> "$tmp" || { echo "PR #$n 조회 실패 — 부분 결과로 계산하면 창을 이르게 잡는다. 트리거하지 마라"; rm -f "$tmp"; exit 1; }
+    gh api --paginate "repos/Jiwonang/KeepCon/pulls/$n/reviews" --jq '.[] | select(.user.login=="coderabbitai[bot]") | select(.submitted_at != null) | .submitted_at' >> "$sub" || { echo "PR #$n 조회 실패 — 부분 결과로 계산하면 창을 이르게 잡는다. 트리거하지 마라"; exit 1; }
+    # ⚠️ `reviews`만 보면 안 된다 — 3단계가 이미 경고하듯 리뷰 본문은 **일반 코멘트로도** 온다.
+    #    2026-08-20 실측: #105의 마지막 리뷰가 comments에 10:06:26Z로 실렸는데 reviews에는
+    #    07:41:38Z뿐이라, 이 스캔이 창을 **54분 이르게** 잡았다.
+    #
+    # ⚠️ 두 값을 `tee >(...)`로 가르지 마라. 프로세스 치환은 파이프라인의 대기·상태 전파
+    #    **밖**이라 ①뒤의 `sort`가 기록보다 먼저 돌 수 있고 ②그 안의 실패가 `||`에 안 잡힌다.
+    #    파일로 받아 성공을 확인한 뒤 순차로 가른다.
+    gh api --paginate "repos/Jiwonang/KeepCon/issues/$n/comments" --jq '.[] | select(.user.login=="coderabbitai[bot]") | select(.body | test("Actionable comments posted|No actionable comments")) | "\(.created_at) \(.updated_at)"' > "$raw" || { echo "PR #$n 코멘트 조회 실패 — 트리거하지 마라"; exit 1; }
+    cut -d' ' -f1 < "$raw" >> "$cre"
+    cut -d' ' -f2 < "$raw" >> "$upd"
   done
-  last=$(sort "$tmp" | tail -1); rm -f "$tmp"
+  for f in "$sub" "$cre" "$upd"; do sort -o "$f" "$f"; done
 
-  [ -n "$last" ] || { echo "리뷰 0건 — 원인을 확인하기 전에는 트리거하지 마라"; exit 1; }
+  [ -s "$sub" ] || [ -s "$upd" ] || { echo "리뷰 0건 — 원인을 확인하기 전에는 트리거하지 마라"; exit 1; }
+  printf 'reviews.submitted_at  최댓값: %s
+' "$(tail -1 "$sub")"
+  printf 'comments.created_at   최댓값: %s
+' "$(tail -1 "$cre")"
+  printf 'comments.updated_at   최댓값: %s  <- 창 계산에 쓰는 값
+' "$(tail -1 "$upd")"
+  last=$(printf '%s
+%s
+' "$(tail -1 "$sub")" "$(tail -1 "$upd")" | sort | tail -1)
   python -c "import sys,datetime as d;t=d.datetime.fromisoformat(sys.argv[1].replace('Z','+00:00'))+d.timedelta(hours=1,minutes=2);print('마지막 리뷰',sys.argv[1],'→ 트리거 가능',t.strftime('%Y-%m-%dT%H:%M:%SZ'))" "$last"
 )
 ```
 
+> ⚠️ **`updated_at`이 항상 리뷰 시각인 것은 아니다 — 세 값이 벌어지면 사람이 판단하라.**
+> CodeRabbit은 **머지 직전에 요약 코멘트를 편집**한다. #84 실측: 마지막 커밋이
+> `2026-08-10T03:01:50Z`, 코멘트가 담은 리뷰 범위도 그 커밋 하나뿐인데 `updated_at`은
+> `2026-08-11T05:51:55Z`(머지 21분 전)다 — 그 사이 커밋이 없으니 리뷰였을 수 없다.
+> 스캔이 저장소 전체 최댓값을 쓰므로 **옛 PR 하나를 머지하는 것만으로** 창이 최대 27시간
+> 밀려, 슬롯이 비어 있는데 트리거를 거부한다.
+>
+> 그렇다고 `created_at`으로 바꾸면 **역행한다** — 제자리 재리뷰(#105 +11분, #92 +26분)를
+> 놓쳐 창을 이르게 잡는다. 그래서 위 스크립트는 세 후보를 **모두 찍는다.**
+> `updated_at`이 나머지 둘보다 **한 시간 이상** 앞서 있으면 리뷰가 아니라 머지 편집일
+> 공산이 크니, 그 값 대신 나머지 둘의 최댓값으로 계산하라. 관측된 실제 재리뷰는 전부
+> 54초~26분 안에 들어온다. (자동 판별은 별도 PR — 후보의 head SHA로 커밋 시각을 조회해
+> 하한을 잡는 3단계 해법이 있다.)
+>
 > ⚠️ **한도는 PR별이 아니라 계정 단위 공유 풀이다.** 이 계정의 실효 한도는 시간당 1건이며(봇이 리뷰 본문에 `Your plan provides up to 1 included review per hour`라고 적는다 — 플랜 상한인 Pro+ 시간당 10건이 아니라 fair-usage로 조여진 값이다), **저장소의 다른 PR이 같은 슬롯을 가져간다.**
 >
 > ⚠️ `@coderabbitai rate limit`이 알려주는 "N분 뒤"는 **조회 시점 기준의 근사치라 경계에서 진다.** 2026-08-19 실측: 안내받은 29분을 기다려 #101을 트리거했으나 창(07:30:01Z)이 열리기 **16초 전**이라 튕겼다. 실패한 트리거는 창을 앞당겨 주지도 않는다.
@@ -164,7 +203,23 @@ gh pr view <번호> --json comments,reviews --jq '[.comments[], .reviews[]] | ma
 `REVIEWED`는 "언젠가 리뷰됐다"는 뜻일 뿐이다. **CodeRabbit이 리뷰한 커밋과 현재 head를 비교한다:**
 
 ```bash
-gh api repos/Jiwonang/KeepCon/pulls/<번호>/reviews --jq '[.[] | select(.user.login=="coderabbitai[bot]") | .commit_id] | last // "NO_REVIEW"'
+# ⚠️ `--paginate`는 **페이지마다 `--jq`를 따로 적용**한다 — `[...] | last`로 쓰면 페이지별로
+#    계산돼 여러 줄이 나온다. 배열로 모으지 말고 **스트리밍한 뒤 `tail -1`** 로 집는다.
+#    (외부 `jq -s`로 페이지를 합치는 방법도 있지만 **이 환경에는 독립 `jq`가 없다** —
+#     `gh --jq`만 쓸 수 있다. 아래 형태는 그 제약 안에서 같은 결과를 낸다.)
+#
+# ⚠️ `PENDING` 리뷰는 `submitted_at`이 없지만 `commit_id`는 있다 — 거르지 않으면 아직
+#    제출되지 않은 리뷰의 커밋을 `CURRENT` 근거로 쓴다. 창 계산 쪽은 더 나쁘다:
+#    `null`이 ISO 문자열보다 사전순으로 커서 `sort | tail -1`이 그걸 집고 계산이 죽는다.
+# ⚠️ 조회 실패를 `NO_REVIEW`로 읽지 마라. 파이프라인 종료 코드는 `tail`의 0이고,
+#    `gh api --jq`는 HTTP 오류 **본문을 stdout에** 쓴다. 가드가 없으면 "명령이 깨졌다"가
+#    "봇이 안 돌았다"로 번역되어 시간당 1건짜리 슬롯을 태운다.
+if sha=$(set -o pipefail
+         gh api --paginate repos/Jiwonang/KeepCon/pulls/<번호>/reviews \
+           --jq '.[] | select(.user.login=="coderabbitai[bot]") | select(.submitted_at != null) | .commit_id' | tail -1)
+then echo "${sha:-NO_REVIEW}"
+else echo "조회 실패 — 이 실행으로는 판정 불가. NO_REVIEW로 읽지 마라(재트리거는 슬롯을 버린다)"
+fi
 gh pr view <번호> --json headRefOid --jq .headRefOid
 ```
 
@@ -172,7 +227,32 @@ gh pr view <번호> --json headRefOid --jq .headRefOid
 
 > ⚠️ **시각(timestamp)으로 비교하지 마라.** 리뷰 게시 시각과 `commits[].committedDate`를 견주는 방식은 틀린다 — `committedDate`는 푸시 시각이 아니라 **작성자 로컬 시계의 커밋 생성 시각**이다. 리뷰를 기다리는 몇 분 사이에 커밋해 두고 리뷰가 올라온 뒤 푸시하면(흔한 작업 흐름) 커밋이 리뷰보다 **이르게** 찍혀 `CURRENT`로 통과한다 — 3b가 막으려던 바로 그것이다. 작성자 시계가 앞서 있으면 반대로 늘 `STALE`이 되어 소음이 된다. SHA 비교는 시계·푸시 지연과 무관하다.
 >
-> ⚠️ **3단계는 `comments`와 `reviews`를 둘 다 보는데 3b는 `reviews`만 본다.** 리뷰 본문이 SHA 없는 일반 코멘트로만 올라오면 여기서 `NO_REVIEW`가 되어 영원히 `CURRENT`가 될 수 없다. 그때는 **`CURRENT`로 치지 마라** — 재트리거해서 `reviews`에 실리게 하거나, 그래도 안 되면 4번 폴백으로 기록을 남긴다. (2026-08-20 기준 최근 40개 PR에서 리뷰 본문이 일반 코멘트로만 온 사례는 0건이지만, 3단계가 그 가능성을 명시하므로 규칙을 비워 두지 않는다.)
+> ⚠️ **3단계는 `comments`와 `reviews`를 둘 다 보는데 3b는 `reviews`만 본다.** 리뷰 본문이 일반 코멘트로만 올라오면 여기서 `NO_REVIEW`가 되어 `CURRENT`가 될 수 없다. **2026-08-20 #105에서 실제로 일어났다** — 재트리거한 리뷰가 `comments`에만 실렸다.
+>
+> 그때는 **코멘트 본문에서 SHA를 읽어라.** CodeRabbit은 `📥 Commits` 절에 리뷰 범위를 적는다:
+>
+> ```bash
+> # ⚠️ `--paginate` 없으면 첫 30건만 본다 — 코멘트가 쌓인 PR에서 **최신 리뷰를 놓친다.**
+> # ⚠️ 판정 문구가 **있는** 코멘트로 먼저 좁힌다. `between …` 커밋 범위는 리뷰가 끝나기 전
+> #    `Currently processing new changes in this PR` 안내에도 실린다 — 범위만 보고 판정하면
+> #    **리뷰가 없는데 `CURRENT`로 통과한다**(2026-08-20 #106에서 실제로 그렇게 오판했다).
+> # ⚠️ 여기도 `gh` 실패를 구분해야 한다 — 실패 시 404 JSON이 `grep`에 걸리지 않아
+> #    **빈 출력**이 되고, 그건 "본문에 SHA 없음"과 같은 모양이다.
+> #    단 `grep`의 no-match(exit 1)는 **정상**이므로 `gh`와 한 파이프에 묶지 않는다
+> #    (묶으면 pipefail이 "SHA 없음"을 "조회 실패"로 읽는다 — 실측으로 확인).
+> if bodies=$(gh api --paginate repos/Jiwonang/KeepCon/issues/<번호>/comments \
+>              --jq '.[] | select(.user.login=="coderabbitai[bot]")
+>                    | select(.body | test("Actionable comments posted|No actionable comments"))
+>                    | .body')
+> then
+>   sha=$(printf '%s\n' "$bodies" | grep -o 'between [0-9a-f]\{40\} and [0-9a-f]\{40\}' | tail -1)
+>   echo "${sha:-본문에 SHA 없음}"
+> else
+>   echo "조회 실패 — 판정 불가(빈 결과와 구분하라)"
+> fi
+> ```
+>
+> 뒤쪽 SHA가 `headRefOid`와 같으면 `CURRENT`다 — API 필드보다 **더 강한 증거**다(봇이 실제로 무엇을 읽었는지 자기가 적은 것이다). 본문에도 SHA가 없으면 그때는 **`CURRENT`로 치지 마라** — 재트리거하거나 4번 폴백으로 기록을 남긴다.
 >
 > ⚠️ 3단계의 로그인 이름은 `coderabbitai`인데 **여기서는 `coderabbitai[bot]`이다.** REST(`/pulls/N/reviews`)와 GraphQL(`gh pr view`)이 봇 계정을 다르게 표기한다 — 섞어 쓰면 항상 `NO_REVIEW`가 나온다.
 
@@ -204,7 +284,10 @@ gh pr comment <번호> --body "$(cat <<'EOF'
 🔁 **CodeRabbit 없이 머지 — 대체 리뷰 경로**
 
 - CodeRabbit 상태: `RATE_LIMITED` (재트리거 후에도 유지)
-- 대체 리뷰: `keepcon-code-reviewer` — 지적 N건 (🔴 a / 🟠 b / 🟡 c), 전부 반영
+- 대체 리뷰: `keepcon-code-reviewer` — 지적 N건 (🔴 a / 🟠 b / 🟡 c, + 🔵 d) · 형제 미고침 k건 / 미확인 m건
+  (요약 줄은 **에이전트가 낸 그대로** 옮긴다 — 필드를 줄이면 남은 미고침·미확인이 기록에서 사라진다)
+- 반영: `k=0 && m=0`일 때만 `전부 반영`이라고 적는다. 하나라도 남았으면 **무엇이 왜 남았는지**
+  적는다 — 미고침·미확인을 세어 놓고 `전부 반영`으로 마무리하면 그 숫자가 장식이 된다
 - CI: `Format · Analyze · Test` · `Firestore rules` · `Markdown lint` 전부 green
 
 (사유: CodeRabbit 체크는 리뷰 여부와 무관하게 항상 pass라 게이트가 아니며, 이 기록이 어느 경로로 통과했는지를 남기는 유일한 수단이다.)
