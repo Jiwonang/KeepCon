@@ -8,6 +8,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:keepcon/shared/deeplink/app_destination.dart';
 import 'package:keepcon/shared/deeplink/deep_link_parser.dart';
 import 'package:keepcon/shared/models/group.dart';
+import 'package:keepcon/shared/util/invite_link.dart';
 
 void main() {
   group('초대 링크', () {
@@ -26,7 +27,7 @@ void main() {
       );
     });
 
-    test('Group.inviteUrl을 그대로 되돌려 읽는다(라운드트립)', () {
+    test('inviteUrlFrom이 만든 링크를 그대로 되돌려 읽는다(라운드트립)', () {
       // 링크를 만드는 쪽과 읽는 쪽이 어긋나면 초대가 통째로 죽는다.
       final Group group = Group(
         id: 'g1',
@@ -43,7 +44,10 @@ void main() {
         inviteToken: '482913',
       );
       expect(
-        parseDeepLink(Uri.parse(group.inviteUrl)),
+        parseDeepLink(Uri.parse(inviteUrlFrom(
+          origin: 'https://keepcon-dev.web.app',
+          inviteToken: group.inviteToken,
+        ))),
         const InviteDestination('482913'),
       );
     });
@@ -93,8 +97,10 @@ void main() {
   });
 
   test('공백뿐인 쿼리는 없는 것으로 보고 경로 코드를 쓴다', () {
-    // 랜딩 페이지(public/index.html)의 JS와 **같은 규약**이어야 한다. 그쪽에서 trim을
-    // 나중에 하면 "%20"이 truthy라 경로 코드를 가로채고 빈칸을 보여준다(CodeRabbit 지적).
+    // ⚠️ 이 규약은 원래 정적 랜딩 페이지의 JS와 맞추려고 고정한 것이다 — 그 페이지는
+    //    v3.1에서 삭제됐고 지금은 hosting이 Flutter 웹 빌드를 서빙한다. 규약 자체는
+    //    남긴다: trim을 나중에 하면 "%20"이 truthy라 경로 토큰을 가로채고 빈칸을
+    //    넘긴다(CodeRabbit 지적).
     expect(
       parseDeepLink(Uri.parse('https://example.com/invite/482913?invite=%20')),
       const InviteDestination('482913'),

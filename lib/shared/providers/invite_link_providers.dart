@@ -1,0 +1,58 @@
+/// KeepCon 공유 계약 — 초대 링크의 **origin**(스킴 + 호스트 + 포트) SSOT.
+///
+/// 왜 모델이 아니라 provider인가:
+///   [Group]은 순수 모델이라 "지금 어느 백엔드에 붙어 있는지"를 알 수 없다. 그런데 초대
+///   링크가 걸릴 도메인은 백엔드마다 다르다 — prod 링크를 에뮬레이터에서 띄우면 **남의
+///   실서비스 그룹으로 데려간다.** 그래서 origin은 조립부(main)가 정해 주입하고, 화면은
+///   provider로 소비한다(계약 규약: 공유 DI provider는 `lib/shared/providers/` 정본).
+///
+/// `null`이면 **이 실행에서는 공유 가능한 초대 링크가 없다**는 뜻이다. 화면은 링크 UI를
+/// 감추고 그 사실을 알려야 한다(없는 링크를 그럴듯하게 만들어 주면, 눌렀을 때 엉뚱한
+/// 백엔드로 가거나 조용히 아무 일도 안 일어난다).
+library;
+
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../firebase/firebase_bootstrap.dart' show FirebaseTarget;
+
+/// 현재 실행의 초대 링크 origin. `null`이면 링크를 만들 수 없다.
+///
+/// 기본값은 `null`이다 — 덮어쓰지 않는 실행은 in-memory 데모뿐이고, 그 데이터는 앱
+/// 프로세스 안에만 있어 **공유할 링크가 원리상 없다.** Firebase 조립부가
+/// [inviteOriginFor]로 덮어쓴다.
+final Provider<String?> inviteOriginProvider =
+    Provider<String?>((Ref ref) => null);
+
+/// [target]에 붙은 실행에서 쓸 초대 링크 origin.
+///
+/// **웹·안드로이드 모두 백엔드 도메인을 쓴다.** 링크가 가리켜야 할 곳은 앱이 뜬 자리가
+/// 아니라 **데이터가 있는 자리**다. 웹에서 `Uri.base.origin`을 쓰면 로컬 개발 서버
+/// (`http://localhost:8083` 등)가 그대로 링크에 실려, 받는 사람에게는 자기 기기의
+/// 죽은 주소가 된다 — 한 기기 안에서만 통하는 링크다.
+///
+/// 그 도메인에는 `flutter build web` 산출물이 배포돼 있어(`firebase.json`의 hosting이
+/// `build/web`을 가리킨다), 링크를 열면 앱이 뜨고 딥링크 파서가 토큰을 집어 요청 흐름을
+/// 잇는다. 배포를 빠뜨리면 링크가 404가 되므로 **호스팅 배포와 이 표는 함께 움직인다.**
+///
+/// **안드로이드는 App Links라 도메인이 빌드 시점에 고정된다.** `AndroidManifest.xml`의
+/// 인텐트 필터에 적힌 host만 앱으로 오고, 그 도메인이
+/// `/.well-known/assetlinks.json`으로 서명을 검증해 줘야 한다. 그래서:
+///
+///   - prod·dev — 각 Firebase Hosting 도메인. 매니페스트에 **둘 다** 등록돼 있어야 한다.
+///   - emulator + 안드로이드 — **`null`.** App Links를 검증해 줄 도메인이 없고, AVD는
+///     호스트에 `10.0.2.2`로만 닿는다. dev·prod 도메인을 빌려 쓰면 **링크를 누른 사람이
+///     다른 백엔드의 그룹에 참여 요청**을 보내게 된다. 화면이 링크 대신 초대코드를
+///     안내한다(`_NoInviteLinkNotice`).
+///   - emulator + 웹 — **진입 origin.** 그 기기 안에서만 통하는 링크지만 **그것이 정확히
+///     에뮬레이터 데이터의 범위**다(둘 다 그 PC 안에만 있다). dev·prod는 위 표를 쓰므로
+///     로컬 개발 서버 주소가 배포 링크로 새지 않는다 — 그게 이 함수가 고친 문제다.
+///     이 조합이 웹에서 딥링크 파싱→참여 시트를 손으로 확인할 **유일한 경로**라 남긴다
+///     (플래그 없는 `flutter run -d chrome`이 규약상 기본 백엔드다).
+String? inviteOriginFor(FirebaseTarget target) {
+  return switch (target) {
+    FirebaseTarget.prod => 'https://keepcon-ab660.web.app',
+    FirebaseTarget.dev => 'https://keepcon-dev.web.app',
+    FirebaseTarget.emulator => kIsWeb ? Uri.base.origin : null,
+  };
+}

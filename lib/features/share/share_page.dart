@@ -31,6 +31,7 @@ import 'pages/group_notifications_page.dart';
 import 'pages/shared_gifticon_detail_page.dart';
 import 'pages/usage_log_page.dart';
 import 'state/share_providers.dart';
+import 'widgets/my_join_requests_card.dart';
 import 'widgets/share_error_banner.dart';
 import 'widgets/share_format.dart';
 import 'widgets/share_sheets.dart';
@@ -102,9 +103,11 @@ class SharePage extends ConsumerWidget {
               ),
               if (groups.isNotEmpty) const SizedBox(height: 12),
             ],
+            // 내가 보낸 참여 요청 — 대기·거절만 뜬다(승인되면 위 그룹 목록에 나타난다).
+            const MyJoinRequestsCard(),
             if (groups.isEmpty && !groupsUnavailable && !groupsPending)
               const _EmptyHint(
-                text: '아직 참여한 그룹이 없어요.\n그룹을 만들거나 초대코드로 참여해 보세요.',
+                text: '아직 참여한 그룹이 없어요.\n그룹을 만들거나 받은 초대 링크로 참여를 요청해 보세요.',
               )
             else if (groups.isNotEmpty)
               for (int i = 0; i < groups.length; i++) ...<Widget>[
@@ -420,7 +423,7 @@ class _GroupActionButtons extends StatelessWidget {
           child: OutlinedButton.icon(
             onPressed: onJoin,
             icon: const Icon(Icons.login, size: 18),
-            label: const Text('그룹 참여하기'),
+            label: const Text('참여 요청하기'),
             style: OutlinedButton.styleFrom(
               foregroundColor: scheme.onSurface,
               side: BorderSide(color: scheme.outline),

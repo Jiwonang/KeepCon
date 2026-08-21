@@ -23,6 +23,7 @@ import '../../../shared/providers/shared_gifticons_provider.dart';
 import '../../../shared/theme/brand_palette.dart';
 import '../../../shared/theme/theme_tokens.dart';
 import '../state/share_providers.dart';
+import '../widgets/pending_join_requests_section.dart';
 import '../widgets/share_common.dart';
 import '../widgets/share_error_banner.dart';
 import '../widgets/share_format.dart';
@@ -164,6 +165,12 @@ class _GroupDetailBody extends ConsumerWidget {
                 ],
               ),
             ),
+            // ── 참여 요청(방장 전용) ──
+            //
+            // 방장만 본다 — 아직 멤버가 아닌 사람들의 이름이라 일반 멤버에게 열지
+            // 않는다(보안 규칙도 같은 선을 긋는다). 이 스트림이 요청 도착을 알리는
+            // 유일한 신호이므로 멤버 목록 바로 아래, 눈에 띄는 자리에 둔다.
+            if (iAmOwner) PendingJoinRequestsSection(groupId: group.id),
             const SizedBox(height: 24),
 
             // ── 공유 기프티콘 ──

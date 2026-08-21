@@ -741,8 +741,8 @@ void main() {
 
       // 그룹 섹션은 실패를 표시하고(재시도 버튼은 위 그룹에서 따로 고정),
       expect(find.textContaining('그룹 목록을 불러오지 못했어요.'), findsOneWidget);
-      expect(
-          find.text('아직 참여한 그룹이 없어요.\n그룹을 만들거나 초대코드로 참여해 보세요.'), findsNothing);
+      expect(find.text('아직 참여한 그룹이 없어요.\n그룹을 만들거나 받은 초대 링크로 참여를 요청해 보세요.'),
+          findsNothing);
       // 공유 섹션도 "없음"으로 위장하지 않는다(그룹이 0개라 순회가 없어
       // sharedHaveError가 false여도 빈 안내가 나오면 안 된다 — 회귀 고정).
       expect(find.text('공유된 기프티콘이 없어요.'), findsNothing);
@@ -820,7 +820,7 @@ void main() {
       await pumpPage(tester, const SharePage());
 
       expect(
-        find.text('아직 참여한 그룹이 없어요.\n그룹을 만들거나 초대코드로 참여해 보세요.'),
+        find.text('아직 참여한 그룹이 없어요.\n그룹을 만들거나 받은 초대 링크로 참여를 요청해 보세요.'),
         findsNothing,
       );
       expect(find.text('공유된 기프티콘이 없어요.'), findsNothing);

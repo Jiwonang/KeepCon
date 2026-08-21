@@ -61,6 +61,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 // 같다. 생성물을 손으로 고치면 재생성 때 날아가므로, 파일을 바꾸는 대신 prefix로 구분한다.
 import '../../firebase_options.dart' as prod_options;
 import '../../firebase_options_dev.dart' as dev_options;
+import '../providers/invite_link_providers.dart';
 import '../providers/repositories.dart';
 import '../repositories/impl/firebase/firebase_auth_repository.dart';
 import '../repositories/impl/firebase/firebase_gifticon_repository.dart';
@@ -155,7 +156,13 @@ Future<List<Override>> initFirebaseAndBuildOverrides({
     debugPrint('KeepCon: Firebase 연결됨 (${target.name} — ${target.projectId})');
   }
 
-  return firebaseProviderOverrides();
+  return <Override>[
+    ...firebaseProviderOverrides(),
+    // 초대 링크가 가리킬 곳은 백엔드마다 다르다 — 기본값이 `null`이라 **안 덮어쓰면
+    // 어느 플랫폼에서도 링크가 만들어지지 않고**(데모의 의도된 상태다), 옛 코드처럼
+    // prod로 고정하면 에뮬레이터·dev에서 실서비스 링크를 발급한다.
+    inviteOriginProvider.overrideWithValue(inviteOriginFor(target)),
+  ];
 }
 
 /// Auth/Firestore SDK를 로컬 에뮬레이터로 연결한다.

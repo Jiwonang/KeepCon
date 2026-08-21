@@ -53,9 +53,20 @@
                  ⚠️ 검증에 실패하면 조용히 브라우저로 열린다 — 지문이 맞는지는
                  `adb shell pm get-app-links com.keepcon.app`으로 확인한다.
 
-                 host는 Group.inviteHost·firebase.json의 hosting과 **셋이 같아야** 한다.
+                 host는 `inviteOriginFor()`(lib/shared/providers/invite_link_providers.dart)가
+                 내는 도메인과 **같아야** 하고, 그 도메인이 assetlinks.json을 서빙해야 한다.
                  pathPrefix로 /invite만 받는다(호스팅의 다른 페이지까지 앱이 가로채지
-                 않도록). -->
+                 않도록).
+
+                 **dev·prod 둘 다 등록하는 이유:** 팀 개발은 dev 백엔드에서 하는데 여기에
+                 prod만 있으면 dev에서 발급한 링크가 앱으로 오지 않는다 — 링크가 브라우저로
+                 새고, 그게 정상 동작처럼 보여서 원인을 찾기 어렵다. 각 host는 자기
+                 도메인의 assetlinks.json으로 따로 검증되므로 둘을 함께 둔다고 서로
+                 간섭하지 않는다.
+
+                 로컬 에뮬레이터는 여기 없다 — assetlinks.json을 서빙할 도메인이 없어
+                 원리상 등록할 수 없다. 그래서 `inviteOriginFor()`가 그 조합에서 null을
+                 내고, 화면이 링크 대신 초대코드를 안내한다. -->
             <intent-filter android:autoVerify="true">
                 <action android:name="android.intent.action.VIEW"/>
                 <category android:name="android.intent.category.DEFAULT"/>
@@ -63,6 +74,10 @@
                 <data
                     android:scheme="https"
                     android:host="keepcon-ab660.web.app"
+                    android:pathPrefix="/invite"/>
+                <data
+                    android:scheme="https"
+                    android:host="keepcon-dev.web.app"
                     android:pathPrefix="/invite"/>
             </intent-filter>
         </activity>
