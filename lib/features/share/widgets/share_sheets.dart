@@ -93,6 +93,12 @@ class _CreateGroupSheetState extends ConsumerState<_CreateGroupSheet> {
   String _emoji = _emojis.first;
   int _maxMembers = Group.defaultMaxMembers;
 
+  /// 생성 중 — 버튼과 엔터를 함께 잠근다. 두 번 들어오면 **같은 이름의 그룹이 두 개**
+  /// 만들어진다(Firebase 구현에서는 `inviteTokens` 문서도 두 벌). 진입점이 둘이라
+  /// (버튼 · `onSubmitted`) 더 쉽게 겹친다.
+  /// 형제 `_JoinGroupSheetState._sending`과 같은 규약이다.
+  bool _sending = false;
+
   @override
   void dispose() {
     _nameCtrl.dispose();
@@ -101,9 +107,10 @@ class _CreateGroupSheetState extends ConsumerState<_CreateGroupSheet> {
 
   Future<void> _submit() async {
     final String name = _nameCtrl.text.trim();
-    if (name.isEmpty) return;
+    if (name.isEmpty || _sending) return;
     final NavigatorState navigator = Navigator.of(context);
     final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
+    setState(() => _sending = true);
     // try는 **저장소 호출만** 감싼다(참여 시트와 동일 규약 — `_JoinGroupSheetState._submit`).
     try {
       await ref
@@ -111,6 +118,7 @@ class _CreateGroupSheetState extends ConsumerState<_CreateGroupSheet> {
           .createGroup(name: name, emoji: _emoji, maxMembers: _maxMembers);
     } catch (e, s) {
       reportHandledFailure(ref, e, s, context: 'CreateGroupSheet.createGroup');
+      if (mounted) setState(() => _sending = false);
       messenger
         ..hideCurrentSnackBar()
         ..showSnackBar(const SnackBar(content: Text('지금은 그룹을 만들 수 없어요.')));
@@ -183,7 +191,10 @@ class _CreateGroupSheetState extends ConsumerState<_CreateGroupSheet> {
             ],
           ),
           const SizedBox(height: 20),
-          ElevatedButton(onPressed: _submit, child: const Text('만들기')),
+          ElevatedButton(
+            onPressed: _sending ? null : _submit,
+            child: Text(_sending ? '만드는 중…' : '만들기'),
+          ),
         ],
       ),
     );

@@ -275,14 +275,19 @@ class _MemberInvitePageState extends ConsumerState<MemberInvitePage> {
               _CopyField(
                 label: '초대 링크',
                 value: inviteUrl,
+                // 로컬 전용 링크에서도 **복사는 남긴다** — 바로 아래 캡션이 경고하고,
+                // 링크 텍스트가 선택 불가라 딥링크 개발 루프에서 값을 얻을 유일한
+                // 수단이다. 하단 CTA(공유 시트)는 캡션에서 멀고 한 번에 밖으로
+                // 나가므로 그쪽만 잠근다.
                 onCopy: expired ? null : () => _copy(inviteUrl, '초대 링크'),
               ),
             if (localOnlyLink)
               Padding(
                 padding: const EdgeInsets.only(top: 6),
                 child: Text(
-                  '이 링크는 이 PC에서만 열려요(로컬 에뮬레이터). '
-                  '다른 사람에게는 아래 초대코드를 보내세요.',
+                  '이 링크는 이 PC에서만 열려요(로컬 에뮬레이터). 초대코드도 마찬가지예요 '
+                  '— 에뮬레이터 데이터는 이 PC 안에만 있어요. 다른 기기에서 참여하려면 '
+                  'dev 백엔드로 실행하세요.',
                   style: theme.textTheme.bodySmall
                       ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
                 ),
@@ -433,7 +438,8 @@ class _NoInviteLinkNotice extends StatelessWidget {
           const SizedBox(width: 12),
           Expanded(
             child: Text(
-              '이 환경에서는 초대 링크를 만들 수 없어요.\n아래 초대코드를 공유해 주세요.',
+              '이 환경에서는 초대 링크를 만들 수 없어요.\n'
+              '같은 백엔드에 붙은 기기끼리는 아래 초대코드로 참여할 수 있어요.',
               style: theme.textTheme.bodyMedium
                   ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
             ),

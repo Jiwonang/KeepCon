@@ -62,9 +62,13 @@ class _StubShareRepository implements ShareRepository {
   final List<String> rejected = <String>[];
 
   @override
-  Stream<List<JoinRequest>> watchMyJoinRequests(String userId) => failStreams
-      ? Stream<List<JoinRequest>>.error(StateError('인덱스 없음'))
-      : Stream<List<JoinRequest>>.value(mine);
+  Stream<List<JoinRequest>> watchMyJoinRequests(String userId) {
+    if (failStreams) {
+      return Stream<List<JoinRequest>>.error(StateError('인덱스 없음'));
+    }
+    if (useMineController) return mineController.stream;
+    return Stream<List<JoinRequest>>.value(mine);
+  }
 
   @override
   Stream<List<JoinRequest>> watchPendingJoinRequests(String groupId) {
@@ -79,12 +83,21 @@ class _StubShareRepository implements ShareRepository {
 
   final List<String> cancelled = <String>[];
 
+  /// `mine`을 여러 번 방출해야 하는 테스트용(목록이 줄어드는 경우).
+  final StreamController<List<JoinRequest>> mineController =
+      StreamController<List<JoinRequest>>.broadcast();
+  bool useMineController = false;
+
+  /// `true`면 취소가 즉시 끝난다(게이트를 기다리지 않는다).
+  bool cancelImmediately = false;
+
   /// 완료를 테스트가 제어한다 — '처리 중' 상태를 관측하려면 멈춰 있어야 한다.
   final Completer<void> cancelGate = Completer<void>();
 
   @override
   Future<void> cancelJoinRequest(String id) async {
     cancelled.add(id);
+    if (cancelImmediately) return;
     await cancelGate.future;
   }
 
@@ -206,6 +219,41 @@ void main() {
 
     share.cancelGate.complete();
     await tester.pumpAndSettle();
+  });
+
+  testWidgets('한 건을 취소해도 남은 요청의 취소 버튼이 잠기지 않는다', (WidgetTester tester) async {
+    // key가 없으면 목록이 [a,b]→[b]로 줄 때 index 0의 State가 재사용돼 b가 a의
+    // `_busy = true`를 물려받는다 — 형제 `_PendingRow`에서 실측한 사고와 같다.
+    final _StubShareRepository share = _StubShareRepository()
+      ..useMineController = true
+      ..cancelImmediately = true;
+    addTearDown(share.mineController.close);
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: <Override>[
+          authRepositoryProvider.overrideWithValue(auth),
+          shareRepositoryProvider.overrideWithValue(share),
+          errorReporterProvider.overrideWithValue(reporter),
+        ],
+        child: const MaterialApp(
+          home: Scaffold(body: MyJoinRequestsCard()),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    share.mineController.add(<JoinRequest>[_req('a'), _req('b')]);
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(TextButton, '취소'), findsNWidgets(2));
+
+    await tester.tap(find.widgetWithText(TextButton, '취소').first);
+    await tester.pumpAndSettle();
+    share.mineController.add(<JoinRequest>[_req('b')]);
+    await tester.pumpAndSettle();
+
+    final TextButton left =
+        tester.widget<TextButton>(find.widgetWithText(TextButton, '취소'));
+    expect(left.onPressed, isNotNull, reason: '남은 행이 앞 행의 _busy 를 물려받았다');
   });
 
   group('방장 승인 목록', () {

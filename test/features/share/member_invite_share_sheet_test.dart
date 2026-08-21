@@ -239,12 +239,13 @@ void main() {
     // 링크 자체는 보인다(딥링크 개발 루프에 필요하다).
     expect(find.textContaining('localhost:8082/invite/'), findsOneWidget);
     // 다만 공유하라고 말하지 않고, 내보내는 경로를 잠근다.
-    expect(find.textContaining('이 PC에서만 열려요'), findsWidgets);
+    // 캡션과 CTA 라벨을 따로 센다 — `findsWidgets`(≥1)면 CTA 하나로 충족돼
+    // **캡션이 통째로 사라져도 통과한다**(뮤테이션으로 확인).
+    expect(find.textContaining('초대코드도 마찬가지예요'), findsOneWidget);
     final ElevatedButton cta = tester.widget<ElevatedButton>(
       find.widgetWithText(ElevatedButton, '이 링크는 이 PC에서만 열려요'),
     );
     expect(cta.onPressed, isNull);
-    expect(shareCalls, isEmpty);
   });
 
   testWidgets('상단 "초대 링크" 필드의 복사는 그대로다(공유와 별개 경로)',

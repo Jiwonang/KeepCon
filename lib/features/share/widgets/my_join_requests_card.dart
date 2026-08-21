@@ -89,7 +89,7 @@ class _JoinRequestRow extends ConsumerStatefulWidget {
 class _JoinRequestRowState extends ConsumerState<_JoinRequestRow> {
   /// 취소 중 — 버튼을 잠근다. 두 번 누르면 `cancelJoinRequest`가 두 번 불리고,
   /// 첫 호출이 성공한 뒤 두 번째가 실패해 **취소됐는데 실패 안내**가 뜬다.
-  /// (형제 `_PendingRow`가 승인·거절에 같은 처리를 한다.)
+  /// (형제 `_PendingRow`가 승인·거절에 **같은 잠금 규약**을 쓴다 — 라벨 전환은 여기만.)
   bool _busy = false;
 
   Future<void> _cancel() async {

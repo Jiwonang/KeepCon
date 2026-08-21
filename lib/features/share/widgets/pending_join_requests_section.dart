@@ -128,7 +128,10 @@ class _PendingRowState extends ConsumerState<_PendingRow> {
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
         children: <Widget>[
-          Text(r.avatarEmoji, style: Theme.of(context).textTheme.titleLarge),
+          // ⚠️ `titleLarge`가 아니다 — 이 앱의 AppTheme은 그것을 18/w700로 덮어써서
+          //    아바타가 22 → 18로 줄어든다. `headlineSmall`이 22다. 테스트는 맨
+          //    MaterialApp이라 이 차이를 못 보므로 여기에 적어 둔다.
+          Text(r.avatarEmoji, style: Theme.of(context).textTheme.headlineSmall),
           const SizedBox(width: 12),
           Expanded(child: Text(r.displayName)),
           TextButton(
