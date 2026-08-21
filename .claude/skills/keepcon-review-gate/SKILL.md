@@ -148,7 +148,7 @@ gh pr view <번호> --json comments,reviews --jq '[.comments[], .reviews[]] | ma
   sub=$(mktemp); cre=$(mktemp); upd=$(mktemp); raw=$(mktemp)
   trap 'rm -f "$sub" "$cre" "$upd" "$raw"' EXIT   # 중간 실패로 빠져나가도 남기지 않는다
   for n in $nums; do
-    gh api --paginate "repos/Jiwonang/KeepCon/pulls/$n/reviews" --jq '.[] | select(.user.login=="coderabbitai[bot]") | .submitted_at' >> "$sub" || { echo "PR #$n 조회 실패 — 부분 결과로 계산하면 창을 이르게 잡는다. 트리거하지 마라"; exit 1; }
+    gh api --paginate "repos/Jiwonang/KeepCon/pulls/$n/reviews" --jq '.[] | select(.user.login=="coderabbitai[bot]") | select(.submitted_at != null) | .submitted_at' >> "$sub" || { echo "PR #$n 조회 실패 — 부분 결과로 계산하면 창을 이르게 잡는다. 트리거하지 마라"; exit 1; }
     # ⚠️ `reviews`만 보면 안 된다 — 3단계가 이미 경고하듯 리뷰 본문은 **일반 코멘트로도** 온다.
     #    2026-08-20 실측: #105의 마지막 리뷰가 comments에 10:06:26Z로 실렸는데 reviews에는
     #    07:41:38Z뿐이라, 이 스캔이 창을 **54분 이르게** 잡았다.
@@ -208,12 +208,15 @@ gh pr view <번호> --json comments,reviews --jq '[.comments[], .reviews[]] | ma
 #    (외부 `jq -s`로 페이지를 합치는 방법도 있지만 **이 환경에는 독립 `jq`가 없다** —
 #     `gh --jq`만 쓸 수 있다. 아래 형태는 그 제약 안에서 같은 결과를 낸다.)
 #
+# ⚠️ `PENDING` 리뷰는 `submitted_at`이 없지만 `commit_id`는 있다 — 거르지 않으면 아직
+#    제출되지 않은 리뷰의 커밋을 `CURRENT` 근거로 쓴다. 창 계산 쪽은 더 나쁘다:
+#    `null`이 ISO 문자열보다 사전순으로 커서 `sort | tail -1`이 그걸 집고 계산이 죽는다.
 # ⚠️ 조회 실패를 `NO_REVIEW`로 읽지 마라. 파이프라인 종료 코드는 `tail`의 0이고,
 #    `gh api --jq`는 HTTP 오류 **본문을 stdout에** 쓴다. 가드가 없으면 "명령이 깨졌다"가
 #    "봇이 안 돌았다"로 번역되어 시간당 1건짜리 슬롯을 태운다.
 if sha=$(set -o pipefail
          gh api --paginate repos/Jiwonang/KeepCon/pulls/<번호>/reviews \
-           --jq '.[] | select(.user.login=="coderabbitai[bot]") | .commit_id' | tail -1)
+           --jq '.[] | select(.user.login=="coderabbitai[bot]") | select(.submitted_at != null) | .commit_id' | tail -1)
 then echo "${sha:-NO_REVIEW}"
 else echo "조회 실패 — 이 실행으로는 판정 불가. NO_REVIEW로 읽지 마라(재트리거는 슬롯을 버린다)"
 fi
