@@ -218,6 +218,35 @@ void main() {
     expect(cta.onPressed, isNull);
   });
 
+  testWidgets('로컬 전용 링크는 공유 시트로 내보낼 수 없다', (WidgetTester tester) async {
+    // 웹 + 로컬 에뮬레이터는 `http://localhost:<포트>` 링크를 만든다. 캡션으로 사실을
+    // 적어 두는 것만으로는 **공유 시트로 내보내는 경로**가 열려 있어, 받는 사람은
+    // 열 수 없는 링크를 받는다.
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: <Override>[
+          authRepositoryProvider.overrideWithValue(auth),
+          gifticonRepositoryProvider.overrideWithValue(gifticons),
+          errorReporterProvider.overrideWithValue(reporter),
+          shareRepositoryProvider.overrideWithValue(share),
+          inviteOriginProvider.overrideWithValue('http://localhost:8082'),
+        ],
+        child: MaterialApp(home: MemberInvitePage(groupId: group.id)),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // 링크 자체는 보인다(딥링크 개발 루프에 필요하다).
+    expect(find.textContaining('localhost:8082/invite/'), findsOneWidget);
+    // 다만 공유하라고 말하지 않고, 내보내는 경로를 잠근다.
+    expect(find.textContaining('이 PC에서만 열려요'), findsWidgets);
+    final ElevatedButton cta = tester.widget<ElevatedButton>(
+      find.widgetWithText(ElevatedButton, '이 링크는 이 PC에서만 열려요'),
+    );
+    expect(cta.onPressed, isNull);
+    expect(shareCalls, isEmpty);
+  });
+
   testWidgets('상단 "초대 링크" 필드의 복사는 그대로다(공유와 별개 경로)',
       (WidgetTester tester) async {
     await pumpInvitePage(tester);

@@ -66,7 +66,10 @@ class MyJoinRequestsCard extends ConsumerWidget {
                   ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
             ),
             const SizedBox(height: 12),
-            for (final JoinRequest r in visible) _JoinRequestRow(request: r),
+            // key 없이 나열하면 목록이 줄 때 State가 재사용돼 남은 행이 앞 행의
+            // `_busy`를 물려받는다 — `_PendingRow`에서 실측으로 확인한 사고다.
+            for (final JoinRequest r in visible)
+              _JoinRequestRow(key: ValueKey<String>(r.id), request: r),
           ],
         ),
       ),
@@ -74,20 +77,35 @@ class MyJoinRequestsCard extends ConsumerWidget {
   }
 }
 
-class _JoinRequestRow extends ConsumerWidget {
-  const _JoinRequestRow({required this.request});
+class _JoinRequestRow extends ConsumerStatefulWidget {
+  const _JoinRequestRow({super.key, required this.request});
 
   final JoinRequest request;
 
-  Future<void> _cancel(BuildContext context, WidgetRef ref) async {
+  @override
+  ConsumerState<_JoinRequestRow> createState() => _JoinRequestRowState();
+}
+
+class _JoinRequestRowState extends ConsumerState<_JoinRequestRow> {
+  /// 취소 중 — 버튼을 잠근다. 두 번 누르면 `cancelJoinRequest`가 두 번 불리고,
+  /// 첫 호출이 성공한 뒤 두 번째가 실패해 **취소됐는데 실패 안내**가 뜬다.
+  /// (형제 `_PendingRow`가 승인·거절에 같은 처리를 한다.)
+  bool _busy = false;
+
+  Future<void> _cancel() async {
+    if (_busy) return;
     final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
+    setState(() => _busy = true);
     // try는 저장소 호출만 감싼다 — 취소는 됐는데 스낵바에서 예외가 나면 실패 안내가 떠
     // 사용자가 취소에 실패했다고 오해한다.
     try {
-      await ref.read(shareRepositoryProvider).cancelJoinRequest(request.id);
+      await ref
+          .read(shareRepositoryProvider)
+          .cancelJoinRequest(widget.request.id);
     } catch (e, s) {
       reportHandledFailure(ref, e, s,
           context: 'MyJoinRequestsCard.cancelJoinRequest');
+      if (mounted) setState(() => _busy = false);
       messenger
         ..hideCurrentSnackBar()
         ..showSnackBar(
@@ -101,9 +119,9 @@ class _JoinRequestRow extends ConsumerWidget {
   }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
-    final bool pending = request.status == JoinRequestStatus.pending;
+    final bool pending = widget.request.status == JoinRequestStatus.pending;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),
       child: Row(
@@ -117,11 +135,11 @@ class _JoinRequestRow extends ConsumerWidget {
           ),
           const SizedBox(width: 12),
           // 그룹을 특정하지 않는다 — 상태 라벨은 계약(JoinRequestStatus)이 정본이다.
-          Expanded(child: Text(request.status.label)),
+          Expanded(child: Text(widget.request.status.label)),
           if (pending)
             TextButton(
-              onPressed: () => _cancel(context, ref),
-              child: const Text('취소'),
+              onPressed: _busy ? null : _cancel,
+              child: Text(_busy ? '취소 중…' : '취소'),
             ),
         ],
       ),

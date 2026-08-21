@@ -377,13 +377,16 @@ class _MemberInvitePageState extends ConsumerState<MemberInvitePage> {
         child: Padding(
           padding: const EdgeInsets.fromLTRB(24, 8, 24, 16),
           child: ElevatedButton.icon(
-            onPressed: (expired || inviteUrl == null)
+            // 로컬 전용 링크도 잠근다 — 캡션으로 사실을 적어 두는 것만으로는
+            // **공유 시트로 내보내는 경로**가 열려 있다. 받는 사람은 열 수 없다.
+            onPressed: (expired || inviteUrl == null || localOnlyLink)
                 ? null
                 : () => _share(g, inviteUrl),
             icon: const Icon(Icons.share, size: 20),
-            label: Text(switch ((expired, inviteUrl)) {
-              (true, _) => '만료된 초대는 공유할 수 없어요',
-              (_, null) => '이 환경에서는 링크를 공유할 수 없어요',
+            label: Text(switch ((expired, inviteUrl, localOnlyLink)) {
+              (true, _, _) => '만료된 초대는 공유할 수 없어요',
+              (_, null, _) => '이 환경에서는 링크를 공유할 수 없어요',
+              (_, _, true) => '이 링크는 이 PC에서만 열려요',
               _ => '어플로 공유하기',
             }),
             style: ElevatedButton.styleFrom(

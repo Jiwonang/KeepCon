@@ -77,8 +77,16 @@ class _StubShareRepository implements ShareRepository {
         : Stream<List<JoinRequest>>.value(pending!);
   }
 
+  final List<String> cancelled = <String>[];
+
+  /// 완료를 테스트가 제어한다 — '처리 중' 상태를 관측하려면 멈춰 있어야 한다.
+  final Completer<void> cancelGate = Completer<void>();
+
   @override
-  Future<void> cancelJoinRequest(String id) async {}
+  Future<void> cancelJoinRequest(String id) async {
+    cancelled.add(id);
+    await cancelGate.future;
+  }
 
   @override
   Future<Group> approveJoinRequest(String id) async {
@@ -178,6 +186,26 @@ void main() {
     await pump(tester, share, child: const MyJoinRequestsCard());
 
     expect(find.text('보낸 참여 요청을 불러오지 못했어요.'), findsOneWidget);
+  });
+
+  testWidgets('취소 중에는 취소 버튼이 잠긴다 — 두 번 누르면 두 번 호출된다',
+      (WidgetTester tester) async {
+    final _StubShareRepository share =
+        _StubShareRepository(mine: <JoinRequest>[_req('a')]);
+    await pump(tester, share, child: const MyJoinRequestsCard());
+
+    await tester.tap(find.widgetWithText(TextButton, '취소'));
+    await tester.pump();
+
+    // 첫 탭으로 호출은 한 번. 버튼은 잠겨 있어야 한다.
+    expect(share.cancelled, <String>['a']);
+    final TextButton btn = tester.widget<TextButton>(
+      find.widgetWithText(TextButton, '취소 중…'),
+    );
+    expect(btn.onPressed, isNull, reason: '취소 중인데 버튼이 열려 있다 — 두 번째 탭이 중복 호출된다');
+
+    share.cancelGate.complete();
+    await tester.pumpAndSettle();
   });
 
   group('방장 승인 목록', () {

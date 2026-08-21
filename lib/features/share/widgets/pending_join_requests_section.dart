@@ -128,7 +128,7 @@ class _PendingRowState extends ConsumerState<_PendingRow> {
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
         children: <Widget>[
-          Text(r.avatarEmoji, style: const TextStyle(fontSize: 22)),
+          Text(r.avatarEmoji, style: Theme.of(context).textTheme.titleLarge),
           const SizedBox(width: 12),
           Expanded(child: Text(r.displayName)),
           TextButton(
