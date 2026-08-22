@@ -270,6 +270,23 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
 
 // ─────────────────────── 스캔 가이드 오버레이 ───────────────────────
 
+/// 가이드 사각형 **바깥**을 덮는 스크림의 불투명도.
+///
+/// 프리뷰가 비쳐 보일 만큼 옅으면서, 사각형 안쪽이 확실히 밝아 보여
+/// 시선이 그리로 모이는 정도. 더 어둡게/밝게 하려면 이 값만 바꾸면 된다.
+const double _kScanScrimOpacity = 0.6;
+
+/// 가이드 프레임의 세로 위치 — 위쪽 여백과 아래쪽 여백의 비율.
+///
+/// 1:1이면 화면 정중앙이다. **아래쪽을 크게 잡을수록 프레임이 위로 올라간다.**
+/// 정중앙보다 살짝 위가 겨누기 편해서 아래에 여유를 더 준다 — 기기를 들면
+/// 손 위치상 화면 아래쪽이 몸 쪽으로 기울고, 안내 문구도 프레임 아래에 있어
+/// 정중앙에 두면 둘이 화면 하단으로 몰려 보인다.
+///
+/// 더 올리려면 [_kGuideBottomFlex]를 키운다(5, 6 …).
+const int _kGuideTopFlex = 3;
+const int _kGuideBottomFlex = 4;
+
 /// 카메라 프리뷰 위에 얹는 스캔 가이드.
 ///
 /// 사용자가 바코드를 어디에 맞춰야 하는지 알려주는 사각 프레임과
@@ -285,13 +302,70 @@ class _ScanGuideOverlay extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // 딤 레이어와 가이드 레이어를 **같은 레이아웃 코드**로 두 번 그린다.
+    //
+    // 구멍 좌표를 따로 계산하지 않는 것이 요점이다 — 여백·폰트 크기가 바뀌면
+    // 계산한 좌표는 조용히 틀어져 구멍과 프레임이 어긋난다. [_guideLayout]을
+    // 두 번 부르면 구멍이 언제나 프레임과 정확히 겹친다.
+    return Stack(
+      fit: StackFit.expand,
+      children: <Widget>[
+        // 스크림은 **정적**인데(테마가 바뀔 때만 변한다) [ColorFiltered]가 그릴 때마다
+        // 화면 크기의 saveLayer를 뜬다. 바로 옆 카메라 텍스처는 초당 수십 번 갱신되므로,
+        // 경계를 두지 않으면 그 비싼 합성이 프레임마다 딸려 들어갈 여지가 있다.
+        // 정적인 레이어를 캐시해 두면 그 여지 자체가 사라진다.
+        RepaintBoundary(child: _scrim(context)),
+        _guideLayout(context, cutout: false),
+      ],
+    );
+  }
+
+  /// 가이드 사각형 **바깥만** 반투명하게 덮는 레이어.
+  ///
+  /// 구멍은 좌표가 아니라 합성 모드로 뚫는다. [BlendMode.srcOut]은 "자식이
+  /// 불투명한 곳을 **제외한** 나머지"에 색을 칠하므로, 자식으로 가이드 사각형
+  /// 자리에 불투명 박스만 놓아 주면 그 자리가 그대로 구멍이 된다.
+  Widget _scrim(BuildContext context) {
+    return ColorFiltered(
+      colorFilter: ColorFilter.mode(
+        theme.colorScheme.scrim.withValues(alpha: _kScanScrimOpacity),
+        BlendMode.srcOut,
+      ),
+      child: Stack(
+        fit: StackFit.expand,
+        children: <Widget>[
+          // 합성의 바탕.
+          //
+          // 여기 쓰인 색은 **화면에 보이지 않는다** — dstOut/srcOut 피연산자로만
+          // 쓰이므로 불투명하기만 하면 되고, 실제 보이는 색은 위 [ColorFilter]가
+          // 정한다. 그래서 테마 토큰이 아니라 상수 불투명색을 쓴다
+          // (색상 하드코딩 금지 규약의 대상인 '보이는 색'이 아니다).
+          const DecoratedBox(
+            decoration: BoxDecoration(
+              color: Color(0xFF000000),
+              backgroundBlendMode: BlendMode.dstOut,
+            ),
+            child: SizedBox.expand(),
+          ),
+          _guideLayout(context, cutout: true),
+        ],
+      ),
+    );
+  }
+
+  /// 가이드 프레임과 안내 문구의 레이아웃.
+  ///
+  /// [cutout]이 참이면 **구멍을 뚫기 위한 마스크**로 그린다 — 사각형은 테두리
+  /// 대신 불투명하게 채우고, 문구는 자리(레이아웃)만 차지하고 그리지 않는다.
+  /// 문구를 그대로 그리면 글자 모양대로 구멍이 뚫린다.
+  Widget _guideLayout(BuildContext context, {required bool cutout}) {
     final Color accent = theme.colorScheme.primary;
     final Color onDark = context.onDarkSurface;
 
     return SafeArea(
       child: Column(
         children: <Widget>[
-          const Spacer(),
+          const Spacer(flex: _kGuideTopFlex),
 
           // 바코드를 맞출 영역.
           //
@@ -303,10 +377,14 @@ class _ScanGuideOverlay extends StatelessWidget {
               child: Container(
                 margin: const EdgeInsets.symmetric(horizontal: 32),
                 decoration: BoxDecoration(
-                  border: Border.all(
-                    color: accent,
-                    width: 3,
-                  ),
+                  // 마스크일 때는 이 영역이 '뚫릴 자리'이므로 꽉 채운다.
+                  color: cutout ? const Color(0xFF000000) : null,
+                  border: cutout
+                      ? null
+                      : Border.all(
+                          color: accent,
+                          width: 3,
+                        ),
                   borderRadius: BorderRadius.circular(AppRadii.panel),
                 ),
               ),
@@ -316,31 +394,37 @@ class _ScanGuideOverlay extends StatelessWidget {
           const SizedBox(height: 24),
 
           // 사용 안내 + 인식 실패 시 폴백 경로 안내.
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 32),
-            child: Column(
-              children: <Widget>[
-                Text(
-                  '바코드 또는 QR 코드를 사각형 안에 맞춰주세요',
-                  textAlign: TextAlign.center,
-                  style: theme.textTheme.bodyLarge?.copyWith(
-                    color: onDark,
-                    fontWeight: FontWeight.w700,
+          //
+          // 마스크 패스에서는 그리지 않는다(Opacity 0) — 자리는 그대로 차지하므로
+          // 위 사각형의 세로 위치가 두 패스에서 동일하게 유지된다.
+          Opacity(
+            opacity: cutout ? 0 : 1,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 32),
+              child: Column(
+                children: <Widget>[
+                  Text(
+                    '바코드 또는 QR 코드를 사각형 안에 맞춰주세요',
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.bodyLarge?.copyWith(
+                      color: onDark,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  '인식되지 않으면 화면을 닫고 직접 입력을 이용해 주세요.',
-                  textAlign: TextAlign.center,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: onDark.withValues(alpha: 0.75),
+                  const SizedBox(height: 8),
+                  Text(
+                    '인식되지 않으면 화면을 닫고 직접 입력을 이용해 주세요.',
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: onDark.withValues(alpha: 0.75),
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
 
-          const Spacer(),
+          const Spacer(flex: _kGuideBottomFlex),
         ],
       ),
     );
