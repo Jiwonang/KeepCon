@@ -687,6 +687,45 @@ class __GifticonFormScreenState extends ConsumerState<_GifticonFormScreen> {
         );
         navigator.popUntil((route) => route.isFirst);
 
+      case ScanSubmitLimitReached(:final int saved, :final int limit):
+        // 중복과 달리 **경로를 가르지 않는다.** 중복은 직접 입력이면 그 자리에서
+        // 번호를 고칠 수 있어 화면에 머물렀지만, 한도는 입력을 어떻게 바꿔도
+        // 저장되지 않는다 — 어느 경로든 폼에 남겨 둘 이유가 없다.
+        navigator.popUntil((route) => route.isFirst);
+        await showDialog<void>(
+          context: navigator.context,
+          builder: (BuildContext dialogContext) {
+            final ThemeData dialogTheme = Theme.of(dialogContext);
+
+            return AlertDialog(
+              title: const Text('저장 한도에 도달했어요'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text('무료 플랜은 기프티콘을 $limit개까지 저장할 수 있어요.'),
+                  const SizedBox(height: 6),
+                  Text('지금 $saved개를 사용 중이라 더 저장하지 못했어요.'),
+                  const SizedBox(height: 14),
+                  Text(
+                    '프리미엄으로 올리면 개수 제한 없이 저장할 수 있어요.\n'
+                    '설정 > 프리미엄에서 바꿀 수 있습니다.',
+                    style: dialogTheme.textTheme.bodySmall?.copyWith(
+                      color: dialogTheme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+              actions: <Widget>[
+                TextButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(),
+                  child: const Text('확인'),
+                ),
+              ],
+            );
+          },
+        );
+
       case ScanSubmitDuplicate(:final Gifticon existing):
         // 직접 입력은 사용자가 그 자리에서 번호를 고칠 수 있으므로 화면에 머무르며
         // 바코드 필드 아래에 빨간 문구로 알린다.
