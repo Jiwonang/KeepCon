@@ -19,28 +19,33 @@
 /// 테스트는 이 provider를 override해 시각을 고정한다 — 그러지 않으면 `DateTime.now()`에
 /// 의존하는 테스트가 자정을 넘기는 순간 전부 하루씩 밀려 깨진다.
 ///
-/// ## 신선도는 아직 다루지 않는다(의도된 범위 제한)
+/// ## 신선도 — 복귀는 갱신하고, 포그라운드 자정은 아직이다
 ///
-/// 이 값은 컨테이너가 사는 동안 캐시된다. 앱을 켜 둔 채 날짜가 바뀌어도 원천 목록이
-/// 다시 방출되기 전까지는 어제 기준으로 남는다 — **승격 전 `gifticonStatsProvider`도
-/// 똑같이 한 번만 읽었으므로 새로 생긴 문제가 아니다.** 이 파일이 고치는 것은
-/// "소비자들이 서로 다른 답을 낸다"이지 "값이 늙는다"가 아니다.
+/// 이 값은 의존성이 없어 **컨테이너 수명 동안 한 번만 계산된다.** 무효화하는 주체가
+/// 없으면 앱이 살아 있는 내내 첫 계산 시각에 머문다(50ms 간격으로 두 번 읽어도 같은
+/// `DateTime`이 나오는 것으로 실측). ⚠️ 이전 판 주석은 "원천 목록이 바뀔 때 함께
+/// 갱신된다"고 적었는데 **사실이 아니다** — 원천 목록을 watch하는 것은 소비자(통계·목록)
+/// 쪽이고, 그들이 재계산돼도 여기서는 캐시된 같은 값을 다시 읽을 뿐이다.
 ///
-/// 자정에 [Ref.invalidateSelf]를 예약하는 방식은 **시도했다가 되돌렸다**: 자정까지의
-/// [Timer]가 위젯 테스트에서 pending timer로 남아, [MainPage]를 마운트하는 모든 테스트가
-/// "Pending timers" 로 실패한다(`test/features/share/invite_deeplink_test.dart`에서
-/// 발견). 모든 테스트가 이 provider를 override하도록 강제하는 것은 전염성이 너무 크다.
+/// 그래서 갱신 주체를 **앱 조립부**에 뒀다: `KeepConShell`이 `WidgetsBindingObserver`로
+/// `AppLifecycleState.resumed`를 받아 `ref.invalidate(nowProvider)`를 부른다
+/// (`lib/app/keepcon_shell.dart`). 이것이 실제로 아픈 경로를 덮는다 — 알림 센터는 **이미
+/// 울린 만료 알림을 계산으로 복원**하므로, 시계가 늙으면 백그라운드에 있는 사이 발송된
+/// 알림이 목록에 아예 안 뜬다(푸시를 받고 앱으로 돌아와 벨을 눌렀는데 비어 있음).
 ///
-/// 제대로 하려면 타이머를 이 provider가 아니라 **앱 진입부**가 소유해야 한다 — 예컨대
-/// 셸에 라이프사이클 옵서버를 두고 resume·자정에 `ref.invalidate(nowProvider)`를
-/// 부르는 식. 화면 provider는 순수하게 두고 갱신 주체를 밖에 두는 구조라, 테스트는
-/// 타이머를 만나지 않는다. 별도 작업으로 분리한다.
+/// ⚠️ **남은 구멍: 앱을 포그라운드에 켜 둔 채** 날짜·발송 시각을 넘기는 경우. 그때는
+/// 여전히 이전 시각에 머문다. 자정에 [Ref.invalidateSelf]를 예약하는 방식은 **시도했다가
+/// 되돌렸다** — 자정까지의 [Timer]가 위젯 테스트에서 pending timer로 남아 [MainPage]를
+/// 마운트하는 테스트가 전부 "Pending timers"로 실패한다
+/// (`test/features/share/invite_deeplink_test.dart`에서 발견). 모든 테스트가 이 provider를
+/// override하도록 강제하는 것은 전염성이 너무 크다. 타이머 역시 셸이 소유해야 하며,
+/// 별도 작업으로 남긴다.
 library;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 /// 날짜 파생 계산이 공유하는 현재 시각.
 ///
-/// 이 provider를 `watch`하는 소비자들은 항상 같은 "오늘"을 본다. 값 자체의 갱신은
-/// 라이브러리 주석의 "신선도" 절 참조 — 지금은 원천 목록이 바뀔 때 함께 갱신된다.
+/// 이 provider를 `watch`하는 소비자들은 항상 같은 "오늘"을 본다. 값은 앱이 앞으로
+/// 돌아올 때 셸이 무효화해 갱신한다 — 라이브러리 주석의 "신선도" 절 참조.
 final nowProvider = Provider<DateTime>((ref) => DateTime.now());

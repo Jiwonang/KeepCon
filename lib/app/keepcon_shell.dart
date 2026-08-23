@@ -18,6 +18,7 @@ import '../features/share/share_page.dart';
 import '../features/share/widgets/share_sheets.dart';
 import '../shared/deeplink/app_destination.dart';
 import '../shared/providers/deep_link_providers.dart';
+import '../shared/providers/now_provider.dart';
 
 /// 하단 내비게이션 셸. 앱의 홈으로 사용한다.
 class KeepConShell extends ConsumerStatefulWidget {
@@ -27,7 +28,8 @@ class KeepConShell extends ConsumerStatefulWidget {
   ConsumerState<KeepConShell> createState() => _KeepConShellState();
 }
 
-class _KeepConShellState extends ConsumerState<KeepConShell> {
+class _KeepConShellState extends ConsumerState<KeepConShell>
+    with WidgetsBindingObserver {
   // 탭: 홈(0) · 공유(1). 스캔(추가)은 탭이 아니라 중앙 +로 push한다.
   int _index = 0;
 
@@ -39,9 +41,38 @@ class _KeepConShellState extends ConsumerState<KeepConShell> {
   @override
   void initState() {
     super.initState();
+    // 앱 복귀 시 시계를 되살리기 위해 라이프사이클을 구독한다 — 아래 참조.
+    WidgetsBinding.instance.addObserver(this);
     // 로그인 후 셸이 뜨는 시점에 대기 중인 딥링크 목적지가 있으면 처리한다.
     WidgetsBinding.instance
         .addPostFrameCallback((_) => _consumePendingDestination());
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  /// 앱이 앞으로 돌아오면 **시계 정본을 되살린다**.
+  ///
+  /// [nowProvider]는 의존성이 없어 컨테이너 수명 동안 한 번만 계산된다 — 아무도
+  /// 무효화하지 않으면 앱이 살아 있는 내내 첫 계산 시각에 머문다. 그러면 날짜 파생이
+  /// 전부 늙는다: 홈의 D-day·만료 임박 판정이 어제 기준으로 남고, 알림 센터는 **이미
+  /// 울린 만료 알림을 계산으로 복원**하므로 그 사이 발송된 알림이 목록에 아예 안 뜬다
+  /// (푸시를 받고 앱으로 돌아와 벨을 눌렀는데 비어 있는, 가장 흔한 실패 경로다).
+  ///
+  /// **타이머가 아니라 라이프사이클에 건 이유:** 자정까지의 [Timer]를 provider에 두는
+  /// 방식은 시도했다가 되돌렸다 — 위젯 테스트에 pending timer로 남아 [MainPage]를
+  /// 마운트하는 테스트가 전부 깨진다([nowProvider] dartdoc). resume 갱신은 타이머가
+  /// 필요 없고, 갱신 주체가 화면이 아니라 앱 조립부라 provider도 순수하게 남는다.
+  ///
+  /// ⚠️ **앱을 포그라운드에 켜 둔 채** 날짜/발송 시각을 넘기는 경우는 여전히 남는다.
+  /// 그건 타이머 소유 구조가 필요해 별도 작업이다.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) return;
+    ref.invalidate(nowProvider);
   }
 
   /// 대기 중인 목적지를 소비해 해당 화면으로 이동한다.
