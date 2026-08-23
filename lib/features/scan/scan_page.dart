@@ -794,7 +794,7 @@ class __GifticonFormScreenState extends ConsumerState<_GifticonFormScreen> {
       // 안 일어난 것처럼 보인다 — 왜 막혔는지 함께 알린다.
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: const Text('입력하지 않은 필수 항목이 있습니다.'),
+          content: const KeepAllText('입력하지 않은 필수 항목이 있습니다.'),
           backgroundColor: Theme.of(context).colorScheme.error,
         ),
       );
@@ -822,7 +822,9 @@ class __GifticonFormScreenState extends ConsumerState<_GifticonFormScreen> {
     switch (formState.submit) {
       case ScanSubmitSuccess():
         messenger.showSnackBar(
-          const SnackBar(content: Text('기프티콘이 성공적으로 저장되었습니다.')),
+          const SnackBar(
+            content: KeepAllText('기프티콘이 성공적으로 저장되었습니다.'),
+          ),
         );
         navigator.popUntil((route) => route.isFirst);
 
