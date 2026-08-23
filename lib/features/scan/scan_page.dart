@@ -16,6 +16,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:keepcon/features/scan/services/gifticon_ocr_parser.dart';
 import 'package:keepcon/features/scan/services/ml_kit_service.dart';
 import 'package:keepcon/features/scan/state/gifticon_form_state.dart';
+import 'package:keepcon/features/scan/util/keep_all_ko.dart';
 import 'package:keepcon/features/scan/util/price_input_formatter.dart';
 import 'package:keepcon/features/scan/widgets/barcode_scanner_screen.dart';
 import 'package:keepcon/shared/models/gifticon.dart';
@@ -39,6 +40,35 @@ enum _GifticonGroup {
   final String label;
   final String? emoji;
   final IconData? icon;
+}
+
+/// 저장 결과 안내 다이얼로그(한도 도달·중복 등록)가 **공유하는 배치 규약.**
+///
+/// 둘은 같은 화면군에서 같은 역할을 하는 형제다. 값을 각자 들고 있으면 한쪽만
+/// 고쳐졌을 때 여백·행간이 어긋나 폭이 들쭉날쭉해 보인다 — 한곳에 두어 그
+/// 비대칭이 생길 여지를 없앤다.
+abstract final class _ResultDialog {
+  /// 좁은 화면일수록 좌우 여백이 본문 폭을 크게 깎는다 — 375px에서 기본
+  /// 여백(40)이면 글자가 쓸 수 있는 폭이 250px 남짓이라 짧은 문장도 두 줄로
+  /// 접힌다. 여백을 줄여 폭을 돌려주면 줄 수가 줄고, 줄 수가 줄면 읽기 쉽다.
+  ///
+  /// 넓은 화면에서는 기본값을 유지한다 — 거기서는 폭이 모자라지 않고, 문단이
+  /// 지나치게 길어지면 오히려 시선이 줄을 놓친다.
+  static EdgeInsets insetPadding(BuildContext context) => EdgeInsets.symmetric(
+        horizontal: MediaQuery.sizeOf(context).width < 400 ? 16 : 40,
+        vertical: 24,
+      );
+
+  /// 흐린 보조 안내 스타일.
+  ///
+  /// 좁은 폭에서 두 줄로 접히는데, bodySmall 기본 행간으로는 접힌 두 줄이 서로
+  /// 붙어 **어디까지가 한 문장인지** 보이지 않는다. 글자 크기는 그대로 두고
+  /// 행간만 넓힌다.
+  static TextStyle? mutedStyle(ThemeData theme) =>
+      theme.textTheme.bodySmall?.copyWith(
+        color: theme.colorScheme.onSurfaceVariant,
+        height: 1.45,
+      );
 }
 
 class ScanPage extends ConsumerStatefulWidget {
@@ -225,7 +255,7 @@ class _ScanPageState extends ConsumerState<ScanPage> {
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  '바코드 이미지 분석 또는 수동 입력이 가능합니다.',
+                  keepAllKo('바코드 이미지 분석 또는 수동 입력이 가능합니다.'),
                   style: theme.textTheme.bodyMedium?.copyWith(
                     color: scheme.onSurfaceVariant,
                   ),
@@ -259,46 +289,77 @@ class _ScanPageState extends ConsumerState<ScanPage> {
                   onTap: () => _openForm(ScanSource.manual),
                 ),
                 const SizedBox(height: 28),
+                // 두 글자 덩어리를 [Flexible]로 감싼다 — 감싸지 않으면 각자 자연
+                // 너비를 고집해, 글자 확대 설정(접근성)을 켠 기기에서 둘의 합이
+                // 폭을 넘는다(360px·1.3배에서 1.5px 넘쳤다). 넘치면 잘려서 안
+                // 보이므로, 넘기는 대신 접히게 두는 편이 읽는 데 낫다.
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    Text(
-                      '자주 쓰는 카테고리',
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w700,
+                    Flexible(
+                      child: Text(
+                        keepAllKo('자주 쓰는 카테고리'),
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
                       ),
                     ),
-                    Text(
-                      '미리 분류하기',
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: scheme.onSurfaceVariant,
+                    const SizedBox(width: 8),
+                    Flexible(
+                      child: Text(
+                        keepAllKo('미리 분류하기'),
+                        textAlign: TextAlign.end,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                        ),
                       ),
                     ),
                   ],
                 ),
                 const SizedBox(height: 12),
-                GridView.builder(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 3,
-                    crossAxisSpacing: 10,
-                    mainAxisSpacing: 10,
-                    childAspectRatio: 0.95,
-                  ),
-                  itemCount: _GifticonGroup.values.length,
-                  itemBuilder: (context, index) {
-                    final group = _GifticonGroup.values[index];
-                    final selected = _selectedGroup == group;
+                // 타일 높이는 원래 비율(0.95)로 잡되, **내용이 필요로 하는 높이
+                // 아래로는 내려가지 않게 바닥을 깐다.**
+                //
+                // 비율만 쓰면 폭이 좁아질수록 타일이 낮아져 고정 높이인 내용이
+                // 넘친다(390px에서 2.4px 오버플로 — 디버그 빌드는 매 프레임
+                // 예외를 던지고 릴리스에서는 내용이 잘린다). 넓은 화면에서는
+                // 비율이 이기므로 지금 보이는 모양이 그대로 유지된다.
+                LayoutBuilder(
+                  builder: (BuildContext context, BoxConstraints constraints) {
+                    const int columns = 3;
+                    const double spacing = 10;
 
-                    return _GroupTile(
-                      data: group,
-                      selected: selected,
-                      onTap: () {
-                        HapticFeedback.selectionClick();
-                        setState(() {
-                          _selectedGroup = group;
-                        });
+                    final double tileWidth =
+                        (constraints.maxWidth - spacing * (columns - 1)) /
+                            columns;
+                    final double byRatio = tileWidth / 0.95;
+                    final double floor = _GroupTile.minExtentFor(context);
+
+                    return GridView.builder(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: columns,
+                        crossAxisSpacing: spacing,
+                        mainAxisSpacing: spacing,
+                        mainAxisExtent: byRatio > floor ? byRatio : floor,
+                      ),
+                      itemCount: _GifticonGroup.values.length,
+                      itemBuilder: (BuildContext context, int index) {
+                        final group = _GifticonGroup.values[index];
+                        final selected = _selectedGroup == group;
+
+                        return _GroupTile(
+                          data: group,
+                          selected: selected,
+                          onTap: () {
+                            HapticFeedback.selectionClick();
+                            setState(() {
+                              _selectedGroup = group;
+                            });
+                          },
+                        );
                       },
                     );
                   },
@@ -519,6 +580,56 @@ class _GroupTile extends StatelessWidget {
   final bool selected;
   final VoidCallback onTap;
 
+  // 타일 내용은 **높이가 고정이다** — 아이콘 칸, 간격, 한 줄 라벨, 위아래 여백.
+  // 그리드가 높이를 폭에서 끌어오면(childAspectRatio) 좁은 화면에서 타일이 이
+  // 높이보다 낮아져 내용이 넘친다. 값을 여기 모아 두고 [minExtentFor]가 같은
+  // 값을 쓰게 해, 한쪽만 바뀌어 계산이 어긋나는 일을 막는다.
+  static const double _padV = 20;
+  static const double _iconBox = 34;
+  static const double _gap = 12;
+  static const double _labelSize = 15;
+  static const double _selectedBorder = 2;
+
+  /// 내용이 넘치지 않으려면 타일이 최소한 가져야 하는 높이.
+  ///
+  /// 라벨 높이는 **어림하지 않고 실제로 잰다.** 행간 계수를 곱해 추정했더니
+  /// 360px에서 5.5px 모자랐다 — 이유가 둘이고 둘 다 상수로는 못 맞춘다:
+  ///
+  /// - `치킨/피자`처럼 `/`가 섞인 라벨은 폰트 폴백이 일어나 2px 더 높다. 타일
+  ///   높이는 하나뿐이므로 **가장 높은 라벨**을 기준으로 잡아야 한다.
+  /// - 선택된 타일은 테두리가 2로 굵어(비선택 1) 안쪽 높이를 2px 더 먹는다.
+  ///
+  /// [TextScaler]를 함께 넘겨 글자 확대 설정도 반영된다.
+  static double minExtentFor(BuildContext context) {
+    final TextStyle? labelStyle = Theme.of(context)
+        .textTheme
+        .bodyMedium
+        ?.copyWith(fontSize: _labelSize, fontWeight: FontWeight.w700);
+    final TextScaler scaler = MediaQuery.textScalerOf(context);
+
+    double tallestLabel = 0;
+    for (final _GifticonGroup group in _GifticonGroup.values) {
+      final TextPainter painter = TextPainter(
+        text: TextSpan(text: group.label, style: labelStyle),
+        textDirection: TextDirection.ltr,
+        textScaler: scaler,
+        maxLines: 1,
+      )..layout();
+      if (painter.height > tallestLabel) tallestLabel = painter.height;
+      painter.dispose();
+    }
+
+    // 테두리도 안쪽 높이를 먹는다 — Flutter는 CSS와 달리 [BoxDecoration]의
+    // 테두리 두께를 Container의 padding에 더한다. 가장 두꺼운 경우(선택 상태,
+    // 위아래 각 [_selectedBorder])를 기준으로 잡아야 선택된 타일에서만 넘치는
+    // 일이 없다 — 비선택과의 '차이'로 잡았다가 딱 그만큼 2px 모자랐다.
+    //
+    // 끝의 1px은 반올림 여유다 — 위 계산은 필요한 높이와 **정확히** 같아져서
+    // 서브픽셀 반올림 한 번이면 다시 넘친다. 1px 남는 것은 눈에 띄지 않지만
+    // 모자라면 오버플로로 드러난다.
+    return _padV * 2 + _selectedBorder * 2 + _iconBox + _gap + tallestLabel + 1;
+  }
+
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
@@ -533,7 +644,7 @@ class _GroupTile extends StatelessWidget {
         borderRadius: BorderRadius.circular(16),
         child: Container(
           padding: const EdgeInsets.symmetric(
-            vertical: 20,
+            vertical: _padV,
             horizontal: 10,
           ),
           decoration: BoxDecoration(
@@ -542,14 +653,14 @@ class _GroupTile extends StatelessWidget {
               color: selected
                   ? scheme.primary
                   : scheme.outline.withValues(alpha: 0.25),
-              width: selected ? 2 : 1,
+              width: selected ? _selectedBorder : 1,
             ),
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               SizedBox(
-                height: 34,
+                height: _iconBox,
                 child: Center(
                   child: data.icon != null
                       ? Icon(data.icon, color: fg, size: 32)
@@ -562,13 +673,13 @@ class _GroupTile extends StatelessWidget {
                         ),
                 ),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: _gap),
               Text(
                 data.label,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: theme.textTheme.bodyMedium?.copyWith(
-                  fontSize: 15,
+                  fontSize: _labelSize,
                   fontWeight: FontWeight.w700,
                   color: fg,
                 ),
@@ -698,10 +809,10 @@ class __GifticonFormScreenState extends ConsumerState<_GifticonFormScreen> {
             final ThemeData dialogTheme = Theme.of(dialogContext);
 
             final ColorScheme dialogScheme = dialogTheme.colorScheme;
-            final TextStyle? mutedStyle = dialogTheme.textTheme.bodySmall
-                ?.copyWith(color: dialogScheme.onSurfaceVariant);
+            final TextStyle? mutedStyle = _ResultDialog.mutedStyle(dialogTheme);
 
             return AlertDialog(
+              insetPadding: _ResultDialog.insetPadding(dialogContext),
               title: const Text('저장 한도에 도달했어요'),
               // 중복 안내와 같은 짜임 — 무슨 일인지(제목) / 지금 상태(카드) /
               // 왜 그런지(한 문장) / 어떻게 푸는지(흐린 글씨).
@@ -742,15 +853,40 @@ class __GifticonFormScreenState extends ConsumerState<_GifticonFormScreen> {
                     ),
                   ),
                   const SizedBox(height: 14),
-                  Text('무료 플랜은 $limit개까지 보관할 수 있어, 이번 기프티콘은 저장하지 않았어요.'),
-                  const SizedBox(height: 14),
+                  // 문구는 그대로 두고 **끊어도 되는 자리만** 어절 경계로 제한한다
+                  // ([keepAllKo]). 좁은 폭에서 '이 / 번 기프티콘은'처럼 갈라지던 것을
+                  // 막으면서, `\n`을 손으로 넣는 방식과 달리 폭이 넓어져도 어색하게
+                  // 일찍 끊기지 않는다.
+                  Text(keepAllKo(
+                      '무료 플랜은 $limit개까지 보관할 수 있어, 이번 기프티콘은 저장하지 않았어요.')),
+                  const SizedBox(height: 18),
+
+                  // 해법 두 가지를 **한 문단에 몰아넣지 않는다.** 좁은 폭에서 첫
+                  // 해법이 두 줄로 접히면 다음 해법과 붙어, 어디서 하나가 끝나고
+                  // 다음이 시작하는지 보이지 않는다(`\n`은 줄만 바꿀 뿐 사이를
+                  // 벌리지 못한다). 블록으로 나누고 간격을 주면 "방법이 둘"이라는
+                  // 구조가 글을 읽기 전에 눈에 먼저 들어온다.
+                  //
+                  // **먼저 제시하는 길은 '사용 완료'다.** 프리미엄 전환은 dev·prod에서
+                  // 보안 규칙이 plan 쓰기를 막아 실제로는 되지 않는다("결제 연동 준비 중").
+                  // 그것만 안내하면 사용자를 막다른 곳으로 보내는 셈이라, 지금 바로
+                  // 통하는 방법을 앞에 둔다.
+                  Text(
+                    keepAllKo('다 쓴 기프티콘을 사용 완료 처리하면 자리가 납니다.'),
+                    style: mutedStyle,
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    keepAllKo('프리미엄으로 올리면 개수 제한이 없어져요.'),
+                    style: mutedStyle,
+                  ),
+
+                  // 경로는 **바로 위 문장에 딸린 부속**이다. 앞 블록과 같은 간격을
+                  // 주면 독립된 세 번째 해법으로 읽히므로, 간격을 좁게 붙여
+                  // 종속 관계를 위치로 드러낸다.
+                  const SizedBox(height: 3),
                   Text.rich(
                     TextSpan(
-                      // **먼저 제시하는 길은 '사용 완료'다.** 프리미엄 전환은 dev·prod에서
-                      // 보안 규칙이 plan 쓰기를 막아 실제로는 되지 않는다("결제 연동 준비 중").
-                      // 그것만 안내하면 사용자를 막다른 곳으로 보내는 셈이라, 지금 바로
-                      // 통하는 방법을 앞에 둔다.
-                      //
                       // 경로 표기는 실제 UI와 맞춘다 — 앱에 '설정'이나 '마이페이지'라는
                       // 라벨은 없다. 진입점은 홈 오른쪽 위 톱니바퀴(툴팁 '마이')다.
                       //
@@ -759,18 +895,9 @@ class __GifticonFormScreenState extends ConsumerState<_GifticonFormScreen> {
                       // WidgetSpan으로 넣는다. 이모지는 컬러로 렌더링돼 회색 본문과 톤이
                       // 어긋나지만, 이 방식은 주변 글자와 같은 색·크기를 따라가면서
                       // "찾아야 할 그 모양"을 그대로 보여 준다.
-                      //
-                      // 줄바꿈은 문장 단위로 직접 끊는다. 한 줄에 몰아 두면 좁은
-                      // 다이얼로그 폭에서 '프리미 / 엄).'처럼 단어 중간이 갈라진다.
                       style: mutedStyle,
                       children: <InlineSpan>[
-                        const TextSpan(
-                          text: '다 쓴 기프티콘을 사용 완료 처리하면 자리가 납니다.\n',
-                        ),
-                        const TextSpan(
-                          text: '프리미엄으로 올리면 개수 제한이 없어져요.\n',
-                        ),
-                        const TextSpan(text: '홈 오른쪽 위 '),
+                        TextSpan(text: keepAllKo('홈 오른쪽 위 ')),
                         WidgetSpan(
                           alignment: PlaceholderAlignment.middle,
                           child: Icon(
@@ -779,7 +906,7 @@ class __GifticonFormScreenState extends ConsumerState<_GifticonFormScreen> {
                             color: dialogScheme.onSurfaceVariant,
                           ),
                         ),
-                        const TextSpan(text: ' › 프리미엄'),
+                        TextSpan(text: keepAllKo(' › 프리미엄')),
                       ],
                     ),
                   ),
@@ -820,10 +947,13 @@ class __GifticonFormScreenState extends ConsumerState<_GifticonFormScreen> {
 
             // 보조 정보(브랜드·만료일)는 한 단계 눌러 두고 상품명만 굵게 —
             // 눈이 "무엇과 겹쳤는지"에 먼저 닿게 한다.
-            final TextStyle? mutedStyle = dialogTheme.textTheme.bodySmall
-                ?.copyWith(color: dialogScheme.onSurfaceVariant);
+            //
+            // 배치 규약은 한도 다이얼로그와 **공유한다**([_ResultDialog]) — 형제인데
+            // 여백·행간이 어긋나면 같은 화면군에서 폭이 들쭉날쭉해 보인다.
+            final TextStyle? mutedStyle = _ResultDialog.mutedStyle(dialogTheme);
 
             return AlertDialog(
+              insetPadding: _ResultDialog.insetPadding(dialogContext),
               title: const Text('이미 등록된 기프티콘'),
               // 제목이 "이미 등록됨"을 이미 말하므로 본문은 그것을 되풀이하지 않는다.
               // 대신 세 박자로 나눈다 — 무슨 일인지 / 무엇과 겹쳤는지 / 그래서 어떻게 됐는지.
@@ -832,7 +962,7 @@ class __GifticonFormScreenState extends ConsumerState<_GifticonFormScreen> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
-                  const Text('같은 바코드의 기프티콘이 이미 있어요.'),
+                  Text(keepAllKo('같은 바코드의 기프티콘이 이미 있어요.')),
                   const SizedBox(height: 14),
                   Container(
                     width: double.infinity,
@@ -868,7 +998,7 @@ class __GifticonFormScreenState extends ConsumerState<_GifticonFormScreen> {
                     ),
                   ),
                   const SizedBox(height: 14),
-                  Text('새로 등록하지 않았어요.', style: mutedStyle),
+                  Text(keepAllKo('새로 등록하지 않았어요.'), style: mutedStyle),
                 ],
               ),
               actions: <Widget>[

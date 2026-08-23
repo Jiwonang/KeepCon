@@ -33,6 +33,7 @@ import 'package:flutter/services.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../../../shared/theme/theme_tokens.dart';
+import '../util/keep_all_ko.dart';
 
 /// [BarcodeScannerScreen]의 반환값.
 ///
@@ -417,20 +418,27 @@ class ScanGuideOverlay extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 32),
       child: Column(
         children: <Widget>[
+          // 좌우 32씩 물린 가운데 정렬이라 좁은 기기에서는 두 문구 모두 접힌다.
+          // 한글은 UAX #14상 음절 사이 어디서나 끊을 수 있어 '맞춰주 / 세요'처럼
+          // 어절 한가운데가 갈라지는데, 가운데 정렬에서는 갈라진 조각이 줄마다
+          // 다른 위치에 놓여 더 어수선해 보인다. [keepAllKo]로 끊어도 되는 자리를
+          // 어절 경계로 제한한다(문구는 무변경).
           Text(
-            '바코드 또는 QR 코드를 사각형 안에 맞춰주세요',
+            keepAllKo('바코드 또는 QR 코드를 사각형 안에 맞춰주세요'),
             textAlign: TextAlign.center,
             style: theme.textTheme.bodyLarge?.copyWith(
               color: onDark,
               fontWeight: FontWeight.w700,
+              height: 1.35,
             ),
           ),
           const SizedBox(height: 8),
           Text(
-            '인식되지 않으면 화면을 닫고 직접 입력을 이용해 주세요.',
+            keepAllKo('인식되지 않으면 화면을 닫고 직접 입력을 이용해 주세요.'),
             textAlign: TextAlign.center,
             style: theme.textTheme.bodySmall?.copyWith(
               color: onDark.withValues(alpha: 0.75),
+              height: 1.45,
             ),
           ),
         ],
@@ -555,20 +563,25 @@ class _ScannerError extends StatelessWidget {
                 size: 48,
               ),
               const SizedBox(height: 16),
+              // [reason]은 권한 거부 경우에만 줄바꿈을 품는다. 줄 단위로 나눠
+              // 적용해 그 의도된 줄바꿈은 그대로 두고, 각 줄 안에서만 어절을
+              // 보호한다(안내 문구와 같은 처방 — 가운데 정렬이라 갈라지면 더 어수선하다).
               Text(
-                reason,
+                reason.split('\n').map(keepAllKo).join('\n'),
                 textAlign: TextAlign.center,
                 style: theme.textTheme.bodyLarge?.copyWith(
                   color: onDark,
                   fontWeight: FontWeight.w700,
+                  height: 1.35,
                 ),
               ),
               const SizedBox(height: 8),
               Text(
-                '직접 입력으로도 기프티콘을 등록할 수 있어요.',
+                keepAllKo('직접 입력으로도 기프티콘을 등록할 수 있어요.'),
                 textAlign: TextAlign.center,
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: onDark.withValues(alpha: 0.75),
+                  height: 1.45,
                 ),
               ),
               const SizedBox(height: 20),

@@ -38,6 +38,7 @@ library;
 import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../util/keep_all_ko.dart';
 import '../../../shared/models/gifticon.dart';
 import '../../../shared/models/user.dart';
 import '../../../shared/providers/repositories.dart';
@@ -371,9 +372,14 @@ class GifticonFormController extends StateNotifier<GifticonFormState> {
       // 프리미엄 사용자가 조회 장애로 저장을 잃고, premium으로 간주하면 한도가
       // 조용히 뚫린다. 판정을 보류하고 재시도를 안내하는 것이 정직하다.
       if (plan == null) {
+        // 이 화면군에서 가장 긴 실패 문구라 스낵바가 좁은 기기에서 두 줄로
+        // 접힌다 — 어절이 갈라지지 않게 [keepAllKo]로 감싼다.
+        //
+        // **예외 메시지(`… : $e`)에는 쓰지 않는다.** 그쪽은 내용이 무엇일지 알 수
+        // 없어서, 끊을 곳 없는 긴 토큰이 들어오면 줄바꿈 자체가 막혀 오히려 넘친다.
         state = state.copyWith(
-          submit: const ScanSubmitFailure(
-            '플랜 정보를 확인하지 못했어요. 잠시 후 다시 시도해 주세요.',
+          submit: ScanSubmitFailure(
+            keepAllKo('플랜 정보를 확인하지 못했어요. 잠시 후 다시 시도해 주세요.'),
           ),
         );
         return null;
