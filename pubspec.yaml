@@ -26,6 +26,13 @@ dependencies:
   app_links: ^7.2.1
   share_plus: ^13.3.0
   barcode_widget: ^2.0.4
+
+  # 자소 클러스터 단위 문자열 순회(String.characters).
+  #
+  # flutter가 이미 같은 버전을 끌어오지만 **직접 쓰므로 직접 선언한다** —
+  # 선언하지 않으면 `depend_on_referenced_packages` lint에 걸리고, 전이 의존성은
+  # 상위 패키지 사정으로 사라질 수 있다.
+  characters: ^1.4.0
 dev_dependencies:
   flutter_test:
     sdk: flutter
