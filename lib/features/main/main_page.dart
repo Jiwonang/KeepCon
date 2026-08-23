@@ -27,7 +27,7 @@ import 'state/gifticon_filter.dart';
 import 'state/gifticon_list_providers.dart';
 import 'state/gifticon_stats.dart';
 import 'state/highlighted_gifticon.dart';
-import 'state/now_provider.dart';
+import '../../shared/providers/now_provider.dart';
 import 'widgets/format.dart';
 import 'widgets/gifticon_status_label.dart';
 import 'widgets/sort_filter_sheet.dart';

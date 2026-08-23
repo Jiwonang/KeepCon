@@ -23,7 +23,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:keepcon/features/main/main_page.dart';
 import 'package:keepcon/features/main/state/gifticon_filter.dart';
 import 'package:keepcon/features/main/state/gifticon_list_providers.dart';
-import 'package:keepcon/features/main/state/now_provider.dart';
+import 'package:keepcon/shared/providers/now_provider.dart';
 import 'package:keepcon/shared/models/gifticon.dart';
 import 'package:keepcon/shared/models/user.dart';
 import 'package:keepcon/shared/providers/repositories.dart';

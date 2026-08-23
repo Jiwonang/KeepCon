@@ -28,7 +28,7 @@ import '../../../shared/util/expiry_policy.dart';
 import '../../../shared/util/korean_particle.dart';
 import '../../../shared/util/money_format.dart' show formatWon;
 import '../state/gifticon_list_providers.dart';
-import '../state/now_provider.dart';
+import '../../../shared/providers/now_provider.dart';
 import '../widgets/format.dart';
 import '../widgets/gifticon_status_label.dart';
 

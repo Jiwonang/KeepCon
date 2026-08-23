@@ -21,11 +21,13 @@ import 'package:keepcon/shared/models/gifticon.dart';
 import 'package:keepcon/shared/models/share.dart';
 import 'package:keepcon/shared/providers/deep_link_providers.dart';
 import 'package:keepcon/shared/providers/group_notifications_provider.dart';
+import 'package:keepcon/shared/providers/now_provider.dart';
 import 'package:keepcon/shared/providers/raw_gifticons_provider.dart';
 import 'package:keepcon/shared/providers/repositories.dart';
 import 'package:keepcon/shared/repositories/impl/in_memory_auth_repository.dart';
 import 'package:keepcon/shared/repositories/impl/in_memory_gifticon_repository.dart';
 import 'package:keepcon/shared/repositories/impl/in_memory_share_repository.dart';
+import 'package:keepcon/shared/util/expiry_policy.dart';
 
 /// D-3 알림이 오늘 오전에 이미 울린 기프티콘(만료 3일 뒤).
 Gifticon _expiringSoon() => Gifticon(
@@ -125,7 +127,7 @@ void main() {
         reason: '파생 항목에 별도 읽음 저장소가 없어도 같은 타임스탬프로 갈려야 한다');
   });
 
-  test('그룹 알림 축의 에러는 파생 축이 값을 내도 감춰지지 않는다', () async {
+  test('그룹 알림 축이 에러여도 개인 만료 알림은 그대로 보인다', () async {
     final container = ProviderContainer(
       overrides: <Override>[
         notificationsProvider.overrideWithValue(
@@ -138,12 +140,92 @@ void main() {
       ],
     );
     addTearDown(container.dispose);
+    container.listen(rawGifticonsProvider, (_, __) {});
+    await Future<void>.delayed(Duration.zero);
 
-    expect(container.read(allNotificationsProvider).hasError, isTrue,
-        reason: '일부만 빠진 목록이 정상처럼 보이면 사용자가 실패를 모른다');
+    final AsyncValue<List<AppNotification>> async =
+        container.read(allNotificationsProvider);
+
+    // 배너는 떠야 한다 — 일부만 빠진 목록을 정상으로 위장하지 않는다.
+    expect(async.hasError, isTrue);
+    // 그러나 파생 항목은 로컬 계산이라 네트워크와 무관하다. 오프라인에서 방금 받은
+    // 만료 알림이 사라지면 이 기능이 고치려던 증상 그대로다.
+    expect(async.valueOrNull, isNotNull,
+        reason: '그룹 축 실패가 로컬 계산 결과까지 지우면 안 된다');
+    expect(async.valueOrNull!.whereType<ExpiryNotificationItem>(), isNotEmpty);
+    // 읽음 가드는 AsyncData만 "봤다"로 인정하므로, 못 본 그룹 알림이 읽음 처리되지 않는다.
+    expect(async is AsyncData, isFalse,
+        reason: '에러 상태가 AsyncData가 되면 읽음 가드가 열려 알림이 유실된다');
   });
 
-  testWidgets('개인 알림을 탭하면 목적지 버스에 실리고 화면이 닫힌다', (WidgetTester tester) async {
+  test('첫 로딩에는 파생 항목을 먼저 보여주지 않는다 — 읽음 가드가 열리면 유실된다', () async {
+    final container = ProviderContainer(
+      overrides: <Override>[
+        notificationsProvider
+            .overrideWithValue(const AsyncLoading<List<GroupNotification>>()),
+        rawGifticonsProvider.overrideWith(
+          (_) => Stream<List<Gifticon>>.value(<Gifticon>[_expiringSoon()]),
+        ),
+      ],
+    );
+    addTearDown(container.dispose);
+    container.listen(rawGifticonsProvider, (_, __) {});
+    await Future<void>.delayed(Duration.zero);
+
+    expect(container.read(allNotificationsProvider) is AsyncData, isFalse,
+        reason: '아직 도착 안 한 그룹 알림이 읽음으로 찍히면 회복 불가다');
+  });
+
+  test('시계는 정본을 watch한다 — nowProvider가 바뀌면 목록이 다시 계산된다', () async {
+    // 이 테스트가 잡는 것: 예전 구현은 provider 본문에서 `DateTime.now()`를 직접 읽었다.
+    // 시간은 watch 대상이 아니라 **캐시된 값이 최초 계산 시점에 얼어붙었고**, 앱을 켜 둔
+    // 채 알림이 울려도 목록에 나타나지 않았다(푸시를 받고 벨을 눌렀는데 비어 있음 —
+    // 이 기능이 고치려던 증상 그대로). now를 주입하는 테스트만으로는 구조적으로 못 잡는다.
+    final Gifticon g = _expiringSoon();
+    // D-1 발송은 만료 하루 전 오전 9시다. 그 **직전**을 현재로 두면 아직 안 울린 상태다.
+    final DateTime fireAt = DateTime(
+      g.expiryDate.year,
+      g.expiryDate.month,
+      g.expiryDate.day - 1,
+      expiryNotifyHour,
+    );
+
+    final container = ProviderContainer(
+      overrides: <Override>[
+        notificationsProvider
+            .overrideWithValue(const AsyncData<List<GroupNotification>>([])),
+        rawGifticonsProvider
+            .overrideWith((_) => Stream<List<Gifticon>>.value(<Gifticon>[g])),
+        nowProvider
+            .overrideWithValue(fireAt.subtract(const Duration(minutes: 5))),
+      ],
+    );
+    addTearDown(container.dispose);
+    container.listen(rawGifticonsProvider, (_, __) {});
+    container.listen(allNotificationsProvider, (_, __) {});
+    await Future<void>.delayed(Duration.zero);
+
+    bool hasD1() => (container.read(allNotificationsProvider).valueOrNull ??
+            const <AppNotification>[])
+        .whereType<ExpiryNotificationItem>()
+        .any((ExpiryNotificationItem n) => n.leadDays == 1);
+
+    expect(hasD1(), isFalse, reason: '아직 안 울린 알림은 목록에 없어야 한다');
+
+    // 시계만 앞으로 돌린다(원천 목록·그룹 알림은 그대로) — 목록이 다시 계산돼야 한다.
+    container.updateOverrides(<Override>[
+      notificationsProvider
+          .overrideWithValue(const AsyncData<List<GroupNotification>>([])),
+      rawGifticonsProvider
+          .overrideWith((_) => Stream<List<Gifticon>>.value(<Gifticon>[g])),
+      nowProvider.overrideWithValue(fireAt.add(const Duration(minutes: 5))),
+    ]);
+    await Future<void>.delayed(Duration.zero);
+
+    expect(hasD1(), isTrue, reason: '시계가 흘렀는데 목록이 그대로면 캐시된 값에 얼어붙은 것이다');
+  });
+
+  testWidgets('개인 알림을 탭하면 목적지 버스에 실린다', (WidgetTester tester) async {
     final auth = InMemoryAuthRepository();
     final gifticons =
         InMemoryGifticonRepository(seed: <Gifticon>[_expiringSoon()]);
@@ -184,5 +266,71 @@ void main() {
     expect(destination, isA<GifticonHighlightDestination>(),
         reason: '딥링크·푸시와 같은 통로로 보내야 경로마다 동작이 갈리지 않는다');
     expect((destination! as GifticonHighlightDestination).gifticonId, 'g-1');
+  });
+
+  testWidgets('마이페이지를 경유해 들어와도 홈까지 되돌아간다', (WidgetTester tester) async {
+    // 진입 경로가 셋인데 그중 하나가 마이페이지다. `pop()` 한 번이면 마이페이지가
+    // 스택에 남아 **강조된 홈을 가린다** — 강조는 시간이 지나면 거둬지므로, 사용자가
+    // 뒤로가기로 홈에 닿을 즈음엔 이미 꺼져 탭이 아무 일도 안 한 것처럼 보인다.
+    final auth = InMemoryAuthRepository();
+    final gifticons =
+        InMemoryGifticonRepository(seed: <Gifticon>[_expiringSoon()]);
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: <Override>[
+          authRepositoryProvider.overrideWithValue(auth),
+          gifticonRepositoryProvider.overrideWithValue(gifticons),
+          shareRepositoryProvider.overrideWithValue(
+            InMemoryShareRepository(
+              authRepository: auth,
+              gifticonRepository: gifticons,
+              seed: false,
+            ),
+          ),
+        ],
+        child: MaterialApp(
+          home: Builder(
+            builder: (BuildContext context) => Scaffold(
+              body: Center(
+                child: TextButton(
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (BuildContext c) => Scaffold(
+                        body: Center(
+                          child: TextButton(
+                            onPressed: () => Navigator.of(c).push(
+                              MaterialPageRoute<void>(
+                                builder: (_) => const NotificationCenterPage(),
+                              ),
+                            ),
+                            child: const Text('알림 열기'),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  child: const Text('마이페이지 열기'),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('마이페이지 열기'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('알림 열기'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.textContaining('만료되는 기프티콘이 있어요').first);
+    await tester.pumpAndSettle();
+
+    expect(find.text('마이페이지 열기'), findsOneWidget,
+        reason: '셸(첫 라우트)까지 되돌아와야 강조된 홈이 보인다');
+    expect(find.byType(NotificationCenterPage), findsNothing);
+    expect(find.text('알림 열기'), findsNothing,
+        reason: '경유한 마이페이지가 남아 있으면 강조된 홈을 가린다');
   });
 }

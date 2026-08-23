@@ -19,6 +19,7 @@ import '../models/gifticon.dart';
 import '../models/share.dart';
 import '../models/user.dart';
 import '../notifications/expiry_notification_plan.dart';
+import 'now_provider.dart';
 import 'raw_gifticons_provider.dart';
 import 'repositories.dart';
 import 'session_provider.dart';
@@ -84,34 +85,59 @@ void retryNotifications(WidgetRef ref) {
 /// 두 출처의 성질 차이는 [AppNotification] dartdoc에 있다. 요약하면 그룹 알림은 저장된
 /// 문서고, 개인 만료 알림은 내 기프티콘에서 **계산해 복원**한 것이다.
 ///
-/// 그룹 알림 축의 로딩/에러를 그대로 전파한다 — 파생 축은 실패할 수 없으므로(순수 계산)
-/// 목록이 못 뜨는 이유는 언제나 그룹 알림 스트림이다. 파생 축이 값을 냈다고 해서 그룹
-/// 알림의 에러를 감추면, 배너 없이 **일부만 빠진 목록**이 정상처럼 보인다.
+/// **에러여도 파생 항목은 지우지 않는다.** 파생 축은 로컬 계산이라 네트워크와 무관한데,
+/// 그룹 스트림의 에러를 목록 전체에 전파하면 오프라인일 때 방금 받은 만료 알림까지 함께
+/// 사라진다 — 이 기능이 고치려던 증상 그대로다. 그래서 에러 상태는 [AsyncError]로 유지해
+/// 배너를 띄우되(일부만 빠진 목록을 정상으로 위장하지 않는다), 값 자리에는 파생 항목이
+/// 담긴 목록을 실어 둔다. 화면의 읽음 가드는 [AsyncData]만 "봤다"로 인정하므로, 이렇게
+/// 해도 못 본 그룹 알림이 읽음 처리되지 않는다.
+///
+/// **첫 로딩은 값 없이 전파한다.** 파생 항목을 먼저 보여주면 목록이 [AsyncData]가 되어
+/// 읽음 가드가 열리는데, 그 순간 아직 도착하지 않은 그룹 알림까지 읽음으로 찍혀 유실된다.
 final allNotificationsProvider =
     Provider<AsyncValue<List<AppNotification>>>((ref) {
-  final DateTime now = DateTime.now();
-  // 파생 축은 원천 목록만 있으면 계산된다. 값이 아직 없으면(로딩·미로그인) 빈 목록으로
-  // 두고 그룹 알림 축의 상태를 그대로 따른다.
+  // 시각은 계약 정본 [nowProvider]에서 받는다. `DateTime.now()`를 직접 읽으면 ①이
+  // provider가 캐시되므로 목록이 **최초 계산 시점에 얼어붙고**(앱을 켜 둔 채 알림이
+  // 울려도 목록에 안 나타난다) ②홈의 만료 임박 판정과 다른 "오늘"을 볼 수 있다
+  // (정본 dartdoc이 기록한 실제 사고).
+  final DateTime now = ref.watch(nowProvider);
+  // 파생 축은 원천 목록만 있으면 계산된다. 값이 아직 없으면(로딩·미로그인) 빈 목록이다.
   final List<Gifticon> gifticons =
       ref.watch(rawGifticonsProvider).valueOrNull ?? const <Gifticon>[];
   final List<ExpiryNotificationItem> expiry =
       firedExpiryNotifications(gifticons, now: now);
 
-  return ref.watch(notificationsProvider).whenData(
-    (List<GroupNotification> groupNotifs) {
-      final List<AppNotification> merged = <AppNotification>[
-        for (final GroupNotification n in groupNotifs) GroupNotificationItem(n),
-        ...expiry,
-      ];
-      // 최신순. 같은 시각이면 id로 안정 정렬한다(순서가 흔들리면 같은 데이터에도 목록이
-      // 달라 보이고, 위젯 재사용이 어긋나 스크롤이 튄다).
-      merged.sort((AppNotification a, AppNotification b) {
-        final int byTime = b.createdAt.compareTo(a.createdAt);
-        return byTime != 0 ? byTime : a.id.compareTo(b.id);
-      });
-      return merged;
-    },
-  );
+  List<AppNotification> merge(List<GroupNotification> groupNotifs) {
+    final List<AppNotification> merged = <AppNotification>[
+      for (final GroupNotification n in groupNotifs) GroupNotificationItem(n),
+      ...expiry,
+    ];
+    // 최신순. 같은 시각이면 id로 안정 정렬한다(순서가 흔들리면 같은 데이터에도 목록이
+    // 달라 보이고, 위젯 재사용이 어긋나 스크롤이 튄다).
+    merged.sort((AppNotification a, AppNotification b) {
+      final int byTime = b.createdAt.compareTo(a.createdAt);
+      return byTime != 0 ? byTime : a.id.compareTo(b.id);
+    });
+    return merged;
+  }
+
+  final AsyncValue<List<GroupNotification>> groupAsync =
+      ref.watch(notificationsProvider);
+
+  if (groupAsync.hasError) {
+    // 에러를 유지한 채(배너) 파생 항목을 값 자리에 싣는다. 그룹 알림이 이전 방출로
+    // 남아 있으면 그것도 함께 보여준다 — 순단 중 보고 있던 목록이 사라지지 않는다.
+    return AsyncError<List<AppNotification>>(
+      groupAsync.error!,
+      groupAsync.stackTrace ?? StackTrace.current,
+    ).copyWithPrevious(
+      AsyncData<List<AppNotification>>(
+        merge(groupAsync.valueOrNull ?? const <GroupNotification>[]),
+      ),
+    );
+  }
+
+  return groupAsync.whenData(merge);
 });
 
 /// 안읽음 알림 개수 — 마지막 읽음 시각 이후에 생긴 알림 수(**두 출처 합산**).

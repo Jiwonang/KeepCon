@@ -170,7 +170,12 @@ class _NotificationCenterPageState
                                           .state =
                                       GifticonHighlightDestination(
                                           item.gifticonId);
-                                  Navigator.of(context).pop();
+                                  // 셸까지 되돌린다. `pop()` 한 번이면 마이페이지를
+                                  // 경유해 들어온 경우 그 화면이 남아 강조된 홈을
+                                  // 가린다 — 강조는 시간이 지나면 거둬지므로 사용자가
+                                  // 뒤로가기로 홈에 닿을 즈음엔 이미 꺼져 있다.
+                                  Navigator.of(context)
+                                      .popUntil((Route<void> r) => r.isFirst);
                                 }
                               : null,
                         );

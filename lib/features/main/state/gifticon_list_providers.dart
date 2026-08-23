@@ -28,7 +28,7 @@ import '../../../shared/providers/raw_gifticons_provider.dart';
 import '../../../shared/providers/session_provider.dart';
 import 'gifticon_filter.dart';
 import 'gifticon_sorter.dart';
-import 'now_provider.dart';
+import '../../../shared/providers/now_provider.dart';
 
 // 원천 목록 `rawGifticonsProvider`는 계약 정본으로 승격됐다
 // (`lib/shared/providers/raw_gifticons_provider.dart`) — 앱 조립부의 만료 알림 동기화에

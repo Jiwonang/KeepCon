@@ -17,7 +17,7 @@ import '../../../shared/util/expiry_policy.dart';
 import 'gifticon_filter.dart';
 import '../../../shared/providers/raw_gifticons_provider.dart';
 import 'gifticon_sorter.dart';
-import 'now_provider.dart';
+import '../../../shared/providers/now_provider.dart';
 
 /// 홈 요약 통계 값 객체.
 class GifticonStats {
