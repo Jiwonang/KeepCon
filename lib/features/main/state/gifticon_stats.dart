@@ -15,9 +15,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../shared/models/gifticon.dart';
 import '../../../shared/util/expiry_policy.dart';
 import 'gifticon_filter.dart';
-import 'gifticon_list_providers.dart';
+import '../../../shared/providers/raw_gifticons_provider.dart';
 import 'gifticon_sorter.dart';
-import 'now_provider.dart';
+import '../../../shared/providers/now_provider.dart';
 
 /// 홈 요약 통계 값 객체.
 class GifticonStats {

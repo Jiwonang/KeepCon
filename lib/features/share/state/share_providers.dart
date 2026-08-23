@@ -8,7 +8,7 @@
 /// 계약 준수:
 /// - 행위자/멤버 식별 = 세션 정본 [sessionUserProvider]
 ///   (`lib/shared/providers/session_provider.dart`)를 **직접** 소비한다(페이지 별칭 없음).
-///   세션 재구독(invalidate) 대상도 그 정본이다 — [_retrySessionIfFailed] 참조.
+///   세션 재구독(invalidate) 대상도 그 정본이다 — [retrySessionIfFailed] 참조.
 /// - 그룹/공유/이력/알림은 [ShareRepository]의 watch 스트림을 구독한다.
 /// - **내 그룹 목록은 계약 정본 [myGroupsProvider]**
 ///   (`lib/shared/providers/my_groups_provider.dart`)를 소비한다 — 이 페이지에서 세션→
@@ -106,55 +106,12 @@ final usageLogsProvider = Provider<AsyncValue<List<UsageLog>>>((ref) {
   );
 });
 
-/// 특정 사용자의 알림 스트림(내부용).
-final _notificationsByUserProvider =
-    StreamProvider.family<List<GroupNotification>, String>((ref, userId) {
-  return ref.watch(shareRepositoryProvider).watchNotifications(userId);
-});
-
-/// 내가 속한 그룹들의 알림(최신순). 폴딩 규약은 [foldSessionUser] — 로딩은 로딩으로 전파,
-/// 미로그인 확정만 빈 목록, 세션 순단(보존 user)에는 보고 있던 목록을 유지한다.
-final notificationsProvider =
-    Provider<AsyncValue<List<GroupNotification>>>((ref) {
-  return foldSessionUser<List<GroupNotification>>(
-    ref.watch(sessionUserProvider),
-    (User user) => ref.watch(_notificationsByUserProvider(user.id)),
-    signedOut: const <GroupNotification>[],
-  );
-});
-
-/// 특정 사용자의 알림 마지막 읽음 시각 스트림(내부용).
-final _notifReadAtByUserProvider =
-    StreamProvider.family<DateTime?, String>((ref, userId) {
-  return ref.watch(shareRepositoryProvider).watchNotificationsReadAt(userId);
-});
-
-/// 내 알림 마지막 읽음 시각. 미로그인/로딩/에러는 null로 접는다
-/// (null = 전부 안읽음 판정 — 과대 표시가 과소 표시보다 안전한 보수적 방향).
-final notificationsReadAtProvider = Provider<DateTime?>((ref) {
-  // 읽는 값이 id 뿐이라 `select`로 좁힌다(같은 사용자 재방출에는 재계산 없음).
-  final String? uid = ref.watch(
-    sessionUserProvider.select((AsyncValue<User?> s) => s.valueOrNull?.id),
-  );
-  if (uid == null) return null;
-  return ref.watch(_notifReadAtByUserProvider(uid)).valueOrNull;
-});
-
-/// 안읽음 알림 개수 — 마지막 읽음 시각 이후에 생성된 알림 수.
-///
-/// 읽음 시각이 없으면(한 번도 안 읽음) 전체가 안읽음이다. 알림 화면이 **목록을 실제로
-/// 보여준 뒤**(성공 데이터 방출 후 1회 — 진입 즉시가 아니다, 계약
-/// [ShareRepository.markNotificationsRead] dartdoc 참조) 읽음 시각이 갱신돼 0으로 수렴한다.
-final unreadNotificationCountProvider = Provider<int>((ref) {
-  final List<GroupNotification> notifs =
-      ref.watch(notificationsProvider).valueOrNull ??
-          const <GroupNotification>[];
-  final DateTime? readAt = ref.watch(notificationsReadAtProvider);
-  if (readAt == null) return notifs.length;
-  return notifs
-      .where((GroupNotification n) => n.createdAt.isAfter(readAt))
-      .length;
-});
+// 알림 provider 3종(`notificationsProvider`·`notificationsReadAtProvider`·
+// `unreadNotificationCountProvider`)은 계약 정본으로 승격됐다
+// (`lib/shared/providers/group_notifications_provider.dart`) — 알림 벨이 공유 탭·마이페이지에
+// 이어 **홈 헤더**까지 세 화면으로 늘면서, 셋이 같은 안읽음 수를 보고 한 곳의 읽음 처리가
+// 나머지 뱃지에도 반영돼야 하기 때문이다. 별칭(재export shim)을 남기지 않고 선언을 삭제한
+// 뒤 소비처가 정본을 직수입한다(#13 규약).
 
 /// 특정 사용자의 원본 기프티콘 스트림(내부용).
 final _gifticonsByUserProvider =
@@ -282,60 +239,24 @@ final shareCandidatesHaveErrorProvider = Provider<bool>((ref) {
       ref.watch(sharedItemLookupHasErrorProvider);
 });
 
-/// 세션 스트림이 에러일 때만 재구독한다(정상일 땐 건드리지 않아 불필요한 리빌드 방지).
-///
-/// 대상은 **계약 정본 [sessionUserProvider]** 다(share는 그것을 직접 소비한다 — 통과
-/// 별칭을 두면 invalidate가 dependents 방향으로만 전파돼 원천이 재구독되지 않는다).
-/// 세션은 share 탭 전반이 watch하므로 멀쩡한 세션을 invalidate하면 화면 전체가 잠깐
-/// 로딩으로 깜빡인다. 알림/이력/기프티콘 스트림은 모두 세션 뒤에 붙으므로, 세션이
-/// 에러면 그것부터 되살려야 하위 재시도가 의미를 갖는다.
-///
-/// 계약 훅 [retryMyGroups]도 세션 계층을 같은 규칙(에러일 때만)으로 되살린다. 둘의 차이는
-/// **범위**뿐이다 — 그룹 축이 재시도 대상에 포함된 경로(그룹 목록·단건 조회·공유 후보)는
-/// [retryMyGroups]가 세션+그룹을 함께 맡고, 그룹과 무관한 경로(알림·이력·그룹별 공유
-/// 스트림)는 이 함수가 세션만 맡는다. 한 번의 사용자 액션에서 둘을 겹쳐 부르지 않는다
-/// (겹치면 이미 재구독 중인 세션을 한 번 더 끊었다 잇는다).
-void _retrySessionIfFailed(WidgetRef ref) {
-  // 검사용 read를 [WidgetRef.exists]로 가드한다(계약 훅 [MyGroupsRetry.retry]와 같은
-  // 근거): `read`는 살아 있지 않은 autoDispose 인스턴스를 새로 만들어 실제 스트림을
-  // 구독하므로, 세션 체인이 마운트되지 않은 컨텍스트에서 호출되면 검사가 곧 낭비
-  // 구독이 된다. 존재하지 않는 인스턴스엔 캐시된 에러도 있을 수 없어 판정으로도 정확하다.
-  if (!ref.exists(sessionUserProvider)) return;
-  if (ref.read(sessionUserProvider).hasError) {
-    ref.invalidate(sessionUserProvider);
-  }
-}
+// 세션 재시도 훅(옛 이름 `_retrySessionIfFailed`)은 계약 정본 [retrySessionIfFailed]
+// (`lib/shared/providers/session_provider.dart`)로 승격됐다 — 승격된 알림 정본도 같은
+// 규칙으로 세션 계층을 되살려야 하는 두 번째 소비자가 됐다. 사본을 남기면 한쪽만 손볼 때
+// 갈라지므로 선언을 삭제하고 정본을 직수입한다(#13 규약).
 
 // 에러인 그룹별 공유 스트림만 재구독하는 `_retryFailedSharedInstances`는 계약 정본
 // [retryFailedSharedGifticonStreams](`lib/shared/providers/shared_gifticons_provider.dart`)로
 // 승격됐다 — main 상세도 같은 축을 되살려야 하는 두 번째 소비자가 됐다. 사본을 남기면
 // 한쪽만 손볼 때 갈라지므로 선언을 삭제하고 정본을 직수입한다(#13 규약).
 
-/// 알림 스트림 수동 재시도 — **에러인** 원천만 invalidate해 재구독한다.
-///
-/// 읽음 시각 스트림까지 무조건 invalidate하면 정상 동작 중인 리스너가 해제·재구독되고,
-/// 그 갭 동안 [notificationsReadAtProvider]가 null로 접혀 안읽음 뱃지가 잠깐
-/// 전체-안읽음으로 튄다 — 배너의 원인이 아닌 스트림은 건드리지 않는다.
-void retryNotifications(WidgetRef ref) {
-  _retrySessionIfFailed(ref);
-  final User? user = ref.read(sessionUserProvider).valueOrNull;
-  // 세션이 null인 경우는 "알려진 user가 한 번도 없던" 상태뿐이다: 세션이 값을 가진 적이
-  // 있으면 에러 전이도, 위 invalidate 직후의 로딩 전이도 copyWithPrevious로 값을
-  // 보존하므로 valueOrNull이 그 user를 계속 돌려준다(하위 스코프 재시도 진행). user가
-  // 없었다면 하위 family 인스턴스도 만들어진 적이 없어 되살릴 대상 자체가 없다 —
-  // 세션이 회복되면 하위가 함께 재구성된다.
-  if (user == null) return;
-  if (ref.read(_notificationsByUserProvider(user.id)).hasError) {
-    ref.invalidate(_notificationsByUserProvider(user.id));
-  }
-  if (ref.read(_notifReadAtByUserProvider(user.id)).hasError) {
-    ref.invalidate(_notifReadAtByUserProvider(user.id));
-  }
-}
+// 알림 스트림 재시도 훅 `retryNotifications`도 알림 provider와 함께 승격됐다
+// (`lib/shared/providers/group_notifications_provider.dart`) — 재구독 대상인 원천 스트림이
+// 그 파일의 private provider라, 훅만 여기 남으면 원천에 닿지 못한다. 계약 정본
+// `retryMyGroups`·`retryFailedSharedGifticonStreams`와 같은 배치다.
 
-/// 사용 이력 스트림 수동 재시도(에러일 때만 재구독 — [retryNotifications]와 같은 원칙).
+/// 사용 이력 스트림 수동 재시도(에러일 때만 재구독 — `retryNotifications`와 같은 원칙).
 void retryUsageLogs(WidgetRef ref) {
-  _retrySessionIfFailed(ref);
+  retrySessionIfFailed(ref);
   final User? user = ref.read(sessionUserProvider).valueOrNull;
   if (user == null) return;
   if (ref.read(_usageLogsByUserProvider(user.id)).hasError) {
@@ -351,7 +272,7 @@ void retryUsageLogs(WidgetRef ref) {
 /// 골라 재구독한다 — 합쳐 보는 화면이라도 재시도가 필요한 건 실패한 스트림뿐이다
 /// ([retryFailedSharedGifticonStreams]의 근거 참조).
 void retrySharedGifticons(WidgetRef ref, {String? groupId}) {
-  _retrySessionIfFailed(ref);
+  retrySessionIfFailed(ref);
   if (groupId != null) {
     ref.invalidate(sharedGifticonsProvider(groupId));
     return;
@@ -366,7 +287,7 @@ void retrySharedGifticons(WidgetRef ref, {String? groupId}) {
 /// 두 축을 함께 되살린다 — 각 축은 여전히 **에러인 계층만** 재구독하므로(계약
 /// [retryMyGroups] + [retryFailedSharedGifticonStreams]) 멀쩡한 스트림은 건드리지 않는다.
 ///
-/// 세션 계층은 [retryMyGroups]가 맡으므로 [_retrySessionIfFailed]를 겹쳐 부르지 않는다.
+/// 세션 계층은 [retryMyGroups]가 맡으므로 [retrySessionIfFailed]를 겹쳐 부르지 않는다.
 void retrySharedItemLookup(WidgetRef ref) {
   retryMyGroups(ref);
   retryFailedSharedGifticonStreams(ref);
@@ -379,7 +300,7 @@ void retrySharedItemLookup(WidgetRef ref) {
 /// 그룹 목록이 경로에 포함되는 이유: 후보 = 내 기프티콘 − 이미 공유된 것이고, "이미
 /// 공유된 것"은 내 그룹들을 가로질러 모은다([shareCandidatesHaveErrorProvider]가
 /// [sharedItemLookupHasErrorProvider]를 포함하는 것과 같은 이유). 세션 계층은
-/// [retryMyGroups]가 맡는다(중복 호출 방지 — [_retrySessionIfFailed] 참조).
+/// [retryMyGroups]가 맡는다(중복 호출 방지 — [retrySessionIfFailed] 참조).
 void retryShareCandidates(WidgetRef ref) {
   // 후보 에러 판정([shareCandidatesHaveErrorProvider])이 lookup 판정을 포함하듯,
   // 재시도도 lookup 재시도를 **합성**한다 — 감지와 재시도가 1:1로 대응해, lookup

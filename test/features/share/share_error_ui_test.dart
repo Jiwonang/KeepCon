@@ -21,7 +21,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:keepcon/features/share/pages/group_notifications_page.dart';
+import 'package:keepcon/features/share/pages/notification_center_page.dart';
 import 'package:keepcon/features/share/pages/shared_gifticon_detail_page.dart';
 import 'package:keepcon/features/share/pages/usage_log_page.dart';
 import 'package:keepcon/features/share/share_page.dart';
@@ -344,7 +344,7 @@ void main() {
         (WidgetTester tester) async {
       repo.notificationsFail = true;
 
-      await pumpPage(tester, const GroupNotificationsPage());
+      await pumpPage(tester, const NotificationCenterPage());
 
       // 목록을 한 줄도 못 본 상태 — 읽음 처리가 일어나면 회복 후 알림이 유실된다.
       expect(await readAt(), isNull, reason: '에러 중 진입은 읽음 처리를 보류해야 한다(알림 보존)');
@@ -354,7 +354,7 @@ void main() {
 
     testWidgets('스트림이 회복되어 목록이 보이면 그때 1회 읽음 처리된다', (WidgetTester tester) async {
       repo.notificationsFail = true;
-      await pumpPage(tester, const GroupNotificationsPage());
+      await pumpPage(tester, const NotificationCenterPage());
       expect(await readAt(), isNull);
 
       // 사용자가 '다시 시도'를 눌러 재구독 → 이번엔 성공 방출.
@@ -379,7 +379,7 @@ void main() {
       // 읽음 처리가 영영 일어나지 않는다(뱃지 잔존).
       useSignedOutSession();
 
-      await pumpPage(tester, const GroupNotificationsPage());
+      await pumpPage(tester, const NotificationCenterPage());
       expect(await readAt(), isNull);
 
       // 세션이 뒤늦게 복원되면 그때 목록을 보고 읽음 처리해야 한다.
@@ -396,7 +396,7 @@ void main() {
     testWidgets('정상 진입(데이터 방출)이면 기존대로 읽음 처리된다', (WidgetTester tester) async {
       repo.notificationsFail = false;
 
-      await pumpPage(tester, const GroupNotificationsPage());
+      await pumpPage(tester, const NotificationCenterPage());
 
       expect(find.text('새 기프티콘'), findsOneWidget);
       expect(await readAt(), isNotNull, reason: '정상 경로의 기존 동작은 그대로다');
@@ -410,7 +410,7 @@ void main() {
       // 실패한다 — 회귀 고정).
       repo.markReadFails = true;
 
-      await pumpPage(tester, const GroupNotificationsPage());
+      await pumpPage(tester, const NotificationCenterPage());
       expect(find.text('새 기프티콘'), findsOneWidget);
       expect(await readAt(), isNull, reason: '쓰기 실패면 읽음 처리가 안 된 것이다');
 
@@ -432,7 +432,7 @@ void main() {
     testWidgets('알림 에러면 배너가 뜨고, 자동 재시도는 하지 않는다', (WidgetTester tester) async {
       repo.notificationsFail = true;
 
-      await pumpPage(tester, const GroupNotificationsPage());
+      await pumpPage(tester, const NotificationCenterPage());
 
       expect(find.byType(ShareErrorBanner), findsOneWidget);
       expect(find.text('알림을 불러오지 못했어요.'), findsOneWidget);
@@ -446,7 +446,7 @@ void main() {
 
     testWidgets('재시도를 누르면 알림 스트림을 재구독하고 배너가 사라진다', (WidgetTester tester) async {
       repo.notificationsFail = true;
-      await pumpPage(tester, const GroupNotificationsPage());
+      await pumpPage(tester, const NotificationCenterPage());
       expect(repo.notificationSubscriptions, 1);
 
       repo.notificationsFail = false;
@@ -657,11 +657,11 @@ void main() {
     testWidgets('알림 화면: 보고 있던 목록이 사라지지 않는다', (WidgetTester tester) async {
       sessionAuth = _SessionBlipAuthRepository(auth);
 
-      await pumpPage(tester, const GroupNotificationsPage());
+      await pumpPage(tester, const NotificationCenterPage());
 
       // 양성 대조 — 순단이 실제로 재현된 상태에서의 단언인지 확인.
       final ProviderContainer container = ProviderScope.containerOf(
-          tester.element(find.byType(GroupNotificationsPage)));
+          tester.element(find.byType(NotificationCenterPage)));
       expect(container.read(sessionUserProvider).hasError, isTrue);
 
       expect(find.text('새 기프티콘'), findsOneWidget);
@@ -807,7 +807,7 @@ void main() {
     testWidgets('알림 화면은 로딩 중 스피너를 보여 준다', (WidgetTester tester) async {
       repo.notificationsHang = true;
 
-      await pumpPage(tester, const GroupNotificationsPage(), settle: false);
+      await pumpPage(tester, const NotificationCenterPage(), settle: false);
 
       expect(find.text('알림이 없어요.'), findsNothing,
           reason: '아직 모르는 상태를 확정 부재로 표기하면 안 된다');

@@ -9,6 +9,7 @@
 /// 기준을 쓰게 하기 위해서다.
 library;
 
+import '../models/app_notification.dart';
 import '../models/gifticon.dart';
 import '../util/expiry_policy.dart';
 
@@ -166,3 +167,100 @@ String _title(int leadDays) =>
 /// 본문은 "무엇이 만료되는가"만 담는다 — 알림창에서 한 줄로 읽히고, 바코드 같은
 /// 민감한 값은 잠금화면에 노출되지 않아야 한다.
 String _body(Gifticon g) => '${g.brand} ${g.productName}';
+
+/// 알림 센터가 거슬러 보여주는 기간. 이보다 오래전에 울린 알림은 목록에서 뺀다.
+///
+/// 기프티콘 하나당 최대 [expiryNotifyLeadDays]개(3건)가 쌓이므로 상한이 없으면 보유량이
+/// 많은 사용자의 목록이 끝없이 길어진다. 30일이면 가장 이른 D-7 알림까지 넉넉히 담긴다.
+const Duration expiryNotificationHistory = Duration(days: 30);
+
+/// [gifticons]에 대해 **이미 울린** 만료 임박 알림을 복원한다.
+///
+/// [planExpiryNotifications]의 대칭이다 — 같은 격자([expiryNotifyLeadDays] × [expiryNotifyHour])를
+/// 쓰되 예약이 미래만 남기는 자리에서 이쪽은 **과거만** 남긴다. 두 함수가 같은 상수를 보므로
+/// "예약된 알림"과 "목록에 뜨는 알림"이 어긋날 수 없다.
+///
+/// 발송 기록을 저장하지 않고 계산으로 복원하는 이유는 [AppNotification] dartdoc에 있다.
+/// 요약하면, 울린 사실을 남기려면 기기가 꺼져 있을 때도 쓸 서버가 필요한데 발송 시각이
+/// 정책 상수로 결정론적이라 계산으로 같은 답을 얻을 수 있다.
+///
+/// 규칙 — **"과거"인 것만으로는 부족하다.** 예약은 앱이 목록을 동기화하는 시점부터
+/// 시작하므로, 시간 술어만 뒤집으면 *예약된 적 없는* 시점까지 "울렸다"고 만들어 낸다.
+/// 아래 넷을 모두 통과해야 실제로 발송됐던 알림이다:
+/// - 아직 **해결되지 않은** 기프티콘이다 — [GifticonStatus.available]이면서 날짜상으로도
+///   만료 전. status만 보면 안 되는 이유는 `available → expired` 전이를 수행하는 주체가
+///   이 앱에 없기 때문이다(`expiry_policy.dart` dartdoc).
+/// - 발송 시각이 [now]보다 **과거이거나 같다**(미래 = 아직 안 울린 것 = 예약의 몫).
+/// - 발송 시각이 [Gifticon.registeredAt] **이후**다 — 기프티콘이 없던 때의 격자점은
+///   예약될 수 없었으므로 울린 적도 없다.
+/// - [within]보다 오래되지 않았다(보관 기간 — 이것만은 발송 여부가 아니라 표시 정책이다).
+///
+/// **최신순**으로 정렬한다(목록이 최신순이므로 소비자가 다시 정렬하지 않아도 된다).
+///
+/// ⚠️ 예약의 [maxCount] 절단은 아직 반영하지 않았다 — 예약 상한을 넘겨 잘린 알림도
+/// 여기서는 "울렸다"로 나온다(기프티콘 60장 이상 보유 시 발현).
+///
+/// [now]는 테스트 주입용이며, 생략하면 [DateTime.now]를 쓴다.
+List<ExpiryNotificationItem> firedExpiryNotifications(
+  List<Gifticon> gifticons, {
+  DateTime? now,
+  Duration within = expiryNotificationHistory,
+}) {
+  final DateTime current = now ?? DateTime.now();
+  final DateTime oldest = current.subtract(within);
+  final List<ExpiryNotificationItem> fired = <ExpiryNotificationItem>[];
+
+  for (final Gifticon g in gifticons) {
+    if (g.status != GifticonStatus.available) continue;
+    // status만으로는 만료를 못 거른다 — `available → expired` 전이를 수행하는 주체가
+    // 이 앱에 없어(`expiry_policy.dart` dartdoc) 만료된 기프티콘도 available로 남는다.
+    // 날짜로 함께 판정해야 홈 카드의 "만료" 표시와 같은 답이 된다(그러지 않으면 어제
+    // 만료된 기프티콘을 두고 카드는 "만료", 알림 센터는 "내일 만료"라고 말한다).
+    if (isExpiredByDate(g.expiryDate, now: current)) continue;
+
+    for (final int lead in expiryNotifyLeadDays) {
+      // 예약과 **같은 식**으로 시각을 만든다 — 여기서 계산이 갈리면 울린 알림과 목록의
+      // 시각이 어긋나 "온 적 없는 알림"이나 "빠진 알림"이 생긴다.
+      final DateTime firedAt = DateTime(
+        g.expiryDate.year,
+        g.expiryDate.month,
+        g.expiryDate.day - lead,
+        expiryNotifyHour,
+      );
+      // 시간 축에 대해서만 예약(`isAfter(current)`)의 여집합이다 — 한 시점이 두 목록에
+      // **동시에** 들지는 않는다. 아래 등록 하한·만료 필터는 "예약된 적 있었나"를 따로
+      // 보는 것이라, 어느 쪽에도 안 드는 격자점은 의도적으로 존재한다(dartdoc 참조).
+      if (firedAt.isAfter(current)) continue;
+      if (firedAt.isBefore(oldest)) continue;
+      // **등록 전의 격자점은 예약된 적이 없다.** 예약은 앱이 목록을 동기화하는 시점부터
+      // 잡히므로, 그때 이미 지나 있던 시점은 발송되지 않는다. 시간 여집합만으로는 이
+      // 구멍을 못 막는다 — 만료 임박 기프티콘을 스캔하는 것이 이 앱의 주 흐름이라
+      // **만료 7일 이내에 등록하는 모든 기프티콘**이 받은 적 없는 알림을 만들어 낸다
+      // (신규 사용자는 그것이 그대로 안읽음 뱃지 숫자가 된다).
+      // `isBefore`가 아니라 `!isAfter` — 예약이 `!fireAt.isAfter(current)`로 **같은 시각을
+      // 버리므로**, 여기서 같은 시각을 남기면 정확히 1틱만큼 여집합이 어긋난다(등록 시각이
+      // 정각 09:00:00.000인 경우 울린 적 없는 알림 1건이 생긴다 — 15,840조합 브루트포스로 실측).
+      if (!firedAt.isAfter(g.registeredAt)) continue;
+
+      fired.add(ExpiryNotificationItem(
+        gifticonId: g.id,
+        leadDays: lead,
+        firedAt: firedAt,
+        title: _title(lead),
+        message: _body(g),
+      ));
+    }
+  }
+
+  // 최신순. 같은 시각이면 기프티콘 id → lead 순으로 안정 정렬한다(목록 순서가 흔들리면
+  // 같은 입력에도 화면이 달라 보인다).
+  fired.sort((ExpiryNotificationItem a, ExpiryNotificationItem b) {
+    final int byTime = b.firedAt.compareTo(a.firedAt);
+    if (byTime != 0) return byTime;
+    final int byId = a.gifticonId.compareTo(b.gifticonId);
+    if (byId != 0) return byId;
+    return a.leadDays.compareTo(b.leadDays);
+  });
+
+  return fired;
+}

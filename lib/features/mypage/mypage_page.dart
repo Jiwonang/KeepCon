@@ -25,15 +25,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../shared/models/user.dart';
+import '../../shared/providers/group_notifications_provider.dart';
 import '../../shared/providers/repositories.dart';
 import '../../shared/providers/session_provider.dart';
 import '../../shared/providers/theme_mode_provider.dart';
 import '../../shared/repositories/auth_repository.dart';
 import '../../shared/theme/theme_tokens.dart';
 import '../auth/auth_error_message.dart';
-import '../share/pages/group_notifications_page.dart';
+import '../share/pages/notification_center_page.dart';
 import '../share/pages/usage_log_page.dart';
-import '../share/state/share_providers.dart';
 import 'notification_settings_page.dart';
 
 /// 현재 사용자의 구독 플랜(마이페이지 로컬 소비).
@@ -153,7 +153,7 @@ class MyPage extends ConsumerWidget {
                     onTap: () => _managePlan(context, ref),
                   ),
                   const _RowDivider(),
-                  // 알림 — 그룹 알림 목록으로 진입(share 소유 화면 재사용).
+                  // 알림 — 알림 센터로 진입(share 소유 화면 재사용).
                   // 점은 하드코딩이 아니라 안읽음 정본(#55) 실연동: 목록에 들어가
                   // 읽음 처리되면 자동으로 꺼진다.
                   _SettingsRow(
@@ -162,7 +162,7 @@ class MyPage extends ConsumerWidget {
                     title: '알림',
                     onTap: () => Navigator.of(context).push(
                       MaterialPageRoute<void>(
-                        builder: (_) => const GroupNotificationsPage(),
+                        builder: (_) => const NotificationCenterPage(),
                       ),
                     ),
                   ),
@@ -504,11 +504,18 @@ class _DeleteAccountDialogState extends State<_DeleteAccountDialog> {
   }
 }
 
-/// 알림 벨 아이콘 — 탭하면 그룹 알림 목록, 점은 안읽음 실연동.
+/// 알림 벨 아이콘 — 탭하면 알림 센터, 점은 안읽음 실연동.
+///
+/// **공유 위젯 [NotificationBell]로 통합하지 않은 이유:** 홈·공유 탭은 숫자 뱃지인데
+/// 여기는 설정 리스트라 점 표기가 어울린다. 안읽음 **수**는 세 곳 모두 정본
+/// [unreadNotificationCountProvider]에서 오므로 값이 갈리지는 않는다 — 갈라진 것은
+/// 표기뿐이다. 통합한다면 표기를 지우지 말고 공유 위젯에 `BadgeStyle { count, dot }`
+/// 선택지를 두어 구독·임계값·0 처리만 한 벌로 모을 것(지금은 `if (hasUnread)` 판정이
+/// 공유 위젯의 `if (unreadCount > 0)`와 같은 규칙의 두 번째 사본이다).
 ///
 /// 예전에는 장식(탭 불가·점 상시 켜짐)이었다. 안읽음 정본
 /// [unreadNotificationCountProvider](#55)를 소비해 실제 안읽음이 있을 때만
-/// 점을 켜고, 탭하면 [GroupNotificationsPage]로 들어가 읽음 처리로 점이 꺼진다.
+/// 점을 켜고, 탭하면 [NotificationCenterPage]로 들어가 읽음 처리로 점이 꺼진다.
 class _BellIcon extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -518,7 +525,7 @@ class _BellIcon extends ConsumerWidget {
       tooltip: '알림',
       onPressed: () => Navigator.of(context).push(
         MaterialPageRoute<void>(
-          builder: (_) => const GroupNotificationsPage(),
+          builder: (_) => const NotificationCenterPage(),
         ),
       ),
       icon: Stack(
