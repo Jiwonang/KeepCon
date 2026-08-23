@@ -78,6 +78,10 @@
 | `sessionUserProvider` (`AutoDisposeStreamProvider<User?>`) — **SSOT**. `watchCurrentUser()` 세션 스트림 정본 | provider | `lib/shared/providers/session_provider.dart` | 2.6 |
 | `myGroupsRetryProvider` (`Provider<MyGroupsRetry>`) + `MyGroupsRetry.retry()` — 내 그룹 체인 **수동 재시도 훅**(에러 계층만 재구독) | provider | `lib/shared/providers/my_groups_provider.dart` | 2.6 |
 | `retryMyGroups(WidgetRef ref)` → `void` — 위 훅의 화면용 진입점(`ref.read(myGroupsRetryProvider).retry()`와 동일) | function | 〃 | 2.6 |
+| `notificationsProvider` (`Provider<AsyncValue<List<GroupNotification>>>`) / `notificationsReadAtProvider` (`Provider<DateTime?>`) / `unreadNotificationCountProvider` (`Provider<int>`) — **SSOT**. 그룹 알림 목록·마지막 읽음 시각·안읽음 수. 벨 3곳(홈·공유 탭·마이페이지)이 같은 수를 본다 | provider | `lib/shared/providers/group_notifications_provider.dart` | 3.2 |
+| `retryNotifications(WidgetRef ref)` → `void` — 알림·읽음 스트림 중 **에러인 것만** 재구독 | function | 〃 | 3.2 |
+| `retrySessionIfFailed(WidgetRef ref)` → `void` — 세션 스트림이 에러일 때만 재구독(그룹 축을 건드리지 않는 경로용. `retryMyGroups`와 겹쳐 부르지 않는다) | function | `lib/shared/providers/session_provider.dart` | 3.2 |
+| `NotificationBell({onPressed, tooltip})` — 안읽음 수 뱃지가 붙은 알림 벨(0이면 뱃지 없음, 10 이상은 `9+`). 목적지는 주입받는다 | widget | `lib/shared/widgets/notification_bell.dart` | 3.2 |
 | `inviteOriginProvider` (`Provider<String?>`) — **SSOT**. 초대 링크의 origin. `null`이면 **이 실행에서는 링크를 만들 수 없다**(화면이 링크 대신 초대코드를 안내한다). 조립부가 `inviteOriginFor(target)`으로 주입 | provider | `lib/shared/providers/invite_link_providers.dart` | 3.1 |
 | `inviteUrlFrom({origin, inviteToken})` → `String` — `<origin>/invite/<token>` 조립(순수 함수, `parseInviteToken`과 라운드트립) / `inviteOriginFor(FirebaseTarget)` → `String?` — 백엔드별 origin 표 | function | `lib/shared/util/invite_link.dart`, `lib/shared/providers/invite_link_providers.dart` | 3.1 |
 
@@ -280,7 +284,7 @@
        share의 `retry*(WidgetRef)` 관용구와 동형이라 배너 콜백에 그대로 넣을 수 있다.
      - 되살리는 계층은 **세션(`sessionUserProvider`) + 그룹 스트림(`_groupsByUserProvider`의
        현재 user 인스턴스)** 둘 다이며, **에러인 계층만** 재구독한다(멀쩡한 스트림 재구독 =
-       불필요한 읽기·과금·로딩 깜빡임 — share의 `_retrySessionIfFailed`와 같은 스코프 원칙).
+       불필요한 읽기·과금·로딩 깜빡임 — 계약 정본 `retrySessionIfFailed`와 같은 스코프 원칙).
        세션에 알려진 user가 없으면 그룹 계층은 건드리지 않는다(family 인스턴스가 없다).
      - **자동 재시도 금지 규약은 그대로**다 — 훅은 사용자 액션(버튼/당김 새로고침)에서만 호출한다.
        `build`/`listen`에서 에러 감지 후 자동 호출하면 장애 중 retry storm이 된다.
@@ -291,8 +295,8 @@
      `retryMyGroups(ref)` 직접, 공유 상세는 신설 `retrySharedItemLookup`(= `retryMyGroups`
      + 실패한 그룹별 공유 인스턴스), 공유 시트는 `retryShareCandidates`가 세션 계층 재시도를
      `retryMyGroups`로 승격. **분담 규약:** `retryMyGroups`가 세션+그룹을 함께 맡으므로, 그것을
-     부르는 경로에서는 share의 `_retrySessionIfFailed`를 **겹쳐 부르지 않는다**(중복 invalidate
-     방지). 그룹과 무관한 경로(알림·이력·그룹별 공유 스트림)만 `_retrySessionIfFailed`를 쓴다.
+     부르는 경로에서는 계약 정본 `retrySessionIfFailed`를 **겹쳐 부르지 않는다**(중복 invalidate
+     방지). 그룹과 무관한 경로(알림·이력·그룹별 공유 스트림)만 `retrySessionIfFailed`를 쓴다.
      `myGroupListUnavailableProvider`는 남아 있지만 이제 **표시 판정 전용**이다(재시도 가능
      여부와 무관 — "값도 없는 에러"에서만 배너를 띄운다는 UX 판단은 유지: 멀쩡히 렌더되는
      목록 위에 실패를 얹지 않는다).
@@ -438,6 +442,7 @@
 
 | v3.0 | 2026-08-20 | **참여 요청 Firestore 구현 + 보안 규칙 (스키마 확정, non-breaking).** 계약은 v2.9에서 확정했고 이번에는 그 계약을 Firestore에 앉혔다. (1) **`inviteTokens/{token}`** 조회 문서 신설 — 문서 id가 곧 토큰이고 담는 것은 `groupId`·`expiresAt`뿐이다. 비멤버는 규칙상 `groups`를 읽을 수 없어 토큰→그룹을 찾을 길이 없는데, 그 다리를 놓으면서 대문까지 열면 안 되므로 **`get`만 열고 `list`는 막았다**(목록을 열면 토큰을 몰라도 모든 그룹 id를 얻는다). (2) **`joinRequests/{groupId}_{userId}`** — 문서 id로 (그룹,사용자)당 하나를 저장소가 강제한다. 읽기는 요청자 본인과 그 그룹의 방장만(일반 멤버에게도 대기자 명단을 열지 않는다), 생성은 비멤버가 만료 전에만, 결정은 방장이 대기 중인 요청의 `status` 한 필드만. (3) **만료·멤버십을 규칙에서도 본다** — 클라이언트 트랜잭션 안에만 두면 규칙을 안 거치는 요청에 무력하다(PR #89에서 정확히 그 구멍이었다). 정원은 규칙에서 보지 않는다(대기자는 자리를 차지하지 않는다는 계약 그대로). (4) 그룹이 사라지면 요청·토큰 문서도 캐스케이드로 정리한다. 재발급은 **옛 토큰 문서를 먼저 지우고** 새 문서를 쓴다(둘 다 열리는 창을 만들지 않는다 — fail-closed). (5) `InMemoryShareRepository`에 만료 판정용 시계를 주입해 **초대 만료 가드에 처음으로 테스트를 붙였다**(`joinGroup`의 기존 미검증 가드 포함). 규칙 검증 33건 추가(총 67건), 전체 테스트 **437** 통과. **[에이전트 리뷰 반영]** 🔴 하나가 치명적이었다 — 없는 `inviteTokens` 문서를 지우면 `resource`가 null인데 `resource.data`를 만져 규칙 평가가 오류(=거부)로 죽었고, 레거시 그룹에는 그 문서가 아예 없으므로 **기존 그룹 전부가 삭제·탈퇴·재발급 불가**가 될 뻔했다(재발급은 그룹 토큰만 회전시킨 채 매번 같은 지점에서 죽는다). `resource == null` 예외를 두되 `joinRequests`에는 두지 않았다 — 거기서는 200/403이 문서 존재 오라클이 된다. 🟠 멤버십이 끊기는 세 경로(나가기·강퇴·소유권 이전)의 요청 정리가 Firebase에만 없었다 — in-memory 테스트가 못박아 둔 동작인데 `flutter test`는 in-memory만 돌려 green으로 지나갔다(반복 패턴 #1). 🟠 **토큰이 조회 가능한 문서 id가 되면서 6자리 90만 공간이 열거 오라클이 됐다** — `list`를 막아도 `get`으로 훑으면 모든 그룹 id를 얻는다. 엔트로피 상향을 '화면이 24pt로 표시해서' 미뤄 뒀는데 그 판단의 전제를 이 PR이 바꿨으므로 여기서 128비트(`Random.secure`, base64url 22자)로 올리고 표시 스타일도 함께 맞췄다. 그 외 요청 문서의 필드 하한·타입 검사(`hasOnly`만으로는 빠뜨린 필드가 매퍼 폴백으로 그룹 문서에 굳는다), 선행 정리 실패 시 토큰 복원, 낡은 규칙 주석 정정, 검증 케이스 8건 추가(총 67건). | share(다음 단계 UI가 이 구현을 소비), 그 외 페이지 영향 없음 |
 | v3.1 | 2026-08-21 | **참여 요청 UI + 초대 링크 origin 분리 (⚠️ breaking).** `Group.inviteHost`·`Group.inviteUrl`이 **사라졌다** — 소비자는 `inviteOriginProvider`를 watch해 `inviteUrlFrom(origin:, inviteToken:)`으로 조립한다. 제거 이유: 그 호스트가 prod 하나로 박혀 있어 **에뮬레이터·dev에서 띄운 앱이 실서비스 도메인 링크를 발급**했다(받은 사람이 누르면 남의 실서비스 그룹으로 간다). 모델은 순수해서 백엔드를 알 수 없으므로 조립을 provider로 옮겼다. (1) 화면이 `joinGroup` 대신 **`requestToJoin`**을 부른다 — v2.9에서 계약을, v3.0에서 Firestore·규칙을 깔아 둔 승인제를 이제 UI가 실제로 쓴다. (2) **승인 전 요청자에게 그룹 식별 정보를 일절 노출하지 않는다**(이름·이모지·멤버 수·`groupId`) — 링크는 유출될 수 있고, `groupId`로 그룹을 되조회해 이름을 붙이면 `JoinRequest`가 표시 정보를 안 담는 계약을 **화면이 우회**하는 셈이 된다. (3) 방장 승인 목록은 `iAmOwner` 게이팅 + 로딩·에러를 빈 목록으로 접지 않는다(이 스트림이 요청 도착을 알리는 유일한 신호라 "못 불러왔다"가 "요청 없음"으로 보이면 대기자를 지나친다). (4) 호스팅이 **`build/web`**(Flutter 웹 빌드)을 서빙하도록 바꾸고 `assetlinks.json`을 `web/.well-known/`으로 옮겼다 — 링크를 열면 정적 안내 페이지가 아니라 앱이 뜬다. **[에이전트 리뷰 반영]** 🟠 매니페스트에 dev host만 추가하고 그 도메인을 배포하지 않으면 **Android 11 이하에서 prod 링크까지 미검증**이 된다(필터 안 모든 host가 검증돼야 한다 — minSdk 24). 🟠 `_PendingRow`에 key가 없어 목록이 줄면 State가 재사용돼 **남은 요청의 버튼이 영구히 잠겼다**(실측 재현 후 `ValueKey(r.id)` + 회귀 테스트). 🟠 웹에서 `Uri.base.origin`을 쓰던 근거가 이 저장소에서 거짓이었다 — 웹 빌드가 어디에도 배포되지 않아 링크가 항상 `localhost:<포트>`였다(그래서 (4)를 함께 했다). 🟠 빈 안내 문구를 바꾸면서 그 문구를 감시하던 **회귀 가드 2건이 죽었다**(뮤테이션으로 증명 — 게이트를 통째로 지워도 28/28 통과). 그 외 요청자 카드의 에러 삼킴, SSOT 가드 미등록(우회 실증 후 등록·재확인), 문서 정합. 테스트 **466**. | share(생산·소비), 그 외 페이지 영향 없음 |
+| v3.2 | 2026-08-23 | **알림 provider 승격 + 홈 벨 진입점 (non-breaking, 이동 + 순수 추가).** 홈 헤더의 알림 벨이 **장식**이었다 — `IconButton`이 아니라 `Icon`이라 탭이 감지되지 않았고, 빨간 점은 provider가 아니라 하드코딩이라 안읽음이 0이어도 켜져 있었다. #55에서 공유 탭·마이페이지 벨만 실연동으로 고치면서 홈이 빠진 것이다(그 파일의 dartdoc이 "예전에는 장식이었다"고 적고 있는데, 홈은 여전히 그 '예전'이었다). (1) `notificationsProvider`·`notificationsReadAtProvider`·`unreadNotificationCountProvider`를 `lib/features/share/state/share_providers.dart` → **`lib/shared/providers/group_notifications_provider.dart`** 정본으로 승격. 벨이 세 화면으로 늘어 **세 번째 소비자**가 생긴 시점이라 규칙 ③(늦게 승격)을 충족한다. private 원천 스트림 2개도 함께 옮겼다 — 파생이 그것을 watch하므로 쪼갤 수 없다. (2) 승격이 재시도 훅을 끌고 갔다: `retryNotifications`는 옮긴 private 원천을 invalidate하므로 정본 파일로 동행했고(계약 정본 `retryMyGroups`·`retryFailedSharedGifticonStreams`와 같은 배치), 그것이 부르는 `_retrySessionIfFailed`는 **`retrySessionIfFailed`로 공개해 `session_provider.dart`(세션 정본)로 승격**했다 — 사본을 두면 세션 재시도 규칙이 두 벌이 된다. share의 나머지 재시도 3곳도 같은 정본을 부른다(동작 불변). (3) **`NotificationBell` 공유 위젯 신설**(`lib/shared/widgets/notification_bell.dart`) — 공유 탭 헤더의 뱃지 벨과 홈 벨이 각자 그려지면 임계값·`9+` 표기·색이 갈라진다. 안읽음 수는 위젯이 정본을 직접 구독하고, **목적지는 `onPressed`로 주입받는다**(알림 화면은 `lib/features/share`에 있어 여기서 import하면 계약이 페이지를 향해 거꾸로 의존한다). 공유 탭은 이 위젯으로 교체하며 `_ShareHeader`의 `unreadCount` 파라미터와 페이지의 카운트 watch가 사라졌다. 마이페이지의 **초록 점** 벨은 그대로 뒀다 — 표기가 다른 것은 기존 디자인이라 이번 범위 밖. (4) `tool/check_ssot.sh` 보강 — `SSOT_PROVIDERS`에 승격한 provider 3개, `SSOT_FUNCTIONS`에 `retryNotifications`·`retrySessionIfFailed` 추가(페이지가 같은 이름으로 재선언하면 CI `SSOT guard` 실패). (5) 신규 테스트 `test/features/main/notification_bell_test.dart`(4) — 벨 탭 → `GroupNotificationsPage` 진입, 안읽음 0이면 뱃지 자체가 없음(장식 시절의 상시 점을 잡는 회귀), 수가 그대로 보임, 두 자리는 `9+`. 전체 **470** 통과. | main(홈 벨 진입점 신설), share(같은 위젯 소비 — 화면 동작 불변), mypage(import 경로만 변경) |
 ## 후속 확장 예정(이번 슬라이스 범위 밖)
 
 - ✅ **승격 완료(v2):** `Group`, `GroupMember`, `SharedGifticon`, `UsageLog`, `ShareStatus`, `GroupNotification`/`GroupNotificationType`, `MemberRole`, ~~`InviteExpiry`~~(v2.8에서 삭제 — 24시간 고정 정책 `Group.inviteValidity`로 대체), `ShareRepository`(+`InMemoryShareRepository`, `shareRepositoryProvider`). → `lib/shared/models/group.dart`·`share.dart`, `lib/shared/repositories/share_repository.dart`. 상세 `02_share_contract_promotion.md`.
@@ -456,7 +461,7 @@
   - 되살림 대상 = **에러인 계층만**(세션 `sessionUserProvider` / 그룹 `_groupsByUserProvider`의
     현재 user 인스턴스). 자동 재시도 금지 규약 유지.
   - ✅ **share 배선 완료(같은 v2.6):** `onRetry` 강등이 제거되고 배너 4곳이 훅에 연결됐다
-    (`retrySharedItemLookup` 신설 / `retryShareCandidates` 승격 / 훅과 `_retrySessionIfFailed`를
+    (`retrySharedItemLookup` 신설 / `retryShareCandidates` 승격 / 훅과 `retrySessionIfFailed`를
     겹쳐 부르지 않는 분담 규약). 상세는 #13.
 - ✅ **가드 보강 완료(v2.6):** `tool/check_ssot.sh`의 `SSOT_PROVIDERS`에 `myGroupsProvider`(선행 반영)에 더해 **`sessionUserProvider`·`myGroupsRetryProvider`를 추가**했다 — 페이지가 같은 이름의 provider를 재선언하면 CI `SSOT guard`가 실패한다(임시 프로브로 두 이름·두 선언 형태 모두 실제 검출 확인 후 프로브 삭제).
 - **미착수:** 기기 푸시 알림용 `NotificationService`/범용 `NotificationType`(그룹 알림은 `ShareRepository`가 충족), auth/share **세부** 라우트(그룹 상세·초대 등 페이지 내부 내비게이션 — 현재 `AppRoutes.share` 탭 라우트만 존재).

@@ -18,8 +18,10 @@ import '../../shared/theme/theme_tokens.dart';
 import '../../shared/util/date_format.dart' show formatYmdDot;
 import '../../shared/util/expiry_policy.dart';
 import '../../shared/util/money_format.dart' show formatWon;
+import '../../shared/widgets/notification_bell.dart';
 import '../mypage/mypage_page.dart';
 import '../scan/scan_page.dart';
+import '../share/pages/group_notifications_page.dart';
 import 'pages/gifticon_detail_page.dart';
 import 'state/gifticon_filter.dart';
 import 'state/gifticon_list_providers.dart';
@@ -141,7 +143,14 @@ class _GreetingHeader extends StatelessWidget {
           tooltip: '기프티콘 추가',
         ),
         const SizedBox(width: 4),
-        const _NotificationBell(),
+        NotificationBell(
+          tooltip: '알림',
+          onPressed: () => Navigator.of(context).push(
+            MaterialPageRoute<void>(
+              builder: (_) => const GroupNotificationsPage(),
+            ),
+          ),
+        ),
         const SizedBox(width: 8),
         Container(
           width: 40,
@@ -170,38 +179,6 @@ class _GreetingHeader extends StatelessWidget {
           tooltip: '마이',
         ),
       ],
-    );
-  }
-}
-
-class _NotificationBell extends StatelessWidget {
-  const _NotificationBell();
-
-  @override
-  Widget build(BuildContext context) {
-    final ColorScheme scheme = Theme.of(context).colorScheme;
-    return SizedBox(
-      width: 40,
-      height: 40,
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          Icon(Icons.notifications_none, color: scheme.onSurface),
-          Positioned(
-            top: 8,
-            right: 8,
-            child: Container(
-              width: 9,
-              height: 9,
-              decoration: BoxDecoration(
-                color: scheme.primary,
-                shape: BoxShape.circle,
-                border: Border.all(color: scheme.surface, width: 1.5),
-              ),
-            ),
-          ),
-        ],
-      ),
     );
   }
 }

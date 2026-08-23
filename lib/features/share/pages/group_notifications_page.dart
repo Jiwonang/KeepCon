@@ -15,9 +15,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../shared/models/share.dart';
 import '../../../shared/diagnostics/report_handled_failure.dart';
+import '../../../shared/providers/group_notifications_provider.dart';
 import '../../../shared/providers/repositories.dart';
 import '../../../shared/theme/theme_tokens.dart';
-import '../state/share_providers.dart';
 import '../widgets/share_error_banner.dart';
 import '../widgets/share_format.dart';
 

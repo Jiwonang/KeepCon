@@ -26,6 +26,7 @@ import '../../shared/providers/my_groups_provider.dart'
 import '../../shared/providers/session_provider.dart';
 import '../../shared/providers/shared_gifticons_provider.dart';
 import '../../shared/theme/theme_tokens.dart';
+import '../../shared/widgets/notification_bell.dart';
 import 'pages/group_detail_page.dart';
 import 'pages/group_notifications_page.dart';
 import 'pages/shared_gifticon_detail_page.dart';
@@ -73,7 +74,6 @@ class SharePage extends ConsumerWidget {
     final String? uid = ref.watch(
       sessionUserProvider.select((AsyncValue<User?> s) => s.valueOrNull?.id),
     );
-    final int unreadNotifications = ref.watch(unreadNotificationCountProvider);
 
     return Scaffold(
       body: SafeArea(
@@ -82,7 +82,6 @@ class SharePage extends ConsumerWidget {
           children: <Widget>[
             // ── 헤더(큰 타이틀 + 알림벨 + 그룹 추가) ──
             _ShareHeader(
-              unreadCount: unreadNotifications,
               onNotifications: () =>
                   _push(context, const GroupNotificationsPage()),
               onCreate: () => showCreateGroupSheet(context),
@@ -206,23 +205,19 @@ class SharePage extends ConsumerWidget {
 
 // ─────────────────────────── 헤더 ───────────────────────────
 
-/// 상단 헤더 — 큰 타이틀 "공유" + 알림벨(안읽음 뱃지) + 그룹 추가. 홈/스캔과 동일 톤.
+/// 상단 헤더 — 큰 타이틀 "공유" + 알림벨(안읽음 뱃지) + 그룹 추가. 벨은 홈 헤더와 같은
+/// 공유 위젯([NotificationBell])이라 뱃지 표기가 두 화면에서 갈리지 않는다.
 class _ShareHeader extends StatelessWidget {
   const _ShareHeader({
-    required this.unreadCount,
     required this.onNotifications,
     required this.onCreate,
   });
 
-  /// 안읽음 알림 개수. 0이면 뱃지를 숨긴다.
-  final int unreadCount;
   final VoidCallback onNotifications;
   final VoidCallback onCreate;
 
   @override
   Widget build(BuildContext context) {
-    final ColorScheme scheme = Theme.of(context).colorScheme;
-
     return Row(
       children: <Widget>[
         Expanded(
@@ -231,45 +226,11 @@ class _ShareHeader extends StatelessWidget {
             style: context.pageHeaderStyle,
           ),
         ),
-        // 알림 벨 + 안읽음 카운트 뱃지(있을 때만) → 그룹 알림.
-        SizedBox(
-          width: 44,
-          height: 44,
-          child: IconButton(
-            onPressed: onNotifications,
-            tooltip: '그룹 알림',
-            icon: Stack(
-              clipBehavior: Clip.none,
-              children: <Widget>[
-                Icon(Icons.notifications_none, color: scheme.onSurface),
-                if (unreadCount > 0)
-                  Positioned(
-                    top: -4,
-                    right: -5,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 4),
-                      constraints:
-                          const BoxConstraints(minWidth: 16, minHeight: 16),
-                      alignment: Alignment.center,
-                      decoration: BoxDecoration(
-                        color: scheme.error,
-                        borderRadius: BorderRadius.circular(AppRadii.pill),
-                        border: Border.all(color: scheme.surface, width: 1.5),
-                      ),
-                      child: Text(
-                        unreadCount > 9 ? '9+' : '$unreadCount',
-                        style: TextStyle(
-                          color: scheme.onError,
-                          fontSize: 10,
-                          fontWeight: FontWeight.w800,
-                          height: 1.1,
-                        ),
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-          ),
+        // 안읽음 수는 벨이 계약 정본을 직접 구독한다 — 이 페이지가 세어 넘기면 홈 헤더의
+        // 벨과 세는 방식이 갈릴 수 있다(뱃지 임계값·9+ 표기가 두 벌이 된다).
+        NotificationBell(
+          tooltip: '그룹 알림',
+          onPressed: onNotifications,
         ),
         IconButton(
           onPressed: onCreate,

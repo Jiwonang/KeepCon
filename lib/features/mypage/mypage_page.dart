@@ -25,6 +25,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../shared/models/user.dart';
+import '../../shared/providers/group_notifications_provider.dart';
 import '../../shared/providers/repositories.dart';
 import '../../shared/providers/session_provider.dart';
 import '../../shared/providers/theme_mode_provider.dart';
@@ -33,7 +34,6 @@ import '../../shared/theme/theme_tokens.dart';
 import '../auth/auth_error_message.dart';
 import '../share/pages/group_notifications_page.dart';
 import '../share/pages/usage_log_page.dart';
-import '../share/state/share_providers.dart';
 import 'notification_settings_page.dart';
 
 /// 현재 사용자의 구독 플랜(마이페이지 로컬 소비).

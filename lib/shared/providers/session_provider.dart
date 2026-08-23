@@ -143,3 +143,27 @@ AsyncValue<T> foldSessionUser<T>(
   if (session.hasValue) return AsyncData<T>(signedOut);
   return AsyncLoading<T>();
 }
+
+/// 세션 스트림이 에러일 때만 재구독한다(정상일 땐 건드리지 않아 불필요한 리빌드 방지).
+///
+/// 대상은 **계약 정본 [sessionUserProvider]** 다(share는 그것을 직접 소비한다 — 통과
+/// 별칭을 두면 invalidate가 dependents 방향으로만 전파돼 원천이 재구독되지 않는다).
+/// 세션은 share 탭 전반이 watch하므로 멀쩡한 세션을 invalidate하면 화면 전체가 잠깐
+/// 로딩으로 깜빡인다. 알림/이력/기프티콘 스트림은 모두 세션 뒤에 붙으므로, 세션이
+/// 에러면 그것부터 되살려야 하위 재시도가 의미를 갖는다.
+///
+/// 계약 훅 `retryMyGroups`도 세션 계층을 같은 규칙(에러일 때만)으로 되살린다. 둘의 차이는
+/// **범위**뿐이다 — 그룹 축이 재시도 대상에 포함된 경로(그룹 목록·단건 조회·공유 후보)는
+/// `retryMyGroups`가 세션+그룹을 함께 맡고, 그룹과 무관한 경로(알림·이력·그룹별 공유
+/// 스트림)는 이 함수가 세션만 맡는다. 한 번의 사용자 액션에서 둘을 겹쳐 부르지 않는다
+/// (겹치면 이미 재구독 중인 세션을 한 번 더 끊었다 잇는다).
+void retrySessionIfFailed(WidgetRef ref) {
+  // 검사용 read를 [WidgetRef.exists]로 가드한다(계약 훅 `MyGroupsRetry.retry`와 같은
+  // 근거): `read`는 살아 있지 않은 autoDispose 인스턴스를 새로 만들어 실제 스트림을
+  // 구독하므로, 세션 체인이 마운트되지 않은 컨텍스트에서 호출되면 검사가 곧 낭비
+  // 구독이 된다. 존재하지 않는 인스턴스엔 캐시된 에러도 있을 수 없어 판정으로도 정확하다.
+  if (!ref.exists(sessionUserProvider)) return;
+  if (ref.read(sessionUserProvider).hasError) {
+    ref.invalidate(sessionUserProvider);
+  }
+}
