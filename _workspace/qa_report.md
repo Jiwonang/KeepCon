@@ -189,7 +189,7 @@
 | # | 경계면 | 생산자 (왼쪽) | 소비자 (오른쪽) | 판정 |
 |---|--------|--------------|----------------|------|
 | 1 | share → 계약 무수정 | `lib/shared/**` | 브랜치 diff | 통과 — `git diff develop -- lib/shared` 빈 출력, SSOT guard exit 0 |
-| 1b | `markNotificationsRead` 시그니처·의미 | `share_repository.dart:190-193` | `group_notifications_page.dart:70` | 시그니처 일치 / dartdoc 문구 드리프트 ([minor 3]) |
+| 1b | `markNotificationsRead` 시그니처·의미 | `share_repository.dart:190-193` | `notification_center_page.dart:70` | 시그니처 일치 / dartdoc 문구 드리프트 ([minor 3]) |
 | 2 | 알림 읽음 가드 4경로 | `notificationsProvider` | `_markReadWhenVisible` | (a)(b)(c)(d) 전부 성립, listen 누수 없음 / 미로그인 경로 1건 ([minor 1]) |
 | 3 | 재시도 진입점 4개 | `retry*` | 원천 provider | 4/4 정확한 원천 지정 / family 과잉 invalidate ([minor 2]) |
 | 4 | `myGroups` 재시도 불가 실측 | `my_groups_provider.dart:79/87/110` | `share_page.dart:81-89` | 프로브 결론 **정확**(Riverpod semantics상 옳음) / 계약 요청에 세션 계층 누락 ([minor 5]) |
@@ -227,7 +227,7 @@
 > |------|------|-----------|
 > | `medium 1` | ✅ 해소 | `shared_gifticon_detail_page.dart` — `myGroupListUnavailableProvider` 분기로 `onRetry` null 강등 |
 > | `medium 2` | ✅ 해소 | `share_page.dart` — 공유 빈 안내를 `!groupsUnavailable`(+로딩)로 게이트 |
-> | `minor 1` | ✅ 해소 | `group_notifications_page.dart` — 실패 시 `_markedRead` 복원(비-StateError 포함) + 복원 직후 재평가 |
+> | `minor 1` | ✅ 해소 | `notification_center_page.dart` — 실패 시 `_markedRead` 복원(비-StateError 포함) + 복원 직후 재평가 |
 > | `minor 2` | ✅ 해소 | `share_providers.dart` — `retrySharedGifticons(ref, groupId:)` 스코프 재시도(그룹 상세가 `group.id` 전달), 인자 없는 경로도 실패 인스턴스만 invalidate |
 > | `minor 3` | ✅ 해소 | `share_repository.dart` dartdoc 정정(계약 소유자 수행 — CODEOWNERS 리뷰 대상) |
 > | `minor 4` | ✅ 해소 | `share_sheets.dart` — `medium 1`과 동일 분기 |
@@ -264,7 +264,7 @@
 - 통지: share-page-dev
 
 ### [minor 1] 알림 읽음 1회 가드가 '미로그인 AsyncData(빈 목록)'에 소모됨
-- 위치: `lib/features/share/pages/group_notifications_page.dart:63-65, 68-73`
+- 위치: `lib/features/share/pages/notification_center_page.dart:63-65, 68-73`
 - 문제: 세션이 `data(null)`이면 `notificationsProvider`가 `const AsyncData(<GroupNotification>[])`를 돌려주는데
   (`share_providers.dart:124-125`) 이것도 `AsyncData`라 가드를 통과한다 → `_markedRead = true`로 확정되고
   `markNotificationsRead()`는 `StateError`로 조용히 삼켜진다(`:71-73`). 이후 **진짜 세션이 도착해 목록을 보여도
@@ -291,7 +291,7 @@
 - 위치: `lib/shared/repositories/share_repository.dart:192`
 - 판정: **계약 충돌 아님(문구 드리프트).** 규범적 계약((1) 세션 없으면 `StateError` (2) 마지막 읽음 시각을 현재로 갱신)은
   양쪽 모두 그대로다. 바뀐 것은 *호출 시점*뿐이고, "진입 시 호출해 안읽음을 해소한다"는 **호출자 가이드 문장**이다.
-  `markNotificationsRead`의 소비자는 `group_notifications_page.dart:70` **단 하나**임을 전수 확인했으므로
+  `markNotificationsRead`의 소비자는 `notification_center_page.dart:70` **단 하나**임을 전수 확인했으므로
   다른 페이지에 파급이 없고, 변경 방향도 엄격히 안전한 쪽(못 본 알림 유실 방지)이다. 코드 수정 불필요.
 - 수정: 계약 dartdoc을 실제 규약에 맞게 정정 요청 — 예: "알림 화면이 **목록을 실제로 표시한 뒤** 호출해 안읽음을
   해소한다(로딩·에러 중 호출하면 못 본 알림이 읽음 처리돼 유실된다)." 매트릭스 #13에는 이미 반영돼 있어
@@ -402,7 +402,7 @@
 | 2 | 훅 스코프(에러 계층만) | `MyGroupsRetry.retry()` (`my_groups_provider.dart:193-205`) | 배너 콜백 | **통과** — `hasError` 가드 2중, family는 현재 user 인스턴스만 |
 | 2b | 분담 규약(겹쳐 부르지 않음) | `_retrySessionIfFailed` (`share_providers.dart:321`) | `retry*` 5개 호출 그래프 | **통과** — 커버 공백 0 / 이중 커버 0 (아래 표) |
 | 3 | 별칭 함정 | `shareCurrentUserProvider` (`share_providers.dart:52`) | 소비처 전수 | **통과** — `invalidate(별칭)` 잔존 **0건**, StreamProvider 전용 API(`.future`/`.stream`/`.notifier`) 사용 **0건**, 테스트 override **0건** |
-| 4 | 읽음 가드 회귀 | `notificationsProvider` (`share_providers.dart:139-149`) | `_markReadWhenVisible` (`group_notifications_page.dart:60-71`) | **통과** — 미로그인 `data(null)`→`AsyncData([])`→가드 통과→저장소 `StateError`→`_markedRead` 복원 경로 유지. 단 `medium 1`의 부수효과 있음 |
+| 4 | 읽음 가드 회귀 | `notificationsProvider` (`share_providers.dart:139-149`) | `_markReadWhenVisible` (`notification_center_page.dart:60-71`) | **통과** — 미로그인 `data(null)`→`AsyncData([])`→가드 통과→저장소 `StateError`→`_markedRead` 복원 경로 유지. 단 `medium 1`의 부수효과 있음 |
 | 5 | autoDispose 수명 체인 | `sessionUserProvider`(autoDispose) | 별칭(keepAlive) / 훅(keepAlive) | **통과**(실측) — 훅의 `ref.read`는 붙잡지 않음(PROBE A=0), 별칭은 붙잡음(PROBE B=1, 의도) |
 | 6 | SSOT/재선언 | `tool/check_ssot.sh:33` | `lib/features` | **통과** — 신규 2개 이름 실제 검출 확인(임시 프로브). 패턴 한계는 `minor 3` |
 | 7 | 매트릭스 ↔ 코드 | 매트릭스 v2.6 | 실제 코드 | **대체로 일치** — 배너 4곳 배선·잔여 3곳·테스트 수(8/189)·별칭 판정 모두 확인. 수치 1건 불일치(`minor 1`) |
@@ -484,7 +484,7 @@
   ```
 
   **미로그인 확정(`data(null)`) → `AsyncData([])` 경로는 반드시 보존**해야 읽음 가드의
-  `StateError` 복원 분기(`group_notifications_page.dart:78-84`)가 그대로 성립한다.
+  `StateError` 복원 분기(`notification_center_page.dart:78-84`)가 그대로 성립한다.
   회귀 테스트는 "세션 순단 시 알림 목록이 유지되고 배너가 뜨지 않는다"로 고정 권장.
 - 통지: share-page-dev(구현), contract-architect(정본 폴딩 규약을 파생에도 적용할지 판정)
 
@@ -536,7 +536,7 @@
 |-----------|----------|------|
 | `medium 1` 공유 상세 무력한 재시도 버튼 | **더 강하게 해소** — null 강등 대신 `retrySharedItemLookup`(그룹+공유 두 축) | `shared_gifticon_detail_page.dart:56`, 신규 테스트가 `groupSubscriptions` 증가 단언 |
 | `medium 2` 공유 섹션 false-empty | 유지 | `share_page.dart:138-141` — `!groupsUnavailable && !sharedPending` 게이트 존속 |
-| `minor 1` 읽음 가드 복원 | 유지 | `group_notifications_page.dart:84-94` — `_markedRead=false` + 복원 직후 재평가 |
+| `minor 1` 읽음 가드 복원 | 유지 | `notification_center_page.dart:84-94` — `_markedRead=false` + 복원 직후 재평가 |
 | `minor 2` 스코프 재시도 | 유지·확장 | `retrySharedGifticons(ref, groupId:)`(`group_detail_page.dart:175`) + `_retryFailedSharedInstances` |
 | `minor 4` 시트 무력한 버튼 | **더 강하게 해소** — `retryShareCandidates`가 그룹 축까지 커버 | `share_sheets.dart:304`, 테스트 단언 |
 | `minor 5` 계약 요청에 세션 계층 누락 | **구조적으로 해소** — 세션 정본화로 중복 캐시 에러 소스 자체가 제거 | `my_groups_provider.dart:85,115` |

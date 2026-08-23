@@ -719,7 +719,7 @@ class _GifticonListState extends ConsumerState<_GifticonList> {
 }
 
 /// 기프티콘 한 장 — 좌 브랜드 타일 + 중앙 정보 + 우 썸네일 + 우상단 D-day 뱃지.
-class _RichGifticonCard extends StatelessWidget {
+class _RichGifticonCard extends ConsumerWidget {
   final Gifticon gifticon;
 
   /// 알림을 타고 들어와 잠시 짚어 보여주는 중인지. 테두리로 표시한다.
@@ -736,12 +736,15 @@ class _RichGifticonCard extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
     final BrandStyle brand = BrandPalette.of(gifticon.brand);
 
-    final DateTime nowDate = DateTime.now();
+    // 시각은 계약 정본에서 받는다 — 여기서 따로 읽으면 목록 필터·통계와 다른 "오늘"을
+    // 보게 되어 요약("N개 곧 만료")과 카드 색이 어긋난다(now_provider.dart가 승격 사유로
+    // 인용한 실제 사고). 앱을 켜 둔 채 자정을 넘기면 그 어긋남이 실제로 발현한다.
+    final DateTime nowDate = ref.watch(nowProvider);
     final int daysLeft = daysUntilExpiry(gifticon.expiryDate, now: nowDate);
     final bool used = gifticon.status == GifticonStatus.used;
     final bool expired = gifticon.status == GifticonStatus.expired ||

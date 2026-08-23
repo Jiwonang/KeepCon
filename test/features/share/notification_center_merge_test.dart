@@ -333,4 +333,55 @@ void main() {
     expect(find.text('알림 열기'), findsNothing,
         reason: '경유한 마이페이지가 남아 있으면 강조된 홈을 가린다');
   });
+
+  test('기프티콘 스트림이 아직 로딩이면 목록을 AsyncData로 만들지 않는다', () async {
+    // 이 테스트가 잡는 것: 파생 축의 로딩을 빈 목록으로 접으면, 그룹 축이 먼저
+    // 도착하는 순간 목록이 AsyncData가 되어 화면의 읽음 가드가 열린다. 그 시점에
+    // `markNotificationsRead()`가 나가 readAt이 지금으로 찍히는데, 뒤늦게 합류하는
+    // 파생 항목은 createdAt이 과거(오전 9시)라 **영구히 읽음**이 된다 — 뱃지를
+    // 살리려던 기능이 뱃지를 지운다. 그룹 축에 대해 막아 둔 사고의 대칭형이다.
+    final container = ProviderContainer(
+      overrides: <Override>[
+        notificationsProvider.overrideWithValue(
+          AsyncData<List<GroupNotification>>(
+            <GroupNotification>[_groupNotif(at: DateTime.now())],
+          ),
+        ),
+        // 값도 에러도 내지 않는 스트림 = 첫 방출 전 로딩.
+        rawGifticonsProvider
+            .overrideWith((_) => const Stream<List<Gifticon>>.empty()),
+      ],
+    );
+    addTearDown(container.dispose);
+    container.listen(rawGifticonsProvider, (_, __) {});
+    container.listen(allNotificationsProvider, (_, __) {});
+    await Future<void>.delayed(Duration.zero);
+
+    expect(container.read(rawGifticonsProvider).hasValue, isFalse,
+        reason: '전제: 기프티콘 축이 아직 값을 내지 않았다');
+    expect(container.read(allNotificationsProvider) is AsyncData, isFalse,
+        reason: '읽음 가드가 열리면 아직 계산되지 않은 만료 알림이 유실된다');
+  });
+
+  test('기프티콘 스트림 에러도 배너로 드러난다 — 조용히 사라지지 않는다', () async {
+    // 파생 축은 "로컬 계산"이지만 그 **원천**은 Firestore 스트림이다. 그룹 축만 보면
+    // 원천이 죽었을 때 만료 알림이 배너 없이 사라진다.
+    final container = ProviderContainer(
+      overrides: <Override>[
+        notificationsProvider.overrideWithValue(
+          const AsyncData<List<GroupNotification>>(<GroupNotification>[]),
+        ),
+        rawGifticonsProvider.overrideWith(
+          (_) => Stream<List<Gifticon>>.error(StateError('boom')),
+        ),
+      ],
+    );
+    addTearDown(container.dispose);
+    container.listen(rawGifticonsProvider, (_, __) {});
+    container.listen(allNotificationsProvider, (_, __) {});
+    await Future<void>.delayed(Duration.zero);
+
+    expect(container.read(allNotificationsProvider).hasError, isTrue,
+        reason: '원천이 죽었는데 빈 목록을 정상으로 보이면 사용자가 실패를 모른다');
+  });
 }

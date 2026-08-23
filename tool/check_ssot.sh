@@ -69,7 +69,7 @@ fi
 # 시분초를 절삭해 같은 기프티콘을 두고 화면과 통계가 다른 답을 냈다. 가정이 아니라
 # 이미 발생한 재발이라 기계적 가드에 넣는다. 만료 임박 알림이 이 판정 위에 올라가므로
 # 재분기하면 알림까지 어긋난다.
-SSOT_FUNCTIONS="firedExpiryNotifications|retryNotifications|retrySessionIfFailed|retryMyGroups|foldSessionUser|daysUntilExpiry|isExpiringSoon|isExpiredByDate|inviteUrlFrom|inviteOriginFor|parseInviteToken|isSharableOrigin"
+SSOT_FUNCTIONS="planExpiryNotifications|firedExpiryNotifications|retryNotifications|retrySessionIfFailed|retryMyGroups|foldSessionUser|daysUntilExpiry|isExpiringSoon|isExpiredByDate|inviteUrlFrom|inviteOriginFor|parseInviteToken|isSharableOrigin"
 
 # 선언 형태 두 갈래를 잡는다(호출 `retryMyGroups(ref);`·`return foldSessionUser<...>(...)`는
 # 둘 다 통과):
@@ -106,7 +106,9 @@ fi
 # `expirySoonDays`는 승격 전 `gifticon_stats.dart`(공개)와 `gifticon_card.dart`
 # (`_expirySoonDays` 사본)에 이중으로 있었다. 상수는 재정의해도 컴파일되고 값이 같으면
 # 티도 안 나다가, 한쪽만 바뀌는 순간 조용히 갈라진다.
-SSOT_CONSTANTS="expirySoonDays"
+# 발송 격자(lead days × hour)와 상한은 예약과 복원이 **함께** 보는 값이다. 한쪽에
+# 사본이 생기면 푸시와 알림 센터가 서로 다른 시각을 말한다.
+SSOT_CONSTANTS="expirySoonDays|expiryNotifyLeadDays|expiryNotifyHour|expiryNotificationHistory|maxScheduledExpiryNotifications"
 
 consts=$(scan "^[[:space:]]*(static[[:space:]]+)?const[[:space:]]+([A-Za-z0-9_<>,.? ]+[[:space:]]+)?_?(${SSOT_CONSTANTS})[[:space:]]*=") || exit 1
 if [ -n "$consts" ]; then

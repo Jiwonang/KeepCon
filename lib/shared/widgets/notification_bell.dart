@@ -1,6 +1,11 @@
 /// KeepCon 공유 위젯 — 안읽음 수 뱃지가 붙은 알림 벨.
 ///
-/// 벨은 홈 헤더·공유 탭 헤더 두 곳에 있고 둘이 같은 숫자를 보여야 한다. 화면마다 벨을
+/// 알림 센터 진입점은 **세 곳**(홈 헤더·공유 탭 헤더·마이페이지)이고 셋이 같은 숫자를
+/// 보여야 한다. 이 위젯은 그중 **앞의 둘**을 담당한다 — 마이페이지 벨(`_BellIcon`)은
+/// 설정 리스트라 숫자 뱃지 대신 점을 쓰는 기존 디자인이라 통합하지 않았다(안읽음 **수**
+/// 자체는 세 곳 모두 정본에서 오므로 값은 어긋나지 않는다. 갈라진 것은 표기뿐이다).
+/// 통합할 때는 `BadgeStyle { count, dot }` 같은 선택지를 이 위젯에 두어 구독·임계값·0
+/// 처리는 한 벌로 남기는 편이 두 벌 유지보다 낫다. 화면마다 벨을
 /// 따로 그리면 뱃지 임계값·표기(`9+`)·색이 갈라지고, 실제로 홈 벨은 **점이 하드코딩**돼
 /// 안읽음이 0이어도 켜져 있었다(#55에서 공유 탭·마이페이지만 실연동으로 고치고 홈이 빠짐).
 /// 그래서 표시와 안읽음 구독을 이 위젯 하나로 모은다.
@@ -38,9 +43,12 @@ class NotificationBell extends ConsumerWidget {
     final ColorScheme scheme = Theme.of(context).colorScheme;
     final int unreadCount = ref.watch(unreadNotificationCountProvider);
 
+    // 48×48 — Material 최소 탭 영역이다. 이 값을 44로 좁혀 두면 헤더가 4px 단정해지는
+    // 대신 손가락이 큰 사용자와 접근성 도구에서 놓치기 쉬워진다. 두 헤더 모두 타이틀이
+    // `Expanded`라 4px은 그쪽이 흡수한다.
     return SizedBox(
-      width: 44,
-      height: 44,
+      width: 48,
+      height: 48,
       child: IconButton(
         onPressed: onPressed,
         tooltip: tooltip,

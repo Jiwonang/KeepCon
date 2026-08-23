@@ -101,11 +101,24 @@ final allNotificationsProvider =
   // 울려도 목록에 안 나타난다) ②홈의 만료 임박 판정과 다른 "오늘"을 볼 수 있다
   // (정본 dartdoc이 기록한 실제 사고).
   final DateTime now = ref.watch(nowProvider);
-  // 파생 축은 원천 목록만 있으면 계산된다. 값이 아직 없으면(로딩·미로그인) 빈 목록이다.
-  final List<Gifticon> gifticons =
-      ref.watch(rawGifticonsProvider).valueOrNull ?? const <Gifticon>[];
-  final List<ExpiryNotificationItem> expiry =
-      firedExpiryNotifications(gifticons, now: now);
+  final AsyncValue<List<Gifticon>> gifticonsAsync =
+      ref.watch(rawGifticonsProvider);
+  final AsyncValue<List<GroupNotification>> groupAsync =
+      ref.watch(notificationsProvider);
+
+  // 파생 축의 **첫 방출 전**에는 값 없이 로딩을 전파한다. 로딩을 빈 목록으로 접으면
+  // 그룹 축이 먼저 도착하는 순간 목록이 [AsyncData]가 되어 읽음 가드가 열리고, 뒤늦게
+  // 합류하는 파생 항목은 `createdAt`이 `readAt`(그 순간의 벽시계)보다 과거라 **영구히
+  // 읽음**이 된다 — 아래 그룹 축에 대해 막아 둔 사고의 대칭형이다. 한쪽만 막으면
+  // 뱃지를 살리려던 기능이 뱃지를 지운다.
+  if (!gifticonsAsync.hasValue && !gifticonsAsync.hasError) {
+    return const AsyncLoading<List<AppNotification>>();
+  }
+
+  final List<ExpiryNotificationItem> expiry = firedExpiryNotifications(
+    gifticonsAsync.valueOrNull ?? const <Gifticon>[],
+    now: now,
+  );
 
   List<AppNotification> merge(List<GroupNotification> groupNotifs) {
     final List<AppNotification> merged = <AppNotification>[
@@ -121,15 +134,18 @@ final allNotificationsProvider =
     return merged;
   }
 
-  final AsyncValue<List<GroupNotification>> groupAsync =
-      ref.watch(notificationsProvider);
-
-  if (groupAsync.hasError) {
-    // 에러를 유지한 채(배너) 파생 항목을 값 자리에 싣는다. 그룹 알림이 이전 방출로
-    // 남아 있으면 그것도 함께 보여준다 — 순단 중 보고 있던 목록이 사라지지 않는다.
+  // **두 축 중 어느 쪽이 에러여도** 배너를 띄운다. 파생 축의 원천인 `rawGifticonsProvider`도
+  // Firestore 스트림이라 실패할 수 있는데, 그것을 안 보면 만료 알림이 배너 없이 조용히
+  // 사라진다("파생은 로컬 계산이라 무관"은 **계산**에만 맞는 말이고 원천에는 틀리다).
+  final AsyncValue<Object?> failed =
+      groupAsync.hasError ? groupAsync : gifticonsAsync;
+  if (failed.hasError) {
+    // 에러를 유지한 채(배너) 지금 가진 것을 값 자리에 싣는다 — 순단 중 보고 있던
+    // 목록이 사라지지 않는다. 읽음 가드는 [AsyncData]만 "봤다"로 인정하므로 못 본
+    // 알림이 읽음 처리되지도 않는다.
     return AsyncError<List<AppNotification>>(
-      groupAsync.error!,
-      groupAsync.stackTrace ?? StackTrace.current,
+      failed.error!,
+      failed.stackTrace ?? StackTrace.current,
     ).copyWithPrevious(
       AsyncData<List<AppNotification>>(
         merge(groupAsync.valueOrNull ?? const <GroupNotification>[]),

@@ -506,6 +506,13 @@ class _DeleteAccountDialogState extends State<_DeleteAccountDialog> {
 
 /// 알림 벨 아이콘 — 탭하면 알림 센터, 점은 안읽음 실연동.
 ///
+/// **공유 위젯 [NotificationBell]로 통합하지 않은 이유:** 홈·공유 탭은 숫자 뱃지인데
+/// 여기는 설정 리스트라 점 표기가 어울린다. 안읽음 **수**는 세 곳 모두 정본
+/// [unreadNotificationCountProvider]에서 오므로 값이 갈리지는 않는다 — 갈라진 것은
+/// 표기뿐이다. 통합한다면 표기를 지우지 말고 공유 위젯에 `BadgeStyle { count, dot }`
+/// 선택지를 두어 구독·임계값·0 처리만 한 벌로 모을 것(지금은 `if (hasUnread)` 판정이
+/// 공유 위젯의 `if (unreadCount > 0)`와 같은 규칙의 두 번째 사본이다).
+///
 /// 예전에는 장식(탭 불가·점 상시 켜짐)이었다. 안읽음 정본
 /// [unreadNotificationCountProvider](#55)를 소비해 실제 안읽음이 있을 때만
 /// 점을 켜고, 탭하면 [NotificationCenterPage]로 들어가 읽음 처리로 점이 꺼진다.
