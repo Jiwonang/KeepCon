@@ -396,4 +396,54 @@ void main() {
     expect(container.read(allNotificationsProvider).hasError, isTrue,
         reason: '원천이 죽었는데 빈 목록을 정상으로 보이면 사용자가 실패를 모른다');
   });
+
+  testWidgets('상대 시각도 목록과 같은 시계를 쓴다', (WidgetTester tester) async {
+    // 이 테스트가 없으면 `formatRelativeKo(item.createdAt)`로 되돌려도 전체 스위트가
+    // 통과한다(뮤테이션으로 실측). 그러면 목록은 nowProvider의 "오늘"로 계산되는데
+    // 상대 시각만 실제 시계를 읽어, "N일 전"이라 적힌 항목 옆에 정작 오늘 울린
+    // 알림이 빠져 있는 어긋남이 난다.
+    //
+    // ⚠️ 단언은 **정확한 라벨**이어야 한다. `textContaining('일 전')` 같은 부분 일치는
+    //    실제 시계로 계산해도 우연히 걸려(D-7이 며칠 전이 된다) 뮤테이션을 못 죽인다.
+    final auth = InMemoryAuthRepository();
+    // 만료 8/30, 등록 8/1 → D-7 발송은 8/23 09:00.
+    final gifticons = InMemoryGifticonRepository(seed: <Gifticon>[
+      Gifticon(
+        id: 'g-far',
+        ownerId: 'user-1',
+        brand: '투썸',
+        productName: '케이크',
+        category: '카페',
+        price: 25000,
+        expiryDate: DateTime(2026, 8, 30),
+        registeredAt: DateTime(2026, 8, 1),
+      ),
+    ]);
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: <Override>[
+          authRepositoryProvider.overrideWithValue(auth),
+          gifticonRepositoryProvider.overrideWithValue(gifticons),
+          shareRepositoryProvider.overrideWithValue(
+            InMemoryShareRepository(
+              authRepository: auth,
+              gifticonRepository: gifticons,
+              seed: false,
+            ),
+          ),
+          // 만료 당일 정오 — 아직 만료 전이라 세 발송분이 모두 남는다.
+          // D-7(8/23 09:00)→'1주 전', D-3(8/27)→'3일 전', D-1(8/29)→'1일 전'.
+          nowProvider.overrideWithValue(DateTime(2026, 8, 30, 12)),
+        ],
+        child: const MaterialApp(home: NotificationCenterPage()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('1주 전'), findsOneWidget,
+        reason: '상대 시각이 정본 시계를 안 보면 실제 시계 기준 라벨이 나온다');
+    expect(find.text('3일 전'), findsOneWidget, reason: 'D-3 발송분');
+    expect(find.text('1일 전'), findsOneWidget, reason: 'D-1 발송분');
+  });
 }
