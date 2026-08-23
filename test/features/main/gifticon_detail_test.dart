@@ -17,6 +17,7 @@ import 'package:keepcon/features/main/main_page.dart';
 import 'package:keepcon/features/main/pages/gifticon_detail_page.dart';
 import 'package:keepcon/features/main/state/gifticon_filter.dart';
 import 'package:keepcon/features/main/state/gifticon_list_providers.dart';
+import 'package:keepcon/shared/providers/raw_gifticons_provider.dart';
 import 'package:keepcon/shared/models/gifticon.dart';
 import 'package:keepcon/shared/providers/repositories.dart';
 import 'package:keepcon/shared/providers/shared_gifticons_provider.dart';

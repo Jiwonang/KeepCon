@@ -14,7 +14,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:keepcon/app/expiry_notification_sync.dart';
-import 'package:keepcon/features/main/state/gifticon_list_providers.dart';
+import 'package:keepcon/shared/providers/raw_gifticons_provider.dart';
 import 'package:keepcon/shared/deeplink/app_destination.dart';
 import 'package:keepcon/shared/models/gifticon.dart';
 import 'package:keepcon/shared/notifications/expiry_notification_scheduler.dart';

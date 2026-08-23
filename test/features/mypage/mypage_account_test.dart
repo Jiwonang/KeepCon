@@ -7,7 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:keepcon/features/mypage/mypage_page.dart';
-import 'package:keepcon/features/share/state/share_providers.dart';
+import 'package:keepcon/shared/providers/group_notifications_provider.dart';
 import 'package:keepcon/shared/providers/repositories.dart';
 import 'package:keepcon/shared/repositories/impl/in_memory_auth_repository.dart';
 

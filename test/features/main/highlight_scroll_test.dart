@@ -17,7 +17,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:keepcon/features/main/main_page.dart';
-import 'package:keepcon/features/main/state/gifticon_list_providers.dart';
+import 'package:keepcon/shared/providers/raw_gifticons_provider.dart';
 import 'package:keepcon/features/main/state/highlighted_gifticon.dart';
 import 'package:keepcon/shared/models/gifticon.dart';
 
