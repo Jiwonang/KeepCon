@@ -16,8 +16,7 @@ import 'package:keepcon/shared/repositories/impl/in_memory_auth_repository.dart'
 import 'package:keepcon/shared/theme/app_theme.dart';
 
 Future<void> _pumpResetPage(WidgetTester tester) async {
-  final InMemoryAuthRepository auth =
-      InMemoryAuthRepository(initialUser: null);
+  final InMemoryAuthRepository auth = InMemoryAuthRepository(initialUser: null);
   addTearDown(auth.dispose);
   await tester.binding.setSurfaceSize(const Size(430, 932));
   addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -50,8 +49,7 @@ void main() {
     );
   });
 
-  testWidgets('발송 성공 스낵바는 화면을 빠져나온 뒤에도 남는다',
-      (WidgetTester tester) async {
+  testWidgets('발송 성공 스낵바는 화면을 빠져나온 뒤에도 남는다', (WidgetTester tester) async {
     await _pumpResetPage(tester);
 
     await tester.enterText(find.byType(TextField), 'a@b.com');
