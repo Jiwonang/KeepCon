@@ -239,42 +239,29 @@ class GifticonFormController extends StateNotifier<GifticonFormState> {
     state = const GifticonFormState();
   }
 
-  /// 현재 사용자의 플랜을 한 번만 읽는다.
+  /// 현재 사용자의 플랜을 한 번만 읽는다 — 서버 확인(`AuthRepository.getPlan`).
   ///
-  /// 스캔은 "저장을 누른 그 순간의 플랜" 하나만 필요하므로 스트림을 계속 붙들지
-  /// 않는다(그래서 provider 인스턴스가 갈리는 문제도 생기지 않는다).
+  /// 스캔은 "저장을 누른 그 순간의 플랜" 하나만 필요하므로 스트림을 붙들지 않는다.
+  /// 예전에는 `watchPlan().first`로 읽었는데 그건 Firestore 로컬 캐시의 첫 방출이라,
+  /// 다른 기기에서 프리미엄으로 올린 직후 낡은 free로 막을 수 있었다. 계약에
+  /// 서버 확인 접근점이 생겨 그 한계는 사라졌다.
   ///
   /// **읽지 못하면 `null`을 돌려준다** — free로 간주하지 않는다. 그러면 결제한
   /// 사용자가 인프라 오류 하나로 저장을 막힌다. 한도는 과금 정책이지 보안 경계가
   /// 아니므로(서버가 강제하지도 않는다), 모르는 상태에서 사용자를 벌하는 것보다
   /// "확인하지 못했으니 다시 시도" 쪽이 옳다. 호출부가 그렇게 안내한다.
   ///
-  /// 타임아웃을 두는 이유: 스트림이 영영 방출하지 않으면 `first`가 걸려 submit이
-  /// 끝나지 않고, 저장 버튼이 비활성인 채로 화면이 멈춘다.
-  ///
-  /// ⚠️ **알려진 한계 — 이 값은 "서버의 플랜"이 아니라 "이 기기가 아는 플랜"이다.**
-  /// Firebase 구현의 [AuthRepository.watchPlan]은 `snapshots()`이고, Firestore
-  /// 리스너는 **로컬 캐시에서 첫 스냅샷을 먼저 방출한 뒤** 서버 값으로 갱신한다.
-  /// `first`는 그 첫 방출에서 끊으므로 서버 왕복을 기다리지 않는다. 그래서 다른
-  /// 기기에서 프리미엄으로 올린 직후 이 기기 캐시가 낡아 있으면 free로 오판해
-  /// 막을 수 있다. 타임아웃은 이 경로를 방어하지 못한다 — 값은 빠르게 오되 틀렸다.
-  /// (재시도해도 같은 캐시를 다시 읽으므로 풀리지 않는다.)
-  ///
-  /// 제대로 고치려면 계약에 서버 확인 일회성 접근점(`Future<UserPlan> getPlan()`,
-  /// Firebase 쪽 `Source.server`)이 필요하다 — `lib/shared`는 CODEOWNERS 영역이라
-  /// `contract-architect` 요청 사항이다. 그 전까지 폭발 반경은 호출부의 단락
-  /// (한도만큼 채운 사용자에게만 조회)으로 좁혀 둔다.
+  /// 타임아웃을 두는 이유: 서버 왕복이 영영 안 돌아오면 submit이 끝나지 않아
+  /// 저장 버튼이 비활성인 채로 화면이 멈춘다. **15초**로 잡은 건 이제 이 값이
+  /// 캐시 방출이 아니라 서버 왕복(콜드 스타트면 gRPC 연결 + 토큰 갱신까지)에
+  /// 걸리기 때문이다 — 짧게 잡으면 느린 회선에서 정작 이 경로가 구제하려던
+  /// 프리미엄 사용자가 "확인하지 못했어요"로 막힌다.
   Future<UserPlan?> _readPlan() async {
     try {
-      // 타임아웃은 **스트림에** 건다. `first.timeout(...)`으로 쓰면 Future만
-      // 새로 만들 뿐 원래 구독은 살아 있어, 방출되지 않는 스트림에서 저장할
-      // 때마다 Firestore 리스너가 하나씩 샌다(타임아웃이 막으려던 바로 그 상황).
-      // `Stream.timeout`은 예외를 스트림에 흘려보내고 `first`가 구독을 끊는다.
       return await _ref
           .read(authRepositoryProvider)
-          .watchPlan()
-          .timeout(const Duration(seconds: 5))
-          .first;
+          .getPlan()
+          .timeout(const Duration(seconds: 15));
     } catch (e) {
       // **free로 간주하지 않는다.** 그러면 결제한 사용자가 인프라 오류 하나로
       // 저장을 막힌다 — 한도는 과금 정책이지 보안 경계가 아니므로, 모르는 상태에서
@@ -362,8 +349,8 @@ class GifticonFormController extends StateNotifier<GifticonFormState> {
         .length;
 
     // 한도 미만이면 플랜은 판정에 영향이 없다(free든 premium이든 통과) — 그때는
-    // 읽지 않는다. 대부분의 저장에서 플랜 조회가 통째로 빠지고, 아래 오판 여지도
-    // "한도만큼 채운 사용자"로 좁혀진다.
+    // 읽지 않는다. 대부분의 저장에서 서버 왕복이 통째로 빠지고, 조회가 실패했을
+    // 때의 재시도 안내도 "한도만큼 채운 사용자"로 좁혀진다.
     if (activeCount >= UserPlan.freeGifticonLimit) {
       final UserPlan? plan = await _readPlan();
 
