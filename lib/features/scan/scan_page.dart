@@ -687,6 +687,114 @@ class __GifticonFormScreenState extends ConsumerState<_GifticonFormScreen> {
         );
         navigator.popUntil((route) => route.isFirst);
 
+      case ScanSubmitLimitReached(:final int saved, :final int limit):
+        // 중복과 달리 **경로를 가르지 않는다.** 중복은 직접 입력이면 그 자리에서
+        // 번호를 고칠 수 있어 화면에 머물렀지만, 한도는 입력을 어떻게 바꿔도
+        // 저장되지 않는다 — 어느 경로든 폼에 남겨 둘 이유가 없다.
+        navigator.popUntil((route) => route.isFirst);
+        await showDialog<void>(
+          context: navigator.context,
+          builder: (BuildContext dialogContext) {
+            final ThemeData dialogTheme = Theme.of(dialogContext);
+
+            final ColorScheme dialogScheme = dialogTheme.colorScheme;
+            final TextStyle? mutedStyle = dialogTheme.textTheme.bodySmall
+                ?.copyWith(color: dialogScheme.onSurfaceVariant);
+
+            return AlertDialog(
+              title: const Text('저장 한도에 도달했어요'),
+              // 중복 안내와 같은 짜임 — 무슨 일인지(제목) / 지금 상태(카드) /
+              // 왜 그런지(한 문장) / 어떻게 푸는지(흐린 글씨).
+              //
+              // 숫자를 문장에 녹이면 "10개까지 저장할 수 있어요. 지금 10개를…"처럼
+              // 같은 수가 두 번 나오고 문장이 늘어진다. 카드로 빼면 한눈에 읽히고
+              // 아래 문장도 짧아진다.
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 12,
+                    ),
+                    decoration: BoxDecoration(
+                      color: dialogScheme.surfaceContainerHighest,
+                      borderRadius: BorderRadius.circular(AppRadii.card),
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.baseline,
+                      textBaseline: TextBaseline.alphabetic,
+                      children: <Widget>[
+                        Text(
+                          '$saved',
+                          style: dialogTheme.textTheme.headlineSmall?.copyWith(
+                            fontWeight: FontWeight.w800,
+                            // 한도에 닿았다는 것을 색으로도 알린다.
+                            color: dialogScheme.error,
+                          ),
+                        ),
+                        Text(' / $limit개', style: mutedStyle),
+                        const Spacer(),
+                        Text('사용 중', style: mutedStyle),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  Text('무료 플랜은 $limit개까지 보관할 수 있어, 이번 기프티콘은 저장하지 않았어요.'),
+                  const SizedBox(height: 14),
+                  Text.rich(
+                    TextSpan(
+                      // **먼저 제시하는 길은 '사용 완료'다.** 프리미엄 전환은 dev·prod에서
+                      // 보안 규칙이 plan 쓰기를 막아 실제로는 되지 않는다("결제 연동 준비 중").
+                      // 그것만 안내하면 사용자를 막다른 곳으로 보내는 셈이라, 지금 바로
+                      // 통하는 방법을 앞에 둔다.
+                      //
+                      // 경로 표기는 실제 UI와 맞춘다 — 앱에 '설정'이나 '마이페이지'라는
+                      // 라벨은 없다. 진입점은 홈 오른쪽 위 톱니바퀴(툴팁 '마이')다.
+                      //
+                      // 아이콘은 ⚙ **이모지가 아니라 앱이 실제로 그리는 아이콘**
+                      // ([Icons.settings_outlined] — main_page의 그 버튼과 같은 글리프)을
+                      // WidgetSpan으로 넣는다. 이모지는 컬러로 렌더링돼 회색 본문과 톤이
+                      // 어긋나지만, 이 방식은 주변 글자와 같은 색·크기를 따라가면서
+                      // "찾아야 할 그 모양"을 그대로 보여 준다.
+                      //
+                      // 줄바꿈은 문장 단위로 직접 끊는다. 한 줄에 몰아 두면 좁은
+                      // 다이얼로그 폭에서 '프리미 / 엄).'처럼 단어 중간이 갈라진다.
+                      style: mutedStyle,
+                      children: <InlineSpan>[
+                        const TextSpan(
+                          text: '다 쓴 기프티콘을 사용 완료 처리하면 자리가 납니다.\n',
+                        ),
+                        const TextSpan(
+                          text: '프리미엄으로 올리면 개수 제한이 없어져요.\n',
+                        ),
+                        const TextSpan(text: '홈 오른쪽 위 '),
+                        WidgetSpan(
+                          alignment: PlaceholderAlignment.middle,
+                          child: Icon(
+                            Icons.settings_outlined,
+                            size: (mutedStyle?.fontSize ?? 12) + 2,
+                            color: dialogScheme.onSurfaceVariant,
+                          ),
+                        ),
+                        const TextSpan(text: ' › 프리미엄'),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              actions: <Widget>[
+                TextButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(),
+                  child: const Text('확인'),
+                ),
+              ],
+            );
+          },
+        );
+
       case ScanSubmitDuplicate(:final Gifticon existing):
         // 직접 입력은 사용자가 그 자리에서 번호를 고칠 수 있으므로 화면에 머무르며
         // 바코드 필드 아래에 빨간 문구로 알린다.

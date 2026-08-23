@@ -232,43 +232,97 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
         ],
       ),
 
-      body: Stack(
-        fit: StackFit.expand,
-        children: <Widget>[
-          // ─────────────────────────────────────────
-          // 카메라 프리뷰 + 실시간 인식
-          // ─────────────────────────────────────────
-          MobileScanner(
-            controller: _controller,
-            onDetect: _onDetect,
+      // ─────────────────────────────────────────
+      // 카메라 프리뷰 + 실시간 인식 + 스캔 가이드
+      // ─────────────────────────────────────────
+      body: MobileScanner(
+        controller: _controller,
+        onDetect: _onDetect,
 
-            // 카메라를 열 수 없는 경우(권한 거부/미지원 등).
-            //
-            // mobile_scanner는 이 상황을 예외로 던지지 않고 errorBuilder로 알린다.
-            // 그래서 여기서 사용자가 다음 행동(닫고 직접 입력)을 할 수 있게 안내한다.
-            errorBuilder: (
-              BuildContext context,
-              MobileScannerException error,
-            ) {
-              return _ScannerError(error: error);
-            },
-          ),
+        // 가이드 오버레이는 **프리뷰가 실제로 보일 때만** 그린다.
+        //
+        // Stack 형제로 두면 프리뷰 자리에 무엇이 오든 그 위에 얹힌다 —
+        // 권한 거부 안내(errorBuilder)와 초기화 중 placeholder까지 스크림에
+        // 덮여 어두워지고, 그 안내 문구 한복판을 구멍 경계와 테두리가 가로지른다.
+        // mobile_scanner 7.4.0은 두 경로에서 overlayBuilder를 **아예 호출하지
+        // 않으므로**(mobile_scanner.dart의 321·347 조기 반환 vs 355 프리뷰 경로),
+        // 여기로 옮기는 것만으로 세 상태가 한 번에 정리된다.
+        //
+        // IgnorePointer는 그대로 둔다 — 패키지도 오버레이를 IgnorePointer로
+        // 감싸지만 `ignoring: tapToFocus`이고 tapToFocus 기본값이 false라
+        // 실제로는 아무것도 막지 않는다(같은 파일 29·399).
+        overlayBuilder: (BuildContext context, BoxConstraints constraints) {
+          return IgnorePointer(child: ScanGuideOverlay(theme: theme));
+        },
 
-          // ─────────────────────────────────────────
-          // 스캔 가이드 오버레이
-          // ─────────────────────────────────────────
-          //
-          // 프리뷰 조작(탭 포커스 등)을 가리지 않도록 IgnorePointer로 감싼다.
-          IgnorePointer(
-            child: _ScanGuideOverlay(theme: theme),
-          ),
-        ],
+        // 카메라를 열 수 없는 경우(권한 거부/미지원 등).
+        //
+        // mobile_scanner는 이 상황을 예외로 던지지 않고 errorBuilder로 알린다.
+        // 그래서 여기서 사용자가 다음 행동(닫고 직접 입력)을 할 수 있게 안내한다.
+        errorBuilder: (
+          BuildContext context,
+          MobileScannerException error,
+        ) {
+          return _ScannerError(error: error);
+        },
       ),
     );
   }
 }
 
 // ─────────────────────── 스캔 가이드 오버레이 ───────────────────────
+
+/// 가이드 사각형 **바깥**을 덮는 스크림의 불투명도.
+///
+/// 프리뷰가 비쳐 보일 만큼 옅으면서, 사각형 안쪽이 확실히 밝아 보여
+/// 시선이 그리로 모이는 정도. 더 어둡게/밝게 하려면 이 값만 바꾸면 된다.
+const double _kScanScrimOpacity = 0.6;
+
+/// 가이드 프레임의 세로 위치 — 위쪽 여백과 아래쪽 여백의 비율.
+///
+/// 1:1이면 화면 정중앙이다. **아래쪽을 크게 잡을수록 프레임이 위로 올라간다.**
+/// 정중앙보다 살짝 위가 겨누기 편해서 아래에 여유를 더 준다 — 기기를 들면
+/// 손 위치상 화면 아래쪽이 몸 쪽으로 기울고, 안내 문구도 프레임 아래에 있어
+/// 정중앙에 두면 둘이 화면 하단으로 몰려 보인다.
+///
+/// 더 올리려면 [_kGuideBottomFlex]를 키운다(5, 6 …).
+const int _kGuideTopFlex = 3;
+const int _kGuideBottomFlex = 4;
+
+/// 가이드 프레임의 가로:세로 비율.
+///
+/// 기프티콘 바코드가 가로로 길어 정사각형이 아닌 가로가 긴 프레임으로 유도한다.
+/// 프레임을 더 납작하게(가로로 길게) 하려면 값을 키운다.
+///
+/// **왜 바코드 모양(16:10)이 아니라 4:3인가.** 이 사각형은 잘라내는 영역이 아니라
+/// "어디에 대세요"라는 안내일 뿐이다 — OCR은 가이드 안쪽이 아니라 **카메라 프레임
+/// 전체**를 본다([ScanPage]가 `capture.image`를 통째로 ML Kit에 넘긴다).
+///
+/// 그래서 바코드 띠 모양으로 납작하게 잡으면 사용자가 바코드만 꽉 채우도록
+/// 유도되고, 기기를 가까이 대면서 **브랜드·상품명·유효기간이 프레임 밖으로 나가
+/// OCR 프리필이 빈다.** 기프티콘 한 장에 가까운 4:3이 그 글자들까지 함께 들어오게
+/// 해 준다 — 바코드 인식은 어느 쪽이든 문제없다.
+const double _kGuideAspectRatio = 4 / 3;
+
+/// 가이드 프레임이 차지할 수 있는 최대 세로 비율.
+///
+/// [AspectRatio]는 세로 제약이 무한하면 **가로에 맞춰** 높이를 정한다(16:10이므로
+/// 화면 폭의 0.625배). 가로 모드에서는 그 높이가 화면 높이를 넘겨 Column이
+/// 오버플로하고, 프레임과 구멍의 아래 절반이 화면 밖으로 나간다
+/// (640x360에서 112px, 800x360에서 212px — 마스크·실제 두 패스에서 각각).
+///
+/// 세로 모드에서는 자연 높이가 이 상한보다 작아 아무 영향이 없다
+/// (폭 360이면 자연 높이 225 < 상한 288).
+const double _kGuideMaxHeightFraction = 0.45;
+
+/// 합성 마스크에서 '불투명한 자리'를 나타내는 피연산자.
+///
+/// [BlendMode.srcOut]·[BlendMode.dstOut]은 **알파만** 본다
+/// (`src×(1−dstA)`, `dst×(1−srcA)`). 피연산자의 RGB는 결과에 들어가지 않으므로
+/// 이 값은 **화면에 보이지 않는다** — 실제 보이는 색은 `colorScheme.scrim`이다.
+/// 즉 '색상 하드코딩 금지' 규약이 말하는 '보이는 색'이 아니다.
+/// 그 사정을 주석이 아니라 이름에 담아 두어, 리뷰에서 매번 다시 따지지 않게 한다.
+const Color _kMaskOpaque = Color(0xFF000000);
 
 /// 카메라 프리뷰 위에 얹는 스캔 가이드.
 ///
@@ -278,70 +332,179 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
 /// 색·라운드는 공유 테마 토큰([AppRadii], `colorScheme.primary`)을 사용한다.
 /// 단, 카메라 프리뷰 위에 놓이는 텍스트는 밝기와 무관하게 항상 흰색이어야 하므로
 /// [ThemeTokensX.onDarkSurface]를 쓴다.
-class _ScanGuideOverlay extends StatelessWidget {
-  const _ScanGuideOverlay({required this.theme});
+@visibleForTesting
+class ScanGuideOverlay extends StatelessWidget {
+  const ScanGuideOverlay({super.key, required this.theme});
 
   final ThemeData theme;
 
   @override
   Widget build(BuildContext context) {
+    // 딤 레이어와 가이드 레이어를 **같은 레이아웃 코드**로 두 번 그린다.
+    //
+    // 구멍 좌표를 따로 계산하지 않는 것이 요점이다 — 여백·폰트 크기가 바뀌면
+    // 계산한 좌표는 조용히 틀어져 구멍과 프레임이 어긋난다. [_guideLayout]을
+    // 두 번 부르면 구멍이 언제나 프레임과 정확히 겹친다.
+    return Stack(
+      fit: StackFit.expand,
+      children: <Widget>[
+        // 스크림은 **정적**인데(테마가 바뀔 때만 변한다) [ColorFiltered]가 그릴 때마다
+        // 화면 크기의 saveLayer를 뜬다. 그리고 `RenderColorFilter`는
+        // `alwaysNeedsCompositing`만 정의하고 `isRepaintBoundary`는 오버라이드하지
+        // 않으므로(기본값 false), 이 경계는 중복이 아니라 실제로 서브트리를 격리한다.
+        //
+        // 이 오버레이는 `overlayBuilder`로 들어가 있어 부모가
+        // `ValueListenableBuilder<MobileScannerState>` 안쪽이다 — **플래시를 토글할
+        // 때마다** 서브트리가 rebuild되므로 캐시가 실제로 값을 한다.
+        // (카메라 프리뷰 갱신은 별도 합성 레이어라 여기에 영향을 주지 않는다)
+        RepaintBoundary(child: _scrim(context)),
+        _guideLayout(context, cutout: false),
+      ],
+    );
+  }
+
+  /// 가이드 사각형 **바깥만** 반투명하게 덮는 레이어.
+  ///
+  /// 구멍은 좌표가 아니라 합성 모드로 뚫는다. [BlendMode.srcOut]은 "자식이
+  /// 불투명한 곳을 **제외한** 나머지"에 색을 칠하므로, 자식으로 가이드 사각형
+  /// 자리에 불투명 박스만 놓아 주면 그 자리가 그대로 구멍이 된다.
+  Widget _scrim(BuildContext context) {
+    return ColorFiltered(
+      colorFilter: ColorFilter.mode(
+        theme.colorScheme.scrim.withValues(alpha: _kScanScrimOpacity),
+        BlendMode.srcOut,
+      ),
+      child: Stack(
+        fit: StackFit.expand,
+        children: <Widget>[
+          // ⚠️ 지우지 말 것 — '합성의 바탕'이 아니라 **saveLayer 범위 확보용**이다.
+          //
+          // dstOut을 빈 레이어에 걸면 결과도 비어 있으므로, 이 박스는 합성 결과에
+          // 아무것도 더하지 않는다 — 읽으면 죽은 코드로 보인다. 남겨 두는 이유는
+          // [ColorFiltered]의 saveLayer 범위를 '실제로 그려진 내용'으로 잡는
+          // 렌더러에서, 스크림이 프레임 사각형만큼만 칠해지는 것을 막기 위해서다.
+          //
+          // flutter test 래스터라이저에서는 이 박스가 있으나 없으나 픽셀이 같다
+          // (2026-08-23 알파 측정) — 즉 **CI가 이 줄의 제거를 잡지 못한다.**
+          // 실기기(Impeller) 확인 없이 지우지 말 것.
+          const DecoratedBox(
+            decoration: BoxDecoration(
+              color: _kMaskOpaque,
+              backgroundBlendMode: BlendMode.dstOut,
+            ),
+            child: SizedBox.expand(),
+          ),
+          _guideLayout(context, cutout: true),
+        ],
+      ),
+    );
+  }
+
+  /// 가이드 프레임과 안내 문구의 레이아웃.
+  ///
+  /// [cutout]이 참이면 **구멍을 뚫기 위한 마스크**로 그린다 — 사각형은 테두리
+  /// 대신 불투명하게 채우고, 문구는 자리(레이아웃)만 차지하고 그리지 않는다.
+  /// 문구를 그대로 그리면 글자 모양대로 구멍이 뚫린다.
+  Widget _guideLayout(BuildContext context, {required bool cutout}) {
     final Color accent = theme.colorScheme.primary;
     final Color onDark = context.onDarkSurface;
 
-    return SafeArea(
+    // 사용 안내 + 인식 실패 시 폴백 경로 안내.
+    //
+    // 두 패스가 **같은 위젯**을 쓰도록 먼저 만들어 둔다 — 아래에서 마스크일 때만
+    // Opacity로 감싼다(레이아웃에는 영향이 없어 세로 위치는 그대로 유지된다).
+    final Widget caption = Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 32),
       child: Column(
         children: <Widget>[
-          const Spacer(),
+          Text(
+            '바코드 또는 QR 코드를 사각형 안에 맞춰주세요',
+            textAlign: TextAlign.center,
+            style: theme.textTheme.bodyLarge?.copyWith(
+              color: onDark,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            '인식되지 않으면 화면을 닫고 직접 입력을 이용해 주세요.',
+            textAlign: TextAlign.center,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: onDark.withValues(alpha: 0.75),
+            ),
+          ),
+        ],
+      ),
+    );
 
-          // 바코드를 맞출 영역.
-          //
-          // 기프티콘 바코드는 가로로 길기 때문에 정사각형이 아닌
-          // 가로가 긴 프레임으로 유도한다.
-          Center(
-            child: AspectRatio(
-              aspectRatio: 16 / 10,
-              child: Container(
-                margin: const EdgeInsets.symmetric(horizontal: 32),
-                decoration: BoxDecoration(
-                  border: Border.all(
-                    color: accent,
-                    width: 3,
+    // 프레임 높이 상한은 **Column 바깥**에서 잰다.
+    //
+    // Column은 flex가 아닌 자식에게 세로 무한 제약을 주므로, Center 안쪽에서
+    // LayoutBuilder를 쓰면 maxHeight가 infinity라 상한이 아무 일도 하지 않는다
+    // (가로 모드 오버플로가 그대로 남는다 — 테스트가 이걸 잡았다).
+    return SafeArea(
+      child: LayoutBuilder(
+        builder: (BuildContext context, BoxConstraints viewport) {
+          final double maxFrameHeight =
+              viewport.maxHeight * _kGuideMaxHeightFraction;
+
+          return Column(
+            children: <Widget>[
+              const Spacer(flex: _kGuideTopFlex),
+
+              // 바코드를 맞출 영역.
+              //
+              // 기프티콘 바코드는 가로로 길기 때문에 정사각형이 아닌
+              // 가로가 긴 프레임으로 유도한다.
+              //
+              // ⚠️ 좌우 여백은 [AspectRatio] **바깥**에 두어야 한다. 안쪽(자식의
+              // margin)에 두면 AspectRatio는 자기 자신만 비율에 맞추고 그 안에서
+              // 여백만큼 줄어든 테두리가 그려져, **실제로 보이는 사각형이 비율을
+              // 벗어난다** — 폭 360에서 296x225(약 13.2:10), 폭 280에서
+              // 216x175(약 12.3:10). 화면이 좁을수록 왜곡이 커진다.
+              //
+              // [AspectRatio]는 maxHeight가 유한하면 높이에 맞춰 폭을 다시
+              // 계산하므로, 세로 상한을 걸어도 비율은 그대로 유지된다.
+              Center(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 32),
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(maxHeight: maxFrameHeight),
+                    child: AspectRatio(
+                      aspectRatio: _kGuideAspectRatio,
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          // 마스크일 때는 이 영역이 '뚫릴 자리'이므로 꽉 채운다.
+                          color: cutout ? _kMaskOpaque : null,
+                          border: cutout
+                              ? null
+                              : Border.all(
+                                  color: accent,
+                                  width: 3,
+                                ),
+                          borderRadius: BorderRadius.circular(AppRadii.panel),
+                        ),
+                      ),
+                    ),
                   ),
-                  borderRadius: BorderRadius.circular(AppRadii.panel),
                 ),
               ),
-            ),
-          ),
 
-          const SizedBox(height: 24),
+              const SizedBox(height: 24),
 
-          // 사용 안내 + 인식 실패 시 폴백 경로 안내.
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 32),
-            child: Column(
-              children: <Widget>[
-                Text(
-                  '바코드 또는 QR 코드를 사각형 안에 맞춰주세요',
-                  textAlign: TextAlign.center,
-                  style: theme.textTheme.bodyLarge?.copyWith(
-                    color: onDark,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  '인식되지 않으면 화면을 닫고 직접 입력을 이용해 주세요.',
-                  textAlign: TextAlign.center,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: onDark.withValues(alpha: 0.75),
-                  ),
-                ),
-              ],
-            ),
-          ),
+              // 마스크 패스에서만 Opacity로 감싼다 — 자리(레이아웃)는 그대로
+              // 차지하므로 위 사각형의 세로 위치가 두 패스에서 동일하게 유지된다.
+              //
+              // 보이는 패스를 감싸지 않는 이유: `RenderOpacity`는 alpha가 0보다
+              // 크면 **항상** 합성 레이어와 리페인트 경계를 만들지만
+              // (`alwaysNeedsCompositing`), alpha가 0이면 paint에서 바로 반환한다.
+              // 즉 `cutout ? 0 : 1`로 두면 비용이 붙는 쪽이 반대가 된다.
+              if (cutout) Opacity(opacity: 0, child: caption) else caption,
 
-          const Spacer(),
-        ],
+              const Spacer(flex: _kGuideBottomFlex),
+            ],
+          );
+        },
       ),
     );
   }
