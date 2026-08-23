@@ -3,11 +3,8 @@
 /// 레이아웃(위→아래): 뒤로가기 + 타이틀 → 안내문구 → 이메일 → 재설정 링크 보내기.
 /// route: [LoginPage]에서 Navigator.push로 진입(뒤로가기로 복귀).
 ///
-/// 안내에 **스팸함**을 명시한다. Firebase 기본 발신자
-/// (`noreply@<project>.firebaseapp.com`)로 나가는 메일은 Gmail이 스팸으로
-/// 격리하는 경우가 있어(dev 프로젝트에서 실제로 재현), 사용자에게는 "메일이
-/// 안 왔다"로 보인다. 근본 대응은 커스텀 발신 도메인 + SPF/DKIM(Firebase
-/// 콘솔 사안)이고, 그전까지는 이 한 줄이 문의를 줄인다.
+/// 안내에 **스팸함**을 명시한다 — Firebase 기본 발신자로 나간 메일이 스팸으로
+/// 격리되면 사용자에게는 "메일이 안 왔다"로 보인다(경위·근본 대응은 PR 본문).
 library;
 
 import 'package:flutter/material.dart';
@@ -48,7 +45,7 @@ class _ResetPasswordPageState extends ConsumerState<ResetPasswordPage> {
     try {
       await ref.read(authRepositoryProvider).sendPasswordReset(email: email);
       if (!mounted) return;
-      _snack('재설정 링크를 보냈어요. 메일함(스팸함까지) 확인해 주세요.');
+      _snack('재설정 링크를 보냈어요. 스팸함도 확인해 주세요.');
       Navigator.of(context).maybePop();
     } on AuthException catch (e) {
       _snack(authErrorMessage(e));
