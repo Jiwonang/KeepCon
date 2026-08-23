@@ -358,6 +358,10 @@ class GifticonFormController extends StateNotifier<GifticonFormState> {
       // 프리미엄 사용자가 조회 장애로 저장을 잃고, premium으로 간주하면 한도가
       // 조용히 뚫린다. 판정을 보류하고 재시도를 안내하는 것이 정직하다.
       if (plan == null) {
+        // **어절 보호는 여기서 걸지 않는다.** 걸면 보이지 않는 문자가 섞인
+        // 문자열이 상태에 실려 그대로 스낵바의 접근성 라벨이 되고, 위젯이 아니라
+        // 상태가 표현을 들고 있어 `semanticsLabel`로 원문을 되살릴 수도 없다.
+        // 어절 보호는 표시 지점에서만 건다(`KeepAllText`).
         state = state.copyWith(
           submit: const ScanSubmitFailure(
             '플랜 정보를 확인하지 못했어요. 잠시 후 다시 시도해 주세요.',

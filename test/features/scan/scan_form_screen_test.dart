@@ -121,6 +121,16 @@ void main() {
     return container;
   }
 
+  /// 어절 보호([KeepAllText])가 걸린 문구를 찾는다.
+  ///
+  /// `find.text`는 **못 찾는다** — 표시 문자열에 보이지 않는 WORD JOINER가 섞여
+  /// 있기 때문이다. 그대로 두면 아래 `findsNothing` 가드들이 "안 뜬 것"이 아니라
+  /// "못 찾은 것"으로 통과해, 저장이 실제로 일어나도 초록불이 된다.
+  /// [KeepAllText]가 원문을 `semanticsLabel`에 남기므로 그것으로 대조한다.
+  Finder keepAllText(String plain) => find.byWidgetPredicate(
+        (Widget w) => w is Text && (w.semanticsLabel ?? w.data) == plain,
+      );
+
   /// 라벨로 입력 필드를 찾는다(폼에 TextFormField가 여러 개라 위치가 아니라 라벨 기준).
   Finder fieldByLabel(String label) {
     return find.ancestor(
@@ -174,7 +184,7 @@ void main() {
     expect(find.text('유효기간을 선택해 주세요.'), findsOneWidget);
 
     // 성공 문구가 뜨지 않고(가짜 성공 회귀 방지) 폼 화면에 그대로 남는다.
-    expect(find.text('기프티콘이 성공적으로 저장되었습니다.'), findsNothing);
+    expect(keepAllText('기프티콘이 성공적으로 저장되었습니다.'), findsNothing);
     expect(find.text('기프티콘 정보 확인'), findsOneWidget);
 
     expect(await repo.getGifticons(myId), isEmpty);
@@ -188,7 +198,7 @@ void main() {
     await tapSave(tester);
 
     expect(find.text('유효기간을 선택해 주세요.'), findsOneWidget);
-    expect(find.text('기프티콘이 성공적으로 저장되었습니다.'), findsNothing);
+    expect(keepAllText('기프티콘이 성공적으로 저장되었습니다.'), findsNothing);
     expect(await repo.getGifticons(myId), isEmpty);
   });
 
@@ -249,7 +259,7 @@ void main() {
     // 직접 입력 경로는 화면에 머무르며 바코드 필드 아래로 알린다.
     expect(find.text('이미 등록된 바코드 번호입니다.'), findsOneWidget);
     expect(find.text('기프티콘 정보 확인'), findsOneWidget);
-    expect(find.text('기프티콘이 성공적으로 저장되었습니다.'), findsNothing);
+    expect(keepAllText('기프티콘이 성공적으로 저장되었습니다.'), findsNothing);
 
     // 시드 1건 그대로 — 새로 저장되지 않았다.
     expect(await repo.getGifticons(myId), hasLength(1));
@@ -314,7 +324,7 @@ void main() {
       expect(find.text('저장 한도에 도달했어요'), findsOneWidget);
       // 저장은 늘지 않았고 성공 문구도 뜨지 않는다.
       expect(await repo.getGifticons(myId), hasLength(limit));
-      expect(find.text('기프티콘이 성공적으로 저장되었습니다.'), findsNothing);
+      expect(keepAllText('기프티콘이 성공적으로 저장되었습니다.'), findsNothing);
       // 폼에 남겨 두지 않는다 — 입력을 고쳐도 저장될 수 없기 때문이다.
       expect(find.text('기프티콘 정보 확인'), findsNothing);
     });
