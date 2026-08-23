@@ -55,6 +55,30 @@ void main() {
       expect(keepAllKo(sentence).replaceAll(_wordJoiner, ''), sentence);
     });
 
+    test('눈에 하나로 보이는 글자를 쪼개지 않는다', () {
+      // 코드 포인트(`runes`)로 쪼개면 여기서 글자가 깨진다 — 이모지와 뒤따르는
+      // variation selector 사이, ZWJ로 이어진 조각 사이에 WORD JOINER가 끼기
+      // 때문이다. 화면에는 흑백 이모지나 흩어진 낱개 글자로 나타난다.
+      const String vs16 = '☕️'; // U+2615 + U+FE0F
+      const String family = '👨‍👩‍👧'; // ZWJ 시퀀스
+      const String flag = '🇰🇷'; // 지역 표시 기호 쌍
+
+      for (final String glyph in <String>[vs16, family, flag]) {
+        expect(
+          keepAllKo(glyph),
+          glyph,
+          reason: '자소 클러스터 안에 WORD JOINER가 끼었다',
+        );
+      }
+
+      // 어절 경계는 그대로 살아 있어야 한다 — 클러스터를 지키느라 본래 목적을
+      // 잃으면 안 된다.
+      expect(
+        keepAllKo('$vs16 아메리카노'),
+        '$vs16 ${<String>['아', '메', '리', '카', '노'].join(_wordJoiner)}',
+      );
+    });
+
     test('좁은 폭에서 어절 중간이 갈라지지 않는다', () {
       const String sentence = '다 쓴 기프티콘을 사용 완료 처리하면 자리가 납니다.';
       // 다이얼로그가 좁은 기기에서 갖는 폭보다 더 좁게 잡아 확실히 접히게 한다.

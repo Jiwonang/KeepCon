@@ -295,7 +295,6 @@ class _ScanPageState extends ConsumerState<ScanPage> {
                 // 보이므로, 넘기는 대신 접히게 두는 편이 읽는 데 낫다.
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
                     Flexible(
                       child: Text(
@@ -597,7 +596,9 @@ class _GroupTile extends StatelessWidget {
   ///
   /// - `치킨/피자`처럼 `/`가 섞인 라벨은 폰트 폴백이 일어나 2px 더 높다. 타일
   ///   높이는 하나뿐이므로 **가장 높은 라벨**을 기준으로 잡아야 한다.
-  /// - 선택된 타일은 테두리가 2로 굵어(비선택 1) 안쪽 높이를 2px 더 먹는다.
+  /// - 테두리가 안쪽 높이를 먹는다. 가장 두꺼운 경우인 **선택 상태**(위아래 각
+  ///   [_selectedBorder] = 총 4px)를 기준으로 잡아야 한다. 비선택과의 '차이'인
+  ///   2px으로 잡았다가 선택된 타일만 딱 그만큼 넘쳤다.
   ///
   /// [TextScaler]를 함께 넘겨 글자 확대 설정도 반영된다.
   static double minExtentFor(BuildContext context) {
