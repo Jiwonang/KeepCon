@@ -261,6 +261,24 @@ class FirebaseAuthRepository implements AuthRepository {
   }
 
   @override
+  Future<UserPlan> getPlan() async {
+    final fb.User? raw = _auth.currentUser;
+    if (raw == null) return UserPlan.free;
+    try {
+      // Source.server — 캐시를 건너뛰고 서버 값을 읽는다(계약: 판정용 일회성
+      // 조회). 오프라인이면 캐시로 폴백하지 않고 예외가 난다. 그게 맞다 —
+      // 낡은 free로 결제한 사용자를 막는 것보다 "확인 못 했다"가 정직하다.
+      final DocumentSnapshot<Map<String, dynamic>> doc =
+          await _users.doc(raw.uid).get(
+                const GetOptions(source: Source.server),
+              );
+      return UserPlan.fromName(docStringOrNull(doc.data()?['plan']));
+    } on Object catch (e) {
+      throw AuthException(AuthErrorCode.unknown, 'getPlan failed: $e');
+    }
+  }
+
+  @override
   Future<void> updatePlan({required UserPlan plan}) async {
     final fb.User? raw = _auth.currentUser;
     if (raw == null) {

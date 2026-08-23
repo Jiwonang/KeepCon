@@ -189,6 +189,13 @@ class InMemoryAuthRepository implements AuthRepository {
   }
 
   @override
+  Future<UserPlan> getPlan() async {
+    final User? current = _currentUser;
+    if (current == null) return UserPlan.free;
+    return _plans[_key(current.email)] ?? UserPlan.free;
+  }
+
+  @override
   Future<void> updatePlan({required UserPlan plan}) async {
     final User? current = _currentUser;
     if (current == null) {
