@@ -227,8 +227,9 @@ List<ExpiryNotificationItem> firedExpiryNotifications(
         g.expiryDate.day - lead,
         expiryNotifyHour,
       );
-      // 예약은 `isAfter(current)`인 것만 남긴다 — 그 여집합이 정확히 이 조건이라
-      // 한 시점이 두 목록에 동시에 들거나 어느 쪽에도 안 드는 일이 없다.
+      // 시간 축에 대해서만 예약(`isAfter(current)`)의 여집합이다 — 한 시점이 두 목록에
+      // **동시에** 들지는 않는다. 아래 등록 하한·만료 필터는 "예약된 적 있었나"를 따로
+      // 보는 것이라, 어느 쪽에도 안 드는 격자점은 의도적으로 존재한다(dartdoc 참조).
       if (firedAt.isAfter(current)) continue;
       if (firedAt.isBefore(oldest)) continue;
       // **등록 전의 격자점은 예약된 적이 없다.** 예약은 앱이 목록을 동기화하는 시점부터
@@ -236,7 +237,10 @@ List<ExpiryNotificationItem> firedExpiryNotifications(
       // 구멍을 못 막는다 — 만료 임박 기프티콘을 스캔하는 것이 이 앱의 주 흐름이라
       // **만료 7일 이내에 등록하는 모든 기프티콘**이 받은 적 없는 알림을 만들어 낸다
       // (신규 사용자는 그것이 그대로 안읽음 뱃지 숫자가 된다).
-      if (firedAt.isBefore(g.registeredAt)) continue;
+      // `isBefore`가 아니라 `!isAfter` — 예약이 `!fireAt.isAfter(current)`로 **같은 시각을
+      // 버리므로**, 여기서 같은 시각을 남기면 정확히 1틱만큼 여집합이 어긋난다(등록 시각이
+      // 정각 09:00:00.000인 경우 울린 적 없는 알림 1건이 생긴다 — 15,840조합 브루트포스로 실측).
+      if (!firedAt.isAfter(g.registeredAt)) continue;
 
       fired.add(ExpiryNotificationItem(
         gifticonId: g.id,

@@ -101,10 +101,10 @@ void main() {
           planExpiryNotifications(gifticons, now: atFire);
 
       expect(fired.map((ExpiryNotificationItem n) => n.leadDays),
-          contains(expirySoonDays),
+          contains(expiryNotifyLeadDays.first),
           reason: '울린 순간의 알림은 이미 받은 것이므로 목록에 있어야 한다');
       expect(planned.map((ScheduledExpiryNotification n) => n.leadDays),
-          isNot(contains(expirySoonDays)),
+          isNot(contains(expiryNotifyLeadDays.first)),
           reason: '같은 시점을 예약이 또 잡으면 중복 발송이다');
     });
   });

@@ -24,6 +24,7 @@ import '../../../shared/models/share.dart';
 import '../../../shared/diagnostics/report_handled_failure.dart';
 import '../../../shared/providers/deep_link_providers.dart';
 import '../../../shared/providers/group_notifications_provider.dart';
+import '../../../shared/providers/now_provider.dart';
 import '../../../shared/providers/repositories.dart';
 import '../../../shared/theme/theme_tokens.dart';
 import '../widgets/share_error_banner.dart';
@@ -193,7 +194,7 @@ class _NotificationCenterPageState
 ///
 /// [onTap]이 있으면 눌리는 카드다. 지금은 **개인 만료 알림만** 목적지가 있다 — 그룹
 /// 알림은 "어느 그룹의 무엇"까지는 알지만 열어 줄 전용 화면이 아직 없다.
-class _NotificationCard extends StatelessWidget {
+class _NotificationCard extends ConsumerWidget {
   const _NotificationCard({required this.item, this.onTap});
 
   final AppNotification item;
@@ -202,7 +203,7 @@ class _NotificationCard extends StatelessWidget {
   final VoidCallback? onTap;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
 
@@ -263,7 +264,12 @@ class _NotificationCard extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(width: 10),
-                    Text(formatRelativeKo(item.createdAt),
+                    // 상대 시각도 목록을 계산한 시계와 같은 것을 쓴다 — 여기서만
+                    // 실제 시계를 읽으면 "1일 전"이라고 적힌 항목 옆에 정작 오늘
+                    // 울린 알림이 빠져 있는 어긋남이 난다.
+                    Text(
+                        formatRelativeKo(item.createdAt,
+                            now: ref.watch(nowProvider)),
                         style: theme.textTheme.bodySmall),
                   ],
                 ),

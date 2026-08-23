@@ -58,13 +58,22 @@ final notificationsReadAtProvider = Provider<DateTime?>((ref) {
   return ref.watch(_notifReadAtByUserProvider(uid)).valueOrNull;
 });
 
-/// 알림 스트림 수동 재시도 — **에러인** 원천만 invalidate해 재구독한다.
+/// 알림 목록의 원천 중 **에러인 것만** invalidate해 재구독한다.
 ///
 /// 읽음 시각 스트림까지 무조건 invalidate하면 정상 동작 중인 리스너가 해제·재구독되고,
 /// 그 갭 동안 [notificationsReadAtProvider]가 null로 접혀 안읽음 뱃지가 잠깐
 /// 전체-안읽음으로 튄다 — 배너의 원인이 아닌 스트림은 건드리지 않는다.
+///
+/// **기프티콘 원천도 대상이다.** [allNotificationsProvider]가 그 스트림의 에러로도 배너를
+/// 띄우므로 여기서 빼면 그 배너의 '다시 시도'가 아무것도 되살리지 못하는 막다른 길이 된다
+/// (`rawGifticonsProvider`는 autoDispose가 아니라 에러 상태가 앱 재시작 전까지 남는다).
 void retryNotifications(WidgetRef ref) {
   retrySessionIfFailed(ref);
+  // 파생 축의 원천도 배너를 띄우므로 여기서 빠지면 그 배너가 막다른 길이 된다.
+  // 세션과 무관한 최상위 provider라 uid 가드보다 앞에 둔다.
+  if (ref.read(rawGifticonsProvider).hasError) {
+    ref.invalidate(rawGifticonsProvider);
+  }
   final User? user = ref.read(sessionUserProvider).valueOrNull;
   // 세션이 null인 경우는 "알려진 user가 한 번도 없던" 상태뿐이다: 세션이 값을 가진 적이
   // 있으면 에러 전이도, 위 invalidate 직후의 로딩 전이도 copyWithPrevious로 값을

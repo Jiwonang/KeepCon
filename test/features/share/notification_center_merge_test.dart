@@ -29,7 +29,12 @@ import 'package:keepcon/shared/repositories/impl/in_memory_gifticon_repository.d
 import 'package:keepcon/shared/repositories/impl/in_memory_share_repository.dart';
 import 'package:keepcon/shared/util/expiry_policy.dart';
 
-/// D-3 알림이 오늘 오전에 이미 울린 기프티콘(만료 3일 뒤).
+/// 테스트가 공유하는 **고정 시각**. 실제 시계를 쓰면 하루 중 언제 도느냐에 따라 결과가
+/// 갈린다 — 09:00 직후에 돌면 오늘자 D-3 발송분이 "방금 만든 그룹 알림"보다 최신이 되어
+/// 정렬 단언이 뒤집힌다(하루 1분짜리 창). 시각을 고정하면 그 창이 사라진다.
+final DateTime _now = DateTime(2026, 8, 23, 15);
+
+/// D-3 알림이 [_now] 당일 오전에 이미 울린 기프티콘(만료 3일 뒤).
 Gifticon _expiringSoon() => Gifticon(
       id: 'g-1',
       ownerId: 'user-1',
@@ -37,8 +42,8 @@ Gifticon _expiringSoon() => Gifticon(
       productName: '케이크',
       category: '카페',
       price: 25000,
-      expiryDate: DateTime.now().add(const Duration(days: 3)),
-      registeredAt: DateTime.now().subtract(const Duration(days: 30)),
+      expiryDate: _now.add(const Duration(days: 3)),
+      registeredAt: _now.subtract(const Duration(days: 30)),
     );
 
 GroupNotification _groupNotif({required DateTime at}) => GroupNotification(
@@ -64,6 +69,9 @@ void main() {
           (_) => Stream<List<Gifticon>>.value(gifticons),
         ),
         notificationsReadAtProvider.overrideWithValue(readAt),
+        // 시계도 고정한다 — 파생 알림의 발송 시각이 실제 시계에 따라 달라지면
+        // 정렬·개수 단언이 하루 중 도는 시각에 좌우된다.
+        nowProvider.overrideWithValue(_now),
       ],
     );
     addTearDown(container.dispose);
@@ -73,7 +81,7 @@ void main() {
   test('두 축이 한 목록에 최신순으로 섞인다', () async {
     final container = makeContainer(
       group: <GroupNotification>[
-        _groupNotif(at: DateTime.now().subtract(const Duration(minutes: 1))),
+        _groupNotif(at: _now.subtract(const Duration(minutes: 1))),
       ],
       gifticons: <Gifticon>[_expiringSoon()],
     );
@@ -98,7 +106,7 @@ void main() {
 
   test('안읽음 수가 두 축 합산이다', () async {
     final container = makeContainer(
-      group: <GroupNotification>[_groupNotif(at: DateTime.now())],
+      group: <GroupNotification>[_groupNotif(at: _now)],
       gifticons: <Gifticon>[_expiringSoon()],
       readAt: null, // 한 번도 안 읽음 = 전부 안읽음.
     );
@@ -117,7 +125,7 @@ void main() {
     final container = makeContainer(
       gifticons: <Gifticon>[_expiringSoon()],
       // 지금 읽었으면 과거에 울린 만료 알림은 전부 읽음이다.
-      readAt: DateTime.now(),
+      readAt: _now,
     );
     container.listen(rawGifticonsProvider, (_, __) {});
     await Future<void>.delayed(Duration.zero);
@@ -130,6 +138,7 @@ void main() {
   test('그룹 알림 축이 에러여도 개인 만료 알림은 그대로 보인다', () async {
     final container = ProviderContainer(
       overrides: <Override>[
+        nowProvider.overrideWithValue(_now),
         notificationsProvider.overrideWithValue(
           AsyncError<List<GroupNotification>>(
               StateError('boom'), StackTrace.empty),
@@ -161,6 +170,7 @@ void main() {
   test('첫 로딩에는 파생 항목을 먼저 보여주지 않는다 — 읽음 가드가 열리면 유실된다', () async {
     final container = ProviderContainer(
       overrides: <Override>[
+        nowProvider.overrideWithValue(_now),
         notificationsProvider
             .overrideWithValue(const AsyncLoading<List<GroupNotification>>()),
         rawGifticonsProvider.overrideWith(
@@ -342,9 +352,10 @@ void main() {
     // 살리려던 기능이 뱃지를 지운다. 그룹 축에 대해 막아 둔 사고의 대칭형이다.
     final container = ProviderContainer(
       overrides: <Override>[
+        nowProvider.overrideWithValue(_now),
         notificationsProvider.overrideWithValue(
           AsyncData<List<GroupNotification>>(
-            <GroupNotification>[_groupNotif(at: DateTime.now())],
+            <GroupNotification>[_groupNotif(at: _now)],
           ),
         ),
         // 값도 에러도 내지 않는 스트림 = 첫 방출 전 로딩.
@@ -368,6 +379,7 @@ void main() {
     // 원천이 죽었을 때 만료 알림이 배너 없이 사라진다.
     final container = ProviderContainer(
       overrides: <Override>[
+        nowProvider.overrideWithValue(_now),
         notificationsProvider.overrideWithValue(
           const AsyncData<List<GroupNotification>>(<GroupNotification>[]),
         ),

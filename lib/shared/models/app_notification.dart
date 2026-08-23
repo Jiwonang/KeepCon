@@ -98,8 +98,9 @@ final class ExpiryNotificationItem extends AppNotification {
   @override
   final String message;
 
-  /// 기프티콘 + 발송 시점으로 조합한다 — 같은 기프티콘의 D-7과 D-1이 **별개 항목**이면서,
-  /// 다시 계산해도 같은 값이 나와야 목록이 흔들리지 않는다.
+  /// 기프티콘 + lead 일수로 조합한다 — 같은 기프티콘의 D-7과 D-1이 **별개 항목**이면서,
+  /// 다시 계산해도 같은 값이 나와야 목록이 흔들리지 않는다(발송 시각은 lead에서
+  /// 결정되므로 id에 따로 넣지 않는다).
   @override
   String get id => 'expiry:$gifticonId:D-$leadDays';
 
