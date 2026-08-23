@@ -244,7 +244,10 @@ class GifticonFormController extends StateNotifier<GifticonFormState> {
   /// 스캔은 "저장을 누른 그 순간의 플랜" 하나만 필요하므로 스트림을 계속 붙들지
   /// 않는다(그래서 provider 인스턴스가 갈리는 문제도 생기지 않는다).
   ///
-  /// **읽지 못하면 [UserPlan.free]로 본다** — 계약이 정한 기본값(`필드 부재 = free`).
+  /// **읽지 못하면 `null`을 돌려준다** — free로 간주하지 않는다. 그러면 결제한
+  /// 사용자가 인프라 오류 하나로 저장을 막힌다. 한도는 과금 정책이지 보안 경계가
+  /// 아니므로(서버가 강제하지도 않는다), 모르는 상태에서 사용자를 벌하는 것보다
+  /// "확인하지 못했으니 다시 시도" 쪽이 옳다. 호출부가 그렇게 안내한다.
   ///
   /// 타임아웃을 두는 이유: 스트림이 영영 방출하지 않으면 `first`가 걸려 submit이
   /// 끝나지 않고, 저장 버튼이 비활성인 채로 화면이 멈춘다.
@@ -261,7 +264,7 @@ class GifticonFormController extends StateNotifier<GifticonFormState> {
   /// Firebase 쪽 `Source.server`)이 필요하다 — `lib/shared`는 CODEOWNERS 영역이라
   /// `contract-architect` 요청 사항이다. 그 전까지 폭발 반경은 호출부의 단락
   /// (한도만큼 채운 사용자에게만 조회)으로 좁혀 둔다.
-  Future<UserPlan> _readPlan() async {
+  Future<UserPlan?> _readPlan() async {
     try {
       // 타임아웃은 **스트림에** 건다. `first.timeout(...)`으로 쓰면 Future만
       // 새로 만들 뿐 원래 구독은 살아 있어, 방출되지 않는 스트림에서 저장할
@@ -273,8 +276,11 @@ class GifticonFormController extends StateNotifier<GifticonFormState> {
           .timeout(const Duration(seconds: 5))
           .first;
     } catch (e) {
-      debugPrint('KeepCon: 플랜 조회 실패 — free로 간주: $e');
-      return UserPlan.free;
+      // **free로 간주하지 않는다.** 그러면 결제한 사용자가 인프라 오류 하나로
+      // 저장을 막힌다 — 한도는 과금 정책이지 보안 경계가 아니므로, 모르는 상태에서
+      // 사용자를 벌하는 쪽보다 "확인 못 했으니 다시" 쪽이 옳다. null로 알린다.
+      debugPrint('KeepCon: 플랜 조회 실패 — 한도 판정 보류: $e');
+      return null;
     }
   }
 
@@ -356,17 +362,32 @@ class GifticonFormController extends StateNotifier<GifticonFormState> {
         .length;
 
     // 한도 미만이면 플랜은 판정에 영향이 없다(free든 premium이든 통과) — 그때는
-    // 읽지 않는다. `&&` 단락 덕에 대부분의 저장에서 플랜 조회가 통째로 빠지고,
-    // [_readPlan]이 잘못 읽을 여지도 "한도만큼 채운 사용자"로 좁혀진다.
-    if (activeCount >= UserPlan.freeGifticonLimit &&
-        await _readPlan() == UserPlan.free) {
-      state = state.copyWith(
-        submit: ScanSubmitLimitReached(
-          saved: activeCount,
-          limit: UserPlan.freeGifticonLimit,
-        ),
-      );
-      return null;
+    // 읽지 않는다. 대부분의 저장에서 플랜 조회가 통째로 빠지고, 아래 오판 여지도
+    // "한도만큼 채운 사용자"로 좁혀진다.
+    if (activeCount >= UserPlan.freeGifticonLimit) {
+      final UserPlan? plan = await _readPlan();
+
+      // 플랜을 확인하지 못했으면 **막지도 통과시키지도 않는다.** free로 간주하면
+      // 프리미엄 사용자가 조회 장애로 저장을 잃고, premium으로 간주하면 한도가
+      // 조용히 뚫린다. 판정을 보류하고 재시도를 안내하는 것이 정직하다.
+      if (plan == null) {
+        state = state.copyWith(
+          submit: const ScanSubmitFailure(
+            '플랜 정보를 확인하지 못했어요. 잠시 후 다시 시도해 주세요.',
+          ),
+        );
+        return null;
+      }
+
+      if (plan == UserPlan.free) {
+        state = state.copyWith(
+          submit: ScanSubmitLimitReached(
+            saved: activeCount,
+            limit: UserPlan.freeGifticonLimit,
+          ),
+        );
+        return null;
+      }
     }
 
     // 바코드 중복 검증
