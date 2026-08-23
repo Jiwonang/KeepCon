@@ -155,6 +155,20 @@ abstract class AuthRepository {
   /// 저장 위치는 `users/{uid}.plan`(필드 부재 = free). [UserPlan] 문서 참조.
   Stream<UserPlan> watchPlan();
 
+  /// 현재 사용자의 구독 플랜을 **서버에서 한 번** 확인한다.
+  ///
+  /// [watchPlan]과 용도가 다르다. 스트림은 화면 표시용이고, 이쪽은 "저장을 누른
+  /// 그 순간의 결제 상태"처럼 **판정이 걸린 일회성 검사**용이다. Firestore
+  /// `snapshots()`은 로컬 캐시에서 첫 값을 먼저 방출하므로, 다른 기기에서
+  /// 프리미엄으로 올린 직후에는 `watchPlan().first`가 낡은 free를 준다 —
+  /// 그 값으로 사용자를 막으면 결제한 사람이 저장을 잃는다.
+  ///
+  /// 미로그인 상태는 [UserPlan.free]. **조회에 실패하면 free로 폴백하지 않고**
+  /// [AuthException]([AuthErrorCode.unknown])을 던진다 — "모른다"와 "무료다"는
+  /// 다르고, 둘을 같게 취급하면 장애가 곧 과금 정책이 된다. 호출부가 재시도를
+  /// 안내하는 것을 계약으로 한다.
+  Future<UserPlan> getPlan();
+
   /// 현재 사용자의 구독 플랜을 변경한다.
   ///
   /// - 미로그인 상태 호출 → [AuthException]([AuthErrorCode.unknown])

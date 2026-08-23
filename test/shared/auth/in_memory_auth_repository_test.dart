@@ -276,6 +276,19 @@ void main() {
           email: 'a@b.com', password: 'secret1', displayName: 'A2');
       expect(await repo.watchPlan().first, UserPlan.free);
     });
+
+    test('getPlan은 현재 플랜을 한 번 돌려준다 — 기본 free, 변경 후 premium', () async {
+      await repo.signUp(
+          email: 'a@b.com', password: 'secret1', displayName: 'A');
+      expect(await repo.getPlan(), UserPlan.free);
+
+      await repo.updatePlan(plan: UserPlan.premium);
+      expect(await repo.getPlan(), UserPlan.premium);
+    });
+
+    test('미로그인 getPlan은 free', () async {
+      expect(await repo.getPlan(), UserPlan.free);
+    });
   });
 
   group('signInWithGoogle', () {
