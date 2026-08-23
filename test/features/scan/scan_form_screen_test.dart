@@ -27,6 +27,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:keepcon/features/scan/scan_page.dart';
 import 'package:keepcon/features/scan/state/gifticon_form_state.dart';
 import 'package:keepcon/shared/models/gifticon.dart';
+import 'package:keepcon/shared/models/user.dart';
 import 'package:keepcon/shared/providers/repositories.dart';
 import 'package:keepcon/shared/repositories/impl/in_memory_auth_repository.dart';
 import 'package:keepcon/shared/repositories/impl/in_memory_gifticon_repository.dart';
@@ -38,16 +39,40 @@ void main() {
   /// 저장 결과를 직접 들여다보기 위해 Repository 인스턴스를 손에 쥔 채 주입한다.
   late InMemoryGifticonRepository repo;
 
+  /// 플랜을 바꿔 가며 검사하려면 auth 구현도 손에 쥐고 있어야 한다.
+  late InMemoryAuthRepository auth;
+
   ProviderContainer makeContainer({List<Gifticon> seed = const <Gifticon>[]}) {
     repo = InMemoryGifticonRepository(seed: seed);
+    auth = InMemoryAuthRepository();
 
     final ProviderContainer container = ProviderContainer(
       overrides: <Override>[
         gifticonRepositoryProvider.overrideWithValue(repo),
+        authRepositoryProvider.overrideWithValue(auth),
       ],
     );
     addTearDown(container.dispose);
     return container;
+  }
+
+  /// 소유자만 다르게 채운 더미 기프티콘 [count]개 — 저장 한도 검사용.
+  List<Gifticon> filledWallet(int count) {
+    return List<Gifticon>.generate(
+      count,
+      (int i) => Gifticon(
+        id: 'g_$i',
+        ownerId: myId,
+        brand: '브랜드$i',
+        productName: '상품$i',
+        price: 1000,
+        barcode: '900000000000$i',
+        category: '기타',
+        expiryDate: DateTime(2027, 1, 31),
+        registeredAt: DateTime(2026, 1, 1),
+      ),
+      growable: false,
+    );
   }
 
   /// 이미 등록돼 있는 기프티콘(중복 검사 대상).
@@ -263,6 +288,89 @@ void main() {
 
     expect(saved, hasLength(1));
     expect(saved.single.barcode, isNull);
+  });
+
+  group('무료 플랜 저장 한도', () {
+    const int limit = UserPlan.freeGifticonLimit;
+
+    testWidgets('한도 직전($limit개 미만)에는 저장된다', (WidgetTester tester) async {
+      await openManualForm(tester, seed: filledWallet(limit - 1));
+
+      await fillRequired(tester, barcode: '8801234567890');
+      await pickExpiryDate(tester);
+      await tapSave(tester);
+
+      expect(await repo.getGifticons(myId), hasLength(limit));
+      expect(find.text('저장 한도에 도달했어요'), findsNothing);
+    });
+
+    testWidgets('한도에 도달하면 저장되지 않고 홈으로 나가며 안내가 뜬다', (WidgetTester tester) async {
+      await openManualForm(tester, seed: filledWallet(limit));
+
+      await fillRequired(tester, barcode: '8801234567890');
+      await pickExpiryDate(tester);
+      await tapSave(tester);
+
+      expect(find.text('저장 한도에 도달했어요'), findsOneWidget);
+      // 저장은 늘지 않았고 성공 문구도 뜨지 않는다.
+      expect(await repo.getGifticons(myId), hasLength(limit));
+      expect(find.text('기프티콘이 성공적으로 저장되었습니다.'), findsNothing);
+      // 폼에 남겨 두지 않는다 — 입력을 고쳐도 저장될 수 없기 때문이다.
+      expect(find.text('기프티콘 정보 확인'), findsNothing);
+    });
+
+    testWidgets('프리미엄은 한도를 넘어도 저장된다', (WidgetTester tester) async {
+      final ProviderContainer container =
+          await openManualForm(tester, seed: filledWallet(limit));
+
+      await container
+          .read(authRepositoryProvider)
+          .updatePlan(plan: UserPlan.premium);
+
+      await fillRequired(tester, barcode: '8801234567890');
+      await pickExpiryDate(tester);
+      await tapSave(tester);
+
+      expect(await repo.getGifticons(myId), hasLength(limit + 1));
+      expect(find.text('저장 한도에 도달했어요'), findsNothing);
+    });
+
+    testWidgets('사용 완료한 기프티콘은 한도에서 빠진다', (WidgetTester tester) async {
+      // 한도만큼 있지만 하나를 사용 완료했다면 자리가 하나 난 것이다.
+      //
+      // 전체 개수로 세면 무료 사용자가 막다른 골목에 갇힌다 — 계약에 삭제 API가
+      // 없고 dev/prod에서는 프리미엄 전환도 막혀 있어, 10개를 다 쓰면 등록이
+      // 영구히 정지한다. '사용 완료 처리'가 유일한 탈출구이므로 그것이 실제로
+      // 자리를 비우는지 고정한다.
+      final List<Gifticon> wallet = <Gifticon>[
+        ...filledWallet(limit - 1),
+        filledWallet(limit).last.copyWith(status: GifticonStatus.used),
+      ];
+
+      await openManualForm(tester, seed: wallet);
+
+      await fillRequired(tester, barcode: '8801234567890');
+      await pickExpiryDate(tester);
+      await tapSave(tester);
+
+      expect(find.text('저장 한도에 도달했어요'), findsNothing);
+      expect(await repo.getGifticons(myId), hasLength(limit + 1));
+    });
+
+    testWidgets('한도와 중복이 겹치면 한도를 먼저 알린다', (WidgetTester tester) async {
+      // 한도를 채운 지갑의 마지막 항목과 **같은 바코드**로 저장을 시도한다.
+      // 둘 다 해당하지만, 바코드를 고쳐도 저장되지 않으므로 한도가 맞는 안내다.
+      final List<Gifticon> wallet = filledWallet(limit);
+      await openManualForm(tester, seed: wallet);
+
+      await fillRequired(tester, barcode: wallet.last.barcode!);
+      await pickExpiryDate(tester);
+      await tapSave(tester);
+
+      expect(find.text('저장 한도에 도달했어요'), findsOneWidget);
+      expect(find.text('이미 등록된 바코드 번호입니다.'), findsNothing);
+      expect(find.text('이미 등록된 기프티콘'), findsNothing);
+    });
   });
 
   testWidgets('바코드를 고치면 중복 안내가 사라진다', (WidgetTester tester) async {
