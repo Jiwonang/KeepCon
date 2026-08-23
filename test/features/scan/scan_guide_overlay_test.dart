@@ -107,10 +107,16 @@ void main() {
     }
   });
 
-  group('테두리 사각형이 선언한 16:10 비율을 지킨다', () {
+  group('테두리 사각형이 화면 폭과 무관하게 같은 비율을 지킨다', () {
     // 여백을 AspectRatio 안쪽(자식의 margin)에 두면 AspectRatio는 자기 자신만
-    // 비율에 맞추고 그 안에서 여백만큼 줄어든 테두리가 그려진다 — 화면이 좁을수록
-    // 왜곡이 커진다(폭 360에서 13.2:10, 폭 280에서 12.3:10이었다).
+    // 비율에 맞추고 그 안에서 여백만큼 줄어든 테두리가 그려진다 — 그래서 **화면
+    // 폭마다 비율이 달라졌다**(폭 360에서 약 1.32, 폭 280에서 약 1.23). 좁은 화면일수록
+    // 세로로 길쭉해지는 것이 이 테스트가 막는 회귀다.
+    //
+    // 기대값은 프로덕션의 _kGuideAspectRatio와 같아야 한다(비공개 상수라 값을
+    // 그대로 적는다) — 프레임 비율을 바꾸려면 양쪽을 함께 고치게 되어,
+    // 화면 모양 변경이 리뷰에 드러난다.
+    const double expectedRatio = 4 / 3;
     for (final Size size in <Size>[
       const Size(360, 640),
       const Size(320, 568),
@@ -124,8 +130,9 @@ void main() {
 
         expect(
           frame.width / frame.height,
-          closeTo(16 / 10, 0.01),
-          reason: '보이는 테두리가 16:10이어야 한다 (실제: ${frame.size})',
+          closeTo(expectedRatio, 0.01),
+          reason: '보이는 테두리가 $expectedRatio 비율이어야 한다 '
+              '(실제: ${frame.size} = ${frame.width / frame.height})',
         );
       });
     }
