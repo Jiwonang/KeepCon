@@ -335,6 +335,28 @@ void main() {
       expect(find.text('저장 한도에 도달했어요'), findsNothing);
     });
 
+    testWidgets('사용 완료한 기프티콘은 한도에서 빠진다', (WidgetTester tester) async {
+      // 한도만큼 있지만 하나를 사용 완료했다면 자리가 하나 난 것이다.
+      //
+      // 전체 개수로 세면 무료 사용자가 막다른 골목에 갇힌다 — 계약에 삭제 API가
+      // 없고 dev/prod에서는 프리미엄 전환도 막혀 있어, 10개를 다 쓰면 등록이
+      // 영구히 정지한다. '사용 완료 처리'가 유일한 탈출구이므로 그것이 실제로
+      // 자리를 비우는지 고정한다.
+      final List<Gifticon> wallet = <Gifticon>[
+        ...filledWallet(limit - 1),
+        filledWallet(limit).last.copyWith(status: GifticonStatus.used),
+      ];
+
+      await openManualForm(tester, seed: wallet);
+
+      await fillRequired(tester, barcode: '8801234567890');
+      await pickExpiryDate(tester);
+      await tapSave(tester);
+
+      expect(find.text('저장 한도에 도달했어요'), findsNothing);
+      expect(await repo.getGifticons(myId), hasLength(limit + 1));
+    });
+
     testWidgets('한도와 중복이 겹치면 한도를 먼저 알린다', (WidgetTester tester) async {
       // 한도를 채운 지갑의 마지막 항목과 **같은 바코드**로 저장을 시도한다.
       // 둘 다 해당하지만, 바코드를 고쳐도 저장되지 않으므로 한도가 맞는 안내다.

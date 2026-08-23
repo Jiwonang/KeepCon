@@ -244,20 +244,34 @@ class GifticonFormController extends StateNotifier<GifticonFormState> {
   /// 스캔은 "저장을 누른 그 순간의 플랜" 하나만 필요하므로 스트림을 계속 붙들지
   /// 않는다(그래서 provider 인스턴스가 갈리는 문제도 생기지 않는다).
   ///
-  /// **읽지 못하면 [UserPlan.free]로 본다.** 계약이 정한 기본값이 free이고
-  /// (`필드 부재 = free`), 여기까지 왔다는 것은 바로 위 [GifticonRepository.getGifticons]
-  /// 가 성공했다는 뜻이라 연결 문제일 가능성이 낮다. 대신 프리미엄 사용자가 일시적
-  /// 오류로 막힐 수 있는데, 다시 시도하면 풀린다.
+  /// **읽지 못하면 [UserPlan.free]로 본다** — 계약이 정한 기본값(`필드 부재 = free`).
   ///
   /// 타임아웃을 두는 이유: 스트림이 영영 방출하지 않으면 `first`가 걸려 submit이
   /// 끝나지 않고, 저장 버튼이 비활성인 채로 화면이 멈춘다.
+  ///
+  /// ⚠️ **알려진 한계 — 이 값은 "서버의 플랜"이 아니라 "이 기기가 아는 플랜"이다.**
+  /// Firebase 구현의 [AuthRepository.watchPlan]은 `snapshots()`이고, Firestore
+  /// 리스너는 **로컬 캐시에서 첫 스냅샷을 먼저 방출한 뒤** 서버 값으로 갱신한다.
+  /// `first`는 그 첫 방출에서 끊으므로 서버 왕복을 기다리지 않는다. 그래서 다른
+  /// 기기에서 프리미엄으로 올린 직후 이 기기 캐시가 낡아 있으면 free로 오판해
+  /// 막을 수 있다. 타임아웃은 이 경로를 방어하지 못한다 — 값은 빠르게 오되 틀렸다.
+  /// (재시도해도 같은 캐시를 다시 읽으므로 풀리지 않는다.)
+  ///
+  /// 제대로 고치려면 계약에 서버 확인 일회성 접근점(`Future<UserPlan> getPlan()`,
+  /// Firebase 쪽 `Source.server`)이 필요하다 — `lib/shared`는 CODEOWNERS 영역이라
+  /// `contract-architect` 요청 사항이다. 그 전까지 폭발 반경은 호출부의 단락
+  /// (한도만큼 채운 사용자에게만 조회)으로 좁혀 둔다.
   Future<UserPlan> _readPlan() async {
     try {
+      // 타임아웃은 **스트림에** 건다. `first.timeout(...)`으로 쓰면 Future만
+      // 새로 만들 뿐 원래 구독은 살아 있어, 방출되지 않는 스트림에서 저장할
+      // 때마다 Firestore 리스너가 하나씩 샌다(타임아웃이 막으려던 바로 그 상황).
+      // `Stream.timeout`은 예외를 스트림에 흘려보내고 `first`가 구독을 끊는다.
       return await _ref
           .read(authRepositoryProvider)
           .watchPlan()
-          .first
-          .timeout(const Duration(seconds: 5));
+          .timeout(const Duration(seconds: 5))
+          .first;
     } catch (e) {
       debugPrint('KeepCon: 플랜 조회 실패 — free로 간주: $e');
       return UserPlan.free;
@@ -268,8 +282,10 @@ class GifticonFormController extends StateNotifier<GifticonFormState> {
     // 이미 진행 중이면 무시한다.
     //
     // 버튼 비활성화만으로는 부족하다 — 그건 다음 프레임에야 반영되므로 "상태가
-    // 문지기"여야 중복 호출이 확실히 막힌다. 아래 모든 경로가 Success/Failure/
-    // Duplicate 중 하나로 반드시 빠져나가므로 여기서 갇히지 않는다.
+    // 문지기"여야 중복 호출이 확실히 막힌다. 아래 모든 경로가 [ScanSubmitState]의
+    // 종단 상태(Success/Failure/Duplicate/LimitReached) 중 하나로 반드시 빠져나가므로
+    // 여기서 갇히지 않는다 — sealed라 종단 상태를 새로 추가하면 scan_page의 switch가
+    // 컴파일 오류로 알려 준다.
     if (state.submit is ScanSubmitInProgress) {
       return null;
     }
@@ -328,13 +344,25 @@ class GifticonFormController extends StateNotifier<GifticonFormState> {
     // 소유자만 확인하고 개수는 세지 않으므로(규칙은 문서 수를 셀 수 없다), API로
     // 직접 쏘면 11개째도 그대로 저장된다. 진짜 강제는 서버 쪽 카운터 스키마가
     // 필요하고 그건 계약 소유자 영역이다.
-    final UserPlan plan = await _readPlan();
+    //
+    // **보유 중([GifticonStatus.available])만 센다.** 전체 개수로 세면 무료
+    // 사용자가 막다른 골목에 갇힌다 — 10개를 등록해 전부 사용 완료해도 개수는
+    // 그대로인데, 계약에 삭제 API가 없고(전수 확인: 5개 메서드, delete 없음)
+    // dev/prod에서는 보안 규칙이 plan 쓰기를 막아 프리미엄 전환도 되지 않는다.
+    // 그러면 등록이 영구히 정지한다. available 기준이면 '사용 완료 처리'가 곧
+    // 자리를 비우는 탈출구가 되고, "10개까지 **보관**"이라는 제품 의도에도 맞는다.
+    final int activeCount = allGifticons
+        .where((Gifticon g) => g.status == GifticonStatus.available)
+        .length;
 
-    if (plan == UserPlan.free &&
-        allGifticons.length >= UserPlan.freeGifticonLimit) {
+    // 한도 미만이면 플랜은 판정에 영향이 없다(free든 premium이든 통과) — 그때는
+    // 읽지 않는다. `&&` 단락 덕에 대부분의 저장에서 플랜 조회가 통째로 빠지고,
+    // [_readPlan]이 잘못 읽을 여지도 "한도만큼 채운 사용자"로 좁혀진다.
+    if (activeCount >= UserPlan.freeGifticonLimit &&
+        await _readPlan() == UserPlan.free) {
       state = state.copyWith(
         submit: ScanSubmitLimitReached(
-          saved: allGifticons.length,
+          saved: activeCount,
           limit: UserPlan.freeGifticonLimit,
         ),
       );
@@ -397,7 +425,14 @@ class GifticonFormController extends StateNotifier<GifticonFormState> {
             gifticon: saved,
           );
 
-          final groups = await shareRepo.watchGroups(currentUser.id).first;
+          // 여기도 상한을 건다. 이 지점은 addGifticon이 **이미 성공한 뒤**라,
+          // 스트림이 방출하지 않으면 저장은 됐는데 화면만 ScanSubmitInProgress로
+          // 영영 멈춘다(저장 버튼도 잠긴 채). 예외는 아래 catch가 공유 실패로
+          // 흡수하므로 사용자 경로로 새지 않는다.
+          final groups = await shareRepo
+              .watchGroups(currentUser.id)
+              .timeout(const Duration(seconds: 5))
+              .first;
           final targetGroup = groups.firstWhere(
             (g) => g.id == saved.targetGroupId,
             orElse: () => throw Exception('지정된 그룹을 찾을 수 없습니다.'),
