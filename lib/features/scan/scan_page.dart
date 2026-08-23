@@ -744,20 +744,44 @@ class __GifticonFormScreenState extends ConsumerState<_GifticonFormScreen> {
                   const SizedBox(height: 14),
                   Text('무료 플랜은 $limit개까지 보관할 수 있어, 이번 기프티콘은 저장하지 않았어요.'),
                   const SizedBox(height: 14),
-                  Text(
-                    // **먼저 제시하는 길은 '사용 완료'다.** 프리미엄 전환은 dev·prod에서
-                    // 보안 규칙이 plan 쓰기를 막아 실제로는 되지 않는다("결제 연동 준비 중").
-                    // 그것만 안내하면 사용자를 막다른 곳으로 보내는 셈이라, 지금 바로
-                    // 통하는 방법을 앞에 둔다.
-                    //
-                    // 경로 표기는 실제 UI와 맞춘다 — 앱에 '설정'이나 '마이페이지'라는
-                    // 라벨은 없다. 진입점은 홈 오른쪽 위 톱니바퀴(툴팁 '마이')다.
-                    //
-                    // 아이콘을 이모지로 넣지 않는다 — ⚙는 컬러 이모지로 렌더링돼
-                    // 주변 회색 본문과 톤이 어긋난다(웹에서 확인). 글자로 풀어 쓴다.
-                    '다 쓴 기프티콘을 사용 완료 처리하면 자리가 납니다.\n'
-                    '프리미엄으로 올리면 개수 제한이 없어져요 (홈 오른쪽 위 톱니바퀴 › 프리미엄).',
-                    style: mutedStyle,
+                  Text.rich(
+                    TextSpan(
+                      // **먼저 제시하는 길은 '사용 완료'다.** 프리미엄 전환은 dev·prod에서
+                      // 보안 규칙이 plan 쓰기를 막아 실제로는 되지 않는다("결제 연동 준비 중").
+                      // 그것만 안내하면 사용자를 막다른 곳으로 보내는 셈이라, 지금 바로
+                      // 통하는 방법을 앞에 둔다.
+                      //
+                      // 경로 표기는 실제 UI와 맞춘다 — 앱에 '설정'이나 '마이페이지'라는
+                      // 라벨은 없다. 진입점은 홈 오른쪽 위 톱니바퀴(툴팁 '마이')다.
+                      //
+                      // 아이콘은 ⚙ **이모지가 아니라 앱이 실제로 그리는 아이콘**
+                      // ([Icons.settings_outlined] — main_page의 그 버튼과 같은 글리프)을
+                      // WidgetSpan으로 넣는다. 이모지는 컬러로 렌더링돼 회색 본문과 톤이
+                      // 어긋나지만, 이 방식은 주변 글자와 같은 색·크기를 따라가면서
+                      // "찾아야 할 그 모양"을 그대로 보여 준다.
+                      //
+                      // 줄바꿈은 문장 단위로 직접 끊는다. 한 줄에 몰아 두면 좁은
+                      // 다이얼로그 폭에서 '프리미 / 엄).'처럼 단어 중간이 갈라진다.
+                      style: mutedStyle,
+                      children: <InlineSpan>[
+                        const TextSpan(
+                          text: '다 쓴 기프티콘을 사용 완료 처리하면 자리가 납니다.\n',
+                        ),
+                        const TextSpan(
+                          text: '프리미엄으로 올리면 개수 제한이 없어져요.\n',
+                        ),
+                        const TextSpan(text: '홈 오른쪽 위 '),
+                        WidgetSpan(
+                          alignment: PlaceholderAlignment.middle,
+                          child: Icon(
+                            Icons.settings_outlined,
+                            size: (mutedStyle?.fontSize ?? 12) + 2,
+                            color: dialogScheme.onSurfaceVariant,
+                          ),
+                        ),
+                        const TextSpan(text: ' › 프리미엄'),
+                      ],
+                    ),
                   ),
                 ],
               ),
