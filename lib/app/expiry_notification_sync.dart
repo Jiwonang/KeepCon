@@ -15,7 +15,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../features/main/state/gifticon_list_providers.dart';
+import '../shared/providers/raw_gifticons_provider.dart';
 import '../shared/deeplink/app_destination.dart';
 import '../shared/models/gifticon.dart';
 import '../shared/notifications/expiry_notification_scheduler.dart';

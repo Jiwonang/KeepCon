@@ -64,7 +64,7 @@ class NotificationBell extends ConsumerWidget {
                     borderRadius: BorderRadius.circular(AppRadii.pill),
                     border: Border.all(color: scheme.surface, width: 1.5),
                   ),
-                  // 두 자리를 넘으면 뱃지가 아이콘을 덮으므로 `9+`로 접는다.
+                  // 두 자리가 되면(10건 이상) 뱃지가 아이콘을 덮으므로 `9+`로 접는다.
                   child: Text(
                     unreadCount > 9 ? '9+' : '$unreadCount',
                     style: TextStyle(

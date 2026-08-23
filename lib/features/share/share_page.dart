@@ -28,7 +28,7 @@ import '../../shared/providers/shared_gifticons_provider.dart';
 import '../../shared/theme/theme_tokens.dart';
 import '../../shared/widgets/notification_bell.dart';
 import 'pages/group_detail_page.dart';
-import 'pages/group_notifications_page.dart';
+import 'pages/notification_center_page.dart';
 import 'pages/shared_gifticon_detail_page.dart';
 import 'pages/usage_log_page.dart';
 import 'state/share_providers.dart';
@@ -83,7 +83,7 @@ class SharePage extends ConsumerWidget {
             // ── 헤더(큰 타이틀 + 알림벨 + 그룹 추가) ──
             _ShareHeader(
               onNotifications: () =>
-                  _push(context, const GroupNotificationsPage()),
+                  _push(context, const NotificationCenterPage()),
               onCreate: () => showCreateGroupSheet(context),
             ),
             const SizedBox(height: 26),
@@ -229,7 +229,7 @@ class _ShareHeader extends StatelessWidget {
         // 안읽음 수는 벨이 계약 정본을 직접 구독한다 — 이 페이지가 세어 넘기면 홈 헤더의
         // 벨과 세는 방식이 갈릴 수 있다(뱃지 임계값·9+ 표기가 두 벌이 된다).
         NotificationBell(
-          tooltip: '그룹 알림',
+          tooltip: '알림',
           onPressed: onNotifications,
         ),
         IconButton(

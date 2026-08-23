@@ -24,43 +24,16 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../shared/models/gifticon.dart';
 import '../../../shared/models/user.dart';
-import '../../../shared/providers/repositories.dart';
+import '../../../shared/providers/raw_gifticons_provider.dart';
 import '../../../shared/providers/session_provider.dart';
 import 'gifticon_filter.dart';
 import 'gifticon_sorter.dart';
 import 'now_provider.dart';
 
-/// 현재 사용자의 원천 기프티콘 목록.
-///
-/// 세션 정본 [sessionUserProvider]에서 **사용자 id만** 읽어
-/// GifticonRepository.watchGifticons(ownerId)를 구독한다.
-/// 미로그인(null)이면 빈 목록 스트림을 방출한다.
-///
-/// **왜 `select`로 좁히는가.** 이 provider가 세션에서 쓰는 값은 id 하나뿐인데, 정본은
-/// [StreamProvider]라 값이 같은 data→data 재방출도 무조건 통지한다(riverpod 2.6.1
-/// `handleUpdateShouldNotify`). 통째로 watch하면 세션이 재방출될 때마다 create가 재실행돼
-/// **`watchGifticons` 스트림이 teardown/재수립**된다 — share의 `select` 6곳은 재계산이
-/// 끝이지만 이쪽은 Firestore 목록 리스너를 끊었다 붙이는 것이라 쿼리가 통째로 다시 읽힌다.
-/// 실제 트리거는 가설이 아니다: `userChanges()`의 토큰 갱신(약 1시간)과 **mypage 프로필
-/// 편집**(`updateDisplayName` + `reload` → **같은 uid·다른 displayName** 재방출)이다.
-/// 후자는 승격 전 `currentUserProvider`의 `==` 필터로도 걸러지지 않던 경로라, id 기준
-/// `select`가 엄격히 낫다(QA v2.7 [medium 1]).
-///
-/// 폴딩 의미는 좁히기 전과 **동일**하다 — `valueOrNull == null` ⇔ `uid == null`
-/// (로딩·미로그인 확정·값 없는 에러 3경우 모두 일치). `.value`가 아니라 **`valueOrNull`**
-/// 인 것도 그대로다(#13 규약): `.value`는 이전 값이 없는 [AsyncError]에서 rethrow하고,
-/// `valueOrNull`은 순단 에러가 `copyWithPrevious`로 보존한 이전 사용자를 돌려주므로
-/// **세션이 잠깐 끊겨도 목록이 사라지지 않는다**.
-final rawGifticonsProvider = StreamProvider<List<Gifticon>>((ref) {
-  final String? uid = ref.watch(
-    sessionUserProvider.select((AsyncValue<User?> s) => s.valueOrNull?.id),
-  );
-  if (uid == null) {
-    return Stream<List<Gifticon>>.value(const <Gifticon>[]);
-  }
-  final repo = ref.watch(gifticonRepositoryProvider);
-  return repo.watchGifticons(uid);
-});
+// 원천 목록 `rawGifticonsProvider`는 계약 정본으로 승격됐다
+// (`lib/shared/providers/raw_gifticons_provider.dart`) — 앱 조립부의 만료 알림 동기화에
+// 이어 알림 센터의 **파생 만료 알림**까지 소비자가 페이지 밖으로 나갔고, 계약이 페이지를
+// 향해 의존할 수는 없기 때문이다. 공개 이름은 그대로라 아래 파생들의 호출은 무수정이다.
 
 /// id로 찾은 기프티콘 한 장. 상세 화면이 소비한다. 없으면 null.
 ///

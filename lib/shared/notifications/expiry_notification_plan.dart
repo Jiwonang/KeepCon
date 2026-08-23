@@ -9,6 +9,7 @@
 /// 기준을 쓰게 하기 위해서다.
 library;
 
+import '../models/app_notification.dart';
 import '../models/gifticon.dart';
 import '../util/expiry_policy.dart';
 
@@ -166,3 +167,76 @@ String _title(int leadDays) =>
 /// 본문은 "무엇이 만료되는가"만 담는다 — 알림창에서 한 줄로 읽히고, 바코드 같은
 /// 민감한 값은 잠금화면에 노출되지 않아야 한다.
 String _body(Gifticon g) => '${g.brand} ${g.productName}';
+
+/// 알림 센터가 거슬러 보여주는 기간. 이보다 오래전에 울린 알림은 목록에서 뺀다.
+///
+/// 기프티콘 하나당 최대 [expiryNotifyLeadDays]개(3건)가 쌓이므로 상한이 없으면 보유량이
+/// 많은 사용자의 목록이 끝없이 길어진다. 30일이면 가장 이른 D-7 알림까지 넉넉히 담긴다.
+const Duration expiryNotificationHistory = Duration(days: 30);
+
+/// [gifticons]에 대해 **이미 울린** 만료 임박 알림을 복원한다.
+///
+/// [planExpiryNotifications]의 대칭이다 — 같은 격자([expiryNotifyLeadDays] × [expiryNotifyHour])를
+/// 쓰되 예약이 미래만 남기는 자리에서 이쪽은 **과거만** 남긴다. 두 함수가 같은 상수를 보므로
+/// "예약된 알림"과 "목록에 뜨는 알림"이 어긋날 수 없다.
+///
+/// 발송 기록을 저장하지 않고 계산으로 복원하는 이유는 [AppNotification] dartdoc에 있다.
+/// 요약하면, 울린 사실을 남기려면 기기가 꺼져 있을 때도 쓸 서버가 필요한데 발송 시각이
+/// 정책 상수로 결정론적이라 계산으로 같은 답을 얻을 수 있다.
+///
+/// 규칙:
+/// - [GifticonStatus.available]인 것만 대상이다(예약과 같은 기준). 이미 쓰거나 만료된 건은
+///   해결된 알림이라 목록을 채울 이유가 없다.
+/// - 발송 시각이 [now]보다 **과거이거나 같아야** 한다(미래 = 아직 안 울린 것 = 예약의 몫).
+/// - [within]보다 오래된 것은 버린다.
+/// - **최신순**으로 정렬한다(목록이 최신순이므로 소비자가 다시 정렬하지 않아도 된다).
+///
+/// [now]는 테스트 주입용이며, 생략하면 [DateTime.now]를 쓴다.
+List<ExpiryNotificationItem> firedExpiryNotifications(
+  List<Gifticon> gifticons, {
+  DateTime? now,
+  Duration within = expiryNotificationHistory,
+}) {
+  final DateTime current = now ?? DateTime.now();
+  final DateTime oldest = current.subtract(within);
+  final List<ExpiryNotificationItem> fired = <ExpiryNotificationItem>[];
+
+  for (final Gifticon g in gifticons) {
+    if (g.status != GifticonStatus.available) continue;
+
+    for (final int lead in expiryNotifyLeadDays) {
+      // 예약과 **같은 식**으로 시각을 만든다 — 여기서 계산이 갈리면 울린 알림과 목록의
+      // 시각이 어긋나 "온 적 없는 알림"이나 "빠진 알림"이 생긴다.
+      final DateTime firedAt = DateTime(
+        g.expiryDate.year,
+        g.expiryDate.month,
+        g.expiryDate.day - lead,
+        expiryNotifyHour,
+      );
+      // 예약은 `isAfter(current)`인 것만 남긴다 — 그 여집합이 정확히 이 조건이라
+      // 한 시점이 두 목록에 동시에 들거나 어느 쪽에도 안 드는 일이 없다.
+      if (firedAt.isAfter(current)) continue;
+      if (firedAt.isBefore(oldest)) continue;
+
+      fired.add(ExpiryNotificationItem(
+        gifticonId: g.id,
+        leadDays: lead,
+        firedAt: firedAt,
+        title: _title(lead),
+        message: _body(g),
+      ));
+    }
+  }
+
+  // 최신순. 같은 시각이면 기프티콘 id → lead 순으로 안정 정렬한다(목록 순서가 흔들리면
+  // 같은 입력에도 화면이 달라 보인다).
+  fired.sort((ExpiryNotificationItem a, ExpiryNotificationItem b) {
+    final int byTime = b.firedAt.compareTo(a.firedAt);
+    if (byTime != 0) return byTime;
+    final int byId = a.gifticonId.compareTo(b.gifticonId);
+    if (byId != 0) return byId;
+    return a.leadDays.compareTo(b.leadDays);
+  });
+
+  return fired;
+}

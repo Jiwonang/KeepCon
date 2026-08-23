@@ -32,7 +32,7 @@ import '../../shared/providers/theme_mode_provider.dart';
 import '../../shared/repositories/auth_repository.dart';
 import '../../shared/theme/theme_tokens.dart';
 import '../auth/auth_error_message.dart';
-import '../share/pages/group_notifications_page.dart';
+import '../share/pages/notification_center_page.dart';
 import '../share/pages/usage_log_page.dart';
 import 'notification_settings_page.dart';
 
@@ -153,7 +153,7 @@ class MyPage extends ConsumerWidget {
                     onTap: () => _managePlan(context, ref),
                   ),
                   const _RowDivider(),
-                  // 알림 — 그룹 알림 목록으로 진입(share 소유 화면 재사용).
+                  // 알림 — 알림 센터로 진입(share 소유 화면 재사용).
                   // 점은 하드코딩이 아니라 안읽음 정본(#55) 실연동: 목록에 들어가
                   // 읽음 처리되면 자동으로 꺼진다.
                   _SettingsRow(
@@ -162,7 +162,7 @@ class MyPage extends ConsumerWidget {
                     title: '알림',
                     onTap: () => Navigator.of(context).push(
                       MaterialPageRoute<void>(
-                        builder: (_) => const GroupNotificationsPage(),
+                        builder: (_) => const NotificationCenterPage(),
                       ),
                     ),
                   ),
@@ -504,11 +504,11 @@ class _DeleteAccountDialogState extends State<_DeleteAccountDialog> {
   }
 }
 
-/// 알림 벨 아이콘 — 탭하면 그룹 알림 목록, 점은 안읽음 실연동.
+/// 알림 벨 아이콘 — 탭하면 알림 센터, 점은 안읽음 실연동.
 ///
 /// 예전에는 장식(탭 불가·점 상시 켜짐)이었다. 안읽음 정본
 /// [unreadNotificationCountProvider](#55)를 소비해 실제 안읽음이 있을 때만
-/// 점을 켜고, 탭하면 [GroupNotificationsPage]로 들어가 읽음 처리로 점이 꺼진다.
+/// 점을 켜고, 탭하면 [NotificationCenterPage]로 들어가 읽음 처리로 점이 꺼진다.
 class _BellIcon extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -518,7 +518,7 @@ class _BellIcon extends ConsumerWidget {
       tooltip: '알림',
       onPressed: () => Navigator.of(context).push(
         MaterialPageRoute<void>(
-          builder: (_) => const GroupNotificationsPage(),
+          builder: (_) => const NotificationCenterPage(),
         ),
       ),
       icon: Stack(

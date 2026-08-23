@@ -21,7 +21,7 @@ import '../../shared/util/money_format.dart' show formatWon;
 import '../../shared/widgets/notification_bell.dart';
 import '../mypage/mypage_page.dart';
 import '../scan/scan_page.dart';
-import '../share/pages/group_notifications_page.dart';
+import '../share/pages/notification_center_page.dart';
 import 'pages/gifticon_detail_page.dart';
 import 'state/gifticon_filter.dart';
 import 'state/gifticon_list_providers.dart';
@@ -147,7 +147,7 @@ class _GreetingHeader extends StatelessWidget {
           tooltip: '알림',
           onPressed: () => Navigator.of(context).push(
             MaterialPageRoute<void>(
-              builder: (_) => const GroupNotificationsPage(),
+              builder: (_) => const NotificationCenterPage(),
             ),
           ),
         ),

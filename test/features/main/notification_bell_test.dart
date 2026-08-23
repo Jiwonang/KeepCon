@@ -6,7 +6,7 @@
 /// 같은 형태로 되돌아가도 아무 테스트도 울리지 않는다.
 ///
 /// 고정할 것은 셋이다:
-/// 1. **탭이 알림 목록으로 간다** — 벨을 실제로 눌러 [GroupNotificationsPage]가 뜨는지 본다.
+/// 1. **탭이 알림 목록으로 간다** — 벨을 실제로 눌러 [NotificationCenterPage]가 뜨는지 본다.
 /// 2. **뱃지가 안읽음 정본을 따른다** — 0이면 뱃지 자체가 없고, 있으면 그 수가 보인다.
 /// 3. **두 자리는 `9+`로 접힌다** — 공유 탭 벨과 같은 표기여야 한다(같은 위젯을 쓰므로
 ///    표기가 갈릴 수 없다는 것을 여기서 확인한다).
@@ -16,7 +16,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:keepcon/features/main/main_page.dart';
-import 'package:keepcon/features/share/pages/group_notifications_page.dart';
+import 'package:keepcon/features/share/pages/notification_center_page.dart';
 import 'package:keepcon/shared/providers/group_notifications_provider.dart';
 import 'package:keepcon/shared/providers/repositories.dart';
 import 'package:keepcon/shared/repositories/impl/in_memory_auth_repository.dart';
@@ -56,12 +56,12 @@ void main() {
   testWidgets('벨을 누르면 알림 목록 화면으로 들어간다', (WidgetTester tester) async {
     await pumpHome(tester, unread: 0);
 
-    expect(find.byType(GroupNotificationsPage), findsNothing);
+    expect(find.byType(NotificationCenterPage), findsNothing);
 
     await tester.tap(bell());
     await tester.pumpAndSettle();
 
-    expect(find.byType(GroupNotificationsPage), findsOneWidget,
+    expect(find.byType(NotificationCenterPage), findsOneWidget,
         reason: '벨은 장식이 아니라 알림 센터 진입점이어야 한다');
   });
 
@@ -87,6 +87,8 @@ void main() {
 
     expect(
         find.descendant(of: bell(), matching: find.text('9+')), findsOneWidget);
-    expect(find.text('12'), findsNothing, reason: '뱃지가 아이콘을 덮지 않게 접어야 한다');
+    // 벨 안쪽으로 좁혀 본다 — 화면 전체 검색은 무관한 '12'(통계·D-day·날짜)에 걸린다.
+    expect(find.descendant(of: bell(), matching: find.text('12')), findsNothing,
+        reason: '뱃지가 아이콘을 덮지 않게 접어야 한다');
   });
 }

@@ -1,11 +1,16 @@
-/// share 페이지 — 그룹 알림(전체 화면, KeepCon 틀 재디자인).
+/// 알림 센터 — 그룹 알림 + 개인 만료 알림을 한 목록으로 보여주는 전체 화면.
 ///
-/// 등록/만료임박/사용완료 유형별 아이콘·문구를 카드 목록으로 보여준다. 공유/사용완료가
-/// 일어날 때마다 계약 [ShareRepository]에 알림이 쌓이고 이 화면이 [notificationsProvider]
-/// 구독으로 동기화된다. 상대 시각 포맷은 소비자(UI) 책임. 색 하드코딩 없음.
+/// 두 출처를 계약 정본 [allNotificationsProvider]가 최신순으로 합쳐 주고, 이 화면은
+/// 종류별 아이콘·문구로 카드를 그린다. 개인 만료 알림은 저장된 기록이 아니라 계산으로
+/// 복원한 것이며(그 근거는 [AppNotification] dartdoc), 탭하면 목적지 버스를 통해 홈에서
+/// 해당 기프티콘이 강조된다.
 ///
-/// 스트림 에러는 [ShareErrorBanner]로 표시하고 재시도는 사용자 액션으로만 한다
-/// (자동 재시도 금지 — 크로스페이지 주의점 #13).
+/// 이름이 `GroupNotifications`가 아닌 이유: 개인 알림이 들어오면서 화면이 그룹 전용이
+/// 아니게 됐다. 이름이 내용과 어긋나면 다음 사람이 "여긴 그룹 것만"이라고 읽고 개인 축을
+/// 빠뜨린다.
+///
+/// 상대 시각 포맷은 소비자(UI) 책임. 색 하드코딩 없음. 스트림 에러는 [ShareErrorBanner]로
+/// 표시하고 재시도는 사용자 액션으로만 한다(자동 재시도 금지 — 크로스페이지 주의점 #13).
 library;
 
 import 'dart:async';
@@ -13,28 +18,31 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../shared/deeplink/app_destination.dart';
+import '../../../shared/models/app_notification.dart';
 import '../../../shared/models/share.dart';
 import '../../../shared/diagnostics/report_handled_failure.dart';
+import '../../../shared/providers/deep_link_providers.dart';
 import '../../../shared/providers/group_notifications_provider.dart';
 import '../../../shared/providers/repositories.dart';
 import '../../../shared/theme/theme_tokens.dart';
 import '../widgets/share_error_banner.dart';
 import '../widgets/share_format.dart';
 
-/// 그룹 알림 화면. 공유 메인 헤더의 알림 아이콘에서 push 한다.
+/// 알림 센터 화면. 홈·공유 탭 헤더의 벨과 마이페이지에서 push 한다.
 ///
 /// 알림 목록을 **실제로 보여준 뒤에만** [ShareRepository.markNotificationsRead]를
 /// 호출해 안읽음을 해소한다(뱃지 클리어) — 아래 읽음 가드 참조.
-class GroupNotificationsPage extends ConsumerStatefulWidget {
-  const GroupNotificationsPage({super.key});
+class NotificationCenterPage extends ConsumerStatefulWidget {
+  const NotificationCenterPage({super.key});
 
   @override
-  ConsumerState<GroupNotificationsPage> createState() =>
-      _GroupNotificationsPageState();
+  ConsumerState<NotificationCenterPage> createState() =>
+      _NotificationCenterPageState();
 }
 
-class _GroupNotificationsPageState
-    extends ConsumerState<GroupNotificationsPage> {
+class _NotificationCenterPageState
+    extends ConsumerState<NotificationCenterPage> {
   /// 이번 화면 수명 동안 읽음 처리를 이미 호출했는지(중복 호출 방지).
   bool _markedRead = false;
 
@@ -46,7 +54,7 @@ class _GroupNotificationsPageState
     // 첫 성공 방출에서 처리한다.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      _markReadWhenVisible(ref.read(notificationsProvider));
+      _markReadWhenVisible(ref.read(allNotificationsProvider));
     });
   }
 
@@ -58,7 +66,7 @@ class _GroupNotificationsPageState
   /// (= 한 번도 못 본 알림의 유실). 로딩/에러 중에는 보류하고, 사용자가 실제로 목록을
   /// 볼 수 있는 상태([AsyncData])가 됐을 때 1회만 호출한다. 에러 상태로 화면을 나가면
   /// 읽음 처리가 아예 일어나지 않는다 — 알림이 보존되는, 의도된 동작이다.
-  void _markReadWhenVisible(AsyncValue<List<GroupNotification>> value) {
+  void _markReadWhenVisible(AsyncValue<List<AppNotification>> value) {
     if (_markedRead) return;
     // 이전 값을 안고 있는 AsyncLoading/AsyncError도 제외한다(재조회 중·실패 중).
     // 이때 화면은 보존된 이전 목록을 렌더하지만 그 목록은 **최신이 아닐 수 있다** —
@@ -66,20 +74,20 @@ class _GroupNotificationsPageState
     // 그 알림들이 통째로 "읽음" 처리돼 유실된다(위 예전 구현과 같은 사고). 뱃지가
     // 남는 과대 표시는 배너의 '다시 시도'로 회복 가능하지만 유실은 회복 불가이므로,
     // 보수적으로 성공 방출([AsyncData])만 "봤다"로 인정한다.
-    if (value is! AsyncData<List<GroupNotification>>) return;
+    if (value is! AsyncData<List<AppNotification>>) return;
     _markedRead = true;
     unawaited(_markRead(value));
   }
 
-  Future<void> _markRead(AsyncValue<List<GroupNotification>> attempted) async {
+  Future<void> _markRead(AsyncValue<List<AppNotification>> attempted) async {
     try {
       await ref.read(shareRepositoryProvider).markNotificationsRead();
     } catch (e, s) {
       reportHandledFailure(ref, e, s,
-          context: 'GroupNotificationsPage.markNotificationsRead');
+          context: 'NotificationCenterPage.markNotificationsRead');
       // 실패는 "읽음 처리가 안 된 것"이므로 가드를 소모하지 않은 상태로 되돌린다.
-      // 흔한 두 갈래 — ① [StateError]: 세션이 `data(null)`이면 [notificationsProvider]가
-      // `AsyncData(<GroupNotification>[])`를 돌려주는데 이것도 AsyncData라 가드를
+      // 흔한 두 갈래 — ① [StateError]: 세션이 `data(null)`이면 [allNotificationsProvider]가
+      // `AsyncData(<AppNotification>[])`를 돌려주는데 이것도 AsyncData라 가드를
       // 통과하고, 저장소가 미로그인 StateError로 거부한다. ② 저장소 구현별 실패
       // (Firestore 쓰기의 네트워크·권한 오류 등) — 계약 dartdoc이 명시한 StateError가
       // 아니어도 원칙은 같고, unawaited 뒤라 여기서 잡지 않으면 unhandled async
@@ -90,8 +98,8 @@ class _GroupNotificationsPageState
       // 한 번 재평가해 그 창을 닫는다(상태가 그대로면 재시도하지 않으므로 같은
       // 실패를 도는 루프는 생기지 않는다 — 시도마다 서로 다른 방출이 필요하다).
       if (!mounted) return;
-      final AsyncValue<List<GroupNotification>> current =
-          ref.read(notificationsProvider);
+      final AsyncValue<List<AppNotification>> current =
+          ref.read(allNotificationsProvider);
       if (!identical(current, attempted)) {
         _markReadWhenVisible(current);
       }
@@ -101,23 +109,22 @@ class _GroupNotificationsPageState
   @override
   Widget build(BuildContext context) {
     // 성공 방출이 뒤늦게 도착하는 경우(로딩/에러로 진입 → 회복)를 여기서 받는다.
-    ref.listen<AsyncValue<List<GroupNotification>>>(
-      notificationsProvider,
-      (_, AsyncValue<List<GroupNotification>> next) =>
-          _markReadWhenVisible(next),
+    ref.listen<AsyncValue<List<AppNotification>>>(
+      allNotificationsProvider,
+      (_, AsyncValue<List<AppNotification>> next) => _markReadWhenVisible(next),
     );
 
-    final AsyncValue<List<GroupNotification>> async =
-        ref.watch(notificationsProvider);
+    final AsyncValue<List<AppNotification>> async =
+        ref.watch(allNotificationsProvider);
     // 폴딩 규약(#13)은 그대로 두고, 에러 표시만 hasError 관찰로 얹는다.
-    final List<GroupNotification> items =
-        async.valueOrNull ?? const <GroupNotification>[];
+    final List<AppNotification> items =
+        async.valueOrNull ?? const <AppNotification>[];
     final bool hasError = async.hasError;
 
     return Scaffold(
       appBar: AppBar(
         centerTitle: true,
-        title: Text('그룹 알림', style: context.navTitleStyle),
+        title: Text('알림', style: context.navTitleStyle),
       ),
       body: SafeArea(
         top: false,
@@ -149,8 +156,25 @@ class _GroupNotificationsPageState
                       padding: const EdgeInsets.fromLTRB(20, 18, 20, 24),
                       itemCount: items.length,
                       separatorBuilder: (_, __) => const SizedBox(height: 16),
-                      itemBuilder: (BuildContext context, int i) =>
-                          _NotificationCard(item: items[i]),
+                      itemBuilder: (BuildContext context, int i) {
+                        final AppNotification item = items[i];
+                        return _NotificationCard(
+                          item: item,
+                          // 개인 만료 알림만 목적지가 있다. 딥링크·푸시와 **같은
+                          // 통로**(목적지 버스)로 보낸다 — 여기서 화면을 직접
+                          // 조작하면 어느 경로로 들어왔느냐에 따라 동작이 갈린다.
+                          onTap: item is ExpiryNotificationItem
+                              ? () {
+                                  ref
+                                          .read(pendingDestinationProvider.notifier)
+                                          .state =
+                                      GifticonHighlightDestination(
+                                          item.gifticonId);
+                                  Navigator.of(context).pop();
+                                }
+                              : null,
+                        );
+                      },
                     ),
             ),
           ],
@@ -160,11 +184,17 @@ class _GroupNotificationsPageState
   }
 }
 
-/// 알림 카드 — 유형별 원형 아이콘 + 제목/시간/본문 + 셰브론.
+/// 알림 카드 — 종류별 원형 아이콘 + 제목/시간/본문 + 셰브론.
+///
+/// [onTap]이 있으면 눌리는 카드다. 지금은 **개인 만료 알림만** 목적지가 있다 — 그룹
+/// 알림은 "어느 그룹의 무엇"까지는 알지만 열어 줄 전용 화면이 아직 없다.
 class _NotificationCard extends StatelessWidget {
-  const _NotificationCard({required this.item});
+  const _NotificationCard({required this.item, this.onTap});
 
-  final GroupNotification item;
+  final AppNotification item;
+
+  /// 카드를 눌렀을 때의 동작. null이면 표시 전용이다.
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -173,24 +203,34 @@ class _NotificationCard extends StatelessWidget {
 
     late final IconData icon;
     late final Color tint;
-    switch (item.type) {
-      case GroupNotificationType.registered:
-        icon = Icons.card_giftcard;
-        tint = scheme.primary;
-      case GroupNotificationType.expiringSoon:
-        icon = Icons.schedule;
+    // `switch`가 [AppNotification]에 대해 exhaustive라, 알림 종류가 늘면 여기서 컴파일
+    // 에러가 난다(아이콘을 빠뜨려 그 항목만 조용히 이상해지는 것을 막는다).
+    switch (item) {
+      case GroupNotificationItem(:final GroupNotification notification):
+        switch (notification.type) {
+          case GroupNotificationType.registered:
+            icon = Icons.card_giftcard;
+            tint = scheme.primary;
+          case GroupNotificationType.expiringSoon:
+            icon = Icons.schedule;
+            tint = scheme.error;
+          case GroupNotificationType.used:
+            icon = Icons.check_circle_outline;
+            tint = scheme.onSurfaceVariant;
+        }
+      case ExpiryNotificationItem():
+        // 그룹의 '만료 임박'(시계)과 다른 아이콘을 쓴다 — 같은 목록에 섞이므로
+        // 내 기프티콘 알림인지 그룹 알림인지가 한눈에 갈려야 한다.
+        icon = Icons.alarm;
         tint = scheme.error;
-      case GroupNotificationType.used:
-        icon = Icons.check_circle_outline;
-        tint = scheme.onSurfaceVariant;
     }
 
-    return Container(
+    final Widget card = Container(
       padding: const EdgeInsets.all(20),
       decoration: AppDecorations.softCard(scheme),
       child: Row(
         children: <Widget>[
-          // 유형별 원형 아이콘(연한 틴트 배경).
+          // 종류별 원형 아이콘(연한 틴트 배경).
           Container(
             width: 54,
             height: 54,
@@ -225,7 +265,7 @@ class _NotificationCard extends StatelessWidget {
                 const SizedBox(height: 6),
                 Text(
                   item.message,
-                  style: theme.textTheme.bodyMedium?.copyWith(height: 1.45),
+                  style: theme.textTheme.bodyMedium?.copyWith(height: 1.35),
                 ),
               ],
             ),
@@ -234,6 +274,13 @@ class _NotificationCard extends StatelessWidget {
           Icon(Icons.chevron_right, size: 20, color: scheme.onSurfaceVariant),
         ],
       ),
+    );
+
+    if (onTap == null) return card;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(AppRadii.card),
+      child: card,
     );
   }
 }

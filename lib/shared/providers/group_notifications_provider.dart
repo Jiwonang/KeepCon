@@ -1,4 +1,4 @@
-/// KeepCon 공유 계약 — 그룹 알림 목록·읽음·안읽음 수 provider (SSOT).
+/// KeepCon 공유 계약 — 알림 센터 provider (SSOT).
 ///
 /// share 페이지 전용이던 것을 승격했다. 알림 벨은 이제 **세 화면**(공유 탭 헤더·마이페이지·
 /// 홈 헤더)에 있고, 셋이 같은 안읽음 수를 보여야 한다. 페이지마다 세션→`watchNotifications`
@@ -6,13 +6,20 @@
 /// 처리한 결과가 다른 화면의 뱃지에 반영되지 않는다(승격 전 [myGroupsProvider]가 겪은 것과
 /// 같은 인스턴스 분기).
 ///
+/// 목록 정본은 [allNotificationsProvider]다 — 저장된 그룹 알림과 **계산으로 복원한**
+/// 개인 만료 알림을 합친다(두 출처의 성질 차이는 [AppNotification] dartdoc).
+///
 /// 소비만 한다 — 페이지 폴더에서 재선언 금지(CLAUDE.md 핵심 규약, `tool/check_ssot.sh`).
 library;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../models/app_notification.dart';
+import '../models/gifticon.dart';
 import '../models/share.dart';
 import '../models/user.dart';
+import '../notifications/expiry_notification_plan.dart';
+import 'raw_gifticons_provider.dart';
 import 'repositories.dart';
 import 'session_provider.dart';
 
@@ -50,22 +57,6 @@ final notificationsReadAtProvider = Provider<DateTime?>((ref) {
   return ref.watch(_notifReadAtByUserProvider(uid)).valueOrNull;
 });
 
-/// 안읽음 알림 개수 — 마지막 읽음 시각 이후에 생성된 알림 수.
-///
-/// 읽음 시각이 없으면(한 번도 안 읽음) 전체가 안읽음이다. 알림 화면이 **목록을 실제로
-/// 보여준 뒤**(성공 데이터 방출 후 1회 — 진입 즉시가 아니다, 계약
-/// [ShareRepository.markNotificationsRead] dartdoc 참조) 읽음 시각이 갱신돼 0으로 수렴한다.
-final unreadNotificationCountProvider = Provider<int>((ref) {
-  final List<GroupNotification> notifs =
-      ref.watch(notificationsProvider).valueOrNull ??
-          const <GroupNotification>[];
-  final DateTime? readAt = ref.watch(notificationsReadAtProvider);
-  if (readAt == null) return notifs.length;
-  return notifs
-      .where((GroupNotification n) => n.createdAt.isAfter(readAt))
-      .length;
-});
-
 /// 알림 스트림 수동 재시도 — **에러인** 원천만 invalidate해 재구독한다.
 ///
 /// 읽음 시각 스트림까지 무조건 invalidate하면 정상 동작 중인 리스너가 해제·재구독되고,
@@ -87,3 +78,54 @@ void retryNotifications(WidgetRef ref) {
     ref.invalidate(_notifReadAtByUserProvider(user.id));
   }
 }
+
+/// 알림 센터 목록 — 그룹 알림 + 개인 만료 알림을 최신순으로 합친 **정본**.
+///
+/// 두 출처의 성질 차이는 [AppNotification] dartdoc에 있다. 요약하면 그룹 알림은 저장된
+/// 문서고, 개인 만료 알림은 내 기프티콘에서 **계산해 복원**한 것이다.
+///
+/// 그룹 알림 축의 로딩/에러를 그대로 전파한다 — 파생 축은 실패할 수 없으므로(순수 계산)
+/// 목록이 못 뜨는 이유는 언제나 그룹 알림 스트림이다. 파생 축이 값을 냈다고 해서 그룹
+/// 알림의 에러를 감추면, 배너 없이 **일부만 빠진 목록**이 정상처럼 보인다.
+final allNotificationsProvider =
+    Provider<AsyncValue<List<AppNotification>>>((ref) {
+  final DateTime now = DateTime.now();
+  // 파생 축은 원천 목록만 있으면 계산된다. 값이 아직 없으면(로딩·미로그인) 빈 목록으로
+  // 두고 그룹 알림 축의 상태를 그대로 따른다.
+  final List<Gifticon> gifticons =
+      ref.watch(rawGifticonsProvider).valueOrNull ?? const <Gifticon>[];
+  final List<ExpiryNotificationItem> expiry =
+      firedExpiryNotifications(gifticons, now: now);
+
+  return ref.watch(notificationsProvider).whenData(
+    (List<GroupNotification> groupNotifs) {
+      final List<AppNotification> merged = <AppNotification>[
+        for (final GroupNotification n in groupNotifs) GroupNotificationItem(n),
+        ...expiry,
+      ];
+      // 최신순. 같은 시각이면 id로 안정 정렬한다(순서가 흔들리면 같은 데이터에도 목록이
+      // 달라 보이고, 위젯 재사용이 어긋나 스크롤이 튄다).
+      merged.sort((AppNotification a, AppNotification b) {
+        final int byTime = b.createdAt.compareTo(a.createdAt);
+        return byTime != 0 ? byTime : a.id.compareTo(b.id);
+      });
+      return merged;
+    },
+  );
+});
+
+/// 안읽음 알림 개수 — 마지막 읽음 시각 이후에 생긴 알림 수(**두 출처 합산**).
+///
+/// 파생 만료 알림의 발송 시각이 정책 상수로 결정론적이라, 저장된 그룹 알림과 **같은
+/// 타임스탬프 하나**([notificationsReadAtProvider])로 읽음/안읽음이 갈린다 — 파생 항목을
+/// 위해 별도 읽음 저장소를 두지 않아도 되는 이유다.
+final unreadNotificationCountProvider = Provider<int>((ref) {
+  final List<AppNotification> notifs =
+      ref.watch(allNotificationsProvider).valueOrNull ??
+          const <AppNotification>[];
+  final DateTime? readAt = ref.watch(notificationsReadAtProvider);
+  if (readAt == null) return notifs.length;
+  return notifs
+      .where((AppNotification n) => n.createdAt.isAfter(readAt))
+      .length;
+});
