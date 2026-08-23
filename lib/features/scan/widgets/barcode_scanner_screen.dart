@@ -289,6 +289,12 @@ const double _kScanScrimOpacity = 0.6;
 const int _kGuideTopFlex = 3;
 const int _kGuideBottomFlex = 4;
 
+/// 가이드 프레임의 가로:세로 비율.
+///
+/// 기프티콘 바코드가 가로로 길어 정사각형이 아닌 가로가 긴 프레임으로 유도한다.
+/// 프레임을 더 납작하게(가로로 길게) 하려면 값을 키운다.
+const double _kGuideAspectRatio = 16 / 10;
+
 /// 가이드 프레임이 차지할 수 있는 최대 세로 비율.
 ///
 /// [AspectRatio]는 세로 제약이 무한하면 **가로에 맞춰** 높이를 정한다(16:10이므로
@@ -442,25 +448,33 @@ class ScanGuideOverlay extends StatelessWidget {
               // 기프티콘 바코드는 가로로 길기 때문에 정사각형이 아닌
               // 가로가 긴 프레임으로 유도한다.
               //
+              // ⚠️ 좌우 여백은 [AspectRatio] **바깥**에 두어야 한다. 안쪽(자식의
+              // margin)에 두면 AspectRatio는 자기 자신만 비율에 맞추고 그 안에서
+              // 여백만큼 줄어든 테두리가 그려져, **실제로 보이는 사각형이 비율을
+              // 벗어난다** — 폭 360에서 296x225(약 13.2:10), 폭 280에서
+              // 216x175(약 12.3:10). 화면이 좁을수록 왜곡이 커진다.
+              //
               // [AspectRatio]는 maxHeight가 유한하면 높이에 맞춰 폭을 다시
-              // 계산하므로, 상한을 걸어도 16:10 비율은 그대로 유지된다.
+              // 계산하므로, 세로 상한을 걸어도 비율은 그대로 유지된다.
               Center(
-                child: ConstrainedBox(
-                  constraints: BoxConstraints(maxHeight: maxFrameHeight),
-                  child: AspectRatio(
-                    aspectRatio: 16 / 10,
-                    child: Container(
-                      margin: const EdgeInsets.symmetric(horizontal: 32),
-                      decoration: BoxDecoration(
-                        // 마스크일 때는 이 영역이 '뚫릴 자리'이므로 꽉 채운다.
-                        color: cutout ? _kMaskOpaque : null,
-                        border: cutout
-                            ? null
-                            : Border.all(
-                                color: accent,
-                                width: 3,
-                              ),
-                        borderRadius: BorderRadius.circular(AppRadii.panel),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 32),
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(maxHeight: maxFrameHeight),
+                    child: AspectRatio(
+                      aspectRatio: _kGuideAspectRatio,
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          // 마스크일 때는 이 영역이 '뚫릴 자리'이므로 꽉 채운다.
+                          color: cutout ? _kMaskOpaque : null,
+                          border: cutout
+                              ? null
+                              : Border.all(
+                                  color: accent,
+                                  width: 3,
+                                ),
+                          borderRadius: BorderRadius.circular(AppRadii.panel),
+                        ),
                       ),
                     ),
                   ),

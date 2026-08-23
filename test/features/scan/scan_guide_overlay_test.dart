@@ -107,6 +107,30 @@ void main() {
     }
   });
 
+  group('테두리 사각형이 선언한 16:10 비율을 지킨다', () {
+    // 여백을 AspectRatio 안쪽(자식의 margin)에 두면 AspectRatio는 자기 자신만
+    // 비율에 맞추고 그 안에서 여백만큼 줄어든 테두리가 그려진다 — 화면이 좁을수록
+    // 왜곡이 커진다(폭 360에서 13.2:10, 폭 280에서 12.3:10이었다).
+    for (final Size size in <Size>[
+      const Size(360, 640),
+      const Size(320, 568),
+      const Size(280, 600), // 좁을수록 왜곡이 컸던 케이스
+    ]) {
+      testWidgets('$size', (WidgetTester tester) async {
+        await pumpOverlay(tester, size: size);
+
+        // 실제로 테두리가 그려지는 상자를 잰다(AspectRatio 자신이 아니라 그 자식).
+        final Rect frame = tester.getRect(find.byType(DecoratedBox).last);
+
+        expect(
+          frame.width / frame.height,
+          closeTo(16 / 10, 0.01),
+          reason: '보이는 테두리가 16:10이어야 한다 (실제: ${frame.size})',
+        );
+      });
+    }
+  });
+
   group('레이아웃이 넘치지 않는다', () {
     // 가로 모드 두 건은 회귀 방지다 — 상한을 걸기 전에는 640x360에서 112px,
     // 800x360에서 212px 넘쳤고, 마스크·실제 두 패스에서 각각 발생했다.
