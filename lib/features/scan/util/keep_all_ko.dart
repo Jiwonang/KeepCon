@@ -1,4 +1,4 @@
-import 'package:characters/characters.dart';
+import 'package:flutter/widgets.dart';
 
 /// WORD JOINER(U+2060) — 폭 0, 앞뒤 줄바꿈을 금지하는 문자.
 /// 소스에서 눈에 보이지 않으므로 raw 문자가 아니라 이스케이프로 적는다.
@@ -34,3 +34,31 @@ String keepAllKo(String text) => text
     .split(' ')
     .map((String word) => word.characters.join(_wordJoiner))
     .join(' ');
+
+/// 어절 보호를 적용한 [Text] — **표시는 보호본, 낭독·탐색은 원문.**
+///
+/// [keepAllKo]가 심는 [_wordJoiner]는 눈에 보이지 않지만 문자열에는 남는다.
+/// 그대로 [Text]에 넣으면 그 문자열이 접근성 라벨로도 쓰여, 스크린 리더에 원문과
+/// 다른 값이 전달되고 `find.text()`·`find.bySemanticsLabel()`로도 찾지 못한다.
+/// [Text.semanticsLabel]이 정확히 이 분리를 위해 존재한다.
+///
+/// 호출부마다 `Text(keepAllKo('…'), semanticsLabel: '…')`로 적으면 **같은 문구가
+/// 두 번 등장해** 하나만 고쳐지는 순간 화면과 낭독이 갈라진다(그리고 그것을 잡아
+/// 줄 것이 없다). 이 위젯은 문구를 한 번만 받아 둘 다 만든다.
+class KeepAllText extends StatelessWidget {
+  const KeepAllText(this.data, {super.key, this.style, this.textAlign});
+
+  /// 원문. 표시할 때만 [keepAllKo]를 통과한다.
+  final String data;
+
+  final TextStyle? style;
+  final TextAlign? textAlign;
+
+  @override
+  Widget build(BuildContext context) => Text(
+        keepAllKo(data),
+        semanticsLabel: data,
+        style: style,
+        textAlign: textAlign,
+      );
+}

@@ -15,8 +15,17 @@
 /// 2. 테두리를 '선택/비선택 차이'로 계산 → 선택된 타일만 2.0px 모자람
 ///    (Flutter는 [BoxDecoration] 테두리 두께를 Container padding에 더한다)
 ///
-/// 그래서 어림을 버리고 [TextPainter]로 실측하도록 바꿨고, 이 테스트가 그
-/// 계산을 고정한다. 폭·글자 크기 어느 쪽이 바뀌어도 여기서 먼저 걸린다.
+/// 3. 아이콘 칸을 상수로 두어 확대된 이모지가 칸을 넘어 라벨을 덮음
+///    (이 건은 **예외를 던지지 않아** 넘침 어서션으로는 못 잡는다 — 칸을 직접 잰다)
+///
+/// 그래서 어림을 버리고 [TextPainter]로 실측하도록 바꿨다.
+///
+/// ⚠️ **이 파일이 덮지 못하는 것**(뮤테이션으로 확인 — 아래를 되돌려도 통과한다):
+/// - 폰트 폴백으로 라벨마다 높이가 갈리는 상황. `flutter test`는 합성 폰트를 써서
+///   폴백이 없고 여섯 라벨 실측이 전부 같아진다 — `minExtentFor`가 최댓값 루프를
+///   도는 유일한 이유를 이 환경에서는 재현할 수 없다.
+/// - `minExtentFor`의 `+ 1` 반올림 여유.
+/// - `_ResultDialog.mutedStyle`의 행간 값.
 library;
 
 import 'package:flutter/material.dart';
@@ -30,7 +39,12 @@ import 'package:keepcon/shared/theme/app_theme.dart';
 
 void main() {
   /// [width]px 화면에서 스캔 첫 화면을 띄운다.
-  Future<void> pumpScanAt(WidgetTester tester, double width) async {
+  Future<void> pumpScanAt(
+    WidgetTester tester,
+    double width, {
+    ThemeData? theme,
+    TextScaler textScaler = TextScaler.noScaling,
+  }) async {
     tester.view.devicePixelRatio = 1.0;
     tester.view.physicalSize = Size(width, 900);
     addTearDown(tester.view.resetPhysicalSize);
@@ -49,7 +63,14 @@ void main() {
     await tester.pumpWidget(
       UncontrolledProviderScope(
         container: container,
-        child: MaterialApp(theme: AppTheme.light, home: const ScanPage()),
+        child: MaterialApp(
+          theme: theme ?? AppTheme.light,
+          home: const ScanPage(),
+          builder: (BuildContext context, Widget? child) => MediaQuery(
+            data: MediaQuery.of(context).copyWith(textScaler: textScaler),
+            child: child!,
+          ),
+        ),
       ),
     );
     await tester.pumpAndSettle();
@@ -73,41 +94,70 @@ void main() {
       });
     }
 
-    testWidgets('글자를 크게 키워도 넘치지 않는다', (WidgetTester tester) async {
-      tester.view.devicePixelRatio = 1.0;
-      tester.view.physicalSize = const Size(360, 900);
-      addTearDown(tester.view.resetPhysicalSize);
-      addTearDown(tester.view.resetDevicePixelRatio);
-
-      final ProviderContainer container = ProviderContainer(
-        overrides: <Override>[
-          gifticonRepositoryProvider.overrideWithValue(
-            InMemoryGifticonRepository(),
-          ),
-          authRepositoryProvider.overrideWithValue(InMemoryAuthRepository()),
-        ],
-      );
-      addTearDown(container.dispose);
-
-      // 접근성 설정으로 글자를 키우면 라벨이 커진다 — 타일도 같이 커져야 한다.
-      await tester.pumpWidget(
-        UncontrolledProviderScope(
-          container: container,
-          child: MaterialApp(
-            theme: AppTheme.light,
-            home: const ScanPage(),
-            builder: (BuildContext context, Widget? child) => MediaQuery(
-              data: MediaQuery.of(
-                context,
-              ).copyWith(textScaler: const TextScaler.linear(1.3)),
-              child: child!,
-            ),
-          ),
+    // 라벨 높이를 **실제로 재고 있는지** 고정한다.
+    //
+    // 폭·배율만 흔드는 위 케이스들로는 이 회귀를 못 잡는다 — `flutter test`는
+    // 합성 폰트를 써서 **폰트 폴백이 일어나지 않고**, 여섯 라벨의 실측 높이가
+    // 전부 같아진다. 게다가 계수 어림값이 실측보다 커서 바닥이 오히려 넉넉해진다.
+    // 즉 minExtentFor가 루프를 도는 유일한 이유(라벨마다 높이가 다르다)를
+    // 이 환경에서는 재현할 수 없다.
+    //
+    // 대신 **테마가 지정한 행간**을 축으로 쓴다. 실측은 그것을 따라가지만 계수
+    // 어림은 못 따라가므로, 실측을 어림으로 되돌리면 여기서 바닥이 모자라 넘친다.
+    //
+    // ⚠️ 그래도 남는 것: 폰트 폴백으로 라벨마다 높이가 갈리는 상황과 `+ 1`
+    // 반올림 여유는 이 파일이 덮지 못한다. 값을 바꿔도 CI는 green이다.
+    testWidgets('라벨 행간이 큰 테마에서도 넘치지 않는다', (WidgetTester tester) async {
+      final ThemeData tall = AppTheme.light.copyWith(
+        textTheme: AppTheme.light.textTheme.copyWith(
+          bodyMedium: AppTheme.light.textTheme.bodyMedium?.copyWith(height: 3),
         ),
       );
-      await tester.pumpAndSettle();
+
+      await pumpScanAt(tester, 360, theme: tall);
 
       expect(tester.takeException(), isNull);
+    });
+
+    // 접근성 설정으로 글자를 키우면 라벨이 커진다 — 타일도 같이 커져야 한다.
+    // Android 14는 배율을 200%까지 허용하므로 2.0까지 본다.
+    for (final double scale in <double>[1.3, 2.0]) {
+      testWidgets('글자를 $scale배로 키워도 넘치지 않는다', (WidgetTester tester) async {
+        await pumpScanAt(tester, 360, textScaler: TextScaler.linear(scale));
+
+        expect(tester.takeException(), isNull);
+      });
+    }
+
+    // 카테고리 아이콘 칸도 글자 배율을 따라야 한다.
+    //
+    // 칸 안에 든 이모지는 [Icon]이 아니라 [Text]라 배율을 따라 커지는데, 칸을
+    // 상수로 고정하면 이모지가 칸을 넘어 아래 라벨을 덮는다. **이 결함은 예외를
+    // 던지지 않는다** — `SizedBox`가 tight 제약이라 렌더 객체는 자기 크기를 그대로
+    // 보고하고 이모지만 밖으로 그려진다. 그래서 위의 '넘치지 않는다' 케이스들로는
+    // 원리상 못 잡고, 칸 높이를 직접 재야 한다.
+    testWidgets('아이콘 칸이 글자 배율을 따라간다', (WidgetTester tester) async {
+      const double scale = 2.0;
+      const double emojiSize = 30; // _GroupTile._emojiSize
+
+      await pumpScanAt(
+        tester,
+        360,
+        textScaler: const TextScaler.linear(scale),
+      );
+
+      // 이모지를 감싼 가장 가까운 SizedBox = 아이콘 칸.
+      final Size box = tester.getSize(
+        find
+            .ancestor(of: find.text('☕'), matching: find.byType(SizedBox))
+            .first,
+      );
+
+      expect(
+        box.height,
+        greaterThanOrEqualTo(emojiSize * scale),
+        reason: '아이콘 칸이 확대된 이모지보다 낮다 — 이모지가 라벨을 덮는다',
+      );
     });
   });
 }

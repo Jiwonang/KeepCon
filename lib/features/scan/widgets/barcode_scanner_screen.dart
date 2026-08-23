@@ -423,8 +423,8 @@ class ScanGuideOverlay extends StatelessWidget {
           // 어절 한가운데가 갈라지는데, 가운데 정렬에서는 갈라진 조각이 줄마다
           // 다른 위치에 놓여 더 어수선해 보인다. [keepAllKo]로 끊어도 되는 자리를
           // 어절 경계로 제한한다(문구는 무변경).
-          Text(
-            keepAllKo('바코드 또는 QR 코드를 사각형 안에 맞춰주세요'),
+          KeepAllText(
+            '바코드 또는 QR 코드를 사각형 안에 맞춰주세요',
             textAlign: TextAlign.center,
             style: theme.textTheme.bodyLarge?.copyWith(
               color: onDark,
@@ -433,8 +433,8 @@ class ScanGuideOverlay extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 8),
-          Text(
-            keepAllKo('인식되지 않으면 화면을 닫고 직접 입력을 이용해 주세요.'),
+          KeepAllText(
+            '인식되지 않으면 화면을 닫고 직접 입력을 이용해 주세요.',
             textAlign: TextAlign.center,
             style: theme.textTheme.bodySmall?.copyWith(
               color: onDark.withValues(alpha: 0.75),
@@ -568,6 +568,9 @@ class _ScannerError extends StatelessWidget {
               // 보호한다(안내 문구와 같은 처방 — 가운데 정렬이라 갈라지면 더 어수선하다).
               Text(
                 reason.split('\n').map(keepAllKo).join('\n'),
+                // 원문을 낭독·탐색용으로 남긴다([KeepAllText]와 같은 이유).
+                // 이쪽은 줄 단위로 조립하므로 래퍼를 쓰지 않는다.
+                semanticsLabel: reason,
                 textAlign: TextAlign.center,
                 style: theme.textTheme.bodyLarge?.copyWith(
                   color: onDark,
@@ -576,8 +579,8 @@ class _ScannerError extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 8),
-              Text(
-                keepAllKo('직접 입력으로도 기프티콘을 등록할 수 있어요.'),
+              KeepAllText(
+                '직접 입력으로도 기프티콘을 등록할 수 있어요.',
                 textAlign: TextAlign.center,
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: onDark.withValues(alpha: 0.75),

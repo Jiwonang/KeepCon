@@ -254,8 +254,8 @@ class _ScanPageState extends ConsumerState<ScanPage> {
                   ),
                 ),
                 const SizedBox(height: 6),
-                Text(
-                  keepAllKo('바코드 이미지 분석 또는 수동 입력이 가능합니다.'),
+                KeepAllText(
+                  '바코드 이미지 분석 또는 수동 입력이 가능합니다.',
                   style: theme.textTheme.bodyMedium?.copyWith(
                     color: scheme.onSurfaceVariant,
                   ),
@@ -297,8 +297,8 @@ class _ScanPageState extends ConsumerState<ScanPage> {
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Flexible(
-                      child: Text(
-                        keepAllKo('자주 쓰는 카테고리'),
+                      child: KeepAllText(
+                        '자주 쓰는 카테고리',
                         style: theme.textTheme.titleMedium?.copyWith(
                           fontWeight: FontWeight.w700,
                         ),
@@ -306,8 +306,8 @@ class _ScanPageState extends ConsumerState<ScanPage> {
                     ),
                     const SizedBox(width: 8),
                     Flexible(
-                      child: Text(
-                        keepAllKo('미리 분류하기'),
+                      child: KeepAllText(
+                        '미리 분류하기',
                         textAlign: TextAlign.end,
                         style: theme.textTheme.bodySmall?.copyWith(
                           color: scheme.onSurfaceVariant,
@@ -547,7 +547,10 @@ class _ManualEntryCard extends StatelessWidget {
                         fontWeight: FontWeight.w700,
                       ),
                     ),
-                    Text(
+                    // :258의 부제와 같은 역할·같은 화면이다. 한쪽만 처리하면
+                    // 320~375px에서 위는 어절 경계로, 아래는 어절 한가운데로
+                    // 갈라져 같은 화면 안에서 문단 모양이 어긋난다.
+                    KeepAllText(
                       '이미지 없이 정보를 직접 작성합니다.',
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: scheme.onSurfaceVariant,
@@ -585,6 +588,7 @@ class _GroupTile extends StatelessWidget {
   // 값을 쓰게 해, 한쪽만 바뀌어 계산이 어긋나는 일을 막는다.
   static const double _padV = 20;
   static const double _iconBox = 34;
+  static const double _emojiSize = 30;
   static const double _gap = 12;
   static const double _labelSize = 15;
   static const double _selectedBorder = 2;
@@ -628,7 +632,30 @@ class _GroupTile extends StatelessWidget {
     // 끝의 1px은 반올림 여유다 — 위 계산은 필요한 높이와 **정확히** 같아져서
     // 서브픽셀 반올림 한 번이면 다시 넘친다. 1px 남는 것은 눈에 띄지 않지만
     // 모자라면 오버플로로 드러난다.
-    return _padV * 2 + _selectedBorder * 2 + _iconBox + _gap + tallestLabel + 1;
+    return _padV * 2 +
+        _selectedBorder * 2 +
+        _iconExtentFor(scaler) +
+        _gap +
+        tallestLabel +
+        1;
+  }
+
+  /// 아이콘 칸의 높이.
+  ///
+  /// 칸에 든 이모지는 [Icon]이 아니라 **[Text]라서 글자 확대 설정을 따라 커진다**
+  /// (`Icon`은 `applyTextScaling` 기본값이 false라 그대로다 — 그래서 '기타'
+  /// 타일만 멀쩡했다). 칸을 상수 [_iconBox]로 고정하면 배율이 오를 때 이모지가
+  /// 칸을 넘어 아래 라벨을 덮는다 — 2.0배에서 자연 높이 60px, [_gap] 12px을
+  /// 넘어 13px이 라벨 위로 내려온다.
+  ///
+  /// ⚠️ 이 결함은 **오버플로 예외를 던지지 않는다.** `SizedBox`가 tight 제약이라
+  /// 렌더 객체는 자기 크기를 34로 보고하고 이모지는 그냥 칸 밖에 그려진다.
+  /// 그래서 폭·배율 전수 스윕으로도 잡히지 않았다 — 눈으로 봐야 보인다.
+  ///
+  /// 확대분이 [_iconBox]를 넘을 때만 칸을 넓혀 기본 배율의 모양은 그대로 둔다.
+  static double _iconExtentFor(TextScaler scaler) {
+    final double emoji = scaler.scale(_emojiSize);
+    return emoji > _iconBox ? emoji : _iconBox;
   }
 
   @override
@@ -661,14 +688,14 @@ class _GroupTile extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               SizedBox(
-                height: _iconBox,
+                height: _iconExtentFor(MediaQuery.textScalerOf(context)),
                 child: Center(
                   child: data.icon != null
                       ? Icon(data.icon, color: fg, size: 32)
                       : Text(
                           data.emoji!,
                           style: const TextStyle(
-                            fontSize: 30,
+                            fontSize: _emojiSize,
                             height: 1,
                           ),
                         ),
@@ -858,8 +885,7 @@ class __GifticonFormScreenState extends ConsumerState<_GifticonFormScreen> {
                   // ([keepAllKo]). 좁은 폭에서 '이 / 번 기프티콘은'처럼 갈라지던 것을
                   // 막으면서, `\n`을 손으로 넣는 방식과 달리 폭이 넓어져도 어색하게
                   // 일찍 끊기지 않는다.
-                  Text(keepAllKo(
-                      '무료 플랜은 $limit개까지 보관할 수 있어, 이번 기프티콘은 저장하지 않았어요.')),
+                  KeepAllText('무료 플랜은 $limit개까지 보관할 수 있어, 이번 기프티콘은 저장하지 않았어요.'),
                   const SizedBox(height: 18),
 
                   // 해법 두 가지를 **한 문단에 몰아넣지 않는다.** 좁은 폭에서 첫
@@ -872,13 +898,13 @@ class __GifticonFormScreenState extends ConsumerState<_GifticonFormScreen> {
                   // 보안 규칙이 plan 쓰기를 막아 실제로는 되지 않는다("결제 연동 준비 중").
                   // 그것만 안내하면 사용자를 막다른 곳으로 보내는 셈이라, 지금 바로
                   // 통하는 방법을 앞에 둔다.
-                  Text(
-                    keepAllKo('다 쓴 기프티콘을 사용 완료 처리하면 자리가 납니다.'),
+                  KeepAllText(
+                    '다 쓴 기프티콘을 사용 완료 처리하면 자리가 납니다.',
                     style: mutedStyle,
                   ),
                   const SizedBox(height: 12),
-                  Text(
-                    keepAllKo('프리미엄으로 올리면 개수 제한이 없어져요.'),
+                  KeepAllText(
+                    '프리미엄으로 올리면 개수 제한이 없어져요.',
                     style: mutedStyle,
                   ),
 
@@ -898,7 +924,10 @@ class __GifticonFormScreenState extends ConsumerState<_GifticonFormScreen> {
                       // "찾아야 할 그 모양"을 그대로 보여 준다.
                       style: mutedStyle,
                       children: <InlineSpan>[
-                        TextSpan(text: keepAllKo('홈 오른쪽 위 ')),
+                        TextSpan(
+                          text: keepAllKo('홈 오른쪽 위 '),
+                          semanticsLabel: '홈 오른쪽 위 ',
+                        ),
                         WidgetSpan(
                           alignment: PlaceholderAlignment.middle,
                           child: Icon(
@@ -907,7 +936,10 @@ class __GifticonFormScreenState extends ConsumerState<_GifticonFormScreen> {
                             color: dialogScheme.onSurfaceVariant,
                           ),
                         ),
-                        TextSpan(text: keepAllKo(' › 프리미엄')),
+                        TextSpan(
+                          text: keepAllKo(' › 프리미엄'),
+                          semanticsLabel: ' › 프리미엄',
+                        ),
                       ],
                     ),
                   ),
@@ -963,7 +995,7 @@ class __GifticonFormScreenState extends ConsumerState<_GifticonFormScreen> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
-                  Text(keepAllKo('같은 바코드의 기프티콘이 이미 있어요.')),
+                  const KeepAllText('같은 바코드의 기프티콘이 이미 있어요.'),
                   const SizedBox(height: 14),
                   Container(
                     width: double.infinity,
@@ -999,7 +1031,7 @@ class __GifticonFormScreenState extends ConsumerState<_GifticonFormScreen> {
                     ),
                   ),
                   const SizedBox(height: 14),
-                  Text(keepAllKo('새로 등록하지 않았어요.'), style: mutedStyle),
+                  KeepAllText('새로 등록하지 않았어요.', style: mutedStyle),
                 ],
               ),
               actions: <Widget>[
