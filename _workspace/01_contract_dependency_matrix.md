@@ -55,7 +55,7 @@
 | `ShareRepository` | interface | `lib/shared/repositories/share_repository.dart` | 2 |
 | `ShareRepository.watchGroups(String userId)` → `Stream<List<Group>>` | method | 〃 | 2 |
 | `ShareRepository.getGroups(userId)` / `getGroupById(groupId)` | method | 〃 | 2 |
-| `ShareRepository.createGroup({name, emoji})` / `joinGroup(inviteToken)` → `Future<Group>` | method | 〃 | 2.9 |
+| `ShareRepository.createGroup({name, emoji, maxMembers})` → `Future<Group>` | method | 〃 | 3.8 |
 | `ShareRepository.leaveGroup(groupId)` / `deleteGroup(groupId)` → `Future<void>` | method | 〃 | 2 |
 | `ShareRepository.transferOwnershipAndLeave({groupId, newOwnerUserId})` → `Future<Group>` | method | 〃 | 2 |
 | `ShareRepository.setInviteOwnerOnly({groupId, ownerOnly})` → `Future<Group>` | method | 〃 | 2 |

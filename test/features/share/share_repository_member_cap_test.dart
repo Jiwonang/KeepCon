@@ -4,7 +4,9 @@
 // - Group.maxMembers(기본 Group.defaultMaxMembers, 최소 1) — 방장 포함 인원 상한.
 // - Group.isFull / remainingSlots — 참여 가능 여부 판정의 단일 진입점(모델 predicate).
 // - createGroup(maxMembers): 방장이 상한을 정한다.
-// - joinGroup: Group.isFull이면 StateError로 참여 거부(이미 멤버면 no-op이 우선).
+// - approveJoinRequest: Group.isFull이면 StateError로 **승인**을 거부한다.
+//   요청(requestToJoin)은 정원과 무관하게 접수된다 — 대기자가 자리를 선점하면
+//   방장이 정작 받고 싶은 사람을 못 넣는다.
 //
 // 행위자 기본 = InMemoryAuthRepository.defaultUser(id 'user-1').
 
@@ -138,7 +140,11 @@ void main() {
       );
       expect(joined.id, g.id);
       expect(joined.memberCount, 2);
+      // 이 파일의 주제는 모델 predicate다 — 승인이 `isFull`·`remainingSlots`를
+      // 실제로 움직이는지까지 본다(`share_repository_join_request_test`는 요청이
+      // 대기로 남는 쪽을, 여기서는 모델 값의 전이를 지킨다).
       expect(joined.isFull, isTrue); // 2/2로 이제 만석.
+      expect(joined.remainingSlots, 0);
     });
   });
 }

@@ -63,7 +63,7 @@ void main() {
     // 먼저 고정해, 정규식이 깨졌을 때 여기서 먼저 실패하게 한다.
     // 카나리아는 **전체 되쓰기를 실제로 하는** 메서드여야 한다 — 본문에 심볼이
     // 없어도 통과하는 단언들과 달리, 이건 파싱이 살아 있어야만 통과한다.
-    // (v3.2 전에는 `joinGroup`이 이 자리였다. 그 메서드가 삭제되면서 옮겼다 —
+    // (v3.8 전에는 `joinGroup`이 이 자리였다. 그 메서드가 삭제되면서 옮겼다 —
     //  카나리아가 사라지면 이 테스트가 조용히 무력해진다.)
     expect(bodies.keys, contains('approveJoinRequest'));
     expect(bodies.keys, contains('leaveGroup'));

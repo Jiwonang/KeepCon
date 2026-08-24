@@ -69,12 +69,12 @@ void main() {
       const DebugPrintErrorReporter(includeMessage: false).report(
         StateError('Invite token expired: 481923'),
         StackTrace.current,
-        context: 'JoinGroupSheet.joinGroup',
+        context: 'JoinGroupSheet.requestToJoin',
       );
 
       expect(printed.first, isNot(contains('481923')));
       // 분류에 필요한 것(라벨·종류)은 그대로 남는다.
-      expect(printed.first, contains('JoinGroupSheet.joinGroup'));
+      expect(printed.first, contains('JoinGroupSheet.requestToJoin'));
       expect(printed.first, contains('StateError'));
     });
 

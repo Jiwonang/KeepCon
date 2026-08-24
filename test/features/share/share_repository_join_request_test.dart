@@ -144,24 +144,9 @@ void main() {
       );
     });
 
-    test('만료된 초대는 joinGroup도 거부한다(기존 가드 — 처음으로 고정)', () async {
-      DateTime clockNow = DateTime.now();
-      final InMemoryShareRepository aged = InMemoryShareRepository(
-        authRepository: auth,
-        gifticonRepository: gifticons,
-        now: () => clockNow,
-      );
-      addTearDown(aged.dispose);
-
-      final Group g = await aged.createGroup(name: '우리집', emoji: '🏠');
-      clockNow = clockNow.add(Group.inviteValidity * 2);
-
-      await asGuest();
-      await expectLater(
-        aged.requestToJoin(g.inviteToken),
-        throwsA(isA<StateError>()),
-      );
-    });
+    // (삭제) 옛 `joinGroup`의 만료 가드를 고정하던 테스트. 그 메서드가 사라지면서
+    // 본문이 바로 위 '만료된 초대로는 요청할 수 없다'와 같아졌다 — 만료 가드를
+    // 제거하는 뮤테이션에 **둘이 함께 실패**하는 것으로 중복을 확인했다.
 
     test('재발급하면 만료 창이 다시 열린다', () async {
       DateTime clockNow = DateTime.now();

@@ -26,7 +26,7 @@ import 'package:keepcon/shared/repositories/share_repository.dart';
 /// 호출된 메서드만 기록하는 스텁.
 ///
 /// [noSuchMethod]로 나머지를 막아 **예상 밖 경로가 조용히 통과하지 않게** 한다 —
-/// 옛 `joinGroup`은 v3.2에서 **계약에서 삭제**됐으므로, 그 경로로 되돌아가는 회귀는
+/// 옛 `joinGroup`은 v3.8에서 **계약에서 삭제**됐으므로, 그 경로로 되돌아가는 회귀는
 /// 이제 이 스파이가 아니라 **컴파일러가** 막는다(없는 메서드는 부를 수 없다).
 class _SpyShareRepository implements ShareRepository {
   _SpyShareRepository({this.fail = false});
@@ -106,7 +106,7 @@ void main() {
 
     expect(share.requestedTokens, <String>['TOKEN123']);
     // 옛 `joinGroup` 경로로의 회귀는 계약에서 그 메서드가 사라져 컴파일이 막는다
-    // (v3.2). 여기서는 새 경로가 실제로 불리는지만 본다.
+    // (v3.8). 여기서는 새 경로가 실제로 불리는지만 본다.
   });
 
   testWidgets('요청 후 화면은 승인 대기만 알리고 그룹을 식별할 정보를 담지 않는다',

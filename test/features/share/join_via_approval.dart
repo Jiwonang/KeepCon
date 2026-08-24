@@ -1,6 +1,6 @@
 // 테스트 지원 — **승인제를 거쳐** 그룹 멤버가 되는 헬퍼.
 //
-// `joinGroup`이 사라지면서(v3.2) "다른 사람 그룹의 멤버가 된 상태"를 만드는 한 줄짜리
+// `joinGroup`이 사라지면서(v3.8) "다른 사람 그룹의 멤버가 된 상태"를 만드는 한 줄짜리
 // 수단이 없어졌다. 그 자리를 이 헬퍼가 메운다 — 그리고 **실제 경로를 그대로 탄다**:
 // 요청자가 `requestToJoin`, 방장이 `approveJoinRequest`.
 //
@@ -44,14 +44,15 @@ Future<Group> joinViaApproval(
   required String requesterPassword,
 }) async {
   final JoinRequest request = await repo.requestToJoin(inviteToken);
-
-  // 승인은 방장만 할 수 있다.
-  await auth.signIn(email: owner.email, password: owner.password);
-  final Group approved = await repo.approveJoinRequest(request.id);
-
-  // 요청자로 되돌린다 — 호출부가 이어서 그 사용자로 단언한다.
-  await auth.signIn(email: requesterEmail, password: requesterPassword);
-  return approved;
+  try {
+    // 승인은 방장만 할 수 있다.
+    await auth.signIn(email: owner.email, password: owner.password);
+    return await repo.approveJoinRequest(request.id);
+  } finally {
+    // 실패해도 요청자로 되돌린다 — 여기서 새는 세션은 뒤따르는 단언을 **방장 기준으로**
+    // 조용히 평가시킨다(정원이 찬 그룹이면 `approveJoinRequest`가 던진다).
+    await auth.signIn(email: requesterEmail, password: requesterPassword);
+  }
 }
 
 /// [email]로 새 계정을 만들고 그 사용자로 로그인한 상태로 둔다(편의 래퍼).
@@ -70,8 +71,10 @@ Future<User> signUpAs(
 /// 위반 스텁이 있었기 때문이다. `joinGroup`과 함께 그 스텁을 걷어내면서 셋업도 실제 그룹 +
 /// 실제 승인을 거치도록 바꿨다. **셋업이 거짓이면 그 위에 쌓은 단언도 거짓이다.**
 ///
-/// 방장 계정은 [name]에서 파생해 호출마다 다르다 — 고정하면 한 테스트에서 두 번 부를 때
-/// 이메일 중복으로 죽는다(지금은 그런 호출이 없지만, 다음 사람이 밟을 자리다).
+/// 방장 계정은 [name]에서 파생한다 — **이름이 다르면** 계정도 다르다. 한 테스트에서
+/// **같은 이름으로** 두 번 부르면 여전히 `AuthException(emailInUse)`로 죽으므로, 그때는
+/// 이름을 다르게 주거나 [joinViaApproval]을 직접 쓴다. 시드 그룹과 같은 이름(`'가족'`)을
+/// 쓰면 이름이 같은 그룹이 둘이 되므로 단언은 id로 한다.
 ///
 /// 호출 뒤 로그인 사용자는 **요청자(기본 사용자)** 로 돌아온다.
 Future<Group> joinHostGroup(
@@ -83,16 +86,19 @@ Future<Group> joinHostGroup(
   final String hostEmail = 'host-${name.hashCode.toUnsigned(32)}@keepcon.app';
   const String hostPassword = 'pw123456';
 
-  // 방장 계정으로 그룹을 만든다.
+  // 방장 계정으로 그룹을 만든다. `createGroup`이 던져도 세션이 호스트로 남지 않게
+  // 복귀를 finally 로 보장한다(형제 [joinViaApproval]과 같은 규약).
   await signUpAs(auth,
       email: hostEmail, displayName: '방장', password: hostPassword);
-  final Group hosted = await repo.createGroup(name: name, emoji: emoji);
-
-  // 요청자로 돌아와 요청 → 방장이 승인 → 다시 요청자.
-  await auth.signIn(
-    email: InMemoryAuthRepository.defaultUser.email,
-    password: InMemoryAuthRepository.defaultPassword,
-  );
+  final Group hosted;
+  try {
+    hosted = await repo.createGroup(name: name, emoji: emoji);
+  } finally {
+    await auth.signIn(
+      email: InMemoryAuthRepository.defaultUser.email,
+      password: InMemoryAuthRepository.defaultPassword,
+    );
+  }
   return joinViaApproval(
     repo,
     auth,
