@@ -1,10 +1,13 @@
-# KeepCon 공유 계약 의존성 매트릭스 (v1)
+# KeepCon 공유 계약 의존성 매트릭스
 
 > 단일 진실 원천(SSOT). 페이지 개발자와 QA는 이 문서를 경계면 검증의 기준으로 삼는다.
 > 이번 검증 슬라이스 범위: **scan(생산) → main(소비)**. auth는 인터페이스+mock으로 대체.
 > 계약 위치: `lib/shared/`. 이 문서와 소스가 어긋나면 소스가 아니라 **양쪽을 함께** 갱신한다.
 
-작성일: 2026-07-06 · 최종 갱신: 2026-07-31 · 계약 버전: v2.7 (세션 소비 전환 완결 — 세션 구독 정본 1개)
+작성일: 2026-07-06 · 최종 갱신: 2026-08-24 · 계약 버전: **v3.8** (`joinGroup` 삭제 — 참여는 승인제 하나뿐)
+
+> ⚠️ 이 줄은 아래 **"변경 이력" 표의 마지막 행과 반드시 함께** 갱신한다. 버전을 올리면서 이 줄을
+> 놓치면 표를 안 읽은 사람이 옛 버전을 현재 계약으로 읽는다 — 실제로 v2.7에서 11개 버전 동안 방치됐다.
 
 ---
 
@@ -59,11 +62,14 @@
 | `ShareRepository.leaveGroup(groupId)` / `deleteGroup(groupId)` → `Future<void>` | method | 〃 | 2 |
 | `ShareRepository.transferOwnershipAndLeave({groupId, newOwnerUserId})` → `Future<Group>` | method | 〃 | 2 |
 | `ShareRepository.setInviteOwnerOnly({groupId, ownerOnly})` → `Future<Group>` | method | 〃 | 2 |
+| `ShareRepository.removeMember({groupId, userId})` → `Future<Group>` (방장 전용 강퇴) | method | 〃 | — |
+| `ShareRepository.regenerateInviteToken({groupId})` → `Future<Group>` (재발급 시점 + 24시간) | method | 〃 | 2.9 |
 | `ShareRepository.watchSharedGifticons(groupId)` / `getSharedGifticons(groupId)` | method | 〃 | 2 |
 | `ShareRepository.shareGifticon({groupId, Gifticon gifticon})` → `Future<SharedGifticon>` | method | 〃 | 2 |
 | `ShareRepository.toggleReservation(id)` / `markUsed(id)` → `Future<SharedGifticon>` | method | 〃 | 2 |
 | `ShareRepository.cancelShare(id)` → `Future<void>` | method | 〃 | 2 |
 | `ShareRepository.watch/getUsageLogs(userId)` / `watch/getNotifications(userId)` | method | 〃 | 2 |
+| `ShareRepository.watchNotificationsReadAt(userId)` → `Stream<DateTime?>` / `markNotificationsRead()` → `Future<void>` | method | 〃 | — |
 | `ShareRepository.requestToJoin(inviteToken)` → `Future<JoinRequest>` | method | 〃 | 2.9 |
 | `ShareRepository.watch/getMyJoinRequests(userId)` → `List<JoinRequest>` (최신순) | method | 〃 | 2.9 |
 | `ShareRepository.watch/getPendingJoinRequests(groupId)` → `List<JoinRequest>` (오래된 순) | method | 〃 | 2.9 |
@@ -89,6 +95,10 @@
 | `nowProvider` (`Provider<DateTime>`) — **SSOT**. 날짜 파생 계산이 공유하는 단일 시각. 소비자가 각자 `DateTime.now()`를 읽으면 서로 다른 "오늘"로 판정한다. 값은 셸이 앱 복귀 시 무효화해 갱신(포그라운드 자정은 미해결). **만료·D-day 파생**은 이것만 본다. ⚠️ 상대 시각 포맷(사용 이력·공유 탭)과 초대 만료는 아직 실제 시계를 읽는다 — 문서가 아니라 코드가 지키는 범위를 적는다 | provider | `lib/shared/providers/now_provider.dart` | 3.3 |
 | `inviteOriginProvider` (`Provider<String?>`) — **SSOT**. 초대 링크의 origin. `null`이면 **이 실행에서는 링크를 만들 수 없다**(화면이 링크 대신 초대코드를 안내한다). 조립부가 `inviteOriginFor(target)`으로 주입 | provider | `lib/shared/providers/invite_link_providers.dart` | 3.1 |
 | `inviteUrlFrom({origin, inviteToken})` → `String` — `<origin>/invite/<token>` 조립(순수 함수, `parseInviteToken`과 라운드트립) / `inviteOriginFor(FirebaseTarget)` → `String?` — 백엔드별 origin 표 | function | `lib/shared/util/invite_link.dart`, `lib/shared/providers/invite_link_providers.dart` | 3.1 |
+
+> ⚠️ 버전 열의 `—`는 **계약에는 들어왔는데 아래 "변경 이력" 표에 행이 없는** 항목이다
+> (git 기준 2026-07-30 도입). 이력의 구멍이므로 추측으로 번호를 채우지 않고 그대로 드러낸다 —
+> 다음 이력 갱신 때 메운다.
 
 ### `Gifticon` 필드 계약
 
