@@ -5,6 +5,24 @@
 >
 > 작성일: 2026-07-10 · 상태: **구현 완료** (`lib/shared/` 실제 파일 생성됨) · 계약 버전: v2
 >
+> ⚠️ **이 문서는 2026-07-10 승격 시점의 스냅샷이다 — 아래 인터페이스 선언은 그때의 계약이고,
+> 지금의 계약이 아니다.** 현재 계약의 정본은 `lib/shared/`의 실제 코드이며, 그 이후 변경 이력은
+> `_workspace/01_contract_dependency_matrix.md`의 버전 표를 따른다. 이 문서를 현재 계약으로 읽지 마라.
+>
+> **규모부터 말하면**: 아래 `ShareRepository` 선언은 현재 계약과 대조했을 때 **문서에만 있는 것 1개**
+> (`joinGroup`), **현재에만 있는 것 12개**(`requestToJoin`·`approveJoinRequest`·`rejectJoinRequest`·
+> `cancelJoinRequest`·`get`/`watchMyJoinRequests`·`get`/`watchPendingJoinRequests`·`removeMember`·
+> `regenerateInviteToken`·`markNotificationsRead`·`watchNotificationsReadAt`)다. 즉 **승인제 API 전체가
+> 이 문서에 없다.** 아래 목록은 그중 눈에 띄는 몇 개일 뿐이다:
+> - `ShareRepository.joinGroup`은 **v3.8에서 삭제됐다.** 참여는 `requestToJoin` → 방장 `approveJoinRequest`
+>   승인제로 바뀌었다 — 링크 소지만으로 멤버가 되지 않는다.
+> - `InviteExpiry` enum(`oneHour`/`oneDay`/`sevenDays`/`never`)은 **v2.8에서 삭제됐다.** 만료는
+>   `Group.inviteValidity` 상수로 **24시간 고정**이다. 특히 `never`(무제한)는 유출된 링크가 영구
+>   참여 경로가 되어 **위험해서 지운 값**이다 — 되살리지 마라.
+> - `inviteCode`는 `inviteToken`으로 개명됐고(v2.9), 6자리에서 **128비트**로 올라갔다(v3.0).
+> - `Group.inviteHost`·`Group.inviteUrl`은 **v3.1에서 제거됐다.** 링크는 `inviteOriginProvider` +
+>   `inviteUrlFrom(origin:, inviteToken:)`으로 조립한다.
+>
 > ⚠️ 제약: 이 승격은 `lib/shared/`만 생성한다. `lib/features/share/`의 기존 코드(로컬 모델·스토어·
 > 페이지·테스트)는 **건드리지 않았다.** 그 리팩터(로컬 모델 제거 → 계약 소비)는 후속 단계에서
 > share-page-dev가 수행한다. 그때까지 프로토타입과 계약이 잠시 병존한다(의도된 상태).
