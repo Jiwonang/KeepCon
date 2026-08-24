@@ -56,13 +56,22 @@ abstract class ShareRepository {
     int maxMembers,
   });
 
-  /// 초대 토큰으로 그룹에 참여한다. 행위자가 멤버([MemberRole.member])로 합류한다.
-  ///
-  /// 가드: 초대 토큰에 해당하는 그룹이 없으면 [StateError]. 그룹의
-  /// [Group.inviteExpiresAt]가 지났으면([Group.isInviteExpired]) [StateError]로 거부한다.
-  /// 정원이 찼으면([Group.isFull]) [StateError]로 거부한다.
-  /// 이미 멤버면 no-op으로 현재 그룹을 반환한다(정원/만료 가드보다 우선).
-  Future<Group> joinGroup(String inviteToken);
+  // `joinGroup`은 v3.8에서 **삭제됐다.**
+  //
+  // 링크(토큰) 소지만으로 즉시 멤버가 되던 경로다. 링크는 유출되면 그대로 참여
+  // 경로가 되므로, 소지의 의미를 '참여 자격'에서 '**요청** 자격'으로 낮췄다 —
+  // [requestToJoin] → [approveJoinRequest]. 옛 메서드를 남겨 두면 같은 토큰으로
+  // 승인을 건너뛰는 우회로가 되므로 **삭제가 유일한 게이트**다
+  // (`@Deprecated`도 문서도 호출을 막지 못한다).
+  //
+  // 옛 가드들이 간 자리:
+  // - 없는 토큰·만료·중복 요청 → [requestToJoin]
+  // - 정원 → [approveJoinRequest] (대기자가 자리를 선점하지 못하게 승인 시점으로 옮겼다)
+  // - **이미 멤버 → [requestToJoin]인데 의미가 바뀌었다.** 옛 `joinGroup`은 no-op으로
+  //   현재 그룹을 반환했고 그 판정이 만료·정원보다 **우선**이었다. 지금은 [StateError]로
+  //   거부하고 **만료 검사가 먼저** 온다 — 이미 멤버라도 링크가 24시간을 넘겼으면
+  //   '만료'로 거부된다(멤버가 단톡방에 남은 자기 링크를 누르는 흔한 경로다).
+  //   이 동작 변경은 v2.9에서 들어왔고, 여기서는 대응 관계만 기록한다.
 
   /// 그룹에서 나간다.
   ///

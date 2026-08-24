@@ -153,9 +153,9 @@ service cloud.firestore {
       //    유일한 경로는 **방장의 승인 쓰기**(isGroupOwnerUpdate)이며, 요청자 본인은 groups
       //    문서에 손댈 수 없다.
       //
-      //    옛 경로 `ShareRepository.joinGroup(inviteToken)`은 비멤버가 inviteToken으로
-      //    groups를 조회하는 것부터 위 `allow read`(멤버만)에 막혀 여전히 동작하지 않는다 —
-      //    우회로가 아니다. 화면에서 걷어낼 때 구현도 함께 지운다.
+      //    옛 경로 `ShareRepository.joinGroup(inviteToken)`은 계약·양쪽 구현에서
+      //    **삭제됐다**(v3.8). 비멤버가 groups를 직접 조회해 합류하는 경로는 이제
+      //    존재하지 않는다. 아래 규칙은 그 경로가 되살아나도 막는 백스톱이다.
       allow update: if isSignedIn()
         && uid() in resource.data.memberIds
         && (isGroupOwnerUpdate() || isSelfLeave());

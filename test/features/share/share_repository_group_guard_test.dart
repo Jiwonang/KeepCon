@@ -16,6 +16,8 @@ import 'package:keepcon/shared/repositories/impl/in_memory_auth_repository.dart'
 import 'package:keepcon/shared/repositories/impl/in_memory_gifticon_repository.dart';
 import 'package:keepcon/shared/repositories/impl/in_memory_share_repository.dart';
 
+import 'join_via_approval.dart';
+
 void main() {
   late InMemoryAuthRepository auth;
   late InMemoryGifticonRepository gifticons;
@@ -51,7 +53,7 @@ void main() {
       expect(await repo.getGroupById(mine.id), isNull);
 
       // 초대로 참여한 그룹 → 방장은 u_host, 나는 멤버. 삭제 불가.
-      final Group joined = await repo.joinGroup('111111');
+      final Group joined = await joinHostGroup(repo, auth, '가족');
       expect(joined.isOwnedBy(me), isFalse);
       await expectLater(repo.deleteGroup(joined.id), throwsStateError);
       expect(await repo.getGroupById(joined.id), isNotNull);
@@ -60,7 +62,7 @@ void main() {
 
   group('ShareRepository.leaveGroup 가드', () {
     test('일반 멤버는 나가기 성공(내 그룹에서 빠짐)', () async {
-      final Group joined = await repo.joinGroup('222222');
+      final Group joined = await joinHostGroup(repo, auth, '동아리');
       await expectLater(
           repo.deleteGroup(joined.id), throwsStateError); // 멤버는 삭제 불가
       await repo.leaveGroup(joined.id);
@@ -111,7 +113,7 @@ void main() {
 
   group('ShareRepository.transferOwnershipAndLeave 가드', () {
     test('방장이 아니면 이전 불가', () async {
-      final Group joined = await repo.joinGroup('333333');
+      final Group joined = await joinHostGroup(repo, auth, '모임');
       expect(joined.isOwnedBy(me), isFalse);
       await expectLater(
         repo.transferOwnershipAndLeave(groupId: joined.id, newOwnerUserId: me),

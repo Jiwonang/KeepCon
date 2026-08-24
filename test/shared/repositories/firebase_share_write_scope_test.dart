@@ -61,10 +61,14 @@ void main() {
   test('메서드 경계를 실제로 찾아낸다(테스트가 조용히 무력해지지 않게)', () {
     // 아래 단언들은 "본문에 심볼이 없다"로도 통과할 수 있다. 경계 파싱이 살아 있는지를
     // 먼저 고정해, 정규식이 깨졌을 때 여기서 먼저 실패하게 한다.
-    expect(bodies.keys, contains('joinGroup'));
+    // 카나리아는 **전체 되쓰기를 실제로 하는** 메서드여야 한다 — 본문에 심볼이
+    // 없어도 통과하는 단언들과 달리, 이건 파싱이 살아 있어야만 통과한다.
+    // (v3.8 전에는 `joinGroup`이 이 자리였다. 그 메서드가 삭제되면서 옮겼다 —
+    //  카나리아가 사라지면 이 테스트가 조용히 무력해진다.)
+    expect(bodies.keys, contains('approveJoinRequest'));
     expect(bodies.keys, contains('leaveGroup'));
     expect(bodies.keys, contains('deleteGroup'));
-    expect(bodies['joinGroup'], contains('_groupToDoc('));
+    expect(bodies['approveJoinRequest'], contains('_groupToDoc('));
   });
 
   test('문서 전체를 되쓰는 트랜잭션은 전체 되쓰기 매퍼를 쓴다', () {

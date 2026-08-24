@@ -163,13 +163,16 @@ class Group {
   ///
   /// 코드가 발급되는 시점(그룹 생성 / `ShareRepository.regenerateInviteToken`)에
   /// `발급 시각 + [inviteValidity]`로 정해지며, 이 시각을 지나면
-  /// `ShareRepository.joinGroup`이 [StateError]로 참여를 거부한다([isInviteExpired] 참조).
+  /// `ShareRepository.requestToJoin`이 [StateError]로 **요청 자체를** 거부한다
+  /// ([isInviteExpired] 참조).
   final DateTime inviteExpiresAt;
 
   /// 그룹 인원 상한(방장 포함). 기본 [defaultMaxMembers]. 생성 시 방장이 정한다.
   ///
-  /// `joinGroup`은 [isFull]이면 참여를 거부한다([StateError]). 이 값보다 멤버가 많아지는
-  /// 전이는 만들어지지 않는다(참여 가드가 유일한 증가 경로).
+  /// 정원 검사는 **승인 시점**이다 — `ShareRepository.approveJoinRequest`가 [isFull]이면
+  /// [StateError]로 거부한다. 요청은 정원과 무관하게 접수된다(대기자가 자리를 선점하면
+  /// 방장이 정작 받고 싶은 사람을 못 넣는다). 이 값보다 멤버가 많아지는 전이는
+  /// 만들어지지 않는다(승인이 유일한 증가 경로).
   final int maxMembers;
 
   // 초대 URL은 여기서 만들지 않는다.
