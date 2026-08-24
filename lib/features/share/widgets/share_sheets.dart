@@ -201,7 +201,8 @@ class _CreateGroupSheetState extends ConsumerState<_CreateGroupSheet> {
   }
 }
 
-/// 그룹 참여 바텀시트 — 초대코드 입력. 참여 시 [ShareRepository]에 반영한다.
+/// 그룹 참여 **요청** 바텀시트 — 초대코드 입력. [ShareRepository.requestToJoin]으로
+/// **요청만** 보낸다 — 방장이 승인하기 전까지 멤버가 아니다(v3.8에서 즉시 합류 경로 삭제).
 ///
 /// [initialToken]가 있으면(초대 딥링크 진입) 코드 입력란을 미리 채운다.
 Future<void> showJoinGroupSheet(BuildContext context, {String? initialToken}) {

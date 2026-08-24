@@ -9,11 +9,13 @@
 > 지금의 계약이 아니다.** 현재 계약의 정본은 `lib/shared/`의 실제 코드이며, 그 이후 변경 이력은
 > `_workspace/01_contract_dependency_matrix.md`의 버전 표를 따른다. 이 문서를 현재 계약으로 읽지 마라.
 >
-> **규모부터 말하면**: 아래 `ShareRepository` 선언은 현재 계약과 대조했을 때 **문서에만 있는 것 1개**
-> (`joinGroup`), **현재에만 있는 것 12개**(`requestToJoin`·`approveJoinRequest`·`rejectJoinRequest`·
-> `cancelJoinRequest`·`get`/`watchMyJoinRequests`·`get`/`watchPendingJoinRequests`·`removeMember`·
-> `regenerateInviteToken`·`markNotificationsRead`·`watchNotificationsReadAt`)다. 즉 **승인제 API 전체가
-> 이 문서에 없다.** 아래 목록은 그중 눈에 띄는 몇 개일 뿐이다:
+> **규모부터 말하면**: 아래 `ShareRepository` 선언에는 **승인제 API가 통째로 없다**
+> (`requestToJoin`·`approveJoinRequest`·`rejectJoinRequest`·`cancelJoinRequest`와 그 조회 메서드들).
+> 반대로 여기 선언된 `joinGroup`은 현재 계약에 없다. 멤버·초대·알림 축에도 이 문서 뒤에 추가된 것이
+> 있다(`removeMember`·`regenerateInviteToken`·`markNotificationsRead`·`watchNotificationsReadAt`).
+> **현재 목록의 정본은 `lib/shared/repositories/share_repository.dart`이며, 이 안내는 개수를 세지 않는다**
+> — 세면 다음 계약 변경에 조용히 틀려진다(이 문서가 그렇게 틀렸다). 아래는 이 문서를 읽다 특히
+> 틀리기 쉬운 지점들이다:
 > - `ShareRepository.joinGroup`은 **v3.8에서 삭제됐다.** 참여는 `requestToJoin` → 방장 `approveJoinRequest`
 >   승인제로 바뀌었다 — 링크 소지만으로 멤버가 되지 않는다.
 > - `InviteExpiry` enum(`oneHour`/`oneDay`/`sevenDays`/`never`)은 **v2.8에서 삭제됐다.** 만료는
