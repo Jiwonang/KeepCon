@@ -14,6 +14,8 @@ import 'package:keepcon/shared/repositories/impl/in_memory_auth_repository.dart'
 import 'package:keepcon/shared/repositories/impl/in_memory_gifticon_repository.dart';
 import 'package:keepcon/shared/repositories/impl/in_memory_share_repository.dart';
 
+import 'join_via_approval.dart';
+
 void main() {
   late InMemoryAuthRepository auth;
   late InMemoryGifticonRepository gifticons;
@@ -87,17 +89,24 @@ void main() {
     final String newCode = updated.inviteToken;
     expect(newCode, isNot(oldCode));
 
-    // 다른 사용자로 전환해 새 코드로 실제 그룹에 합류.
-    await auth.signUp(
-      email: 'newbie@keepcon.app',
-      password: 'pw123456',
-      displayName: '뉴비',
+    // 다른 사용자로 전환해 새 코드로 요청 → 방장 승인 → 실제 합류.
+    await signUpAs(auth, email: 'newbie@keepcon.app', displayName: '뉴비');
+    final Group joined = await joinViaApproval(
+      repo,
+      auth,
+      inviteToken: newCode,
+      owner: OwnerCredentials(
+        email: InMemoryAuthRepository.defaultUser.email,
+        password: InMemoryAuthRepository.defaultPassword,
+      ),
+      requesterEmail: 'newbie@keepcon.app',
+      requesterPassword: 'pw123456',
     );
-    final Group joined = await repo.joinGroup(newCode);
     expect(joined.id, g.id);
-    // 옛 코드로는 이 그룹에 합류되지 않는다(옛 코드는 더 이상 이 그룹을 가리키지 않음).
-    // 미발견 코드에 대한 joinGroup의 계약(StateError)·in-memory 데모 fallback 정리는
-    // 별도 후속 작업에서 다룬다.
     expect((await repo.getGroupById(g.id))!.inviteToken, newCode);
+
+    // 옛 코드는 더 이상 이 그룹을 가리키지 않는다 — 이제 계약대로 거부된다
+    // (옛 `joinGroup`은 없는 토큰에 가짜 그룹을 만들어 성공한 것처럼 보였다).
+    await expectLater(repo.requestToJoin(oldCode), throwsStateError);
   });
 }

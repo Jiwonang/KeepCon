@@ -158,7 +158,7 @@ void main() {
 
       await asGuest();
       await expectLater(
-        aged.joinGroup(g.inviteToken),
+        aged.requestToJoin(g.inviteToken),
         throwsA(isA<StateError>()),
       );
     });

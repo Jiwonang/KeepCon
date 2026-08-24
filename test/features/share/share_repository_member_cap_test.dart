@@ -11,9 +11,12 @@
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:keepcon/shared/models/group.dart';
+import 'package:keepcon/shared/models/join_request.dart';
 import 'package:keepcon/shared/repositories/impl/in_memory_auth_repository.dart';
 import 'package:keepcon/shared/repositories/impl/in_memory_gifticon_repository.dart';
 import 'package:keepcon/shared/repositories/impl/in_memory_share_repository.dart';
+
+import 'join_via_approval.dart';
 
 void main() {
   late InMemoryAuthRepository auth;
@@ -95,36 +98,44 @@ void main() {
     });
   });
 
-  group('joinGroup 정원 가드', () {
-    test('정원이 찬 그룹에 새 사용자가 참여하면 StateError', () async {
+  group('정원 가드 (승인 시점)', () {
+    // 정원은 **승인 시점**에 검사된다(v2.9 계약) — 대기자가 자리를 선점하면 방장이
+    // 정작 받고 싶은 사람을 못 넣기 때문이다. 그래서 요청 자체는 정원과 무관하게 접수되고,
+    // 거부는 방장이 승인을 누를 때 일어난다.
+    test('정원이 찬 그룹은 요청은 받되 승인에서 거부한다', () async {
       // user-1이 정원 1(방장뿐이라 즉시 만석)인 그룹을 만든다.
       final Group full =
           await repo.createGroup(name: '만석', emoji: '⛔', maxMembers: 1);
       expect(full.isFull, isTrue);
 
-      // 다른 사용자로 전환해 같은 코드로 참여 시도 → 정원 초과로 거부.
-      await auth.signUp(
-        email: 'other@keepcon.app',
-        password: 'pw123456',
-        displayName: '다른이',
-      );
-      await expectLater(
-        repo.joinGroup(full.inviteToken),
-        throwsStateError,
-      );
+      // 다른 사용자로 전환해 요청 — **요청은 성공한다**(자리를 차지하지 않는다).
+      await signUpAs(auth, email: 'other@keepcon.app', displayName: '다른이');
+      final JoinRequest req = await repo.requestToJoin(full.inviteToken);
+      expect(req.status, JoinRequestStatus.pending);
+
+      // 방장으로 돌아가 승인 → 정원 초과로 거부.
+      await auth.signIn(
+          email: InMemoryAuthRepository.defaultUser.email,
+          password: InMemoryAuthRepository.defaultPassword);
+      await expectLater(repo.approveJoinRequest(req.id), throwsStateError);
     });
 
-    test('여유가 있으면 새 사용자가 정상 참여', () async {
+    test('여유가 있으면 승인으로 정상 합류', () async {
       final Group g =
           await repo.createGroup(name: '여유', emoji: '✅', maxMembers: 2);
-      final String code = g.inviteToken;
 
-      await auth.signUp(
-        email: 'friend@keepcon.app',
-        password: 'pw123456',
-        displayName: '친구',
+      await signUpAs(auth, email: 'friend@keepcon.app', displayName: '친구');
+      final Group joined = await joinViaApproval(
+        repo,
+        auth,
+        inviteToken: g.inviteToken,
+        owner: OwnerCredentials(
+          email: InMemoryAuthRepository.defaultUser.email,
+          password: InMemoryAuthRepository.defaultPassword,
+        ),
+        requesterEmail: 'friend@keepcon.app',
+        requesterPassword: 'pw123456',
       );
-      final Group joined = await repo.joinGroup(code);
       expect(joined.id, g.id);
       expect(joined.memberCount, 2);
       expect(joined.isFull, isTrue); // 2/2로 이제 만석.

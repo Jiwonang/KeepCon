@@ -18,7 +18,6 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:keepcon/features/share/widgets/share_sheets.dart';
 import 'package:keepcon/shared/diagnostics/error_reporter.dart';
-import 'package:keepcon/shared/models/group.dart';
 import 'package:keepcon/shared/models/join_request.dart';
 import 'package:keepcon/shared/providers/error_reporter_provider.dart';
 import 'package:keepcon/shared/providers/repositories.dart';
@@ -27,13 +26,13 @@ import 'package:keepcon/shared/repositories/share_repository.dart';
 /// 호출된 메서드만 기록하는 스텁.
 ///
 /// [noSuchMethod]로 나머지를 막아 **예상 밖 경로가 조용히 통과하지 않게** 한다 —
-/// 특히 `joinGroup`이 다시 불리면 여기서 즉시 드러난다.
+/// 옛 `joinGroup`은 v3.2에서 **계약에서 삭제**됐으므로, 그 경로로 되돌아가는 회귀는
+/// 이제 이 스파이가 아니라 **컴파일러가** 막는다(없는 메서드는 부를 수 없다).
 class _SpyShareRepository implements ShareRepository {
   _SpyShareRepository({this.fail = false});
 
   final bool fail;
   final List<String> requestedTokens = <String>[];
-  final List<String> joinedTokens = <String>[];
 
   @override
   Future<JoinRequest> requestToJoin(String inviteToken) async {
@@ -48,12 +47,6 @@ class _SpyShareRepository implements ShareRepository {
       requestedAt: DateTime(2026, 1, 1),
       status: JoinRequestStatus.pending,
     );
-  }
-
-  @override
-  Future<Group> joinGroup(String inviteToken) async {
-    joinedTokens.add(inviteToken);
-    throw StateError('이 경로는 더 이상 쓰이지 않아야 한다');
   }
 
   @override
@@ -102,7 +95,7 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  testWidgets('링크로 열린 시트는 joinGroup이 아니라 requestToJoin을 부른다',
+  testWidgets('링크로 열린 시트는 requestToJoin을 부른다(즉시 합류가 아니다)',
       (WidgetTester tester) async {
     final _SpyShareRepository share = _SpyShareRepository();
     final _SpyErrorReporter reporter = _SpyErrorReporter();
@@ -112,8 +105,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(share.requestedTokens, <String>['TOKEN123']);
-    // 옛 경로가 남아 있으면 승인제가 우회된다 — 가장 중요한 단언.
-    expect(share.joinedTokens, isEmpty);
+    // 옛 `joinGroup` 경로로의 회귀는 계약에서 그 메서드가 사라져 컴파일이 막는다
+    // (v3.2). 여기서는 새 경로가 실제로 불리는지만 본다.
   });
 
   testWidgets('요청 후 화면은 승인 대기만 알리고 그룹을 식별할 정보를 담지 않는다',

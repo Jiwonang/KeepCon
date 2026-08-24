@@ -15,6 +15,8 @@ import 'package:keepcon/shared/repositories/impl/in_memory_auth_repository.dart'
 import 'package:keepcon/shared/repositories/impl/in_memory_gifticon_repository.dart';
 import 'package:keepcon/shared/repositories/impl/in_memory_share_repository.dart';
 
+import 'join_via_approval.dart';
+
 void main() {
   late InMemoryAuthRepository auth;
   late InMemoryGifticonRepository gifticons;
@@ -55,7 +57,7 @@ void main() {
       expect(friends.canInvite(me), isFalse);
 
       // 참여 그룹(기본 정책 off)에서 나는 멤버 → 초대 가능.
-      final Group joined = await repo.joinGroup('111111');
+      final Group joined = await joinHostGroup(repo, auth, '동네모임');
       expect(joined.inviteOwnerOnly, isFalse);
       expect(joined.canInvite(me), isTrue);
     });
@@ -75,7 +77,7 @@ void main() {
       expect((await repo.getGroupById(mine.id))!.inviteOwnerOnly, isTrue);
 
       // 참여 그룹에서 나는 멤버(방장 아님) → 정책 변경 거부, 값 유지.
-      final Group joined = await repo.joinGroup('222222');
+      final Group joined = await joinHostGroup(repo, auth, '스터디');
       final bool before = joined.inviteOwnerOnly;
       await expectLater(
         repo.setInviteOwnerOnly(groupId: joined.id, ownerOnly: true),
@@ -189,19 +191,21 @@ void main() {
     });
   });
 
-  group('joinGroup 코드 조회 (P1)', () {
-    test('저장된 그룹 코드로 참여 — 이미 멤버면 해당 그룹을 반환(가짜 그룹 생성 안 함)', () async {
-      // 시드 가족 그룹(코드 482913)에 나는 이미 방장. 코드 조회가 우선하므로 그 그룹을 그대로 반환.
-      final Group joined = await repo.joinGroup('482913');
-      expect(joined.id, 'g_family');
-      expect(joined.isMember(me), isTrue);
+  group('requestToJoin 토큰 조회 (옛 joinGroup 자리)', () {
+    // 옛 `joinGroup`은 **없는 토큰에 가짜 그룹을 만들어** 합류시켰고, 그 버그를 이 자리의
+    // 테스트가 정상 동작으로 단언하고 있었다("미발견 코드는 데모용 가짜 그룹으로 합류").
+    // `joinGroup`을 지우면서 계약대로 다시 쓴다 — 없는 토큰은 거부다.
+    test('없는 토큰은 StateError — 오타가 성공한 참여처럼 보이지 않는다', () async {
+      await expectLater(repo.requestToJoin('999999'), throwsStateError);
     });
 
-    test('미발견 코드는 데모용 가짜 그룹으로 합류(in-memory 스텁)', () async {
-      final Group joined = await repo.joinGroup('999999');
-      expect(joined.id, isNot('g_family'));
-      expect(joined.inviteToken, '999999');
-      expect(joined.isMember(me), isTrue);
+    test('이미 멤버인 그룹의 토큰이면 StateError', () async {
+      // 시드 가족 그룹(코드 482913)에 나는 이미 방장이다. 자기 그룹에 요청할 이유가 없고,
+      // 허용하면 방장의 대기 목록에 자기 자신이 뜬다.
+      final Group family = (await repo.getGroupById('g_family'))!;
+      expect(family.inviteToken, '482913');
+      expect(family.isMember(me), isTrue);
+      await expectLater(repo.requestToJoin('482913'), throwsStateError);
     });
   });
 }
