@@ -148,7 +148,11 @@ gh pr view <번호> --json comments,reviews --jq '[.comments[], .reviews[]] | ma
   sub=$(mktemp); cre=$(mktemp); upd=$(mktemp); raw=$(mktemp)
   trap 'rm -f "$sub" "$cre" "$upd" "$raw"' EXIT   # 중간 실패로 빠져나가도 남기지 않는다
   for n in $nums; do
-    gh api --paginate "repos/Jiwonang/KeepCon/pulls/$n/reviews" --jq '.[] | select(.user.login=="coderabbitai[bot]") | select(.submitted_at != null) | .submitted_at' >> "$sub" || { echo "PR #$n 조회 실패 — 부분 결과로 계산하면 창을 이르게 잡는다. 트리거하지 마라"; exit 1; }
+    # ⚠️ 본문이 빈 리뷰 객체가 존재한다(3b 절 참조) — 슬롯을 실제로 쓴 리뷰가 아닐 수
+    #    있는데도 `submitted_at`이 찍혀 있어, 거르지 않으면 그 시각이 "마지막 리뷰"가
+    #    되어 창을 실제보다 늦게(때로는 몇 시간) 잡는다. 3b(아래 3b 절)와 같은 술어이므로
+    #    한쪽만 고치면 두 계산이 갈린다 — 함께 거른다.
+    gh api --paginate "repos/Jiwonang/KeepCon/pulls/$n/reviews" --jq '.[] | select(.user.login=="coderabbitai[bot]") | select(.submitted_at != null) | select((.body|length) > 0) | .submitted_at' >> "$sub" || { echo "PR #$n 조회 실패 — 부분 결과로 계산하면 창을 이르게 잡는다. 트리거하지 마라"; exit 1; }
     # ⚠️ `reviews`만 보면 안 된다 — 3단계가 이미 경고하듯 리뷰 본문은 **일반 코멘트로도** 온다.
     #    2026-08-20 실측: #105의 마지막 리뷰가 comments에 10:06:26Z로 실렸는데 reviews에는
     #    07:41:38Z뿐이라, 이 스캔이 창을 **54분 이르게** 잡았다.
@@ -200,63 +204,157 @@ gh pr view <번호> --json comments,reviews --jq '[.comments[], .reviews[]] | ma
 
 ### 3b. 리뷰가 지금 head를 봤는지 확인 (필수)
 
-`REVIEWED`는 "언젠가 리뷰됐다"는 뜻일 뿐이다. **CodeRabbit이 리뷰한 커밋과 현재 head를 비교한다:**
+`REVIEWED`는 "언젠가 리뷰됐다"는 뜻일 뿐이다. **CodeRabbit이 리뷰한 커밋과 현재 head를 비교한다.**
+
+⚠️ **한쪽 API만 조회하고 끝내지 마라 — 판정이 실리는 자리가 갈린다.** 2026-08-24
+실측(14건):
+
+- `reviews`가 **0건**인 것은 #112·#113·#114·#115 넷. 이 중 #112·#114·#115는 지적이
+  없어 **요약 코멘트를 계속 수정(edit)**해 마커 블록에 `No actionable comments were
+  generated`를 채웠다. **#113은 다르다** — 마커는 있지만 판정 문구가 본문 어디에도
+  없고(전수 검색 0건) `reviews`도 0건이다. §3 판정도 `RATE_LIMITED`다 — **이 PR은
+  리뷰가 한 번도 안 됐다.** 그런데도 마커 블록의 `between <base> and <head>` 범위는
+  head와 정확히 일치한다(`77ac5668`) — **sha 일치가 리뷰 완료를 증명하지 않는다는
+  살아 있는 증거**다. 이 사실은 아래 판정 규칙에서 다시 쓴다.
+- 마커 코멘트가 **아예 없고** `reviews`에만 결과가 있는 것은 #93·#95·#98·#101·#104·
+  #110·#111 일곱 건 — 전부 지적을 낸 리뷰였다.
+- **양쪽에 다 있는 것**도 있다: #92·#105는 마커에 `No actionable comments were
+  generated`가, `reviews`에는 더 **이른** 지적 리뷰가 실렸다(#105는 이전에 "0건"으로
+  잘못 기록됐다 — 실제로는 1건). #106도 마커가 있다.
+
+⚠️ **마커 경로는 흔치 않다 — 스캔한 PR 중 마커가 있는 것은 소수다**(#88·#90·#92·#105·
+#106·#107·#112·#113·#114·#115에서 확인; 지적을 낸 리뷰가 마지막 패스였던 PR에는 마커가
+없었다). "지적이 있으면 마커를 안 만든다"로 단정하지도 마라 — #106의 마커 sha는 그 시점
+`reviews` 최신값보다 더 나중 커밋이라, 마커의 커밋 범위가 지적 여부와 무관하게 갱신되는
+경우가 실재한다. 확실한 것은 **마커에 범위만 있고 판정 문구가 없는 상태가 실재하며**
+(리뷰가 진행 중이었거나 — #106, 한 번도 안 됐거나 — #113), 그때는 **마커의 sha 단독이
+증거가 아니라는 것**이다.
+
+**어느 한쪽만 보면 반드시 반대쪽 절반에서 진다.** 그러니 **둘 다 조회하고, 판정 문구를
+동반한 증거가 head를 가리키는 쪽이 하나라도 있으면 `CURRENT`로 판정한다**(sha만 같은 것은
+증거가 아니다 — 아래 #113·#106이 실증):
 
 ```bash
-# ⚠️ `--paginate`는 **페이지마다 `--jq`를 따로 적용**한다 — `[...] | last`로 쓰면 페이지별로
-#    계산돼 여러 줄이 나온다. 배열로 모으지 말고 **스트리밍한 뒤 `tail -1`** 로 집는다.
-#    (외부 `jq -s`로 페이지를 합치는 방법도 있지만 **이 환경에는 독립 `jq`가 없다** —
-#     `gh --jq`만 쓸 수 있다. 아래 형태는 그 제약 안에서 같은 결과를 낸다.)
-#
-# ⚠️ `PENDING` 리뷰는 `submitted_at`이 없지만 `commit_id`는 있다 — 거르지 않으면 아직
-#    제출되지 않은 리뷰의 커밋을 `CURRENT` 근거로 쓴다. 창 계산 쪽은 더 나쁘다:
-#    `null`이 ISO 문자열보다 사전순으로 커서 `sort | tail -1`이 그걸 집고 계산이 죽는다.
-# ⚠️ 조회 실패를 `NO_REVIEW`로 읽지 마라. 파이프라인 종료 코드는 `tail`의 0이고,
-#    `gh api --jq`는 HTTP 오류 **본문을 stdout에** 쓴다. 가드가 없으면 "명령이 깨졌다"가
-#    "봇이 안 돌았다"로 번역되어 시간당 1건짜리 슬롯을 태운다.
-if sha=$(set -o pipefail
-         gh api --paginate repos/Jiwonang/KeepCon/pulls/<번호>/reviews \
-           --jq '.[] | select(.user.login=="coderabbitai[bot]") | select(.submitted_at != null) | .commit_id' | tail -1)
-then echo "${sha:-NO_REVIEW}"
-else echo "조회 실패 — 이 실행으로는 판정 불가. NO_REVIEW로 읽지 마라(재트리거는 슬롯을 버린다)"
+# --- 1) comments의 요약 코멘트(recent_review 마커) ---
+# ⚠️ `--paginate` 없으면 첫 30건만 본다 — 코멘트가 쌓인 PR에서 **최신 리뷰를 놓친다.**
+# ⚠️ `recent_review_start`~`recent_review_end` 마커로 좁혀서 판정 문구·SHA를 뽑는다.
+#    이 코멘트는 walkthrough(변경 요약)까지 한 몸에 담고 있고, walkthrough는 리뷰
+#    트리거와 무관하게 항상 채워진다 — 마커 밖 텍스트로 판정하면 "리뷰 안 했는데도
+#    코멘트가 있다"를 리뷰로 오판할 여지가 남는다. `between …` 커밋 범위도 리뷰가
+#    끝나기 전 `Currently processing new changes in this PR` 안내에 실릴 수 있으니
+#    범위만 보고 판정하지 않는다(2026-08-20 #106에서 그렇게 오판했다).
+# ⚠️ 마커 코멘트가 없거나 판정 문구가 NONE인 것은 실패가 아니다 — 지적을 낸 리뷰는
+#    이 코멘트를 아예 안 만들 수도 있고(위 실측 참조), 만들어도 판정 문구 없이 범위만
+#    담을 수 있다(#113 — 리뷰가 안 됐는데도 sha는 head와 같다). verdict가 NONE이면
+#    sha가 뭐든 증거로 세지 않는다. 여기서 NONE이 나와도 계속 진행해 2)를 반드시 확인한다.
+# ⚠️ 시간으로 필터링하지 마라 — `created_at`도 `updated_at`도 아니고 **현재 본문**을
+#    읽는다. CodeRabbit은 이 코멘트를 새로 달지 않고 계속 고쳐 쓴다: #114(코멘트 id
+#    5389573222)는 01:07:58 생성 → 02:17:10 수정, #115(id 5390718611)는 04:25:58
+#    생성 → 04:30:12 수정이었다. **트리거 이후 새로 생긴 코멘트만 찾는 즉흥 폴링**
+#    (`select(.created_at > 트리거시각)`)은 이 편집을 영원히 못 본다 — 2026-08-24에
+#    정확히 이 방식으로 정상 완료된 리뷰를 "빈 응답"으로 오판했다. 이 스킬 밖에서
+#    직접 짠 감시 스크립트로 대신 판정하지 말고, 아래 명령을 그대로 실행해 현재
+#    상태를 읽어라.
+# ⚠️ `set -o pipefail` 없이 `if line=$(cmd | tail -1); then`을 쓰지 마라. 파이프라인
+#    종료 코드는 마지막 명령(`tail`)의 것이라, `gh api`가 404·인증 만료·rate limit으로
+#    실패해도 `tail -1`은 오류 JSON을 그대로 통과시켜 종료 코드 0을 낸다 — `then`
+#    분기가 실행되고 아래 python이 `json.loads(...)['body']`에서 **`KeyError`로
+#    죽는다**(직접 재현해 확인). `[ -z "$line" ]` 가드도 함께 둔다 — 매칭 코멘트가
+#    아예 없을 때 `line`이 빈 문자열이라 `json.loads("")`가 **`JSONDecodeError`로
+#    죽는다**(이것도 재현 확인).
+if line=$(set -o pipefail
+          gh api --paginate repos/Jiwonang/KeepCon/issues/<번호>/comments \
+             --jq '.[] | select(.user.login=="coderabbitai[bot]")
+                   | select(.body | test("recent_review_start"))
+                   | {body}' \
+           | tail -1)
+then
+  if [ -z "$line" ]; then
+    echo "comments-marker verdict: NONE"
+    echo "comments-marker sha:     NONE"
+  else
+    printf '%s' "$line" | python -c "
+import sys, json, re
+body = json.loads(sys.stdin.read())['body']
+m = re.search(r'<!-- recent_review_start -->(.*?)<!-- recent_review_end -->', body, re.S)
+block = m.group(1) if m else ''
+verdict = re.search(r'Actionable comments posted: \d+|No actionable comments were generated', block)
+sha = re.findall(r'between [0-9a-f]{40} and ([0-9a-f]{40})', block)
+print('comments-marker verdict:', verdict.group(0) if verdict else 'NONE')
+print('comments-marker sha:    ', sha[-1] if sha else 'NONE')
+"
+  fi
+else
+  echo "comments 조회 실패 — 판정 불가(빈 결과와 구분하라). NO_REVIEW로 읽지 마라(재트리거는 슬롯을 버린다)"
 fi
-gh pr view <번호> --json headRefOid --jq .headRefOid
+
+# --- 2) reviews 객체 (comments가 NONE이어도 반드시 실행한다) ---
+# PENDING 리뷰는 submitted_at이 없지만 commit_id는 있다 — 거르지 않으면 아직 제출되지
+# 않은 리뷰의 커밋을 CURRENT 근거로 쓴다. 로그인 이름은 3단계(`coderabbitai`)와 달리
+# 여기서는 `coderabbitai[bot]`이다 — REST와 GraphQL이 봇 계정을 다르게 표기한다.
+# ⚠️ 본문이 **빈** 리뷰 객체도 제출된다(#12·#86·#111에서 관측) — `submitted_at`·`commit_id`는
+#    채워져 있는데 `body`가 빈 문자열이다. **정확한 발생 메커니즘은 확인하지 못했다** —
+#    같은 커밋에 본문 있는 리뷰가 먼저·나중 어느 쪽으로도 붙는 사례가 있어 "아직 처리
+#    중"으로 단정할 수 없다. 확실한 것은 **기다려도 본문이 채워진다는 보장이 없다는 것**과
+#    (#111: 09:28:42Z 본문 있음 → 14:22:57Z 같은 커밋에 빈 본문이 그 뒤에 또 붙었고, 그
+#    뒤로 안 채워졌다) 이 객체가 API에 영구히 남는다는 것이다. 거르지 않으면 이 커밋이
+#    영구히 `CURRENT` 근거가 된다. **판정 문구로 거르지 마라** — #104의 최종 요약은
+#    `> [!CAUTION] Some comments are outside the diff`로 시작해 문구가 없고, 문구로
+#    거르면 #104가 false STALE이 된다. **본문 길이로만 거른다.**
+if rsha=$(set -o pipefail
+          gh api --paginate repos/Jiwonang/KeepCon/pulls/<번호>/reviews \
+            --jq '.[] | select(.user.login=="coderabbitai[bot]") | select(.submitted_at != null) | select((.body|length) > 0) | .commit_id' \
+          | tail -1)
+then echo "reviews commit_id:     ${rsha:-NONE}"
+else echo "reviews 조회 실패 — 판정 불가(빈 결과와 구분하라)"
+fi
+
+echo "headRefOid:            $(gh pr view <번호> --json headRefOid --jq .headRefOid)"
 ```
 
-두 SHA가 같으면 `CURRENT`, 다르면 `STALE`이다. `STALE`이면 **그 뒤 커밋은 리뷰되지 않았다** — `@coderabbitai review`로 재트리거한다. `CURRENT`일 때만 4층(CodeRabbit)이 채워진 것이다.
+> ⚠️ **본문을 `tail -1`로 그대로 자르지 마라 — 코멘트가 아니라 그 안의 마지막 줄만 남는다.**
+> `.body`를 여러 줄 텍스트로 뽑아 `tail -1`을 걸면 (코멘트가 하나뿐이어도) 그 본문의
+> 최종 줄(`<!-- tips_end -->` 등)만 남는다. 그래서 `{body}`로 감싸 **코멘트당 한 줄의
+> JSON**으로 받고(`gh api --jq`는 결과를 한 줄씩 찍는다), `tail -1`은 그 줄 단위에서만
+> "마지막 코멘트"를 고른 뒤 python의 `json.loads`로 통째로 복원한다.
+>
+> ⚠️ 이 python 블록의 출력 라벨은 영문으로 뒀다 — 이 저장소의 Windows Git Bash 환경에서
+> 한글 `print()`가 콘솔 인코딩과 어긋나 깨진다(위 날짜 계산 스크립트도 같은 결함이 있다 —
+> 값 자체는 맞지만 라벨이 깨진다. 별도 정리 대상).
+
+**`CURRENT`는 두 소스 중 어느 한쪽이라도 head를 가리킬 때다 — ①`comments-marker verdict`가
+`NONE`이 아니고 그 `sha`가 `headRefOid`와 같거나, ②본문이 빈 것을 거른 `reviews commit_id`가
+`headRefOid`와 같을 때.** **판정 문구 없이 SHA만 같은 것은 증거가 아니다** — 리뷰가 아직
+진행 중일 때도 `between <base> and <head>` 범위가 먼저 채워지고 판정 문구는 나중에 채워진다
+(2026-08-20 #106에서 이 순서 때문에 "진행 중"을 "완료"로 오판했다). **#113이 이 규칙의
+실증이다** — 마커 sha가 head(`77ac5668`)와 정확히 같은데 판정 문구는 본문 어디에도 없고
+(전수 검색 0건), `reviews`는 0건이며, §3 판정은 `RATE_LIMITED`다. **리뷰가 한 번도 안 된
+PR도 마커 sha는 head를 가리킬 수 있다** — sha 일치만으로 판정하면 미리뷰 PR이 그대로
+통과한다.
+
+`CURRENT`가 아닌 나머지는 **판정 문구를 동반한 증거가 하나라도 있었는가**로 가른다 —
+`comments-marker verdict`가 `NONE`이 아니거나 본문 있는 `reviews`가 하나라도 있으면
+`STALE`(리뷰는 됐고 head가 아닐 뿐), **둘 다 verdict가 없으면**(마커 sha만 있어도, #113처럼)
+`NO_REVIEW`다. 마커 sha가 있다는 것 자체는 증거로 세지 않는다. `STALE`이면 **그 뒤 커밋은
+리뷰되지 않았다** — `@coderabbitai review`로 재트리거한다. `CURRENT`일 때만 4층(CodeRabbit)이
+채워진 것이다. `NO_REVIEW`면 **3번으로 돌아가 그 PR의 §3 판정을 먼저 본다** — `RATE_LIMITED`면
+창을 계산해 기다렸다 트리거하고(#113이 이 경우), `NOT_TRIGGERED`면 즉시 트리거한다. 어느
+쪽이든 `CURRENT`가 될 때까지 §5의 머지 조건 3은 충족되지 않는다.
 
 > ⚠️ **시각(timestamp)으로 비교하지 마라.** 리뷰 게시 시각과 `commits[].committedDate`를 견주는 방식은 틀린다 — `committedDate`는 푸시 시각이 아니라 **작성자 로컬 시계의 커밋 생성 시각**이다. 리뷰를 기다리는 몇 분 사이에 커밋해 두고 리뷰가 올라온 뒤 푸시하면(흔한 작업 흐름) 커밋이 리뷰보다 **이르게** 찍혀 `CURRENT`로 통과한다 — 3b가 막으려던 바로 그것이다. 작성자 시계가 앞서 있으면 반대로 늘 `STALE`이 되어 소음이 된다. SHA 비교는 시계·푸시 지연과 무관하다.
->
-> ⚠️ **3단계는 `comments`와 `reviews`를 둘 다 보는데 3b는 `reviews`만 본다.** 리뷰 본문이 일반 코멘트로만 올라오면 여기서 `NO_REVIEW`가 되어 `CURRENT`가 될 수 없다. **2026-08-20 #105에서 실제로 일어났다** — 재트리거한 리뷰가 `comments`에만 실렸다.
->
-> 그때는 **코멘트 본문에서 SHA를 읽어라.** CodeRabbit은 `📥 Commits` 절에 리뷰 범위를 적는다:
->
-> ```bash
-> # ⚠️ `--paginate` 없으면 첫 30건만 본다 — 코멘트가 쌓인 PR에서 **최신 리뷰를 놓친다.**
-> # ⚠️ 판정 문구가 **있는** 코멘트로 먼저 좁힌다. `between …` 커밋 범위는 리뷰가 끝나기 전
-> #    `Currently processing new changes in this PR` 안내에도 실린다 — 범위만 보고 판정하면
-> #    **리뷰가 없는데 `CURRENT`로 통과한다**(2026-08-20 #106에서 실제로 그렇게 오판했다).
-> # ⚠️ 여기도 `gh` 실패를 구분해야 한다 — 실패 시 404 JSON이 `grep`에 걸리지 않아
-> #    **빈 출력**이 되고, 그건 "본문에 SHA 없음"과 같은 모양이다.
-> #    단 `grep`의 no-match(exit 1)는 **정상**이므로 `gh`와 한 파이프에 묶지 않는다
-> #    (묶으면 pipefail이 "SHA 없음"을 "조회 실패"로 읽는다 — 실측으로 확인).
-> if bodies=$(gh api --paginate repos/Jiwonang/KeepCon/issues/<번호>/comments \
->              --jq '.[] | select(.user.login=="coderabbitai[bot]")
->                    | select(.body | test("Actionable comments posted|No actionable comments"))
->                    | .body')
-> then
->   sha=$(printf '%s\n' "$bodies" | grep -o 'between [0-9a-f]\{40\} and [0-9a-f]\{40\}' | tail -1)
->   echo "${sha:-본문에 SHA 없음}"
-> else
->   echo "조회 실패 — 판정 불가(빈 결과와 구분하라)"
-> fi
-> ```
->
-> 뒤쪽 SHA가 `headRefOid`와 같으면 `CURRENT`다 — API 필드보다 **더 강한 증거**다(봇이 실제로 무엇을 읽었는지 자기가 적은 것이다). 본문에도 SHA가 없으면 그때는 **`CURRENT`로 치지 마라** — 재트리거하거나 4번 폴백으로 기록을 남긴다.
->
-> ⚠️ 3단계의 로그인 이름은 `coderabbitai`인데 **여기서는 `coderabbitai[bot]`이다.** REST(`/pulls/N/reviews`)와 GraphQL(`gh pr view`)이 봇 계정을 다르게 표기한다 — 섞어 쓰면 항상 `NO_REVIEW`가 나온다.
 
 이 검사가 없으면 눈으로는 못 잡는다. 도입 시점에 돌려 보니 **PR #93·#95 둘 다 `STALE`이었고, #93은 그 상태로 머지됐다**(#93: 리뷰 커밋 `3568d64f` ≠ head `3ff2eb7d`). "리뷰 본문이 있는지"만 확인하는 규칙으로는 여기까지 못 간다.
+
+**2026-08-24 #114·#115에서는 반대 방향의 실패가 났다.** `reviews`만 조회해 `NO_REVIEW`로
+결론짓고 `comments`를 확인하지 않아, **정상 완료돼 지적 사항이 없던 리뷰를 "리뷰 안 됨"으로
+오판했다**(머지 자체는 결과적으로 문제없었으나 기록이 틀렸고, PR에 정정 코멘트를 남겼다).
+**여기서 처음에 "그러니 comments를 1차로 쓴다"로 순서만 뒤집었다가, `keepcon-code-reviewer`
+에이전트가 `#93·#95·#98·#101·#104·#110·#111` 일곱 건(마커 코멘트가 없고 `reviews`에만
+결과가 있는 PR)이 그 뒤집힌 순서에서 전부 `STALE`로 오판된다는 것을 실행 재현으로 잡아냈다**
+— 처방이 실패의 방향만 바꾼 것이었다. 위 union(둘 다 조회하고, 판정 문구를 동반한 증거가
+head와 일치하면 `CURRENT`)이 그 반례들과 #114·#115를 모두 잡는다 — 반례 일곱 건(#98·#104·#111 →
+`CURRENT`, #93·#95·#101·#110 → `STALE`)과 #114·#115를 합친 **아홉 건**을 재현했고,
+#92·#105·#106·#112·#113까지 더한 **14건 전수**로도 판정이 일치한다.
 
 ### 3c. 리뷰어끼리 어긋나면 — 입력→결과를 댄 쪽이 이긴다
 
@@ -319,6 +417,8 @@ EOF
 - `CodeRabbit` 체크가 pass인 것을 근거로 "리뷰 통과"라고 말하지 않는다.
 - `Review triggered` 응답만 보고 머지하지 않는다.
 - `REVIEWED`만 보고 머지하지 않는다 — **3b가 `CURRENT`인지 확인한다.** 리뷰 뒤 푸시한 커밋은 리뷰되지 않았다.
+- **3b에서 `comments`·`reviews` 어느 한쪽만 보고 결론짓지 않는다** — 형식이 둘로 갈린다. `reviews`는 0건인데 `comments` 마커는 있는 PR(#114·#115)도, 마커는 없는데 `reviews`는 있는 PR(#93·#95·#98·#101·#104·#110·#111)도 실측으로 확인됐다. 둘 다 조회해서 **판정 문구(verdict)를 동반한 증거**가 head를 가리키는 쪽이 하나라도 있으면 `CURRENT`다 — **마커 sha만 head와 같은 것은 증거가 아니다**(#113: 미리뷰, #106: 진행 중이었을 때의 범위).
+- **`created_at` 기준으로 "새 코멘트가 있는가"를 즉흥으로 확인하지 않는다** — CodeRabbit은 요약 코멘트를 계속 수정한다. 현재 본문을 읽어라(위 3b 명령을 그대로 실행).
 - `RATE_LIMITED`를 보자마자 폴백으로 가지 않는다 — 재시도가 먼저다.
 - 폴백 경로를 기록 없이 지나가지 않는다.
 - **스타가 10개 이상이 되면** 자동 리뷰가 복귀한다. 그때 3번의 `NOT_TRIGGERED` 분기는 드물어지지만 할당량 축은 그대로 남으므로 이 스킬은 유효하다.
