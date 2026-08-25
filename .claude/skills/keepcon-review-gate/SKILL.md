@@ -202,14 +202,29 @@ gh pr view <번호> --json comments,reviews --jq '[.comments[], .reviews[]] | ma
 
 `REVIEWED`는 "언젠가 리뷰됐다"는 뜻일 뿐이다. **CodeRabbit이 리뷰한 커밋과 현재 head를 비교한다.**
 
-⚠️ **한쪽 API만 조회하고 끝내지 마라 — 형식이 두 가지고, 둘 다 정상이다.** 2026-08-24
-실측(14건): `reviews`가 0건인 것은 #112·#113·#114·#115 넷뿐이고, 이 PR들은 지적이 없어
-**요약 코멘트를 계속 수정(edit)**해 그 안 `recent_review` 블록에만 결과를 채운다. 반대로
-#92·#93·#95·#98·#101·#104·#105·#106·#110·#111 열 건은 판정이 `reviews` 객체에만 있고
-요약 코멘트에는 마커가 없다 — 이 PR들은 전부 지적을 낸 리뷰였다(#105는 이전에 "0건"으로
-잘못 기록됐다: 실제로는 1건, `Actionable comments posted: 2`). **어느 한쪽만 보면 반드시
-반대쪽 절반에서 진다.** 그러니 **둘 다 조회하고 어느 하나라도 head를 가리키면 `CURRENT`로
-판정한다:**
+⚠️ **한쪽 API만 조회하고 끝내지 마라 — 판정이 실리는 자리가 갈린다.** 2026-08-24
+실측(14건):
+
+- `reviews`가 **0건**인 것은 #112·#113·#114·#115 넷. 이 중 #112·#114·#115는 지적이
+  없어 **요약 코멘트를 계속 수정(edit)**해 마커 블록에 `No actionable comments were
+  generated`를 채웠다. **#113은 다르다** — 마커는 있지만 판정 문구가 본문 어디에도
+  없고(전수 검색 0건) `reviews`도 0건이다. §3 판정도 `RATE_LIMITED`다 — **이 PR은
+  리뷰가 한 번도 안 됐다.** 그런데도 마커 블록의 `between <base> and <head>` 범위는
+  head와 정확히 일치한다(`77ac5668`) — **sha 일치가 리뷰 완료를 증명하지 않는다는
+  살아 있는 증거**다. 이 사실은 아래 판정 규칙에서 다시 쓴다.
+- 마커 코멘트가 **아예 없고** `reviews`에만 결과가 있는 것은 #93·#95·#98·#101·#104·
+  #110·#111 일곱 건 — 전부 지적을 낸 리뷰였다.
+- **양쪽에 다 있는 것**도 있다: #92·#105는 마커에 `No actionable comments were
+  generated`가, `reviews`에는 더 **이른** 지적 리뷰가 실렸다(#105는 이전에 "0건"으로
+  잘못 기록됐다 — 실제로는 1건). #106도 마커가 있다.
+
+⚠️ **"지적이 있으면 마커를 안 만든다"로 읽지 마라 — 갈리는 것은 sha가 아니라 판정 문구뿐이다.**
+마커 블록의 커밋 범위는 지적 유무와 무관하게 **모든 리뷰 패스마다 갱신된다**(#106의 마커 sha가
+그 시점 `reviews` 최신값보다 더 나중 커밋인 것으로 확인). 지적이 있으면 판정 문구가 `reviews`
+쪽에 실리고 마커에는 범위만 남을 뿐이다. 그래서 **마커의 sha 단독은 증거가 아니다.**
+
+**어느 한쪽만 보면 반드시 반대쪽 절반에서 진다.** 그러니 **둘 다 조회하고 어느 하나라도
+head를 가리키면 `CURRENT`로 판정한다:**
 
 ```bash
 # --- 1) comments의 요약 코멘트(recent_review 마커) ---
@@ -220,9 +235,10 @@ gh pr view <번호> --json comments,reviews --jq '[.comments[], .reviews[]] | ma
 #    코멘트가 있다"를 리뷰로 오판할 여지가 남는다. `between …` 커밋 범위도 리뷰가
 #    끝나기 전 `Currently processing new changes in this PR` 안내에 실릴 수 있으니
 #    범위만 보고 판정하지 않는다(2026-08-20 #106에서 그렇게 오판했다).
-# ⚠️ 마커 코멘트가 없는 것은 실패가 아니다 — 지적을 낸 리뷰는 이 코멘트를 아예 만들지
-#    않고 아래 2)의 `reviews`에만 남는다(위 실측 참조). 여기서 NONE이 나와도 계속
-#    진행해 2)를 반드시 확인한다.
+# ⚠️ 마커 코멘트가 없거나 판정 문구가 NONE인 것은 실패가 아니다 — 지적을 낸 리뷰는
+#    이 코멘트를 아예 안 만들 수도 있고(위 실측 참조), 만들어도 판정 문구 없이 범위만
+#    담을 수 있다(#113 — 리뷰가 안 됐는데도 sha는 head와 같다). verdict가 NONE이면
+#    sha가 뭐든 증거로 세지 않는다. 여기서 NONE이 나와도 계속 진행해 2)를 반드시 확인한다.
 # ⚠️ 시간으로 필터링하지 마라 — `created_at`도 `updated_at`도 아니고 **현재 본문**을
 #    읽는다. CodeRabbit은 이 코멘트를 새로 달지 않고 계속 고쳐 쓴다: #114(코멘트 id
 #    5389573222)는 01:07:58 생성 → 02:17:10 수정, #115(id 5390718611)는 04:25:58
@@ -246,7 +262,8 @@ if line=$(set -o pipefail
            | tail -1)
 then
   if [ -z "$line" ]; then
-    echo "comments 마커 verdict: NONE / sha: NONE"
+    echo "comments-marker verdict: NONE"
+    echo "comments-marker sha:     NONE"
   else
     printf '%s' "$line" | python -c "
 import sys, json, re
@@ -267,9 +284,15 @@ fi
 # PENDING 리뷰는 submitted_at이 없지만 commit_id는 있다 — 거르지 않으면 아직 제출되지
 # 않은 리뷰의 커밋을 CURRENT 근거로 쓴다. 로그인 이름은 3단계(`coderabbitai`)와 달리
 # 여기서는 `coderabbitai[bot]`이다 — REST와 GraphQL이 봇 계정을 다르게 표기한다.
+# ⚠️ 본문이 **빈** 리뷰 객체도 제출된다 — 인라인 지적만 담고 요약은 아직 안 온 상태다
+#    (#86: 04:26:51Z bodylen=0 → 04:28:03Z bodylen=3738, 같은 커밋. #111도 동형).
+#    거르지 않으면 그 몇십 초 동안 "진행 중"이 CURRENT가 된다 — 아래 판정 규칙이
+#    comments 경로에 대해 이미 금지한 바로 그것이다. **판정 문구로 거르지 마라** —
+#    #104의 최종 요약은 `> [!CAUTION] Some comments are outside the diff`로 시작해
+#    문구가 없고, 문구로 거르면 #104가 false STALE이 된다. **본문 길이로만 거른다.**
 if rsha=$(set -o pipefail
           gh api --paginate repos/Jiwonang/KeepCon/pulls/<번호>/reviews \
-            --jq '.[] | select(.user.login=="coderabbitai[bot]") | select(.submitted_at != null) | .commit_id' \
+            --jq '.[] | select(.user.login=="coderabbitai[bot]") | select(.submitted_at != null) | select((.body|length) > 0) | .commit_id' \
           | tail -1)
 then echo "reviews commit_id:     ${rsha:-NONE}"
 else echo "reviews 조회 실패 — 판정 불가(빈 결과와 구분하라)"
@@ -288,15 +311,22 @@ echo "headRefOid:            $(gh pr view <번호> --json headRefOid --jq .headR
 > 한글 `print()`가 콘솔 인코딩과 어긋나 깨진다(위 날짜 계산 스크립트도 같은 결함이 있다 —
 > 값 자체는 맞지만 라벨이 깨진다. 별도 정리 대상).
 
-**`CURRENT`는 두 소스 중 어느 한쪽이라도 head를 가리킬 때다 — ①`comments 마커 verdict`가
-`NONE`이 아니고 그 `sha`가 `headRefOid`와 같거나, ②`reviews commit_id`가 `headRefOid`와
-같을 때.** 둘 다 값이 있는데 어느 쪽도 head가 아니면 `STALE`이다. **두 조회가 모두
-`NONE`(또는 조회 실패)일 때만** `NO_REVIEW`다 — 한쪽이 `NONE`이라는 것은 아무것도 증명하지
-않는다(위 실측대로 형식이 갈린다). **판정 문구 없이 SHA만 같은 것은 증거가 아니다** —
-리뷰가 아직 진행 중일 때도 `between <base> and <head>` 범위가 먼저 채워지고 판정 문구는
-나중에 채워진다(2026-08-20 #106에서 이 순서 때문에 "진행 중"을 "완료"로 오판했다).
-`STALE`이면 **그 뒤 커밋은 리뷰되지 않았다** — `@coderabbitai review`로 재트리거한다.
-`CURRENT`일 때만 4층(CodeRabbit)이 채워진 것이다.
+**`CURRENT`는 두 소스 중 어느 한쪽이라도 head를 가리킬 때다 — ①`comments-marker verdict`가
+`NONE`이 아니고 그 `sha`가 `headRefOid`와 같거나, ②본문이 빈 것을 거른 `reviews commit_id`가
+`headRefOid`와 같을 때.** **판정 문구 없이 SHA만 같은 것은 증거가 아니다** — 리뷰가 아직
+진행 중일 때도 `between <base> and <head>` 범위가 먼저 채워지고 판정 문구는 나중에 채워진다
+(2026-08-20 #106에서 이 순서 때문에 "진행 중"을 "완료"로 오판했다). **#113이 이 규칙의
+실증이다** — 마커 sha가 head(`77ac5668`)와 정확히 같은데 판정 문구는 본문 어디에도 없고
+(전수 검색 0건), `reviews`는 0건이며, §3 판정은 `RATE_LIMITED`다. **리뷰가 한 번도 안 된
+PR도 마커 sha는 head를 가리킬 수 있다** — sha 일치만으로 판정하면 미리뷰 PR이 그대로
+통과한다.
+
+`CURRENT`가 아닌 나머지는 **판정 문구를 동반한 증거가 하나라도 있었는가**로 가른다 —
+`comments-marker verdict`가 `NONE`이 아니거나 본문 있는 `reviews`가 하나라도 있으면
+`STALE`(리뷰는 됐고 head가 아닐 뿐), **둘 다 verdict가 없으면**(마커 sha만 있어도, #113처럼)
+`NO_REVIEW`다. 마커 sha가 있다는 것 자체는 증거로 세지 않는다. `STALE`이면 **그 뒤 커밋은
+리뷰되지 않았다** — `@coderabbitai review`로 재트리거한다. `CURRENT`일 때만 4층(CodeRabbit)이
+채워진 것이다.
 
 > ⚠️ **시각(timestamp)으로 비교하지 마라.** 리뷰 게시 시각과 `commits[].committedDate`를 견주는 방식은 틀린다 — `committedDate`는 푸시 시각이 아니라 **작성자 로컬 시계의 커밋 생성 시각**이다. 리뷰를 기다리는 몇 분 사이에 커밋해 두고 리뷰가 올라온 뒤 푸시하면(흔한 작업 흐름) 커밋이 리뷰보다 **이르게** 찍혀 `CURRENT`로 통과한다 — 3b가 막으려던 바로 그것이다. 작성자 시계가 앞서 있으면 반대로 늘 `STALE`이 되어 소음이 된다. SHA 비교는 시계·푸시 지연과 무관하다.
 
@@ -309,7 +339,9 @@ echo "headRefOid:            $(gh pr view <번호> --json headRefOid --jq .headR
 에이전트가 `#93·#95·#98·#101·#104·#110·#111` 일곱 건(마커 코멘트가 없고 `reviews`에만
 결과가 있는 PR)이 그 뒤집힌 순서에서 전부 `STALE`로 오판된다는 것을 실행 재현으로 잡아냈다**
 — 처방이 실패의 방향만 바꾼 것이었다. 위 union(둘 다 조회하고 어느 하나라도 일치하면
-`CURRENT`)이 그 반례들과 #114·#115를 모두 잡는다 — 실측으로 8개 PR 전부 재현해 확인했다.
+`CURRENT`)이 그 반례들과 #114·#115를 모두 잡는다 — 반례 일곱 건(#98·#104·#111 →
+`CURRENT`, #93·#95·#101·#110 → `STALE`)과 #114·#115를 합친 **아홉 건**을 재현했고,
+#92·#105·#106·#112·#113까지 더한 **14건 전수**로도 판정이 일치한다.
 
 ### 3c. 리뷰어끼리 어긋나면 — 입력→결과를 댄 쪽이 이긴다
 
