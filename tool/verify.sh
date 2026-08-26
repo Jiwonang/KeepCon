@@ -88,12 +88,18 @@ run "Markdown lint" npx --yes markdownlint-cli2@0.18.1
 #    빈 결과를 낸다 — ①ref가 없거나(단일 브랜치 clone, 포크, 다른 기본 브랜치 이름)
 #    ②ref는 있는데 merge base가 없다(얕은 클론, 관련 없는 히스토리). 둘 다 이 스크립트가
 #    없애려는 침묵 실패의 모양이다. 모를 때는 더 하는 쪽으로 닫는다.
-# ⚠️ `tool/verify.sh`(자기 자신)도 목록에 있다 — 검증기에 넘기는 호스트·환경변수 이름이
-#    여기 있어서 이 파일이 곧 규칙 계층의 **호출 계약**이다. 게다가 CI의 `Firestore rules`
-#    잡은 이 스크립트를 거치지 않고 `emulators:exec`를 직접 부르므로, 여기가 깨져도
-#    **아무 데서도 빨개지지 않는다**(70-73행의 "로컬이 좁으면 CI에서 빨개진다"가 여기서는
-#    성립하지 않는다).
-RULES_INPUTS=(firestore.rules tool/verify_firestore_rules.sh firebase.json tool/verify.sh)
+# ⚠️ `tool/verify.sh`(자기 자신)와 `tool/lib_rules_state.sh`도 목록에 있다 — 검증기에 넘기는
+#    호스트·환경변수 이름과 **스테일 가드**가 거기 있어서 그 둘이 곧 규칙 계층의 **호출
+#    계약**이다. 게다가 CI의 `Firestore rules` 잡은 `verify.sh`를 거치지 않고
+#    `emulators:exec`를 직접 부르므로, 여기가 깨져도 **아무 데서도 빨개지지 않는다**
+#    (70-73행의 "로컬이 좁으면 CI에서 빨개진다"가 여기서는 성립하지 않는다).
+RULES_INPUTS=(
+  firestore.rules
+  tool/verify_firestore_rules.sh
+  tool/lib_rules_state.sh
+  firebase.json
+  tool/verify.sh
+)
 
 rules_changed() {
   git status --porcelain -- "${RULES_INPUTS[@]}" 2>/dev/null | grep -q . && return 0
@@ -164,44 +170,10 @@ read_emulator_ports() {
 RULES_PROJECT="${FIRESTORE_PROJECT:-demo-keepcon}"
 probe_ref_port=""
 
-# 에뮬레이터가 **실제로 적재한** 규칙 본문을 조회해 로컬 `firestore.rules`와 대조하고
-# `<MATCH|STALE|UNKNOWN>\t<사유>`를 돌려준다. (`GET /emulator/v1/projects/{p}:securityRules`)
-#
-# ⚠️ `emulators:start`는 자기 `firestore.rules`를 감시해 자동 재적재하므로 **같은
-#    체크아웃**에서 띄운 에뮬레이터는 대개 MATCH다. 걸리는 것은 다른 체크아웃·다른
-#    워크트리에서 띄운 인스턴스다 — 감시 대상이 남의 파일이라 이쪽 변경은 영원히
-#    반영되지 않는다. 2026-08-26의 17건 실패가 정확히 그 모양이었고, 응답의 `name`
-#    필드가 남의 경로를 가리켜 그 사실을 드러냈다(그래서 STALE 사유로 그 값을 찍는다).
-# ⚠️ 정규화는 줄바꿈(CRLF→LF)까지만 한다. `.gitattributes`가 `*.sh`·`*.cmd`만 고정하고
-#    `firestore.rules`는 기여자의 `core.autocrlf`에 맡기므로 체크아웃마다 줄바꿈이
-#    다를 수 있는데 그건 규칙 의미와 무관하다. 그 이상은 손대지 않는다 — 공백 하나가
-#    규칙 의미를 바꾸는 경우가 있어서, 더 관대한 비교는 이 감지 자체를 무의미하게 만든다.
-# ⚠️ node가 없으면 빈 출력 → 호출부가 UNKNOWN으로 읽는다. 확인 못 한 것을 통과로
-#    읽지 않는 쪽(전용 인스턴스)으로 닫힌다.
-emulator_rules_state() {
-  node -e '
-    const fs = require("fs");
-    // `node -e`의 argv는 파일 실행보다 한 칸 당겨있다(argv[1]부터 인자) —
-    // 둘 다 안전하게 마지막 세 개를 집는다. slice(2)로 두면 인자가 한 칸씩 밀려
-    // URL이 망가지고, 그 실패는 UNKNOWN으로 읽혀 **항상 전용 인스턴스**로 간다(실측).
-    const [port, project, file] = process.argv.slice(-3);
-    const norm = (s) => s.replace(/\r\n/g, "\n");
-    const ac = new AbortController();
-    const timer = setTimeout(() => ac.abort(), 5000);
-    const url = "http://127.0.0.1:" + port + "/emulator/v1/projects/" + project + ":securityRules";
-    fetch(url, { signal: ac.signal })
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error("HTTP " + r.status))))
-      .then((j) => {
-        const files = (j.rules && j.rules.files) || [];
-        if (files.length !== 1) throw new Error("적재된 규칙 파일이 " + files.length + "개");
-        const loaded = norm(files[0].content || "");
-        const local = norm(fs.readFileSync(file, "utf8"));
-        process.stdout.write(loaded === local ? "MATCH\t" : "STALE\t" + (files[0].name || "경로 불명"));
-      })
-      .catch((e) => process.stdout.write("UNKNOWN\t" + (e.message || e)))
-      .finally(() => clearTimeout(timer));
-  ' "$1" "${RULES_PROJECT}" firestore.rules 2>/dev/null
-}
+# 대조 자체는 `tool/lib_rules_state.sh`에 있다 — 규칙 검증기도 같은 가드가 필요한데(단독
+# 실행 안내가 README·`tool/deploy_rules.sh`에 있다) 여기 인라인으로 두면 그쪽이 빈다.
+# shellcheck source=tool/lib_rules_state.sh
+. "$(dirname "$0")/lib_rules_state.sh"
 
 # ── 전용 에뮬레이터(다른 포트) ───────────────────────────────────────────
 # 재사용할 수 없을 때 **개발용 에뮬레이터를 죽이지 않고** 검증만 따로 돌린다.
@@ -209,9 +181,42 @@ tcp_in_use() {
   (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null
 }
 
-# 기본 포트 묶음이 막혀 있으면 +10씩 밀어 가며 빈 자리를 찾는다. 실제로 필요하다 —
-# 앞선 인스턴스가 내려간 직후에도 Firestore 에뮬레이터(JVM)는 포트를 한동안 붙들고 있어
-# 곧바로 재사용하면 `port taken`으로 죽는다(실측).
+# ⚠️ `emulators:exec`는 **종료 코드 0**으로 끝나고 "Stopping Firestore Emulator"까지 찍은
+#    뒤에도 Firestore 에뮬레이터 JVM을 남긴다(Windows 실측: 부모 node는 죽었는데 java가
+#    alt 포트를 계속 LISTEN — 한 번에 하나씩, 55분 뒤에도 살아 있었다.
+#    firebase-tools #1367·#2477·#3179). 남은 프로세스는 그 포트를 **영구히** 물고 있어
+#    아래 사다리가 실행마다 한 칸씩 소진되고, 열 번이면 이 게이트가 그 PC에서 영영 막힌다.
+#    그래서 우리가 띄운 포트는 우리가 거둔다.
+#
+# ⚠️ 포트로 죽이는 것이 안전한 이유: 이 함수는 **띄우기 직전에 비어 있음을 확인한 포트**
+#    에만 쓴다. 그 뒤에 거기 붙은 리스너는 우리가 띄운 것이다.
+reap_port() {
+  local port="$1" pid
+  tcp_in_use "${port}" || return 0
+  if command -v powershell.exe >/dev/null 2>&1; then
+    pid=$(powershell.exe -NoProfile -Command \
+      "(Get-NetTCPConnection -LocalPort ${port} -State Listen -EA SilentlyContinue).OwningProcess" \
+      2>/dev/null | tr -d '\r' | head -1)
+    [[ -n "${pid}" ]] && powershell.exe -NoProfile -Command \
+      "Stop-Process -Id ${pid} -Force -EA SilentlyContinue" >/dev/null 2>&1
+  elif command -v lsof >/dev/null 2>&1; then
+    # ⚠️ 미확인: Windows에서만 누수를 실측했다. 다른 플랫폼에서 새지 않으면 이 경로는
+    #    `tcp_in_use`에서 이미 빠져나가므로 아무 일도 하지 않는다.
+    pid=$(lsof -ti "tcp:${port}" -sTCP:LISTEN 2>/dev/null | head -1)
+    [[ -n "${pid}" ]] && kill -9 "${pid}" 2>/dev/null
+  fi
+  if tcp_in_use "${port}"; then
+    echo "  ⚠️ 검증용 에뮬레이터(포트 ${port})를 정리하지 못했다 — 그 포트의 java 프로세스를 직접 종료하라." >&2
+  fi
+  return 0
+}
+
+# 기본 포트 묶음이 막혀 있으면 +10씩 밀어 가며 빈 자리를 찾는다.
+#
+# ⚠️ 기준값을 firebase 기본 포트대(ui 4000 / hub 4400 / logging 4500 / firestore 8080 /
+#    auth 9099 / storage 9199 …)에서 **1만 대로 통째로 옮겨 둔다.** 4460+40=4500이 개발용
+#    에뮬레이터의 logging 포트와 겹쳐 사다리 한 칸이 통째로 죽는 것을 실측했다 — 그 칸은
+#    좀비와 달리 정상 상태에서도 항상 막혀 있다.
 pick_alt_ports() {
   local off
   # ⚠️ `/dev/tcp`가 꺼진 bash 빌드에서는 **모든 포트가 비어 보인다** — 탐색이 조용히
@@ -219,12 +224,12 @@ pick_alt_ports() {
   #    탐색을 포기하고 기본값으로 간다(충돌하면 firebase가 시끄럽게 죽는다 — 조용한
   #    오판보다 낫다).
   if [[ -z "${probe_ref_port}" ]] || ! tcp_in_use "${probe_ref_port}"; then
-    ALT_FS=8181 ALT_AUTH=9199 ALT_HUB=4460 ALT_LOG=4560
+    ALT_FS=18080 ALT_AUTH=19099 ALT_HUB=14400 ALT_LOG=14500
     return 0
   fi
   for off in 0 10 20 30 40 50 60 70 80 90; do
-    ALT_FS=$((8181 + off)); ALT_AUTH=$((9199 + off))
-    ALT_HUB=$((4460 + off)); ALT_LOG=$((4560 + off))
+    ALT_FS=$((18080 + off)); ALT_AUTH=$((19099 + off))
+    ALT_HUB=$((14400 + off)); ALT_LOG=$((14500 + off))
     if ! tcp_in_use "${ALT_FS}" && ! tcp_in_use "${ALT_AUTH}" \
       && ! tcp_in_use "${ALT_HUB}" && ! tcp_in_use "${ALT_LOG}"; then
       return 0
@@ -240,7 +245,9 @@ run_dedicated_rules() {
   local dir cfg rc
   rules_setup_failed=0
   if ! pick_alt_ports; then
-    echo "  ✗ 전용 에뮬레이터를 띄울 빈 포트가 없다(8181/9199/4460/4560부터 +90까지 전부 사용 중)."
+    echo "  ✗ 전용 에뮬레이터를 띄울 빈 포트가 없다(18080/19099/14400/14500부터 +90까지 전부 사용 중)."
+    echo "     이전 실행이 남긴 Firestore 에뮬레이터(java) 프로세스일 공산이 크다 —"
+    echo "     18080~18170에서 LISTEN 중인 java 프로세스를 종료한 뒤 다시 돌려라."
     rules_setup_failed=1
     return 1
   fi
@@ -254,7 +261,7 @@ run_dedicated_rules() {
   # (`emulators:exec`의 자식 명령은 이 스크립트의 cwd, 즉 저장소 루트에서 돌므로
   #  `bash tool/verify_firestore_rules.sh`는 그대로 쓴다 — `--config`가 딴 데를 가리켜도
   #  cwd는 따라가지 않는다.)
-  if ! cp firestore.rules firestore.indexes.json "${dir}/"; then
+  if ! cp "${RULES_FILE}" "${INDEX_FILE}" "${dir}/"; then
     echo "  ✗ 규칙·인덱스를 임시 디렉터리로 복사하지 못했다."
     rules_setup_failed=1
     rm -rf "${dir}"
@@ -263,7 +270,7 @@ run_dedicated_rules() {
   # ui는 끈다 — 4000번이 개발용 에뮬레이터의 UI와 부딪힌다.
   cat > "${dir}/firebase.json" <<JSON
 {
-  "firestore": { "rules": "firestore.rules", "indexes": "firestore.indexes.json" },
+  "firestore": { "rules": "$(basename "${RULES_FILE}")", "indexes": "$(basename "${INDEX_FILE}")" },
   "emulators": {
     "auth": { "port": ${ALT_AUTH} },
     "firestore": { "port": ${ALT_FS} },
@@ -278,11 +285,17 @@ JSON
   # firebase는 네이티브 Windows 프로세스라 MSYS 경로(`/tmp/...`)를 못 읽는다.
   command -v cygpath >/dev/null 2>&1 && cfg=$(cygpath -m "${cfg}")
   echo "  (전용 에뮬레이터를 띄운다 — firestore=${ALT_FS} auth=${ALT_AUTH} hub=${ALT_HUB} logging=${ALT_LOG})"
+  # Ctrl+C로 끊기면 아래 정리가 통째로 건너뛰어져 임시 config와 좀비 JVM이 함께 남는다.
+  trap 'reap_port "${ALT_FS}"; reap_port "${ALT_AUTH}"; rm -rf "${dir}"; exit 130' INT TERM
   # 여기서도 셸에 남은 `AUTH_EMULATOR_HOST`가 CLI 주입값을 이기면 죽은 포트로 붙는다.
   env -u AUTH_EMULATOR_HOST -u FIRESTORE_EMULATOR_HOST -u FIREBASE_AUTH_EMULATOR_HOST \
     firebase emulators:exec --config "${cfg}" --project "${RULES_PROJECT}" \
     --only auth,firestore "bash tool/verify_firestore_rules.sh"
   rc=$?
+  trap - INT TERM
+  # ⚠️ 성공(rc=0)이어도 반드시 거둔다 — 누수는 실패가 아니라 **정상 종료**에서 났다.
+  reap_port "${ALT_FS}"
+  reap_port "${ALT_AUTH}"
   rm -rf "${dir}"
   return "${rc}"
 }
@@ -303,6 +316,25 @@ run_rules_dedicated() {
   fail=1
   failed+=("${label}")
   return 1
+}
+
+# 둘 다 안 떠 있을 때 기본 포트로 직접 띄운다. 여기서도 JVM은 남는다 — 그리고 이쪽이 더
+# 아프다: 남은 좀비가 `FS_PORT`(기본 8080)를 물면 `tool/emulators.sh`도 앱도 못 뜬다.
+# 이 분기는 두 포트가 비어 있음을 확인한 뒤에만 오므로 포트로 거두는 것이 안전하다.
+run_default_port_rules() {
+  local rc
+  trap 'reap_port "${FS_PORT}"; reap_port "${AUTH_PORT}"; exit 130' INT TERM
+  # ⚠️ 여기서는 함정이 **반대 방향**이다. CLI는 `FIREBASE_AUTH_EMULATOR_HOST`만 주입하는데
+  #    수신 측은 `AUTH_EMULATOR_HOST`를 먼저 보므로, 셸에 남은 값이 CLI를 이겨 죽은 포트로
+  #    붙는다(`tool/seed_emulator.sh`가 쓰는 노브라 실제로 남아 있을 수 있다). 지워서 넘긴다.
+  env -u AUTH_EMULATOR_HOST -u FIRESTORE_EMULATOR_HOST -u FIREBASE_AUTH_EMULATOR_HOST \
+    firebase emulators:exec --project "${RULES_PROJECT}" --only auth,firestore \
+    "bash tool/verify_firestore_rules.sh"
+  rc=$?
+  trap - INT TERM
+  reap_port "${FS_PORT}"
+  reap_port "${AUTH_PORT}"
+  return "${rc}"
 }
 
 base_unknown=0
@@ -339,6 +371,7 @@ elif rules_changed; then
   # 포트는 여기서 읽는다 — 규칙 검증을 안 돌리는 실행(대다수)에서는 쓰이지도 않는데
   # 폴백 경고만 떠서 "무엇이 잘못됐나" 오해를 부른다.
   read_emulator_ports
+  read_rules_paths
 
   # 규칙 스크립트는 Auth로 사용자 셋을 만들고 그 토큰으로 Firestore를 친다 — **둘 다**
   # 떠 있어야 재사용할 수 있다.
@@ -358,7 +391,7 @@ elif rules_changed; then
   if [[ "${fs_up}" -eq 1 && "${auth_up}" -eq 1 ]]; then
     # ⚠️ **떠 있다는 것만으로는 재사용 조건이 아니다.** 적재된 규칙이 이 트리의
     #    `firestore.rules`와 같아야 한다 — 스크립트 상단 주석 참조.
-    rules_probe=$(emulator_rules_state "${FS_PORT}")
+    rules_probe=$(emulator_rules_state "localhost:${FS_PORT}" "${RULES_PROJECT}")
     rules_state="${rules_probe%%$'\t'*}"
     rules_detail="${rules_probe#*$'\t'}"
     if [[ -z "${rules_state}" ]]; then
@@ -390,15 +423,16 @@ elif rules_changed; then
   elif [[ "${fs_up}" -eq 1 || "${auth_up}" -eq 1 ]]; then
     # 한쪽만 떠 있으면 기본 포트로는 반드시 충돌한다. 예전에는 그래서 여기서 셋업 실패로
     # 끝냈지만, 이제 다른 포트에 전용 인스턴스를 띄울 수 있으므로 그 전제가 사라졌다.
+    # ⚠️ 다만 그 분기에는 역할이 하나 더 있었다 — **PC가 고장 났다는 신호.** auth는 CLI의
+    #    node 프로세스 안에서 돌아 부모와 함께 죽고 Firestore JVM만 남으므로, 이 조합은
+    #    대개 이전 실행이 남긴 좀비다. 검증은 전용 인스턴스로 계속하되 그 사실은 말한다.
     echo "  ⚠️ 에뮬레이터가 절반만 떠 있다(firestore=${fs_up} auth=${auth_up}) — 재사용하지 않는다."
+    echo "     이 조합은 정상 구성이 아니다 — 남은 Firestore 좀비가 ${FS_PORT}를 물고 있으면"
+    echo "     \`tool/emulators.sh\`도 앱도 뜨지 않는다. 검증이 끝나면 그 포트의 java 프로세스를 확인하라."
     run_rules_dedicated
   else
     echo "  (에뮬레이터를 직접 띄운다)"
-    # ⚠️ 여기서는 함정이 **반대 방향**이다. CLI는 `FIREBASE_AUTH_EMULATOR_HOST`만 주입하는데
-    #    수신 측은 `AUTH_EMULATOR_HOST`를 먼저 보므로, 셸에 남은 값이 CLI를 이겨 죽은 포트로
-    #    붙는다(`tool/seed_emulator.sh`가 쓰는 노브라 실제로 남아 있을 수 있다). 지워서 넘긴다.
-    run "Firestore rules" env -u AUTH_EMULATOR_HOST \
-      firebase emulators:exec --project "${RULES_PROJECT}" --only auth,firestore "bash tool/verify_firestore_rules.sh"
+    run "Firestore rules" run_default_port_rules
   fi
 else
   echo
