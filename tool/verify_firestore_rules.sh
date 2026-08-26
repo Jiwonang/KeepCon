@@ -81,32 +81,43 @@ if ! curl -s -o /dev/null --max-time 3 "http://${FS_HOST}/"; then
 fi
 
 # ⚠️ **연결됐다는 것만으로는 검증 조건이 아니다.** 붙은 에뮬레이터가 실제로 적재한 규칙이
-#    이 트리의 `firestore.rules`와 같아야 한다. 다른 체크아웃·워크트리에서 띄운 인스턴스는
-#    남의 파일을 감시하므로 이쪽 변경이 영원히 반영되지 않고, 특히 **느슨하게 고친 규칙이
+#    이 트리의 규칙 파일과 같아야 한다. 다른 체크아웃·워크트리에서 띄운 인스턴스는 남의
+#    파일을 감시하므로 이쪽 변경이 영원히 반영되지 않고, 특히 **느슨하게 고친 규칙이
 #    옛 엄격한 규칙 위에서 green으로 통과한다**(2026-08-26 실측).
 #    가드를 호출자가 아니라 여기 두는 이유: 이 스크립트를 직접 부르는 경로가 많다 —
 #    README의 단독 실행 안내, `tool/verify_firestore_rules.cmd`, 그리고 `tool/deploy_rules.sh`의
 #    **배포 직후 검증** 안내. 호출자에만 두면 하필 배포 근처 경로가 빈다.
+#
+# ⚠️ `KEEPCON_RULES_VOUCH`가 있으면 건너뛴다. `tool/verify.sh`가 **자기가 방금 이 규칙 파일로
+#    띄운 인스턴스**이거나 이미 대조해 MATCH를 확인한 경우에만 넘긴다. 이게 없으면 node가
+#    없는 PC(firebase CLI는 node 없는 standalone 바이너리로도 배포된다)에서 아래 UNKNOWN
+#    하드 실패에 걸려 **규칙 검증이 통째로 불가능**해진다.
 # shellcheck source=tool/lib_rules_state.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib_rules_state.sh"
-read_rules_paths
-RULES_STATE=$(emulator_rules_state "${FS_HOST}" "${PROJECT}")
-case "${RULES_STATE%%$'\t'*}" in
-  MATCH) ;;
-  STALE)
-    echo "✗ 붙은 에뮬레이터가 **낡은 규칙**을 물고 있습니다 — 이 검증은 통과도 실패도 근거가 되지 못합니다."
-    echo "   (그 에뮬레이터가 적재한 규칙의 출처: ${RULES_STATE#*$'\t'})"
-    echo "   그 에뮬레이터를 내리고 이 체크아웃에서 다시 띄우거나, \`bash tool/verify.sh\`로 돌리세요"
-    echo "   (verify.sh는 이 경우 다른 포트에 전용 인스턴스를 띄웁니다)."
-    exit 1
-    ;;
-  *)
-    # 단독 실행에는 '전용 인스턴스'라는 대피로가 없고, 이 스크립트는 지금까지 node를 요구하지
-    # 않았다. 그래서 여기서만 경고로 둔다 — 확인하지 못한 것을 통과로 **부르지는** 않는다.
-    echo "⚠️ 적재된 규칙을 확인하지 못했습니다(${RULES_STATE#*$'\t'}) — 결과를 근거로 쓰기 전에"
-    echo "   \`bash tool/verify.sh\`로 한 번 더 돌리세요."
-    ;;
-esac
+if [[ -n "${KEEPCON_RULES_VOUCH:-}" ]]; then
+  echo "  (스테일 대조 생략 — 호출자가 보증: ${KEEPCON_RULES_VOUCH})"
+else
+  read_rules_paths
+  RULES_STATE=$(emulator_rules_state "${FS_HOST}" "${PROJECT}")
+  case "${RULES_STATE%%$'\t'*}" in
+    MATCH) ;;
+    STALE)
+      echo "✗ 붙은 에뮬레이터가 **낡은 규칙**을 물고 있습니다 — 이 검증은 통과도 실패도 근거가 되지 못합니다."
+      echo "   (그 에뮬레이터가 적재한 규칙의 출처: ${RULES_STATE#*$'\t'})"
+      echo "   그 에뮬레이터를 내리고 이 체크아웃에서 다시 띄우거나, \`bash tool/verify.sh\`로 돌리세요"
+      echo "   (verify.sh는 이 경우 다른 포트에 전용 인스턴스를 띄웁니다)."
+      exit 1
+      ;;
+    *)
+      # ⚠️ 확인하지 못한 것을 통과로 부르지 않는다. 경고로 두면 결과가 exit 0으로 나가고,
+      #    호출자와 사람 모두 "69/69 통과"만 읽는다 — 낡은 규칙 위의 false green이다.
+      echo "✗ 붙은 에뮬레이터가 적재한 규칙을 확인하지 못했습니다(${RULES_STATE#*$'\t'})."
+      echo "   확인하지 못한 검증은 근거가 되지 못하므로 통과로 내지 않습니다."
+      echo "   \`bash tool/verify.sh\`로 돌리세요 — 확인할 수 없으면 다른 포트에 전용 인스턴스를 띄웁니다."
+      exit 1
+      ;;
+  esac
+fi
 
 TOKEN_A=$(signup "rules-a@keepcon.test")
 TOKEN_B=$(signup "rules-b@keepcon.test")

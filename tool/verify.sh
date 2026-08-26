@@ -34,7 +34,18 @@
 #   이 스크립트의 목적이고, 첫 실패에서 멈추면 왕복이 늘어난다.
 set -uo pipefail
 
-cd "$(dirname "$0")/.." || exit 1
+# ⚠️ 스크립트 디렉터리는 `cd` **전에** 잡는다. 아래에서 cwd가 바뀌므로 `$0`(상대경로)은
+#    그 뒤로 못 쓴다 — `cd tool && bash verify.sh`에서 `$0`은 `verify.sh`라 `dirname`이
+#    `.`이 되고, cd 뒤의 `.`은 저장소 루트를 가리켜 소스가 조용히 실패한다(실측).
+_TOOL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "${_TOOL_DIR}/.." || exit 1
+
+# 규칙 계층 공용 헬퍼 — 대조(스테일 가드)와 규칙·인덱스 경로 해석이 여기 있다. 규칙 검증기도
+# 같은 가드가 필요해서(단독 실행 안내가 README·`tool/deploy_rules.sh`에 있다) 공용으로 뺐다.
+# ⚠️ `RULES_INPUTS`가 경로를 정본에서 읽어야 하므로 **여기서** 부른다.
+# shellcheck source=tool/lib_rules_state.sh
+. "${_TOOL_DIR}/lib_rules_state.sh"
+read_rules_paths
 
 BASE="${BASE:-origin/develop}"
 fail=0
@@ -93,8 +104,12 @@ run "Markdown lint" npx --yes markdownlint-cli2@0.18.1
 #    계약**이다. 게다가 CI의 `Firestore rules` 잡은 `verify.sh`를 거치지 않고
 #    `emulators:exec`를 직접 부르므로, 여기가 깨져도 **아무 데서도 빨개지지 않는다**
 #    (70-73행의 "로컬이 좁으면 CI에서 빨개진다"가 여기서는 성립하지 않는다).
+# ⚠️ 규칙·인덱스 이름을 박아 두지 않는다 — 대조와 전용 인스턴스는 `firebase.json`을 정본으로
+#    읽는데 **감지만** 기본 이름을 들고 있으면, 경로를 바꾼 순간 트리거가 영영 안 걸린다.
+#    검증이 실패하는 게 아니라 **아예 안 돈 채 green**이 된다(위 침묵 실패와 같은 모양).
 RULES_INPUTS=(
-  firestore.rules
+  "${RULES_FILE_REL}"
+  "${INDEX_FILE_REL}"
   tool/verify_firestore_rules.sh
   tool/lib_rules_state.sh
   firebase.json
@@ -170,11 +185,6 @@ read_emulator_ports() {
 RULES_PROJECT="${FIRESTORE_PROJECT:-demo-keepcon}"
 probe_ref_port=""
 
-# 대조 자체는 `tool/lib_rules_state.sh`에 있다 — 규칙 검증기도 같은 가드가 필요한데(단독
-# 실행 안내가 README·`tool/deploy_rules.sh`에 있다) 여기 인라인으로 두면 그쪽이 빈다.
-# shellcheck source=tool/lib_rules_state.sh
-. "$(dirname "$0")/lib_rules_state.sh"
-
 # ── 전용 에뮬레이터(다른 포트) ───────────────────────────────────────────
 # 재사용할 수 없을 때 **개발용 에뮬레이터를 죽이지 않고** 검증만 따로 돌린다.
 tcp_in_use() {
@@ -188,27 +198,75 @@ tcp_in_use() {
 #    아래 사다리가 실행마다 한 칸씩 소진되고, 열 번이면 이 게이트가 그 PC에서 영영 막힌다.
 #    그래서 우리가 띄운 포트는 우리가 거둔다.
 #
-# ⚠️ 포트로 죽이는 것이 안전한 이유: 이 함수는 **띄우기 직전에 비어 있음을 확인한 포트**
-#    에만 쓴다. 그 뒤에 거기 붙은 리스너는 우리가 띄운 것이다.
+# ⚠️ **거둘 자격은 두 겹으로 확인한다.** 이 함수는 프로세스를 `-9`/`-Force`로 죽이는데,
+#    잘못 짚으면 개발용 에뮬레이터가 정상 종료를 못 해 `.emulator-local/` 세션 데이터가
+#    통째로 날아간다(되돌릴 수 없다).
+#      ①호출자가 `claim_port`로 **바인드 수준**에서 비어 있는 것을 보고 잡은 포트만 넘긴다.
+#      ②여기서 다시, **부모가 죽은 프로세스만** 죽인다. 누수된 JVM은 정의상 고아이고
+#        (부모 firebase CLI가 이미 종료), 정상 `emulators:start`의 JVM은 부모가 살아 있다
+#        (실측: 개발용 8080의 java는 부모 java가 살아 있고, 누수된 6개는 전부 부모 사망).
+#    ①만으로는 check→bind 사이·검증 도중에 남이 그 포트를 채간 경우를 못 거른다.
 reap_port() {
-  local port="$1" pid
+  local port="$1" pid ppid alive
   tcp_in_use "${port}" || return 0
-  if command -v powershell.exe >/dev/null 2>&1; then
+  # ⚠️ WSL에는 `powershell.exe`도 PATH에 있다 — 그쪽을 먼저 보면 리스너는 리눅스 프로세스인데
+  #    Windows 호스트의 연결 목록을 뒤진다. 못 찾으면 다행이고, 같은 번호를 쓰는 **무관한
+  #    Windows 프로세스를 죽일 수도** 있다. 리스너와 같은 커널을 보는 `lsof`를 먼저 쓴다.
+  if command -v lsof >/dev/null 2>&1; then
+    pid=$(lsof -ti "tcp:${port}" -sTCP:LISTEN 2>/dev/null | head -1)
+    if [[ -n "${pid}" ]]; then
+      ppid=$(ps -o ppid= -p "${pid}" 2>/dev/null | tr -d ' ')
+      # PPID 1 = 부모가 죽어 init(또는 서브리퍼)에 재부모화된 고아.
+      if [[ -z "${ppid}" || "${ppid}" == "1" ]]; then
+        kill -9 "${pid}" 2>/dev/null
+      else
+        echo "  ⚠️ 포트 ${port}의 프로세스(pid=${pid})는 부모가 살아 있다 — 우리 잔재가 아니므로 두고 간다." >&2
+        return 0
+      fi
+    fi
+  elif command -v powershell.exe >/dev/null 2>&1; then
     pid=$(powershell.exe -NoProfile -Command \
       "(Get-NetTCPConnection -LocalPort ${port} -State Listen -EA SilentlyContinue).OwningProcess" \
       2>/dev/null | tr -d '\r' | head -1)
-    [[ -n "${pid}" ]] && powershell.exe -NoProfile -Command \
-      "Stop-Process -Id ${pid} -Force -EA SilentlyContinue" >/dev/null 2>&1
-  elif command -v lsof >/dev/null 2>&1; then
-    # ⚠️ 미확인: Windows에서만 누수를 실측했다. 다른 플랫폼에서 새지 않으면 이 경로는
-    #    `tcp_in_use`에서 이미 빠져나가므로 아무 일도 하지 않는다.
-    pid=$(lsof -ti "tcp:${port}" -sTCP:LISTEN 2>/dev/null | head -1)
-    [[ -n "${pid}" ]] && kill -9 "${pid}" 2>/dev/null
+    if [[ -n "${pid}" ]]; then
+      alive=$(powershell.exe -NoProfile -Command \
+        "\$p = Get-CimInstance Win32_Process -Filter \"ProcessId = ${pid}\" -EA SilentlyContinue; if (\$p -and (Get-CimInstance Win32_Process -Filter \"ProcessId = \$(\$p.ParentProcessId)\" -EA SilentlyContinue)) { 'ALIVE' } else { 'ORPHAN' }" \
+        2>/dev/null | tr -d '\r' | head -1)
+      if [[ "${alive}" == "ORPHAN" ]]; then
+        powershell.exe -NoProfile -Command "Stop-Process -Id ${pid} -Force -EA SilentlyContinue" >/dev/null 2>&1
+      else
+        echo "  ⚠️ 포트 ${port}의 프로세스(pid=${pid})는 부모가 살아 있다 — 우리 잔재가 아니므로 두고 간다." >&2
+        return 0
+      fi
+    fi
   fi
   if tcp_in_use "${port}"; then
     echo "  ⚠️ 검증용 에뮬레이터(포트 ${port})를 정리하지 못했다 — 그 포트의 java 프로세스를 직접 종료하라." >&2
   fi
   return 0
+}
+
+# ⚠️ 거둘 목록. **띄우기 직전에** `claim_port`로 채우고, 끝나면 그 목록만 거둔다.
+#    `fs_up`/`auth_up`은 근거가 되지 못한다 — 그것은 curl **HTTP 프로브**라, 포트를 물고
+#    HTTP를 안 하는 프로세스는 `up=0`으로 읽히는데 포트는 막혀 있다(실측: 조용한 TCP
+#    리스너 → `tcp_in_use`=IN USE / curl 타임아웃). 그 차이를 무시하면 남의 프로세스를
+#    "우리가 띄운 것"으로 착각해 죽인다.
+declare -a REAPABLE=()
+
+claim_port() {
+  if tcp_in_use "$1"; then
+    return 1
+  fi
+  REAPABLE+=("$1")
+  return 0
+}
+
+reap_claimed() {
+  local p
+  for p in "${REAPABLE[@]:-}"; do
+    [[ -n "${p}" ]] && reap_port "${p}"
+  done
+  REAPABLE=()
 }
 
 # 기본 포트 묶음이 막혀 있으면 +10씩 밀어 가며 빈 자리를 찾는다.
@@ -256,6 +314,9 @@ run_dedicated_rules() {
     rules_setup_failed=1
     return 1
   fi
+  # 여기부터 중단되면 임시 디렉터리가 남는다 — 에뮬레이터를 띄우기 전이라 아직 JVM은 없다.
+  # (아래에서 포트를 잡은 뒤 거두기까지 포함한 trap으로 덮어쓴다.)
+  trap 'rm -rf "${dir}"; exit 130' INT TERM
   # 규칙·인덱스를 **복사해서** 상대경로로 참조한다. 원본을 절대경로로 가리키면 Windows
   # 경로 escaping이 JSON과 MSYS 두 겹으로 얽힌다 — 복사가 그 문제를 통째로 없앤다.
   # (`emulators:exec`의 자식 명령은 이 스크립트의 cwd, 즉 저장소 루트에서 돌므로
@@ -285,18 +346,26 @@ JSON
   # firebase는 네이티브 Windows 프로세스라 MSYS 경로(`/tmp/...`)를 못 읽는다.
   command -v cygpath >/dev/null 2>&1 && cfg=$(cygpath -m "${cfg}")
   echo "  (전용 에뮬레이터를 띄운다 — firestore=${ALT_FS} auth=${ALT_AUTH} hub=${ALT_HUB} logging=${ALT_LOG})"
+  # check→bind 사이에 남이 채갔을 수 있다. **여기서 다시 확인한 포트만** 거둔다.
+  REAPABLE=()
+  claim_port "${ALT_FS}" || echo "  ⚠️ 포트 ${ALT_FS}가 그 사이 사용 중이 됐다 — 거두지 않는다." >&2
+  claim_port "${ALT_AUTH}" || echo "  ⚠️ 포트 ${ALT_AUTH}가 그 사이 사용 중이 됐다 — 거두지 않는다." >&2
   # Ctrl+C로 끊기면 아래 정리가 통째로 건너뛰어져 임시 config와 좀비 JVM이 함께 남는다.
-  trap 'reap_port "${ALT_FS}"; reap_port "${ALT_AUTH}"; rm -rf "${dir}"; exit 130' INT TERM
+  trap 'reap_claimed; rm -rf "${dir}"; exit 130' INT TERM
   # 여기서도 셸에 남은 `AUTH_EMULATOR_HOST`가 CLI 주입값을 이기면 죽은 포트로 붙는다.
+  # `KEEPCON_RULES_VOUCH`는 자식의 스테일 가드에 "이 인스턴스는 방금 이 파일로 띄웠다"를
+  # 알린다 — node가 없는 PC(firebase CLI standalone 바이너리)에서 그 가드가 UNKNOWN으로
+  # 하드 실패해 규칙 검증이 통째로 불가능해지지 않게 한다.
   env -u AUTH_EMULATOR_HOST -u FIRESTORE_EMULATOR_HOST -u FIREBASE_AUTH_EMULATOR_HOST \
+    KEEPCON_RULES_VOUCH=FRESH \
     firebase emulators:exec --config "${cfg}" --project "${RULES_PROJECT}" \
     --only auth,firestore "bash tool/verify_firestore_rules.sh"
   rc=$?
-  trap - INT TERM
   # ⚠️ 성공(rc=0)이어도 반드시 거둔다 — 누수는 실패가 아니라 **정상 종료**에서 났다.
-  reap_port "${ALT_FS}"
-  reap_port "${ALT_AUTH}"
+  reap_claimed
   rm -rf "${dir}"
+  # 복원은 정리 그 **뒤**에 한다. 앞에서 풀면 거두는 구간이 무방비가 된다(핸들러는 멱등).
+  trap - INT TERM
   return "${rc}"
 }
 
@@ -305,13 +374,14 @@ JSON
 # 읽힌다 — 예전 '절반만 떠 있음' 분기가 지키던 구분이라 여기서 그대로 이어받는다.
 # (구분할 수 있는 것만 구분한다: `emulators:exec`가 기동에 실패한 경우는 자식의 종료
 #  코드와 섞여 구별할 수 없으므로 규칙 실패로 둔다 — 그쪽은 firebase가 시끄럽게 찍는다.)
-run_rules_dedicated() {
-  local label="Firestore rules"
-  if run_dedicated_rules; then
+run_rules_labeled() {
+  local fn="$1" label="Firestore rules"
+  rules_setup_failed=0
+  if "${fn}"; then
     echo "  ✓ ${label}"
     return 0
   fi
-  [[ "${rules_setup_failed}" -eq 1 ]] && label="Firestore rules — 전용 에뮬레이터 셋업"
+  [[ "${rules_setup_failed}" -eq 1 ]] && label="Firestore rules — 에뮬레이터 셋업"
   echo "  ✗ ${label}"
   fail=1
   failed+=("${label}")
@@ -323,17 +393,30 @@ run_rules_dedicated() {
 # 이 분기는 두 포트가 비어 있음을 확인한 뒤에만 오므로 포트로 거두는 것이 안전하다.
 run_default_port_rules() {
   local rc
-  trap 'reap_port "${FS_PORT}"; reap_port "${AUTH_PORT}"; exit 130' INT TERM
+  # ⚠️ 여기 오는 근거는 `fs_up`/`auth_up`, 즉 **curl HTTP 프로브** 실패뿐이다 — 그것은
+  #    "포트가 비었다"의 증거가 아니다. 포트를 물고 HTTP를 안 하는 프로세스는 `up=0`으로
+  #    읽히는데 포트는 막혀 있다(실측: 조용한 TCP 리스너 → tcp_in_use=IN USE / curl 타임아웃).
+  #    그대로 거두면 **개발용 에뮬레이터를 강제 종료**해 `.emulator-local/` 세션이 날아간다.
+  #    바인드 수준으로 다시 확인하고, 확인된 것만 거둔다.
+  REAPABLE=()
+  if ! claim_port "${FS_PORT}" || ! claim_port "${AUTH_PORT}"; then
+    REAPABLE=()
+    echo "  ✗ 기본 포트(${FS_PORT}/${AUTH_PORT})가 HTTP에 응답하지 않으면서 사용 중이다."
+    echo "     기동 중인 에뮬레이터이거나 남의 프로세스다 — 확인한 뒤 다시 돌려라."
+    rules_setup_failed=1
+    return 1
+  fi
+  trap 'reap_claimed; exit 130' INT TERM
   # ⚠️ 여기서는 함정이 **반대 방향**이다. CLI는 `FIREBASE_AUTH_EMULATOR_HOST`만 주입하는데
   #    수신 측은 `AUTH_EMULATOR_HOST`를 먼저 보므로, 셸에 남은 값이 CLI를 이겨 죽은 포트로
   #    붙는다(`tool/seed_emulator.sh`가 쓰는 노브라 실제로 남아 있을 수 있다). 지워서 넘긴다.
   env -u AUTH_EMULATOR_HOST -u FIRESTORE_EMULATOR_HOST -u FIREBASE_AUTH_EMULATOR_HOST \
+    KEEPCON_RULES_VOUCH=FRESH \
     firebase emulators:exec --project "${RULES_PROJECT}" --only auth,firestore \
     "bash tool/verify_firestore_rules.sh"
   rc=$?
+  reap_claimed
   trap - INT TERM
-  reap_port "${FS_PORT}"
-  reap_port "${AUTH_PORT}"
   return "${rc}"
 }
 
@@ -371,7 +454,6 @@ elif rules_changed; then
   # 포트는 여기서 읽는다 — 규칙 검증을 안 돌리는 실행(대다수)에서는 쓰이지도 않는데
   # 폴백 경고만 떠서 "무엇이 잘못됐나" 오해를 부른다.
   read_emulator_ports
-  read_rules_paths
 
   # 규칙 스크립트는 Auth로 사용자 셋을 만들고 그 토큰으로 Firestore를 친다 — **둘 다**
   # 떠 있어야 재사용할 수 있다.
@@ -409,6 +491,7 @@ elif rules_changed; then
       run "Firestore rules" env \
         "FIRESTORE_EMULATOR_HOST=localhost:${FS_PORT}" \
         "AUTH_EMULATOR_HOST=localhost:${AUTH_PORT}" \
+        "KEEPCON_RULES_VOUCH=MATCH" \
         bash tool/verify_firestore_rules.sh
     else
       if [[ "${rules_state}" == "STALE" ]]; then
@@ -418,7 +501,7 @@ elif rules_changed; then
         echo "  ⚠️ 실행 중인 에뮬레이터가 적재한 규칙을 확인하지 못했다(${rules_detail}) — 재사용하지 않는다."
       fi
       echo "     낡은 규칙 위에서 돈 검증은 통과도 실패도 근거가 되지 못한다."
-      run_rules_dedicated
+      run_rules_labeled run_dedicated_rules
     fi
   elif [[ "${fs_up}" -eq 1 || "${auth_up}" -eq 1 ]]; then
     # 한쪽만 떠 있으면 기본 포트로는 반드시 충돌한다. 예전에는 그래서 여기서 셋업 실패로
@@ -429,10 +512,10 @@ elif rules_changed; then
     echo "  ⚠️ 에뮬레이터가 절반만 떠 있다(firestore=${fs_up} auth=${auth_up}) — 재사용하지 않는다."
     echo "     이 조합은 정상 구성이 아니다 — 남은 Firestore 좀비가 ${FS_PORT}를 물고 있으면"
     echo "     \`tool/emulators.sh\`도 앱도 뜨지 않는다. 검증이 끝나면 그 포트의 java 프로세스를 확인하라."
-    run_rules_dedicated
+    run_rules_labeled run_dedicated_rules
   else
     echo "  (에뮬레이터를 직접 띄운다)"
-    run "Firestore rules" run_default_port_rules
+    run_rules_labeled run_default_port_rules
   fi
 else
   echo

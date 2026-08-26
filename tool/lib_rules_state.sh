@@ -18,6 +18,10 @@ _RULES_LIB_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 RULES_FILE="${_RULES_LIB_ROOT}/firestore.rules"
 INDEX_FILE="${_RULES_LIB_ROOT}/firestore.indexes.json"
+# 저장소 루트 기준 상대 이름 — `tool/verify.sh`의 변경 감지(`git diff --name-only`와 대조)가
+# 이 형태를 쓴다. 절대경로만 내보내면 그쪽이 다시 이름을 박게 된다.
+RULES_FILE_REL="firestore.rules"
+INDEX_FILE_REL="firestore.indexes.json"
 
 # 규칙·인덱스 **경로**도 `firebase.json`이 정본이다 — 포트만 정본을 따르고 여기는 박아 두면,
 # 경로를 바꾼 순간 ①떠 있는 에뮬레이터와의 대조가 항상 STALE이 되고 ②전용 인스턴스가
@@ -31,6 +35,8 @@ read_rules_paths() {
     read -r _r _i <<<"${_paths}"
     RULES_FILE="${_RULES_LIB_ROOT}/${_r}"
     INDEX_FILE="${_RULES_LIB_ROOT}/${_i}"
+    RULES_FILE_REL="${_r}"
+    INDEX_FILE_REL="${_i}"
   else
     # 조용히 기본값으로 넘어가면 커스텀 경로 환경에서 "왜 항상 STALE이지"를 규칙에서 찾게 된다.
     echo "  ⚠️ firebase.json에서 규칙·인덱스 경로를 읽지 못했다(node 부재·firebase.json 파손) — 기본값으로 진행한다." >&2
@@ -44,14 +50,15 @@ read_rules_paths() {
 #    인스턴스다 — 감시 대상이 남의 파일이라 이쪽 변경은 영원히 반영되지 않는다. 응답의 `name`
 #    필드가 그 출처를 드러내므로 STALE 사유로 그 값을 찍는다.
 # ⚠️ 정규화는 줄바꿈(CRLF→LF)까지만 한다. `.gitattributes`의 `* text=auto`가 저장소에는 LF로
-#    고정하지만 **체크아웃 줄바꿈은 `core.eol`(기본 `native`)이 정하므로** 플랫폼에 따라
-#    워킹트리가 CRLF일 수 있다(eol이 못박힌 것은 `*.sh`·`*.cmd`뿐이다). 그건 규칙 의미와
+#    고정하지만 **체크아웃 줄바꿈은 `core.autocrlf`/`core.eol`이 정하므로**(이 클론은
+#    `core.autocrlf=true`) 플랫폼·설정에 따라 워킹트리가 CRLF일 수 있다(eol이 못박힌 것은\n#    `*.sh`·`*.cmd`뿐이다). 그건 규칙 의미와
 #    무관하다. 그 이상은 손대지 않는다 — 공백 하나가 규칙 의미를 바꾸는 경우가 있어서,
 #    더 관대한 비교는 이 감지 자체를 무의미하게 만든다.
 # ⚠️ node가 없거나 응답이 예상과 다르면 빈 출력·UNKNOWN이 된다. 호출자는 그것을 통과로
 #    읽지 말 것 — 확인하지 못한 것과 확인해서 괜찮은 것은 다른 사실이다.
 emulator_rules_state() {
-  node -e '
+  local _state
+  _state=$(node -e '
     const fs = require("fs");
     // `node -e`의 argv는 파일 실행보다 한 칸 당겨있다(argv[1]부터 인자) —
     // 둘 다 안전하게 마지막 세 개를 집는다. slice(2)로 두면 인자가 한 칸씩 밀려
@@ -72,5 +79,12 @@ emulator_rules_state() {
       })
       .catch((e) => process.stdout.write("UNKNOWN\t" + (e.message || e)))
       .finally(() => clearTimeout(timer));
-  ' "$1" "$2" "${RULES_FILE}" 2>/dev/null
+  ' "$1" "$2" "${RULES_FILE}" 2>/dev/null)
+  # node 자체가 없거나 즉사하면 stdout이 비어 있다 — 그대로 넘기면 호출자가 사유를 빈
+  # 괄호로 찍는다(실측). 여기서 사유를 붙여 어느 호출자든 같은 말을 하게 한다.
+  if [[ -z "${_state}" ]]; then
+    printf 'UNKNOWN\tnode를 실행하지 못했다(node 부재·구버전 등)'
+  else
+    printf '%s' "${_state}"
+  fi
 }
