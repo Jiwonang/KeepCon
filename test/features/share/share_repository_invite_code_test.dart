@@ -188,6 +188,48 @@ void main() {
     });
   });
 
+  group('레거시 6자리 링크 토큰 (v3.0 이전)', () {
+    // ⚠️ 링크 토큰이 128비트가 된 것은 v3.0(2026-08-20)이고, **그 이전 토큰은 6자리
+    //    숫자였다.** 그 값들이 아직 살아 있다 — 이 저장소의 데모 시드(`482913`·
+    //    `771205`), 팀 공용 에뮬레이터 시드(`tool/seed_emulator.sh`), 그리고 레거시
+    //    Firestore 문서.
+    //
+    //    그래서 자격증명을 모양으로 **배타적으로** 고르면(6자리면 코드만 본다) 그
+    //    링크들이 통째로 '없는 코드'가 된다. 보안 규칙의 `credentialGrants`는 두
+    //    컬렉션을 OR로 보므로, 클라이언트만 좁으면 정상 링크를 스스로 거부하는 셈이다.
+
+    test('6자리 링크 토큰으로도 참여를 요청할 수 있다', () async {
+      // 시드 그룹은 6자리 토큰을 갖고 있다(이 저장소의 실제 데이터 모양).
+      final List<Group> seeded = await repo.getGroups(
+        InMemoryAuthRepository.defaultUser.id,
+      );
+      final Group legacy = seeded.firstWhere(
+        (Group g) => isWellFormedInviteCode(g.inviteToken),
+        orElse: () => throw StateError('시드에 6자리 토큰 그룹이 없다 — 이 테스트의 전제가 사라졌다'),
+      );
+
+      await asGuest();
+      final JoinRequest req = await repo.requestToJoin(legacy.inviteToken);
+      expect(req.groupId, legacy.id);
+    });
+
+    test('같은 값이 코드로도 살아 있으면 코드가 이긴다(만료 기준이 흔들리지 않게)', () async {
+      // 폴백이 우선순위를 뒤집으면 안 된다 — 코드가 먼저다. 그래야 5분 창이
+      // 24시간 창에 흡수되지 않는다.
+      final Group g = await newGroup();
+      final Group issued = await repo.issueInviteCode(groupId: g.id);
+      final String code = issued.inviteCode!;
+
+      clock = clock.add(const Duration(minutes: 6)); // 코드만 만료
+      await asGuest();
+      await expectLater(
+        repo.requestToJoin(code),
+        throwsA(isA<InviteExpiredException>()),
+        reason: '코드로 먼저 해석돼야 5분 만료가 적용된다',
+      );
+    });
+  });
+
   group('만료는 사용한 자격증명 기준이다 (핵심 불변식)', () {
     test('코드가 죽어도 링크는 살아 있다 — 그리고 그 반대는 성립하지 않는다', () async {
       final Group g = await newGroup();

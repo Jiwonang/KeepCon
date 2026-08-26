@@ -373,11 +373,19 @@ class InMemoryShareRepository implements ShareRepository {
   Future<JoinRequest> requestToJoin(String credential) async {
     final User me = _requireUser();
     // 자격증명은 모양으로 갈린다 — 6자리 숫자면 초대코드, 아니면 링크 토큰.
-    // 링크 토큰은 base64url 22자라 이 검사를 통과할 수 없어 둘이 겹치지 않는다.
-    final bool isCode = isWellFormedInviteCode(credential);
-    final Group? g = isCode
+    //
+    // ⚠️ 다만 **배타적으로 고르면 안 된다.** 지금 발급되는 링크 토큰은 base64url 22자라
+    //    겹치지 않지만, v3.0(128비트) 이전 토큰은 **6자리 숫자**였고 그 값들이 아직 살아
+    //    있다(이 파일의 데모 시드 `482913`·`771205`, 팀 공용 에뮬레이터 시드, 레거시
+    //    Firestore 문서). 코드 쪽만 뒤지면 그 링크들이 통째로 '없는 코드'가 된다.
+    //
+    //    코드를 **먼저** 보므로 "만료는 사용한 자격증명 기준"은 그대로다 — 폴백은 그
+    //    값을 코드로 쓰는 그룹이 아예 없을 때만 탄다.
+    final Group? byCode = isWellFormedInviteCode(credential)
         ? _groupByCodeOrNull(credential)
-        : _groupByTokenOrNull(credential);
+        : null;
+    final bool isCode = byCode != null;
+    final Group? g = byCode ?? _groupByTokenOrNull(credential);
     if (g == null) {
       throw StateError('No group for invite credential: $credential');
     }

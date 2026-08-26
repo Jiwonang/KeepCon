@@ -202,7 +202,8 @@ class _CreateGroupSheetState extends ConsumerState<_CreateGroupSheet> {
   }
 }
 
-/// 그룹 참여 **요청** 바텀시트 — 초대코드 입력. [ShareRepository.requestToJoin]으로
+/// 그룹 참여 **요청** 바텀시트 — 자격증명 입력(6자리 초대코드 또는 링크 토큰).
+/// [ShareRepository.requestToJoin]으로
 /// **요청만** 보낸다 — 방장이 승인하기 전까지 멤버가 아니다(v3.8에서 즉시 합류 경로 삭제).
 ///
 /// [initialToken]가 있으면(초대 딥링크 진입) 코드 입력란을 미리 채운다.
@@ -217,7 +218,9 @@ Future<void> showJoinGroupSheet(BuildContext context, {String? initialToken}) {
 class _JoinGroupSheet extends ConsumerStatefulWidget {
   const _JoinGroupSheet({this.initialToken});
 
-  /// 딥링크로 전달된 초대코드(있으면 입력란을 미리 채운다).
+  /// 딥링크로 전달된 **링크 토큰**(있으면 입력란을 미리 채운다).
+  ///
+  /// 6자리 초대코드가 아니다 — 딥링크가 싣는 것은 항상 링크 쪽 자격증명이다.
   final String? initialToken;
 
   @override
@@ -323,13 +326,13 @@ class _JoinGroupSheetState extends ConsumerState<_JoinGroupSheet> {
           // 입력란은 하나다 — 링크 토큰과 6자리 코드는 모양으로 구분되므로
           // (`isWellFormedInviteCode`) 사용자에게 "지금 넣는 것이 무엇인지" 고르게
           // 하지 않는다. 계약의 `requestToJoin(credential)`이 같은 이유로 하나다.
-          Text('초대코드 또는 초대 링크 코드', style: theme.textTheme.bodySmall),
+          Text('초대코드 또는 초대 링크', style: theme.textTheme.bodySmall),
           const SizedBox(height: 8),
           TextField(
             controller: _codeCtrl,
             autofocus: true,
             textInputAction: TextInputAction.done,
-            decoration: const InputDecoration(hintText: '6자리 초대코드 입력'),
+            decoration: const InputDecoration(hintText: '6자리 코드 또는 링크의 토큰'),
             onSubmitted: (_) => _submit(),
           ),
           const SizedBox(height: 20),

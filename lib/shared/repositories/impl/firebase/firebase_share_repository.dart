@@ -246,7 +246,7 @@ class FirebaseShareRepository implements ShareRepository {
     } catch (_) {
       // 나가기가 무산됐다 — 사라질 줄 알고 미리 거둔 링크를 되살린다.
       // (참여 요청은 되살릴 수 없다. `_cascadeDeleteGroupJoinArtifacts` 주석 참조.)
-      if (preGroup != null) await _restoreInviteToken(preGroup);
+      if (preGroup != null) await _restoreInviteCredentials(preGroup);
       rethrow;
     }
 
@@ -256,7 +256,7 @@ class FirebaseShareRepository implements ShareRepository {
       // 그룹이 남는 분기 — 떠난 사람의 승인 기록만 거둔다.
       await _dropJoinRequest(groupId, me.id);
       // 사라질 줄 알고 미리 거뒀는데 그룹이 남았다면(그사이 누가 합류) 링크를 되살린다.
-      if (preGroup != null) await _restoreInviteToken(preGroup);
+      if (preGroup != null) await _restoreInviteCredentials(preGroup);
     }
   }
 
@@ -293,7 +293,7 @@ class FirebaseShareRepository implements ShareRepository {
       });
     } catch (_) {
       // 삭제가 무산됐다 — 그룹은 남는데 링크만 죽은 상태를 남기지 않는다.
-      if (preGroup != null) await _restoreInviteToken(preGroup);
+      if (preGroup != null) await _restoreInviteCredentials(preGroup);
       rethrow;
     }
 
@@ -443,15 +443,25 @@ class FirebaseShareRepository implements ShareRepository {
   ///
   /// 시도가 모두 실패하면 [StateError] — 조용히 충돌한 코드를 반환해 다음 단계에서
   /// 정체 모를 권한 오류를 내는 것보다 낫다.
+  /// ⚠️ **레거시 6자리 링크 토큰과도 겹치면 안 된다.** 링크 토큰이 128비트가 된 것은
+  /// v3.0이고 그 이전 토큰은 6자리 숫자였다 — 그 값들이 아직 살아 있다(팀 공용 시드
+  /// `482913` 등). 같은 값을 코드로 발급하면 [requestToJoin]이 코드를 먼저 보므로
+  /// **그 그룹의 레거시 링크가 도달 불가**가 된다(코드가 만료되면 '만료' 안내까지 받는다).
+  /// 두 컬렉션을 모두 확인해 그 값을 피한다.
   Future<String> _availableInviteCode(String groupId) async {
     const int attempts = 5;
     for (int i = 0; i < attempts; i++) {
       final String code = newInviteCode();
       final DocumentSnapshot<Map<String, dynamic>> doc =
           await _inviteCodes.doc(code).get();
-      // 없거나, 있어도 **내 그룹 것**이면 덮어쓸 수 있다.
-      if (!doc.exists) return code;
-      if (docStringOrNull(doc.data()?['groupId']) == groupId) return code;
+      // 남의 그룹이 쥔 코드는 규칙이 돌려쓰기를 막으므로 다시 뽑는다.
+      if (doc.exists && docStringOrNull(doc.data()?['groupId']) != groupId) {
+        continue;
+      }
+      // 레거시 링크 토큰과 겹쳐도 다시 뽑는다. 내 그룹 것이어도 마찬가지다 —
+      // 내 링크를 내 코드로 가리는 것도 똑같이 그 링크를 죽인다.
+      if ((await _inviteTokens.doc(code).get()).exists) continue;
+      return code;
     }
     throw StateError('Could not allocate an invite code for group: $groupId');
   }
@@ -487,12 +497,16 @@ class FirebaseShareRepository implements ShareRepository {
       return next;
     });
 
-    // 옛 코드 문서를 **먼저** 지운다(재발급과 같은 fail-closed 순서). 계약이
-    // "그룹당 활성 코드 하나"라, 새 문서를 먼저 쓰면 둘 다 열리는 창이 생긴다.
-    if (oldCode != null && oldCode != code) {
-      await _inviteCodes.doc(oldCode!).delete();
-    }
     try {
+      // 옛 코드 문서를 **먼저** 지운다(재발급과 같은 fail-closed 순서). 계약이
+      // "그룹당 활성 코드 하나"라, 새 문서를 먼저 쓰면 둘 다 열리는 창이 생긴다.
+      //
+      // 이 삭제도 `try` 안이어야 한다 — 밖에 두면 삭제 실패 시 되돌리기 없이 예외가
+      // 나가고, 옛 코드가 살아남은 채 그룹만 새 코드를 내걸어 '활성 코드 하나'가
+      // 깨진다(그 창 동안 6자리를 정당화하는 세 축 중 하나가 무너진다).
+      if (oldCode != null && oldCode != code) {
+        await _inviteCodes.doc(oldCode!).delete();
+      }
       await _inviteCodes.doc(code).set(_inviteCodeToDoc(updated));
     } catch (_) {
       // 조회 문서를 못 만들었으면 그룹이 **아무도 풀 수 없는 코드**를 내걸게 된다 —
@@ -598,14 +612,23 @@ class FirebaseShareRepository implements ShareRepository {
     final User me = _requireUser();
 
     // 자격증명은 모양으로 갈린다 — 6자리 숫자면 초대코드(`inviteCodes`), 아니면 링크
-    // 토큰(`inviteTokens`). 링크 토큰은 base64url 22자라 겹치지 않는다.
+    // 토큰(`inviteTokens`). 비멤버는 규칙상 `groups`를 못 읽으므로 그룹으로 가는 다리는
+    // 이 조회 문서뿐이고, 그래서 만료의 정본도 이 문서가 들고 있다.
     //
-    // 어느 쪽이든 **조회 문서 하나만** 읽는다. 비멤버는 규칙상 `groups`를 못 읽으므로
-    // 그룹으로 가는 다리는 이 문서뿐이고, 그래서 만료의 정본도 이 문서가 들고 있다.
-    final CollectionReference<Map<String, dynamic>> lookup =
-        isWellFormedInviteCode(credential) ? _inviteCodes : _inviteTokens;
-    final DocumentSnapshot<Map<String, dynamic>> credDoc =
-        await lookup.doc(credential).get();
+    // ⚠️ 모양으로 **고르되, 빗나가면 다른 쪽도 본다.** 배타적으로 고르면 v3.0(128비트)
+    //    이전의 **6자리 링크 토큰**이 통째로 '없는 코드'가 된다 — 그 값들은 아직 살아
+    //    있다(팀 공용 시드 `482913`, 데모 시드, 레거시 Firestore 문서). 보안 규칙의
+    //    `credentialGrants`도 두 컬렉션을 OR로 보므로, 여기만 배타적이면 클라이언트가
+    //    규칙보다 좁아 **정상 링크를 스스로 거부**하는 셈이 된다.
+    //
+    //    코드를 **먼저** 보므로 "만료는 사용한 자격증명 기준"은 그대로다 — 살아 있는
+    //    코드가 있으면 그것으로 판정되고, 폴백은 코드 문서가 아예 없을 때만 탄다.
+    final bool codeShaped = isWellFormedInviteCode(credential);
+    DocumentSnapshot<Map<String, dynamic>> credDoc =
+        await (codeShaped ? _inviteCodes : _inviteTokens).doc(credential).get();
+    if (!credDoc.exists && codeShaped) {
+      credDoc = await _inviteTokens.doc(credential).get();
+    }
     final Map<String, dynamic> t = credDoc.data() ?? const <String, dynamic>{};
     final Object? groupId = t['groupId'];
     if (!credDoc.exists || groupId is! String || groupId.isEmpty) {
@@ -1036,7 +1059,7 @@ class FirebaseShareRepository implements ShareRepository {
   /// 사람이 전부 훑어 그룹 id를 얻는 것을 막는 규칙) `where` 질의 자체가 거부된다.
   ///
   /// ⚠️ **참여 요청은 복원할 수 없다.** 이 정리 뒤에 그룹 삭제가 실패하면(동시에 소유권이
-  /// 넘어가는 등) 그룹은 남고 대기 목록만 비는 상태가 된다. 토큰 문서는 [_restoreInviteToken]
+  /// 넘어가는 등) 그룹은 남고 대기 목록만 비는 상태가 된다. 토큰·코드 문서는 [_restoreInviteCredentials]
   /// 으로 되돌리지만 요청은 못 되돌린다 — 요청자는 다시 요청해야 한다. 그 대신 삭제가
   /// 성공했을 때 아무것도 남지 않는 쪽을 택했다(남으면 아무도 끝낼 수 없다).
   Future<void> _cascadeDeleteGroupJoinArtifacts(
@@ -1068,13 +1091,24 @@ class FirebaseShareRepository implements ShareRepository {
     }
   }
 
-  /// 선행 정리 뒤 그룹 삭제가 실패했을 때 초대 링크를 되살린다.
+  /// 선행 정리 뒤 그룹 삭제가 실패했을 때 **초대 자격증명 둘 다** 되살린다.
   ///
   /// 되돌리지 못하면 그룹은 살아 있는데 링크만 죽은 상태가 남고, 방장이 재발급을 누르기
   /// 전까지 아무도 참여를 요청할 수 없다.
-  Future<void> _restoreInviteToken(Group g) async {
-    if (g.inviteToken.isEmpty) return;
-    await _inviteTokens.doc(g.inviteToken).set(_inviteTokenToDoc(g));
+  ///
+  /// 코드를 빠뜨리면 같은 종류의 어긋남이 코드 쪽에 남는다 — 그룹 문서는 6자리를 계속
+  /// 내걸어 방장 화면이 "483920 · 3:52 후 만료"를 표시하는데, 그 코드를 받은 사람은
+  /// 조회 문서가 없어 '없는 코드'로 거부당한다(만료 안내조차 아니다).
+  /// [_restoreInviteCodeAfterFailure]가 발급 경로에서 막는 것과 같은 상태다.
+  Future<void> _restoreInviteCredentials(Group g) async {
+    if (g.inviteToken.isNotEmpty) {
+      await _inviteTokens.doc(g.inviteToken).set(_inviteTokenToDoc(g));
+    }
+    // 이미 만료된 코드는 되살리지 않는다 — 조회 문서가 있든 없든 결과가 같고,
+    // 되살리면 5분 창이 지난 값이 컬렉션에 남아 점유만 늘린다.
+    if (g.hasActiveInviteCode(DateTime.now())) {
+      await _inviteCodes.doc(g.inviteCode!).set(_inviteCodeToDoc(g));
+    }
   }
 
   Future<void> _cascadeDeleteGroupShares(String groupId) async {
@@ -1229,10 +1263,12 @@ class FirebaseShareRepository implements ShareRepository {
         // null인 문서"와 "코드 필드가 없는 문서"가 갈리고, 보안 규칙의 필드 검사도
         // 두 모양을 다 받아 줘야 한다 — 결측 하나로 통일한다.
         //
-        // 전체 되쓰기 경로가 이 맵을 그대로 쓰므로, 코드가 없는 그룹을 되쓰면 기존
-        // 코드 필드가 **사라진다.** 그게 맞는 동작이다: 되쓰기의 입력이 된 [Group]이
-        // 코드 없음이면 문서도 코드 없음이어야 한다(둘이 갈리면 방장 화면과 조회
-        // 문서가 어긋난다).
+        // ⚠️ 이 맵의 소비자는 대부분 `tx.update`이고, **`update`는 맵에 없는 필드를
+        // 지우지 않는다** — 조건부로 빼는 것만으로는 기존 코드가 무효화되지 않는다.
+        // 실제로 지우려면 `FieldValue.delete()`를 명시해야 한다
+        // ([_restoreInviteCodeAfterFailure]가 그렇게 한다). 여기서 조건부로 싣는 것은
+        // '코드 없음'을 `null`이 아니라 **결측**으로 통일하려는 것일 뿐이다(두 모양이
+        // 생기면 보안 규칙의 필드 검사도 둘 다 받아 줘야 한다).
         //
         // ⚠️ 문서 키는 `inviteCode`가 **아니라** `shortInviteCode`다. `inviteCode`는
         // 이미 임자가 있다 — 링크 토큰의 **옛 이름**이라, 레거시 문서는 그 키에 토큰을

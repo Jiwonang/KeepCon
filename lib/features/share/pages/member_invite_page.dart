@@ -1,6 +1,7 @@
 /// share 페이지 — 멤버 초대(전체 화면, KeepCon 틀 재디자인).
 ///
-/// 초대 URL + 초대코드(각 복사 버튼), 유효기간 안내, "방장만 초대" 권한 토글.
+/// 초대 링크(복사 버튼) + 6자리 초대코드(발급·카운트다운), 링크 유효기간 안내,
+/// "방장만 초대" 권한 토글.
 /// 권한 토글은 [ShareRepository.setInviteOwnerOnly]로 그룹 정책에 반영되며
 /// 방장만 편집할 수 있다(그룹 상세의 초대 진입점은 [Group.canInvite]로 게이팅).
 /// 하단 CTA는 OS 공유 시트를 띄워 설치된 앱(카카오톡·디스코드·LINE 등)으로 초대 링크를
@@ -8,7 +9,11 @@
 ///
 /// **만료는 고르는 값이 아니다** — 모든 초대는 발급 시점부터 [Group.inviteValidity](24시간)
 /// 동안만 유효한 고정 정책이라, 이 화면은 남은 유효기간을 **표시만** 한다. 만료된 초대를
-/// 되살리는 경로는 방장의 "코드 재발급"([ShareRepository.regenerateInviteToken])뿐이다.
+/// 되살리는 경로는 방장의 "링크 재발급"([ShareRepository.regenerateInviteToken])이다.
+///
+/// **초대코드는 별개 자격증명이다** — 6자리·5분이고 [ShareRepository.issueInviteCode]로
+/// 발급하며, 링크 재발급과 서로를 무효화하지 않는다. 두 이름을 섞지 말 것:
+/// 이 화면에서 '초대코드'는 오직 6자리를 가리킨다.
 library;
 
 import 'dart:async';
@@ -185,7 +190,9 @@ class _MemberInvitePageState extends ConsumerState<MemberInvitePage> {
     }
   }
 
-  /// 초대코드를 재발급한다(방장 전용). 기존 코드/링크가 무효화됨을 확인 후 진행한다.
+  /// 초대 **링크**를 재발급한다(방장 전용). 기존 링크가 무효화됨을 확인 후 진행한다.
+  ///
+  /// 6자리 초대코드는 건드리지 않는다 — 아래 다이얼로그 문구가 그것을 명시한다.
   Future<void> _regenerate(String groupId) async {
     final bool ok = await showDialog<bool>(
           context: context,

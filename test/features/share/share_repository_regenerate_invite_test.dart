@@ -1,4 +1,7 @@
-// ShareRepository 초대코드 재발급(regenerateInviteToken) 테스트 (계약 대상).
+// ShareRepository 초대 **링크** 재발급(regenerateInviteToken) 테스트 (계약 대상).
+//
+// 6자리 초대코드(issueInviteCode)는 별개 자격증명이고 별도 파일에서 검증한다
+// (`share_repository_invite_code_test.dart`).
 //
 // 계약:
 // - 방장 본인만 재발급 가능(위반/그룹 없음이면 StateError).

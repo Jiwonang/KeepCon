@@ -78,8 +78,11 @@ void main() {
 
   group('isWellFormedInviteCode', () {
     test('6자리 숫자만 통과한다', () {
+      // ⚠️ 예시 값으로 `482913`을 쓰지 않는다 — 그건 이 저장소의 **시드 링크 토큰**이다
+      //    (v3.0 이전 토큰은 6자리였다). 두 공간이 겹친다는 사실이 여기서 흐려지면,
+      //    "코드와 토큰은 모양으로 구분된다"는 잘못된 전제가 다시 자란다.
       expect(isWellFormedInviteCode('000000'), isTrue);
-      expect(isWellFormedInviteCode('482913'), isTrue);
+      expect(isWellFormedInviteCode('305177'), isTrue);
       expect(isWellFormedInviteCode('999999'), isTrue);
     });
 
@@ -97,12 +100,20 @@ void main() {
       expect(isWellFormedInviteCode('１２３４５６'), isFalse);
     });
 
-    test('링크 토큰은 절대 통과하지 않는다 — 둘이 겹치면 조회 대상이 갈린다', () {
-      // 이것이 "입력란 하나로 둘 다 받는다"는 계약의 전제다. 겹치는 값이 하나라도
-      // 있으면 그 자격증명이 엉뚱한 컬렉션에서 조회돼 조용히 '없는 코드'가 된다.
+    test('지금 발급되는 링크 토큰은 통과하지 않는다(128비트 · base64url 22자)', () {
       for (int i = 0; i < 200; i++) {
         expect(isWellFormedInviteCode(newInviteToken()), isFalse);
       }
+    });
+
+    test('⚠️ 레거시 6자리 링크 토큰은 통과한다 — 모양만으로는 구분되지 않는다', () {
+      // v3.0(128비트) 이전 토큰은 6자리 숫자였고 그 값들이 아직 살아 있다(시드 포함).
+      // 즉 이 판정자는 "코드일 **수도** 있다"만 말한다. 자격증명 해석이 이 값 하나로
+      // 컬렉션을 **배타적으로** 고르면 그 링크들이 통째로 '없는 코드'가 된다 —
+      // 실제로 그렇게 짰다가 리뷰에서 잡혔다. 해석부는 코드를 먼저 보되 빗나가면
+      // 토큰도 봐야 한다(`ShareRepository.requestToJoin` 구현 참조).
+      expect(isWellFormedInviteCode('482913'), isTrue,
+          reason: '이 값은 이 저장소의 시드 **링크 토큰**이다');
     });
   });
 }
