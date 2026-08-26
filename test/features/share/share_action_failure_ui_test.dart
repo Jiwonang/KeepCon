@@ -114,6 +114,12 @@ class _BackendFailingShareRepository extends InMemoryShareRepository {
           : super.regenerateInviteToken(groupId: groupId);
 
   @override
+  Future<Group> issueInviteCode({required String groupId}) =>
+      failing.contains('issueInviteCode')
+          ? _boom('issueInviteCode')
+          : super.issueInviteCode(groupId: groupId);
+
+  @override
   Future<SharedGifticon> shareGifticon({
     required String groupId,
     required Gifticon gifticon,
@@ -488,6 +494,24 @@ void main() {
       expect(find.text('새 초대 링크를 발급했어요. 24시간 동안 유효해요.'), findsNothing);
       expect(reporter.reports.single.context,
           'MemberInvitePage.regenerateInviteToken');
+    });
+
+    testWidgets('초대코드 발급 — 백엔드 실패도 안내한다', (WidgetTester tester) async {
+      // 이 파일의 계약은 "백엔드 실패도 반드시 안내한다"이고, 초대코드 발급은
+      // `MemberInvitePage`에 새로 붙은 백엔드 호출 경로다. 스텁에 오버라이드가 없으면
+      // 그 경로만 이 파일의 축 밖에 남는다(형제 중 하나만 빠지는 비대칭).
+      final Group g = await repo.createGroup(name: '가족', emoji: '🏠');
+      repo.failing.add('issueInviteCode');
+
+      await pump(tester, MemberInvitePage(groupId: g.id));
+      await tester.tap(find.text('초대코드 발급하기'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('초대코드를 발급하지 못했어요. 다시 시도해 주세요.'), findsOneWidget);
+      // 실패했는데 코드가 뜨면 안 된다 — 아무도 못 쓰는 6자리를 내거는 상태다.
+      expect(find.textContaining('후 만료'), findsNothing);
+      expect(
+          reporter.reports.single.context, 'MemberInvitePage.issueInviteCode');
     });
   });
 }

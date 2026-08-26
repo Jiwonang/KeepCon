@@ -73,8 +73,11 @@ void main() {
   Future<void> pumpSheet(
     WidgetTester tester,
     _SpyShareRepository share,
-    _SpyErrorReporter reporter,
-  ) async {
+    _SpyErrorReporter reporter, {
+    /// 시트에 미리 채울 자격증명. 기본은 **링크 토큰**이다(딥링크가 싣는 값).
+    /// 6자리를 넘기면 초대코드 경로가 된다 — 만료 안내 문구가 갈리는 축이다.
+    String credential = 'TOKEN123',
+  }) async {
     await tester.pumpWidget(
       ProviderScope(
         overrides: <Override>[
@@ -87,7 +90,7 @@ void main() {
               body: Center(
                 child: ElevatedButton(
                   onPressed: () =>
-                      showJoinGroupSheet(context, initialToken: 'TOKEN123'),
+                      showJoinGroupSheet(context, initialToken: credential),
                   child: const Text('열기'),
                 ),
               ),
@@ -153,13 +156,13 @@ void main() {
     expect(reporter.contexts, <String>['JoinGroupSheet.requestToJoin']);
   });
 
-  testWidgets('만료는 구별해서 알린다 — "만료된 초대코드"라고 말한다', (WidgetTester tester) async {
+  testWidgets('만료된 **코드**는 코드 재발급을 안내한다', (WidgetTester tester) async {
     // 초대코드는 5분이라 만료가 **정상 경로**다. 다른 실패와 뭉뚱그리면 사용자는
     // 코드를 잘못 들었는지 시간이 지난 것인지 알 수 없어 같은 코드를 계속 다시
     // 입력한다. 만료라고 말해 주면 다음 행동이 하나로 정해진다(재발급 요청).
     final _SpyShareRepository share = _SpyShareRepository(expired: true);
     final _SpyErrorReporter reporter = _SpyErrorReporter();
-    await pumpSheet(tester, share, reporter);
+    await pumpSheet(tester, share, reporter, credential: '482913');
 
     await tester.tap(find.widgetWithText(ElevatedButton, '참여 요청 보내기'));
     await tester.pumpAndSettle();
@@ -169,6 +172,26 @@ void main() {
     expect(find.textContaining('잘못됐을 수 있'), findsNothing);
     expect(find.text('참여 요청을 보냈어요'), findsNothing);
     expect(reporter.contexts, <String>['JoinGroupSheet.requestToJoin']);
+  });
+
+  testWidgets('만료된 **링크**는 링크 재발급을 안내한다', (WidgetTester tester) async {
+    // ⚠️ `InviteExpiredException`은 초대코드 전용이 아니다 — 계약이 `credential`을
+    //    "링크 토큰 또는 6자리 코드"로 정의하므로 만료된 링크도 같은 예외를 던진다.
+    //    이 시트는 딥링크로 열릴 때 **링크 토큰**을 미리 채우므로, 하나로 뭉뚱그리면
+    //    링크가 만료된 사람에게 "새 **코드**를 요청하세요"라고 말하게 된다. 코드를
+    //    받아 와도 만료된 링크는 그대로라 다음 행동이 틀린 안내다.
+    final _SpyShareRepository share = _SpyShareRepository(expired: true);
+    final _SpyErrorReporter reporter = _SpyErrorReporter();
+    await pumpSheet(tester, share, reporter); // 기본값 = 링크 토큰
+
+    await tester.tap(find.widgetWithText(ElevatedButton, '참여 요청 보내기'));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('만료된 초대 링크'), findsOneWidget);
+    expect(find.textContaining('링크 재발급'), findsOneWidget);
+    // 코드 재발급을 안내하면 안 된다 — 코드를 받아도 링크는 그대로다.
+    expect(find.textContaining('새 코드를 요청'), findsNothing);
+    expect(find.text('참여 요청을 보냈어요'), findsNothing);
   });
 
   testWidgets('만료가 아닌 실패는 만료라고 말하지 않는다', (WidgetTester tester) async {

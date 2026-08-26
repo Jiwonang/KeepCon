@@ -398,8 +398,16 @@ echo "inviteCodes — 6자리 OTP 초대코드 (5분)"
 # 전제(짧은 노출 창)가 통째로 무너지는 지점이라 여기서 못박는다.
 
 G_CODE="grpcode-${JR_RUN}"     # 링크는 살아 있고(FUT) 코드는 만료된(PAST) 그룹
-CODE_LIVE="481502"
-CODE_DEAD="700913"
+
+# ⚠️ 코드 문서 id는 **실행마다 달라야 한다.** 규칙이 `^[0-9]{6}$`를 요구해 다른
+# 리소스처럼 `${JR_RUN}` 접미를 붙일 수 없으므로, 실행 고유값에서 6자리를 만든다.
+# 고정값을 쓰면 **에뮬레이터를 재사용할 때 앞선 실행의 문서가 남아** 다음 실행의
+# 발급이 '돌려쓰기 금지' 조항에 막혀 403이 된다(케이스가 규칙 결함이 아니라 잔여
+# 상태 때문에 빨개진다 — 이 PR이 실제로 겪은 스테일 문제와 같은 종류다).
+# 아래 정리 케이스가 둘 다 지우지만, id 분리는 그 정리가 실패해도 버티는 백스톱이다.
+CODE_SEED=$(( ($$ * 7919 + RANDOM) % 1000000 ))
+CODE_LIVE=$(printf '%06d' $(( CODE_SEED )))
+CODE_DEAD=$(printf '%06d' $(( (CODE_SEED + 500000) % 1000000 )))
 
 check "  (준비) 코드 보유 그룹 생성(링크 유효·코드 만료)" 200 -X PATCH "${DOCS}/groups/${G_CODE}" \
   "${AUTH_A[@]}" "${JSON[@]}" \
@@ -424,8 +432,16 @@ check "코드 문서에 여분 필드 → 차단" 403 -X PATCH "${DOCS}/inviteCo
   "${AUTH_A[@]}" "${JSON[@]}" \
   -d "{\"fields\":{\"groupId\":{\"stringValue\":\"${G_CODE}\"},\"expiresAt\":{\"timestampValue\":\"${PAST}\"},\"name\":{\"stringValue\":\"가족\"}}}"
 # 충돌한 코드를 남의 그룹으로 돌려쓰면 그 그룹의 초대를 탈취하게 된다.
+# ⚠️ 대상 그룹은 반드시 **코드 만료 정본을 가진** 그룹이어야 한다. `jr_group_doc`으로
+#    만든 그룹(= `shortInviteCodeExpiresAt` 없음)을 쓰면, 규칙이 그룹 일치 조항 **앞의**
+#    만료 일치 조항에서 없는 필드에 접근해 평가 오류로 죽는다 — 결과 코드는 403으로
+#    같지만 **검증하려던 조항은 실행조차 되지 않는다**(통과하는데 이유가 틀린 케이스).
+G_CODE2="grpcode2-${JR_RUN}"
+check "  (준비) 두 번째 코드 보유 그룹(만료 정본 일치)" 200 -X PATCH "${DOCS}/groups/${G_CODE2}" \
+  "${AUTH_A[@]}" "${JSON[@]}" \
+  -d "$(jr_group_doc_with_code "${ID_A}" "${M_A}" "${FUT}" "${G_CODE2}" "${CODE_DEAD}" "${PAST}")"
 check "남의 그룹 코드를 돌려쓰기 → 차단" 403 -X PATCH "${DOCS}/inviteCodes/${CODE_DEAD}" \
-  "${AUTH_A[@]}" "${JSON[@]}" -d "$(jr_code_doc "${G_JR}" "${PAST}")"
+  "${AUTH_A[@]}" "${JSON[@]}" -d "$(jr_code_doc "${G_CODE2}" "${PAST}")"
 
 # ── 조회·열거 ────────────────────────────────────────────────────────
 check "비멤버가 코드 문서를 id로 조회(다리 역할)" 200 -X GET "${DOCS}/inviteCodes/${CODE_DEAD}" "${AUTH_C[@]}"
@@ -468,6 +484,10 @@ check "자격증명에 경로 구분자 → 차단" 403 -X PATCH "${DOCS}/joinRe
 
 check "  (정리) 코드 요청 취소" 200 -X DELETE "${DOCS}/joinRequests/${G_LIVE}_${UID_C}" "${AUTH_C[@]}"
 check "없는 코드 문서 삭제는 no-op" 200 -X DELETE "${DOCS}/inviteCodes/000001" "${AUTH_A[@]}"
+# 만료 케이스용 문서도 거둔다 — 남기면 에뮬레이터 재사용 시 다음 실행의 발급이
+# '돌려쓰기 금지'에 막힌다(id 분리와 겹치는 방어이되, 둘 중 하나만으로는 부족하다:
+# id가 겹칠 확률은 낮아도 0이 아니고, 정리는 앞선 케이스가 실패하면 도달하지 못한다).
+check "  (정리) 만료 코드 문서 삭제" 200 -X DELETE "${DOCS}/inviteCodes/${CODE_DEAD}" "${AUTH_A[@]}"
 check "비방장이 코드 문서 삭제 → 차단" 403 -X DELETE "${DOCS}/inviteCodes/${CODE_LIVE}" "${AUTH_C[@]}"
 check "방장이 코드 문서 삭제" 200 -X DELETE "${DOCS}/inviteCodes/${CODE_LIVE}" "${AUTH_A[@]}"
 

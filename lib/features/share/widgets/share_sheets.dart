@@ -14,6 +14,7 @@ import '../../../shared/models/group.dart';
 import '../../../shared/diagnostics/report_handled_failure.dart';
 import '../../../shared/providers/repositories.dart';
 import '../../../shared/repositories/share_repository.dart';
+import '../../../shared/util/invite_code.dart';
 import '../../../shared/util/korean_particle.dart';
 import '../state/share_providers.dart';
 import 'share_common.dart';
@@ -269,14 +270,24 @@ class _JoinGroupSheetState extends ConsumerState<_JoinGroupSheet> {
       //
       // 판정은 메시지 문자열이 아니라 **타입**으로 한다([InviteExpiredException]) —
       // `contains('expired')` 같은 검사는 메시지를 다듬는 순간 조용히 깨진다.
+      //
+      // ⚠️ 그런데 그 예외는 **초대코드 전용이 아니다** — 계약이 `credential`을 "링크
+      //    토큰 또는 6자리 코드"로 정의하므로 만료된 **링크**도 같은 예외를 던진다.
+      //    이 시트는 딥링크로 열릴 때 링크 토큰을 미리 채우므로, 하나로 뭉뚱그리면
+      //    링크가 만료된 사람에게 "새 **코드**를 요청하세요"라고 말하게 된다 —
+      //    코드를 받아 와도 만료된 링크는 그대로라 다음 행동이 틀린 안내다.
+      //    어느 쪽이 만료됐는지는 입력값 모양으로 가른다.
       final bool expired = e is InviteExpiredException;
+      final bool expiredCode = expired && isWellFormedInviteCode(token);
       if (mounted) setState(() => _sending = false);
       messenger
         ..hideCurrentSnackBar()
         ..showSnackBar(SnackBar(
-          content: Text(expired
-              ? '만료된 초대코드예요. 방장에게 새 코드를 요청하세요.'
-              : '요청을 보낼 수 없어요. 링크나 코드가 잘못됐을 수 있어요.'),
+          content: Text(switch ((expired, expiredCode)) {
+            (true, true) => '만료된 초대코드예요. 방장에게 새 코드를 요청하세요.',
+            (true, false) => '만료된 초대 링크예요. 방장에게 링크 재발급을 요청하세요.',
+            _ => '요청을 보낼 수 없어요. 링크나 코드가 잘못됐을 수 있어요.',
+          }),
         ));
       return;
     }
