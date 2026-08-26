@@ -373,7 +373,8 @@ gh api -X POST repos/Jiwonang/KeepCon/rulesets --input ruleset.json
 - **푸시 전 로컬 검증 — [`tool/verify.sh`](tool/verify.sh) (명령 하나):** `dart format`·`analyze`·`test`·`SSOT guard`·`Markdown lint`를 항상 돌리고, **규칙 계층 입력이 바뀌었으면 에뮬레이터 규칙 검증까지 자동으로** 붙입니다. 예전에는 규칙 검증이 조건부라 매번 사람이 판단했는데 그 판단이 실제로 세 번 연속 실패했습니다 — 그래서 판단을 없앴습니다.
   - 실행: `bash tool/verify.sh` / cmd·PowerShell은 `tool\verify.cmd`(PowerShell은 `.\tool\verify.cmd`).
   - 감시 대상은 `firestore.rules`뿐 아니라 `tool/verify_firestore_rules.sh`·`firebase.json`도 포함합니다 — CI의 `Firestore rules` 잡은 **모든 PR에서** 돌기 때문에, 로컬 트리거가 좁으면 CI에서 처음 빨개집니다.
-  - 에뮬레이터는 세 상태를 구분합니다: 둘 다(Firestore·Auth) 떠 있으면 재사용, 둘 다 없으면 직접 기동, **절반만 떠 있으면 포트 충돌이 확실하므로 셋업 문제로 보고**합니다.
+  - 에뮬레이터 재사용은 **떠 있다는 것만으로 결정하지 않습니다.** 떠 있는 에뮬레이터가 실제로 적재한 규칙 본문을 조회해(`GET /emulator/v1/projects/{project}:securityRules`) 로컬 `firestore.rules`와 대조하고, **일치할 때만** 재사용합니다. 다르거나 확인할 수 없으면(또는 절반만 떠 있으면) **다른 포트에 전용 인스턴스**를 띄워 검증합니다 — 개발용 에뮬레이터는 죽이지 않습니다(`.emulator-local/` 개인 데이터는 정상 종료에만 저장되므로 강제 종료하면 그 세션이 통째로 날아갑니다).
+    - 낡은 규칙을 문 에뮬레이터에 붙으면 검증이 **조용히 무의미해집니다.** 2026-08-26 실측 — 다른 체크아웃에서 띄운 에뮬레이터에 붙어 멀쩡한 규칙이 대량 실패로 보였고, 같은 스크립트를 새 인스턴스에 붙이니 전부 통과였습니다. **반대 방향이 더 위험합니다**: 규칙을 느슨하게 바꾼 변경이 옛 엄격한 규칙 위에서 green으로 통과합니다.
   - `SKIP_RULES=1`로 규칙 검증을 건너뛸 수 있지만, 규칙 입력이 실제로 바뀐 상태라면 **검증 결과를 실패로 냅니다** — 검증하지 않은 상태에 통과 판정을 내지 않기 위해서입니다.
 - **1층 · 커밋 전 자체 리뷰 — `/code-review` (온디맨드):** Claude Code로 작업할 때 **커밋 전** 변경 diff를 리뷰·수정한 뒤 커밋합니다. 일반적 정확성·단순화를 봅니다.
 - **2층 · 에이전트 리뷰 — [`keepcon-code-reviewer`](.claude/agents/keepcon-code-reviewer.md) (기본 리뷰, 항상 · 커밋 후 **푸시 전**):** 변경 diff를 6개 축(기능 정확성·유지보수성·데이터 정합성·안정성·보안·성능)으로 리뷰합니다. 분류와 검증 방식은 CodeRabbit이 이 저장소 PR #40~#95에 남긴 **인라인 지적 122건을 분석해** 물려받았습니다. 코드를 쓴 맥락을 공유하지 않는 에이전트가 처음부터 읽는 것이 이 층의 존재 이유입니다.
