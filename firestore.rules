@@ -8,7 +8,8 @@ rules_version = '2';
 // - groups: 멤버만 읽기·변경 / 방장만 삭제. 비멤버가 스스로 합류하는 경로는 없다
 //   (합류는 방장 승인을 거친다 — 아래 groups 규칙 주석 참조).
 // - sharedGifticons·usageLogs·notifications: 소속 그룹 멤버만.
-// - inviteTokens: 토큰 → 그룹 조회. **get만** 열고 list는 막는다 / 쓰기는 방장만.
+// - inviteTokens: 링크 토큰 → 그룹 조회. **get만** 열고 list는 막는다 / 쓰기는 방장만.
+// - inviteCodes: 6자리 초대코드 → 그룹 조회. 같은 규약이되 만료 정본이 5분짜리다.
 // - joinRequests: 요청자 본인과 그 그룹의 방장만. 생성은 비멤버가 만료 전에만.
 // - shareLocks: 내부 잠금 메커니즘(민감 데이터 없음) — 로그인 사용자면 관리.
 // - 그 외: 기본 차단.
@@ -41,8 +42,15 @@ service cloud.firestore {
     function isWellFormedJoinRequest(d) {
       return d.keys().hasAll(
                ['groupId', 'userId', 'displayName', 'avatarEmoji',
-                'requestedAt', 'status'])
+                'requestedAt', 'status', 'credential'])
         && d.groupId is string
+        // 자격증명은 **경로 세그먼트로 쓰인다**(`credentialGrants`의 `$(cred)`).
+        // 문자 집합을 여기서 좁혀, `/`나 제어문자가 섞인 값이 조회 경로를 비틀지
+        // 못하게 한다. 허용 집합은 두 자격증명을 모두 덮는다 — base64url 토큰
+        // (`A–Z a–z 0–9 - _`)과 6자리 숫자.
+        && d.credential is string
+        && d.credential.size() >= 6 && d.credential.size() <= 64
+        && d.credential.matches('^[A-Za-z0-9_-]+$')
         && d.userId is string
         && d.displayName is string && d.displayName.size() <= 60
         && d.avatarEmoji is string && d.avatarEmoji.size() <= 8
@@ -55,12 +63,33 @@ service cloud.firestore {
         && d.requestedAt > request.time - duration.value(10, 'm');
     }
 
-    // 참여를 **요청**할 자격 — 아직 멤버가 아니고 초대가 살아 있을 때.
-    // 같은 그룹 문서를 두 번 묻지 않도록 한 함수에서 한 번만 읽는다.
-    function canRequestJoin(groupId) {
+    // 자격증명이 이 그룹으로 가는 **살아 있는 문**인지 — 링크 토큰이든 6자리 코드든.
+    //
+    // ⚠️ 만료를 **그룹 문서가 아니라 사용한 자격증명**에서 보는 것이 핵심이다.
+    //    예전에는 `group.inviteExpiresAt`(24시간) 하나로 판정했는데, 그러면 5분짜리
+    //    초대코드로 알아낸 groupId가 그룹 토큰의 **남은 24시간 동안 계속 먹힌다** —
+    //    코드가 만료돼도 요청은 통과하므로 "5분 만료"는 화면에만 있는 문구가 된다.
+    //    6자리는 열거 가능한 공간이라(10^6), 그 창을 실제로 닫는 것이 방어의 전부다.
+    //
+    // `||`는 단축 평가된다 — 링크 토큰이면 3회, 코드면 최대 4회 문서 접근이고
+    // 아래 그룹 검사 2회를 더해도 단일 요청 한도(10)에 든다.
+    function credentialGrants(groupId, cred) {
+      return (
+        exists(/databases/$(database)/documents/inviteTokens/$(cred))
+        && get(/databases/$(database)/documents/inviteTokens/$(cred)).data.groupId == groupId
+        && request.time < get(/databases/$(database)/documents/inviteTokens/$(cred)).data.expiresAt
+      ) || (
+        exists(/databases/$(database)/documents/inviteCodes/$(cred))
+        && get(/databases/$(database)/documents/inviteCodes/$(cred)).data.groupId == groupId
+        && request.time < get(/databases/$(database)/documents/inviteCodes/$(cred)).data.expiresAt
+      );
+    }
+
+    // 참여를 **요청**할 자격 — 아직 멤버가 아니고, 제시한 자격증명이 살아 있을 때.
+    function canRequestJoin(groupId, cred) {
       return exists(/databases/$(database)/documents/groups/$(groupId))
         && !(uid() in get(/databases/$(database)/documents/groups/$(groupId)).data.memberIds)
-        && request.time < get(/databases/$(database)/documents/groups/$(groupId)).data.inviteExpiresAt;
+        && credentialGrants(groupId, cred);
     }
 
     // 그룹 멤버십 판정 — 상위 group 문서의 memberIds를 참조(문서 존재 확인 포함).
@@ -230,6 +259,50 @@ service cloud.firestore {
         && (resource == null || isGroupOwner(resource.data.groupId));
     }
 
+    // 초대**코드** → 그룹 조회. 문서 id가 **6자리 숫자**다.
+    //
+    // `inviteTokens`와 나눈 이유는 만료의 정본이 다르기 때문이다 — 아래 검사가 조회
+    // 문서의 `expiresAt`을 그룹 문서의 정본과 같은 값으로 못박는데, 링크는
+    // `inviteExpiresAt`(24시간)이고 코드는 `shortInviteCodeExpiresAt`(5분)이다.
+    // 한 컬렉션에 섞으면 어느 정본을 봐야 할지 규칙이 알 수 없다.
+    //
+    // ⚠️ 6자리는 열거 가능한 공간이다(10^6). `list`를 막아도 `get`으로 훑으면 살아 있는
+    //    코드의 그룹 id를 긁을 수 있다. 그래서 이 컬렉션의 방어는 **점유를 최소로
+    //    유지하는 것**이다 — 그룹당 활성 코드는 하나이고(발급 시 옛 문서를 먼저 지운다)
+    //    수명은 5분이라, 전수 조회의 수확이 "지금 초대를 기다리는 중인 소수"로 줄어든다.
+    //    자릿수를 줄이거나 수명을 늘리면 이 계산이 무너진다.
+    match /inviteCodes/{code} {
+      // 토큰 쪽과 같은 이유로 `get`만 연다 — 비멤버는 groups를 읽을 수 없어서
+      // 코드에서 그룹으로 가는 다리가 이 문서뿐이다.
+      allow get: if isSignedIn();
+      allow list: if false;
+
+      // 발급·교체·정리는 그 그룹의 방장만.
+      allow create, update: if isSignedIn()
+        // 문서 id를 6자리 숫자로 못박는다. 없으면 임의 문자열을 이 컬렉션에 park해
+        // 열거의 잡음을 늘리거나, 코드가 아닌 값으로 참여 요청을 통과시킬 수 있다.
+        && code.matches('^[0-9]{6}$')
+        && request.resource.data.keys().hasOnly(['groupId', 'expiresAt'])
+        && request.resource.data.groupId is string
+        && request.resource.data.expiresAt is timestamp
+        // 만료의 **정본은 그룹 문서**다(토큰 쪽과 같은 규약). 복제본이 정본보다 길면
+        // 만료된 코드가 계속 통과하고, 짧으면 방장 화면의 카운트다운이 거짓말이 된다.
+        && request.resource.data.expiresAt ==
+             get(/databases/$(database)/documents/groups/$(request.resource.data.groupId))
+               .data.shortInviteCodeExpiresAt
+        && isGroupOwner(request.resource.data.groupId)
+        // 남의 그룹이 쥔 코드는 빼앗을 수 없다. 10^6 공간에서는 충돌이 실제로 일어날 수
+        // 있는데, 이 조항이 없으면 충돌한 쪽이 남의 코드를 자기 그룹으로 돌려써
+        // **초대 링크를 탈취**하게 된다(클라이언트는 미리 조회해 충돌을 피한다).
+        && (!exists(/databases/$(database)/documents/inviteCodes/$(code))
+            || resource.data.groupId == request.resource.data.groupId);
+
+      // 토큰 쪽과 같은 `resource == null` 예외 — 없는 문서의 삭제가 오류로 죽으면
+      // 코드를 한 번도 발급하지 않은 그룹의 삭제·정리가 통째로 막힌다(대다수 그룹이다).
+      allow delete: if isSignedIn()
+        && (resource == null || isGroupOwner(resource.data.groupId));
+    }
+
     // 참여 요청 — 초대 링크를 받은 **비멤버**가 방장의 승인을 기다리는 문서.
     //
     // 문서 id는 `{groupId}_{userId}`로 고정한다. (그룹, 사용자)당 요청 하나라는 계약을
@@ -255,12 +328,13 @@ service cloud.firestore {
         && request.resource.data.status == 'pending'
         && request.resource.data.keys().hasOnly(
              ['groupId', 'userId', 'displayName', 'avatarEmoji',
-              'requestedAt', 'status'])
+              'requestedAt', 'status', 'credential'])
         // `hasOnly`는 **상한만** 정한다. 빠뜨린 필드는 읽기 매퍼의 폴백(`''`)이 되고,
         // 승인 시 그 값이 그대로 그룹 문서의 멤버 이름으로 굳는다 — 표시 문제가 아니라
         // 멤버 전원이 보는 문서에 박히는 데이터다. 하한과 타입도 함께 못박는다.
         && isWellFormedJoinRequest(request.resource.data)
-        && canRequestJoin(request.resource.data.groupId);
+        && canRequestJoin(request.resource.data.groupId,
+                          request.resource.data.credential);
 
       // 변경은 둘뿐이다 — 요청자의 재요청, 방장의 결정.
       allow update: if isSignedIn() && (
@@ -269,12 +343,17 @@ service cloud.firestore {
         (
           resource.data.userId == uid()
           && request.resource.data.status == 'pending'
+          // 재요청은 **다른 자격증명으로** 올 수 있다(만료된 코드로 거절당한 뒤 새
+          // 코드를 받아 다시 넣는 것이 정상 경로다). 그래서 `credential`도 바뀔 수
+          // 있는 필드에 넣고, 아래에서 그 새 값으로 자격을 다시 검사한다.
           && request.resource.data.diff(resource.data).affectedKeys()
-              .hasOnly(['status', 'displayName', 'avatarEmoji', 'requestedAt'])
+              .hasOnly(['status', 'displayName', 'avatarEmoji', 'requestedAt',
+                        'credential'])
           // 재요청도 표시 스냅샷을 다시 쓰므로 같은 타입 검사를 건다 — 없으면 거절 뒤
           // 재요청으로 같은 값을 우회 주입할 수 있다.
           && isWellFormedJoinRequest(request.resource.data)
-          && canRequestJoin(resource.data.groupId)
+          && canRequestJoin(resource.data.groupId,
+                            request.resource.data.credential)
         )
         // ② 방장이 대기 중인 요청을 승인하거나 거절한다. **status 한 필드만** 바뀐다.
         || (

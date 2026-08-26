@@ -13,6 +13,7 @@ import '../../../shared/models/gifticon.dart';
 import '../../../shared/models/group.dart';
 import '../../../shared/diagnostics/report_handled_failure.dart';
 import '../../../shared/providers/repositories.dart';
+import '../../../shared/repositories/share_repository.dart';
 import '../../../shared/util/korean_particle.dart';
 import '../state/share_providers.dart';
 import 'share_common.dart';
@@ -257,11 +258,22 @@ class _JoinGroupSheetState extends ConsumerState<_JoinGroupSheet> {
       //
       // ⚠️ 정원은 여기서 말하지 않는다 — 계약상 정원 검사는 **승인 시점**이라
       //    요청 단계의 실패 사유가 아니다(대기자가 자리를 선점하지 못하게 한 설계).
+      //
+      // **만료만은 구별해서 말한다.** 초대코드는 5분이라 만료가 정상 경로인데,
+      // "잘못됐거나 만료됐을 수 있어요"로 뭉뚱그리면 사용자는 코드를 잘못 들었는지
+      // 시간이 지난 것인지 알 수 없어 **같은 코드를 계속 다시 입력한다.** 만료라고
+      // 말해 주면 다음 행동이 하나로 정해진다 — 방장에게 재발급을 요청한다.
+      //
+      // 판정은 메시지 문자열이 아니라 **타입**으로 한다([InviteExpiredException]) —
+      // `contains('expired')` 같은 검사는 메시지를 다듬는 순간 조용히 깨진다.
+      final bool expired = e is InviteExpiredException;
       if (mounted) setState(() => _sending = false);
       messenger
         ..hideCurrentSnackBar()
-        ..showSnackBar(const SnackBar(
-          content: Text('요청을 보낼 수 없어요. 링크가 잘못됐거나 만료됐을 수 있어요.'),
+        ..showSnackBar(SnackBar(
+          content: Text(expired
+              ? '만료된 초대코드예요. 방장에게 새 코드를 요청하세요.'
+              : '요청을 보낼 수 없어요. 링크나 코드가 잘못됐을 수 있어요.'),
         ));
       return;
     }
@@ -308,13 +320,16 @@ class _JoinGroupSheetState extends ConsumerState<_JoinGroupSheet> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
-          Text('초대코드', style: theme.textTheme.bodySmall),
+          // 입력란은 하나다 — 링크 토큰과 6자리 코드는 모양으로 구분되므로
+          // (`isWellFormedInviteCode`) 사용자에게 "지금 넣는 것이 무엇인지" 고르게
+          // 하지 않는다. 계약의 `requestToJoin(credential)`이 같은 이유로 하나다.
+          Text('초대코드 또는 초대 링크 코드', style: theme.textTheme.bodySmall),
           const SizedBox(height: 8),
           TextField(
             controller: _codeCtrl,
             autofocus: true,
             textInputAction: TextInputAction.done,
-            decoration: const InputDecoration(hintText: '초대코드 입력'),
+            decoration: const InputDecoration(hintText: '6자리 초대코드 입력'),
             onSubmitted: (_) => _submit(),
           ),
           const SizedBox(height: 20),

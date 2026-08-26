@@ -29,14 +29,19 @@ import 'package:keepcon/shared/repositories/share_repository.dart';
 /// 옛 `joinGroup`은 v3.8에서 **계약에서 삭제**됐으므로, 그 경로로 되돌아가는 회귀는
 /// 이제 이 스파이가 아니라 **컴파일러가** 막는다(없는 메서드는 부를 수 없다).
 class _SpyShareRepository implements ShareRepository {
-  _SpyShareRepository({this.fail = false});
+  _SpyShareRepository({this.fail = false, this.expired = false});
 
   final bool fail;
+
+  /// 만료로 거부한다 — 화면이 이 실패만 **구별해서** 안내해야 한다.
+  final bool expired;
+
   final List<String> requestedTokens = <String>[];
 
   @override
   Future<JoinRequest> requestToJoin(String inviteToken) async {
     requestedTokens.add(inviteToken);
+    if (expired) throw InviteExpiredException(inviteToken);
     if (fail) throw StateError('초대가 유효하지 않습니다');
     return JoinRequest(
       id: 'g1_u1',
@@ -146,5 +151,36 @@ void main() {
     expect(find.text('참여 요청을 보냈어요'), findsNothing);
     // 실패 원인은 개발자에게 남는다.
     expect(reporter.contexts, <String>['JoinGroupSheet.requestToJoin']);
+  });
+
+  testWidgets('만료는 구별해서 알린다 — "만료된 초대코드"라고 말한다', (WidgetTester tester) async {
+    // 초대코드는 5분이라 만료가 **정상 경로**다. 다른 실패와 뭉뚱그리면 사용자는
+    // 코드를 잘못 들었는지 시간이 지난 것인지 알 수 없어 같은 코드를 계속 다시
+    // 입력한다. 만료라고 말해 주면 다음 행동이 하나로 정해진다(재발급 요청).
+    final _SpyShareRepository share = _SpyShareRepository(expired: true);
+    final _SpyErrorReporter reporter = _SpyErrorReporter();
+    await pumpSheet(tester, share, reporter);
+
+    await tester.tap(find.widgetWithText(ElevatedButton, '참여 요청 보내기'));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('만료된 초대코드'), findsOneWidget);
+    // 뭉뚱그린 문구로 되돌아가면 이 단언이 잡는다.
+    expect(find.textContaining('잘못됐을 수 있'), findsNothing);
+    expect(find.text('참여 요청을 보냈어요'), findsNothing);
+    expect(reporter.contexts, <String>['JoinGroupSheet.requestToJoin']);
+  });
+
+  testWidgets('만료가 아닌 실패는 만료라고 말하지 않는다', (WidgetTester tester) async {
+    // 반대 방향도 고정한다 — "없는 코드"를 "만료됐다"고 말하면 존재한 적 없는
+    // 그룹을 기다리게 만든다.
+    final _SpyShareRepository share = _SpyShareRepository(fail: true);
+    final _SpyErrorReporter reporter = _SpyErrorReporter();
+    await pumpSheet(tester, share, reporter);
+
+    await tester.tap(find.widgetWithText(ElevatedButton, '참여 요청 보내기'));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('만료'), findsNothing);
   });
 }

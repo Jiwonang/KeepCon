@@ -115,12 +115,21 @@ class Group {
     this.inviteOwnerOnly = false,
     DateTime? inviteExpiresAt,
     this.maxMembers = defaultMaxMembers,
+    this.inviteCode,
+    this.inviteCodeExpiresAt,
   })  : assert(members.isNotEmpty, 'Group must have at least one member'),
         assert(
           _ownerCount(members) == 1,
           'Group must have exactly one owner (single-owner policy)',
         ),
         assert(maxMembers >= 1, 'maxMembers must be at least 1'),
+        // 코드와 그 만료는 **함께 있거나 함께 없다.** 한쪽만 채워지면 "만료 없는 코드"나
+        // "가리킬 코드가 없는 만료"가 생기고, 그 순간 [hasActiveInviteCode]가 판정할 수
+        // 없는 상태가 된다 — 그런 상태를 만들지 않는 것이 이 불변식의 목적이다.
+        assert(
+          (inviteCode == null) == (inviteCodeExpiresAt == null),
+          'inviteCode and inviteCodeExpiresAt must be set or cleared together',
+        ),
         inviteExpiresAt = inviteExpiresAt ?? DateTime.now().add(inviteValidity),
         members = List<GroupMember>.unmodifiable(members);
 
@@ -132,6 +141,18 @@ class Group {
   /// 방장이 고르는 값이 아니라 앱 전체에 고정된 정책이다(선택 UI 없음). 초대가 만료되면
   /// `ShareRepository.regenerateInviteToken`로 새 코드를 발급받아 창을 다시 연다.
   static const Duration inviteValidity = Duration(hours: 24);
+
+  /// 초대**코드**의 유효 기간 — 발급 시점부터 **5분**.
+  ///
+  /// 링크와 다른 값인 이유는 두 자격증명의 위협 모델이 다르기 때문이다. 링크 토큰은
+  /// 128비트라 추측이 성립하지 않아 24시간을 열어 둘 수 있지만, 코드는 소리내어 읽으려고
+  /// 6자리로 줄인 값이라 열거 가능한 공간이다(`lib/shared/util/invite_code.dart` 참조).
+  /// 그 좁은 공간을 **수명으로 막는다** — 상시 활성 코드가 없으면 전수 조회의 수확이
+  /// "지금 초대를 기다리는 중인 소수 그룹"으로 줄어든다.
+  ///
+  /// 방장이 고르는 값이 아니라 앱 전체에 고정된 정책이다(선택 UI 없음). 이 값을 늘리는
+  /// 것은 UX 조정이 아니라 **보안 파라미터 변경**이다.
+  static const Duration inviteCodeValidity = Duration(minutes: 5);
 
   /// 그룹 생성 시 고를 수 있는 인원 상한 프리셋(오름차순). 기본값([defaultMaxMembers])을 포함한다.
   static const List<int> memberCapPresets = <int>[4, 6, 10, 20];
@@ -175,6 +196,28 @@ class Group {
   /// 만들어지지 않는다(승인이 유일한 증가 경로).
   final int maxMembers;
 
+  /// 현재 발급된 초대코드(6자리 숫자 문자열). **없으면 `null`** — 기본 상태다.
+  ///
+  /// 링크 토큰([inviteToken])과 달리 그룹에 상주하지 않는다. 방장이 "초대코드 발급하기"를
+  /// 누른 뒤 [inviteCodeValidity](5분) 동안만 존재하고, 그 창이 닫히면 값은 남아 있어도
+  /// [hasActiveInviteCode]가 `false`가 된다.
+  ///
+  /// **`int`가 아니라 `String`이다** — `012345`의 앞자리 0을 잃으면 다른 코드가 된다
+  /// (`lib/shared/util/invite_code.dart` 참조).
+  ///
+  /// 값이 남아 있는 채로 만료되는 이유: 만료 시각에 문서를 고쳐 줄 주체가 없다(그 순간
+  /// 아무도 쓰지 않는다). 지우는 시점은 **다음 발급**이며, 그때 옛 조회 문서도 함께
+  /// 정리된다. 그래서 판정은 항상 값의 유무가 아니라 [hasActiveInviteCode]로 한다.
+  final String? inviteCode;
+
+  /// [inviteCode]의 만료 시각. 코드가 없으면 `null`([inviteCode]와 항상 짝).
+  ///
+  /// 발급 시점 + [inviteCodeValidity]로 정해진다. 이 시각을 지난 코드로 참여를 요청하면
+  /// `ShareRepository.requestToJoin`이 `InviteExpiredException`으로 거부한다 — 화면이
+  /// "만료된 초대코드"라고 **구별해서** 안내할 수 있게 하려고 일반 [StateError]와
+  /// 다른 타입을 쓴다(모델은 저장소 계약에 의존하지 않으므로 이름만 적는다).
+  final DateTime? inviteCodeExpiresAt;
+
   // 초대 URL은 여기서 만들지 않는다.
   //
   // 예전에는 `inviteHost` 상수와 `inviteUrl` getter가 이 모델에 있었는데, 그 호스트는
@@ -204,6 +247,28 @@ class Group {
   /// 만료 판정의 단일 진입점이며, UI 게이팅(참여 버튼 노출)과 구현체 가드가 모두 이
   /// predicate를 소비한다(로직 drift 방지).
   bool isInviteExpired(DateTime now) => !now.isBefore(inviteExpiresAt);
+
+  /// [now] 기준으로 **쓸 수 있는** 초대코드가 있는지.
+  ///
+  /// 초대코드 판정의 단일 진입점이다. 발급 화면의 코드 표시 여부, 구현체의 조회 가드가
+  /// 모두 이 predicate를 소비한다.
+  ///
+  /// "코드가 있는지"([inviteCode] `!= null`)로 판정하면 안 된다 — 만료된 값이 그대로
+  /// 남아 있기 때문이다([inviteCode] 문서 참조). 유효성은 항상 시각과 함께 본다.
+  bool hasActiveInviteCode(DateTime now) {
+    final DateTime? until = inviteCodeExpiresAt;
+    return inviteCode != null && until != null && now.isBefore(until);
+  }
+
+  /// 초대코드가 만료되기까지 남은 시간. 쓸 수 있는 코드가 없으면 `null`.
+  ///
+  /// 발급 화면의 카운트다운이 소비한다. `null`과 [Duration.zero]를 구별한다 —
+  /// `null`은 "보여줄 코드가 없다"(발급 전/만료 후), zero는 논리상 나오지 않는다
+  /// ([hasActiveInviteCode]가 이미 `false`가 되므로).
+  Duration? inviteCodeRemaining(DateTime now) {
+    if (!hasActiveInviteCode(now)) return null;
+    return inviteCodeExpiresAt!.difference(now);
+  }
 
   /// 멤버 수.
   int get memberCount => members.length;
@@ -239,6 +304,13 @@ class Group {
   }
 
   /// 일부 필드만 교체한 새 인스턴스를 반환한다.
+  ///
+  /// [clearInviteCode]가 `true`면 [inviteCode]·[inviteCodeExpiresAt]를 **함께 비운다**
+  /// (둘은 짝이라는 생성자 불변식을 이 경로에서도 지킨다). 이 플래그가 필요한 이유는
+  /// nullable 필드의 `?? this.x` 패턴이 "값을 지운다"를 표현하지 못하기 때문이다 —
+  /// 플래그가 없으면 `copyWith(inviteCode: null)`이 **조용히 아무 일도 하지 않아**,
+  /// 코드를 무효화했다고 믿는 호출부가 살아 있는 코드를 그대로 남긴다.
+  /// 지정하면 같은 호출의 [inviteCode]·[inviteCodeExpiresAt] 인자보다 우선한다.
   Group copyWith({
     String? id,
     String? name,
@@ -248,6 +320,9 @@ class Group {
     bool? inviteOwnerOnly,
     DateTime? inviteExpiresAt,
     int? maxMembers,
+    String? inviteCode,
+    DateTime? inviteCodeExpiresAt,
+    bool clearInviteCode = false,
   }) {
     return Group(
       id: id ?? this.id,
@@ -258,6 +333,10 @@ class Group {
       inviteOwnerOnly: inviteOwnerOnly ?? this.inviteOwnerOnly,
       inviteExpiresAt: inviteExpiresAt ?? this.inviteExpiresAt,
       maxMembers: maxMembers ?? this.maxMembers,
+      inviteCode: clearInviteCode ? null : (inviteCode ?? this.inviteCode),
+      inviteCodeExpiresAt: clearInviteCode
+          ? null
+          : (inviteCodeExpiresAt ?? this.inviteCodeExpiresAt),
     );
   }
 
@@ -273,7 +352,9 @@ class Group {
           inviteToken == other.inviteToken &&
           inviteOwnerOnly == other.inviteOwnerOnly &&
           inviteExpiresAt == other.inviteExpiresAt &&
-          maxMembers == other.maxMembers;
+          maxMembers == other.maxMembers &&
+          inviteCode == other.inviteCode &&
+          inviteCodeExpiresAt == other.inviteCodeExpiresAt;
 
   @override
   int get hashCode => Object.hash(
@@ -285,12 +366,17 @@ class Group {
         inviteOwnerOnly,
         inviteExpiresAt,
         maxMembers,
+        inviteCode,
+        inviteCodeExpiresAt,
       );
 
+  // `inviteCode` 값 자체는 [toString]에 넣지 않는다 — 로그·오류 리포트로 새어 나가면
+  // 5분짜리 자격증명이 그 로그를 읽는 사람에게 그대로 넘어간다. 활성 여부만 적는다.
   @override
   String toString() => 'Group(id: $id, name: $name, memberCount: $memberCount, '
       'maxMembers: $maxMembers, inviteOwnerOnly: $inviteOwnerOnly, '
-      'inviteExpiresAt: $inviteExpiresAt)';
+      'inviteExpiresAt: $inviteExpiresAt, '
+      'inviteCodeExpiresAt: $inviteCodeExpiresAt)';
 }
 
 /// 멤버 목록의 방장([MemberRole.owner]) 수. [Group] 생성자 불변식 검증에 사용한다.
