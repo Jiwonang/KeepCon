@@ -55,6 +55,35 @@ GroupNotification _groupNotif({required DateTime at}) => GroupNotification(
       createdAt: at,
     );
 
+/// 알림센터 페이지를 띄우는 두 위젯 테스트가 공유하는 오버라이드.
+///
+/// **시계 고정을 여기 한 곳에만 둔다.** 이번 사고의 원인은 같은 목록을 사이트마다
+/// 복붙하면서 두 곳에서 `nowProvider` 한 줄이 빠진 것이었다. 복붙을 남겨 두면 세 번째
+/// 위젯 테스트가 붙는 날 같은 누락이 재현되고, **그날은 초록으로 머지된 뒤** 픽스처
+/// 만료 날짜가 지나서야 빨개진다. 잊을 자리를 없앤다.
+List<Override> _pageOverrides() {
+  final auth = InMemoryAuthRepository();
+  final gifticons =
+      InMemoryGifticonRepository(seed: <Gifticon>[_expiringSoon()]);
+  return <Override>[
+    // ⚠️ 이 오버라이드가 없으면 목록이 **실제 시계**로 계산된다. `_expiringSoon()`의
+    //    만료(`_now`+3일=2026-08-26)가 지난 **다음 날 00:00**에 알림이 사라져 테스트가
+    //    깨진다 — `firedExpiryNotifications`의 `isExpiredByDate` 가드가 날짜 경계로만
+    //    판정하므로 만료 시각이 아니라 날짜가 넘어가는 순간이다. 코드가 아니라 달력이
+    //    바뀌어서 빨개지는 시한폭탄이고, 2026-08-27T00:31Z CI 실행에서 실제로 터졌다.
+    nowProvider.overrideWithValue(_now),
+    authRepositoryProvider.overrideWithValue(auth),
+    gifticonRepositoryProvider.overrideWithValue(gifticons),
+    shareRepositoryProvider.overrideWithValue(
+      InMemoryShareRepository(
+        authRepository: auth,
+        gifticonRepository: gifticons,
+        seed: false,
+      ),
+    ),
+  ];
+}
+
 void main() {
   /// 두 축을 직접 고정해 병합만 격리 검증한다(저장소 시드에 의존하지 않는다).
   ProviderContainer makeContainer({
@@ -236,24 +265,11 @@ void main() {
   });
 
   testWidgets('개인 알림을 탭하면 목적지 버스에 실린다', (WidgetTester tester) async {
-    final auth = InMemoryAuthRepository();
-    final gifticons =
-        InMemoryGifticonRepository(seed: <Gifticon>[_expiringSoon()]);
     late ProviderContainer container;
 
     await tester.pumpWidget(
       ProviderScope(
-        overrides: <Override>[
-          authRepositoryProvider.overrideWithValue(auth),
-          gifticonRepositoryProvider.overrideWithValue(gifticons),
-          shareRepositoryProvider.overrideWithValue(
-            InMemoryShareRepository(
-              authRepository: auth,
-              gifticonRepository: gifticons,
-              seed: false,
-            ),
-          ),
-        ],
+        overrides: _pageOverrides(),
         child: Consumer(
           builder: (BuildContext context, WidgetRef ref, _) {
             container = ProviderScope.containerOf(context);
@@ -282,23 +298,10 @@ void main() {
     // 진입 경로가 셋인데 그중 하나가 마이페이지다. `pop()` 한 번이면 마이페이지가
     // 스택에 남아 **강조된 홈을 가린다** — 강조는 시간이 지나면 거둬지므로, 사용자가
     // 뒤로가기로 홈에 닿을 즈음엔 이미 꺼져 탭이 아무 일도 안 한 것처럼 보인다.
-    final auth = InMemoryAuthRepository();
-    final gifticons =
-        InMemoryGifticonRepository(seed: <Gifticon>[_expiringSoon()]);
 
     await tester.pumpWidget(
       ProviderScope(
-        overrides: <Override>[
-          authRepositoryProvider.overrideWithValue(auth),
-          gifticonRepositoryProvider.overrideWithValue(gifticons),
-          shareRepositoryProvider.overrideWithValue(
-            InMemoryShareRepository(
-              authRepository: auth,
-              gifticonRepository: gifticons,
-              seed: false,
-            ),
-          ),
-        ],
+        overrides: _pageOverrides(),
         child: MaterialApp(
           home: Builder(
             builder: (BuildContext context) => Scaffold(
