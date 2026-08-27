@@ -198,43 +198,67 @@ tcp_in_use() {
 #    아래 사다리가 실행마다 한 칸씩 소진되고, 열 번이면 이 게이트가 그 PC에서 영영 막힌다.
 #    그래서 우리가 띄운 포트는 우리가 거둔다.
 #
-# ⚠️ **거둘 자격은 세 겹으로 확인한다.** 이 함수는 프로세스를 `-9`/`-Force`로 죽이는데,
+# ⚠️ **거둘 자격은 네 겹으로 확인한다.** 이 함수는 프로세스를 `-9`/`-Force`로 죽이는데,
 #    잘못 짚으면 개발용 에뮬레이터가 정상 종료를 못 해 `.emulator-local/` 세션 데이터가
 #    통째로 날아간다(되돌릴 수 없다).
 #      ①호출자가 `port_was_free`로 **띄우기 직전에 비어 있던 것을 본** 포트만 넘긴다.
+#        (관찰일 뿐 bind도 예약도 아니다 — 확인과 bind 사이에 남이 채갈 수 있다.)
 #      ②**부모가 죽은 프로세스만** 죽인다. 누수된 JVM은 정의상 고아이고(부모 firebase CLI가
-#        이미 종료), 정상 `emulators:start`의 JVM은 부모가 살아 있다(실측: 개발용 8080의
-#        java는 부모 java가 살아 있고, 누수된 것들은 전부 부모 사망).
+#        이미 종료), 정상 `emulators:start`의 JVM은 부모가 살아 있다(실측).
 #      ③그 프로세스가 **Firestore 에뮬레이터인지** 명령줄로 확인한다.
-#    ①이 소유권 증명이 아니기 때문에 ③이 필요하다 — `port_was_free`는 연결을 시도해 본
-#    것일 뿐 bind도 예약도 아니어서, 확인과 `emulators:exec`의 bind 사이에 남이 그 포트를
-#    잡을 수 있다. 그 남이 마침 고아까지 되면 ①②만으로는 죽인다. ③이 붙으면 남는 경우는
-#    "우리가 비어 있는 것을 본 포트에 붙은, 부모 없는 Firestore 에뮬레이터"뿐이다.
+#      ④그 프로세스가 **우리가 띄운 뒤에 시작됐는지** 확인한다(`REAP_SINCE`).
+#
+# ⚠️ **그래도 소유권 증명은 아니다.** 남는 경우는 "우리가 비어 있는 것을 본 그 포트에,
+#    우리 실행 중에, 남이 띄웠다가 고아가 된 Firestore 에뮬레이터"다 — 다른 워크트리의
+#    동시 `verify.sh` 실행이 같은 사다리 칸을 1~3초 창 안에서 고르는 경우가 그것이다.
+#    다만 ②가 `--export-on-exit`를 쓰는 개발용 인스턴스를 이미 걸러내므로, 남은 피해는
+#    **데이터 손실이 아니라 그쪽 검증이 시끄럽게 실패하는 것**이다(검증용 인스턴스는
+#    import·export를 쓰지 않는다). 완전히 없애려면 `emulators:exec`의 자식 JVM pid를
+#    실행 중 폴링해 기록해야 하고, 그건 호출부 구조를 바꾸는 별도 작업이다.
 reap_port() {
-  local port="$1" pid ppid verdict cmd
+  local port="$1" pid ppid pcomm cmd etimes verdict
   tcp_in_use "${port}" || return 0
   # ⚠️ WSL에는 `powershell.exe`도 PATH에 있다 — 그쪽을 먼저 보면 리스너는 리눅스 프로세스인데
   #    Windows 호스트의 연결 목록을 뒤진다. 못 찾으면 다행이고, 같은 번호를 쓰는 **무관한
   #    Windows 프로세스를 죽일 수도** 있다. 리스너와 같은 커널을 보는 `lsof`를 먼저 쓴다.
   if command -v lsof >/dev/null 2>&1; then
-    pid=$(lsof -ti "tcp:${port}" -sTCP:LISTEN 2>/dev/null | head -1)
-    [[ -z "${pid}" ]] && return 0
-    # PPID 1 = 부모가 죽어 init(또는 서브리퍼)에 재부모화된 고아.
-    ppid=$(ps -o ppid= -p "${pid}" 2>/dev/null | tr -d ' ')
-    cmd=$(ps -o command= -p "${pid}" 2>/dev/null)
-    if [[ -n "${ppid}" && "${ppid}" != "1" ]]; then
-      echo "  ⚠️ 포트 ${port}의 프로세스(pid=${pid})는 부모가 살아 있다 — 우리 잔재가 아니므로 두고 간다." >&2
-      return 0
+    # ⚠️ `tcp_in_use`가 IPv4(127.0.0.1)만 찌르므로 소유자도 **IPv4 리스너**에서 찾는다.
+    #    섞으면 프로브가 본 것과 죽이는 것이 달라진다(같은 포트에 패밀리별로 다른
+    #    프로세스가 공존할 수 있다 — Windows 쪽에서 실측).
+    pid=$(lsof -ti "4tcp:${port}" -sTCP:LISTEN 2>/dev/null | head -1)
+    # ⚠️ 소유자를 못 찾았는데 포트는 막혀 있다 — **조용히 나가지 않는다.** 아래 최종
+    #    경고로 떨어뜨린다(early return 금지). 사다리 한 칸이 말없이 사라지면
+    #    이 스크립트가 없애려는 바로 그 침묵이 된다.
+    if [[ -n "${pid}" ]]; then
+      # 고아 = 재부모화된 것. 커널은 ①스레드 그룹 ②가장 가까운 CHILD_SUBREAPER ③PID 1
+      # 순으로 넘기므로 **PPID 1만 보면 부족하다** — systemd per-user 인스턴스가 그
+      # 서브리퍼라, 리눅스 데스크톱에서는 진짜 고아의 부모가 살아 있는 `systemd`로 나온다.
+      # (dbus 활성화 같은 다른 서브리퍼는 여전히 남는다 — 그때는 안 죽이는 쪽으로 진다.)
+      ppid=$(ps -o ppid= -p "${pid}" 2>/dev/null | tr -d ' ')
+      pcomm=$(ps -o comm= -p "${ppid:-0}" 2>/dev/null | tr -d ' ')
+      cmd=$(ps -o command= -p "${pid}" 2>/dev/null)
+      etimes=$(ps -o etimes= -p "${pid}" 2>/dev/null | tr -d ' ')
+      if [[ -n "${ppid}" && "${ppid}" != "1" && "${pcomm}" != "systemd" ]]; then
+        echo "  ⚠️ 포트 ${port}의 프로세스(pid=${pid})는 부모가 살아 있다 — 우리 잔재가 아니므로 두고 간다." >&2
+        return 0
+      fi
+      # 명령줄 대소문자는 두 분기를 맞춘다(powershell `-match`는 대소문자를 무시한다).
+      if [[ "${cmd,,}" != *firestore* ]]; then
+        echo "  ⚠️ 포트 ${port}의 프로세스(pid=${pid})는 Firestore 에뮬레이터가 아니다 — 두고 간다." >&2
+        return 0
+      fi
+      # `etimes`(경과 초)가 없는 ps 구현에서는 이 검사만 건너뛴다 — 나머지 셋은 그대로다.
+      if [[ -n "${etimes}" && -n "${REAP_SINCE:-}" && "${etimes}" -gt "$(( $(date +%s) - REAP_SINCE ))" ]]; then
+        echo "  ⚠️ 포트 ${port}의 프로세스(pid=${pid})는 우리보다 먼저 시작됐다 — 두고 간다." >&2
+        return 0
+      fi
+      kill -9 "${pid}" 2>/dev/null
     fi
-    if [[ "${cmd}" != *[Ff]irestore* ]]; then
-      echo "  ⚠️ 포트 ${port}의 프로세스(pid=${pid})는 Firestore 에뮬레이터가 아니다 — 두고 간다." >&2
-      return 0
-    fi
-    kill -9 "${pid}" 2>/dev/null
   elif command -v powershell.exe >/dev/null 2>&1; then
-    # 한 번의 호출로 소유자·부모 생존·명령줄을 함께 판정한다 — powershell 기동이 비싸다.
+    # 소유자·부모 생존·명령줄·시작 시각을 **한 번의 호출**로 판정한다 — powershell 기동이 비싸다.
+    # `LocalAddress` 필터는 위 lsof 쪽과 같은 이유다(프로브가 IPv4를 찌른다).
     verdict=$(powershell.exe -NoProfile -Command \
-      "\$c = Get-NetTCPConnection -LocalPort ${port} -State Listen -EA SilentlyContinue | Select-Object -First 1; if (-not \$c) { 'NONE'; exit }; \$p = Get-CimInstance Win32_Process -Filter \"ProcessId = \$(\$c.OwningProcess)\" -EA SilentlyContinue; if (-not \$p) { 'NONE'; exit }; if (Get-CimInstance Win32_Process -Filter \"ProcessId = \$(\$p.ParentProcessId)\" -EA SilentlyContinue) { \"PARENT \$(\$p.ProcessId)\"; exit }; if (\$p.CommandLine -notmatch 'firestore') { \"FOREIGN \$(\$p.ProcessId)\"; exit }; \"REAP \$(\$p.ProcessId)\"" \
+      "\$c = Get-NetTCPConnection -LocalPort ${port} -State Listen -EA SilentlyContinue | Where-Object { \$_.LocalAddress -in '127.0.0.1','0.0.0.0' } | Select-Object -First 1; if (-not \$c) { 'NONE'; exit }; \$p = Get-CimInstance Win32_Process -Filter \"ProcessId = \$(\$c.OwningProcess)\" -EA SilentlyContinue; if (-not \$p) { 'NONE'; exit }; if (Get-CimInstance Win32_Process -Filter \"ProcessId = \$(\$p.ParentProcessId)\" -EA SilentlyContinue) { \"PARENT \$(\$p.ProcessId)\"; exit }; if (\$p.CommandLine -notmatch 'firestore') { \"FOREIGN \$(\$p.ProcessId)\"; exit }; if ('${REAP_SINCE:-0}' -ne '0' -and \$p.CreationDate -lt [DateTimeOffset]::FromUnixTimeSeconds(${REAP_SINCE:-0}).LocalDateTime) { \"OLD \$(\$p.ProcessId)\"; exit }; \"REAP \$(\$p.ProcessId)\"" \
       2>/dev/null | tr -d '\r' | head -1)
     case "${verdict}" in
       REAP\ *)
@@ -245,7 +269,13 @@ reap_port() {
       FOREIGN\ *)
         echo "  ⚠️ 포트 ${port}의 프로세스(pid=${verdict#FOREIGN })는 Firestore 에뮬레이터가 아니다 — 두고 간다." >&2
         return 0 ;;
-      *) return 0 ;;
+      OLD\ *)
+        echo "  ⚠️ 포트 ${port}의 프로세스(pid=${verdict#OLD })는 우리보다 먼저 시작됐다 — 두고 간다." >&2
+        return 0 ;;
+      # `NONE`(리스너·프로세스 조회 실패)과 빈 출력(powershell 호출 자체가 실패 — 예: WSL에서
+      # 리눅스 리스너를 Windows 호스트에 묻는 경우)은 "거두지 못했다"이지 "거둘 것이 없다"가
+      # 아니다. 반환하지 말고 아래 최종 경고를 타게 둔다.
+      *) ;;
     esac
   fi
   if tcp_in_use "${port}"; then
@@ -270,7 +300,7 @@ port_was_free() {
   return 0
 }
 
-reap_claimed() {
+reap_free_ports() {
   local p
   for p in "${REAPABLE[@]:-}"; do
     [[ -n "${p}" ]] && reap_port "${p}"
@@ -357,10 +387,12 @@ JSON
   echo "  (전용 에뮬레이터를 띄운다 — firestore=${ALT_FS} auth=${ALT_AUTH} hub=${ALT_HUB} logging=${ALT_LOG})"
   # check→bind 사이에 남이 채갔을 수 있다. **여기서 다시 확인한 포트만** 거둔다.
   REAPABLE=()
+  # ④의 기준 시각 — 이보다 먼저 시작된 프로세스는 우리 것일 수 없다.
+  REAP_SINCE=$(date +%s)
   port_was_free "${ALT_FS}" || echo "  ⚠️ 포트 ${ALT_FS}가 그 사이 사용 중이 됐다 — 거두지 않는다." >&2
   port_was_free "${ALT_AUTH}" || echo "  ⚠️ 포트 ${ALT_AUTH}가 그 사이 사용 중이 됐다 — 거두지 않는다." >&2
   # Ctrl+C로 끊기면 아래 정리가 통째로 건너뛰어져 임시 config와 좀비 JVM이 함께 남는다.
-  trap 'reap_claimed; rm -rf "${dir}"; exit 130' INT TERM
+  trap 'reap_free_ports; rm -rf "${dir}"; exit 130' INT TERM
   # 여기서도 셸에 남은 `AUTH_EMULATOR_HOST`가 CLI 주입값을 이기면 죽은 포트로 붙는다.
   # `KEEPCON_RULES_VOUCH`는 자식의 스테일 가드에 "이 인스턴스는 방금 이 파일로 띄웠다"를
   # 알린다 — node가 없는 PC(firebase CLI standalone 바이너리)에서 그 가드가 UNKNOWN으로
@@ -371,7 +403,7 @@ JSON
     --only auth,firestore "bash tool/verify_firestore_rules.sh"
   rc=$?
   # ⚠️ 성공(rc=0)이어도 반드시 거둔다 — 누수는 실패가 아니라 **정상 종료**에서 났다.
-  reap_claimed
+  reap_free_ports
   rm -rf "${dir}"
   # 복원은 정리 그 **뒤**에 한다. 앞에서 풀면 거두는 구간이 무방비가 된다(핸들러는 멱등).
   trap - INT TERM
@@ -408,6 +440,7 @@ run_default_port_rules() {
   #    그대로 거두면 **개발용 에뮬레이터를 강제 종료**해 `.emulator-local/` 세션이 날아간다.
   #    바인드 수준으로 다시 확인하고, 확인된 것만 거둔다.
   REAPABLE=()
+  REAP_SINCE=$(date +%s)
   if ! port_was_free "${FS_PORT}" || ! port_was_free "${AUTH_PORT}"; then
     REAPABLE=()
     echo "  ✗ 기본 포트(${FS_PORT}/${AUTH_PORT})가 HTTP에 응답하지 않으면서 사용 중이다."
@@ -415,7 +448,7 @@ run_default_port_rules() {
     rules_setup_failed=1
     return 1
   fi
-  trap 'reap_claimed; exit 130' INT TERM
+  trap 'reap_free_ports; exit 130' INT TERM
   # ⚠️ 여기서는 함정이 **반대 방향**이다. CLI는 `FIREBASE_AUTH_EMULATOR_HOST`만 주입하는데
   #    수신 측은 `AUTH_EMULATOR_HOST`를 먼저 보므로, 셸에 남은 값이 CLI를 이겨 죽은 포트로
   #    붙는다(`tool/seed_emulator.sh`가 쓰는 노브라 실제로 남아 있을 수 있다). 지워서 넘긴다.
@@ -424,7 +457,7 @@ run_default_port_rules() {
     firebase emulators:exec --project "${RULES_PROJECT}" --only auth,firestore \
     "bash tool/verify_firestore_rules.sh"
   rc=$?
-  reap_claimed
+  reap_free_ports
   trap - INT TERM
   return "${rc}"
 }
