@@ -243,12 +243,21 @@ reap_port() {
         return 0
       fi
       # 명령줄 대소문자는 두 분기를 맞춘다(powershell `-match`는 대소문자를 무시한다).
-      if [[ "${cmd,,}" != *firestore* ]]; then
+      # ⚠️ `${cmd,,}`를 쓰지 않는다 — **bash 4+ 전용**이고, macOS 기본 bash 3.2에서
+      #    `bad substitution`은 치명적 확장 오류라 함수가 아니라 **이 스크립트 전체가 그
+      #    자리에서 죽는다**(실측: 이후 줄도 호출부도 실행되지 않는다). 그러면 임시
+      #    디렉터리 정리·나머지 포트 거두기·요약이 통째로 건너뛰어지고, 이유는 화면에
+      #    안 나온 채 게이트만 red가 된다. 문자 클래스는 3.2에서도 같은 판정을 낸다.
+      if [[ "${cmd}" != *[Ff][Ii][Rr][Ee][Ss][Tt][Oo][Rr][Ee]* ]]; then
         echo "  ⚠️ 포트 ${port}의 프로세스(pid=${pid})는 Firestore 에뮬레이터가 아니다 — 두고 간다." >&2
         return 0
       fi
       # `etimes`(경과 초)가 없는 ps 구현에서는 이 검사만 건너뛴다 — 나머지 셋은 그대로다.
-      if [[ -n "${etimes}" && -n "${REAP_SINCE:-}" && "${etimes}" -gt "$(( $(date +%s) - REAP_SINCE ))" ]]; then
+      # ⚠️ `-n`이 아니라 **숫자인지** 확인한다. `set -u` 아래에서 `[[ "abc" -gt 1 ]]`는
+      #    산술 평가가 `abc`를 변수명으로 읽어 `unbound variable`로 **스크립트를 죽인다**
+      #    (실측) — 위 "이 검사만 건너뛴다"는 약속이 출력이 빈 경우에만 지켜지고 있었다.
+      #    `=~`는 bash 3.0+라 macOS 기본 bash에서도 안전하다.
+      if [[ "${etimes}" =~ ^[0-9]+$ && -n "${REAP_SINCE:-}" && "${etimes}" -gt "$(( $(date +%s) - REAP_SINCE ))" ]]; then
         echo "  ⚠️ 포트 ${port}의 프로세스(pid=${pid})는 우리보다 먼저 시작됐다 — 두고 간다." >&2
         return 0
       fi
