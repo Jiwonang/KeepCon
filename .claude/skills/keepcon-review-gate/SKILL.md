@@ -1,6 +1,6 @@
 ---
 name: keepcon-review-gate
-description: "KeepCon PR을 머지해도 되는지 판정하는 스킬. 트리거 — PR을 올린 뒤, '머지해도 될까', '리뷰 확인해줘', 'CI 확인하고 머지해줘', 'CodeRabbit 결과 봐줘' 등 머지 가부를 묻는 요청. CI green 확인 + keepcon-code-reviewer 리뷰(기본 층 — 푸시 전에 끝났는지 확인하고, 없으면 실행) + CodeRabbit 상태 3분기 판정(리뷰됨/할당량 소진/미트리거)을 거쳐, 리뷰 없이 머지되는 경로를 차단한다. 후속 작업 — '다시 확인해줘', '지적 반영하고 다시'에도 사용."
+description: "KeepCon PR을 머지해도 되는지 판정하는 스킬. 트리거 — PR을 올린 뒤, '머지해도 될까', '리뷰 확인해줘', 'CI 확인하고 머지해줘', 'CodeRabbit 결과 봐줘' 등 머지 가부를 묻는 요청. CI green 확인 + keepcon-code-reviewer 리뷰(기본 층 — 푸시 전에 끝났는지 확인하고, 없으면 실행) + CodeRabbit 상태 4분기 판정(리뷰됨/할당량 소진/미트리거/대화응답만)을 거쳐, 리뷰 없이 머지되는 경로를 차단한다. 후속 작업 — '다시 확인해줘', '지적 반영하고 다시'에도 사용."
 ---
 
 # KeepCon 리뷰 게이트 — 리뷰 없이 머지되는 경로를 막는다
@@ -84,7 +84,19 @@ CI에서 처음 빨개진다.
 
 ```bash
 gh pr checks <번호>
+# ⚠️ 결과가 **지금 head의 것인지** 반드시 대조한다 — 아래 참조.
+gh run list --branch <브랜치> --limit 3 --json headSha,createdAt,status,conclusion,databaseId \
+  --jq '.[] | "sha=\(.headSha[0:7]) \(.createdAt) \(.status) \(.conclusion // "-") id=\(.databaseId)"'
+gh pr view <번호> --json headRefOid --jq '.headRefOid[0:7]'
 ```
+
+> ⚠️ **`gh pr checks`는 옛 실행의 결과를 보여줄 수 있다.** 푸시 직후에는 새 실행이 아직
+> 큐에 있어, 표시되는 초록/빨강이 **직전 커밋의 것**이다. 2026-08-27 실측: `7caf6fa`를
+> 푸시하고 `gh pr checks`를 보니 `Format · Analyze · Test fail`이었는데 그것은
+> `c1ba5f4`(직전 커밋)의 결과였고 `7caf6fa`의 실행은 success였다 — 통과한 것을 실패로
+> 보고했다. **반대 방향이 더 위험하다**: 실패한 커밋을 밀었는데 직전 커밋의 초록이 보이면
+> 그대로 머지한다. 이 저장소가 반복해 데인 "돌지 않았는데 통과로 보이는 것"의 한 형태다.
+> `gh run list`의 `headSha`가 `headRefOid`와 같은 실행만 판정에 쓴다.
 
 CI 잡이 하나라도 red면 **여기서 멈춘다.** ⚠️ **`Firestore rules`·`Markdown lint`는 룰셋 필수 체크가 아니라 red여도 머지 버튼이 열려 있다** — 게이트가 막아 주지 않으므로 이 단계에서 사람이 본다(현재 필수 체크는 `Format · Analyze · Test`와 `CodeRabbit` 둘뿐이다: `gh api repos/Jiwonang/KeepCon/rulesets/18610485 --jq '.rules[] | select(.type=="required_status_checks") | .parameters.required_status_checks'`). 원인을 진단해 수정 → 커밋 → 푸시를 전부 green이 될 때까지 반복한다(CLAUDE.md의 수정 루프). `CodeRabbit` 행의 pass는 **무시한다** — 위에 적은 이유로 정보가 없다.
 
@@ -108,10 +120,29 @@ CI 잡이 하나라도 red면 **여기서 멈춘다.** ⚠️ **`Firestore rules
 
 ### 3. CodeRabbit 상태 판정
 
+> 🚨 **트리거 코멘트에는 `@coderabbitai review` 한 줄만 쓴다.** 설명·반영 내역을 같은
+> 코멘트에 붙이면 CodeRabbit이 그것을 **채팅 질문**으로 받아 대화체로 답하고, **리뷰 객체도
+> 요약 마커도 만들지 않는다.** 그러면 아래 판정과 3b가 "리뷰 안 됨"으로 읽는데, 슬롯은
+> 이미 쓴 뒤다(시간당 1건 · 계정 공유). 설명은 **별도 코멘트**로 앞뒤에 따로 올린다.
+>
+> 2026-08-26~27 실측 — 트리거 형태와 봇 응답이 5/5로 갈렸다:
+>
+> | PR·시각 | 트리거 | 봇 응답 |
+> |---|---|---|
+> | #117 06:04Z | `@coderabbitai review`만(20자) | **리뷰 객체** `Actionable comments posted: 3` |
+> | #117 09:00Z | + 설명 1342자 | 대화 응답 — 마커·판정 문구 없음 |
+> | #117 00:46Z | + 설명 1068자 | 대화 응답 |
+> | #117 03:17Z | + 설명 1275자 | 대화 응답 |
+> | #119 01:07Z·02:12Z | 20자 | **마커 갱신** `No actionable comments were generated` |
+>
+> 인과가 증명된 것은 아니지만(상관 5/5 + 응답 형태) 처방은 어느 쪽이든 손해가 없다.
+> 이 규칙을 어긴 대가는 **한 시간짜리 슬롯을 쓰고도 기계 판정이 안 나오는 것**이고,
+> 실제로 #117에서 세 라운드 연속 그렇게 됐다.
+
 세 상태 모두 코멘트를 남기므로 **코멘트 유무가 아니라 본문으로 구분한다.**
 
 ```bash
-gh pr view <번호> --json comments,reviews --jq '[.comments[], .reviews[]] | map(select(.author.login=="coderabbitai").body) | if any(test("Actionable comments posted|No actionable comments")) then "REVIEWED" elif any(test("Review rate limited")) then "RATE_LIMITED" elif any(test("Review available on request")) then "NOT_TRIGGERED" else "NONE" end'
+gh pr view <번호> --json comments,reviews --jq '[.comments[], .reviews[]] | map(select(.author.login=="coderabbitai").body) | if any(test("Actionable comments posted|No actionable comments")) then "REVIEWED" elif any(test("Review rate limited")) then "RATE_LIMITED" elif any(test("Review available on request")) then "NOT_TRIGGERED" elif any(test("auto-generated reply by CodeRabbit")) then "CHAT_ONLY" else "NONE" end'
 ```
 
 > ⚠️ `comments`만 보면 안 된다. CodeRabbit의 리뷰 본문은 PR에 따라 **일반 코멘트(`comments`)에 오기도 하고 리뷰(`reviews`)에 오기도 한다** — 한쪽만 조회하면 실제로 리뷰된 PR(#93·#95)이 `NOT_TRIGGERED`로 잘못 판정된다. 두 배열을 합쳐서 본다.
@@ -119,12 +150,13 @@ gh pr view <번호> --json comments,reviews --jq '[.comments[], .reviews[]] | ma
 | 결과 | 뜻 | 할 일 |
 |---|---|---|
 | `REVIEWED` | 리뷰 본문이 게시됨 | 지적을 반영하고 4번으로 |
-| `NOT_TRIGGERED` | 트리거를 안 함 (기본 상태) | `@coderabbitai review` 코멘트로 트리거 → 몇 분 뒤 재판정 |
+| `NOT_TRIGGERED` | 트리거를 안 함 (기본 상태) | `@coderabbitai review` **한 줄만** 담은 코멘트로 트리거 → 몇 분 뒤 재판정 |
+| `CHAT_ONLY` | 트리거 뒤 봇이 답했는데 판정 문구·마커가 없음 — 위 🚨의 결과 | **단독 코멘트로 재트리거.** 대화 응답 본문은 읽어라(진짜 지적이 실린다 — #117의 `claim_port` 소유권 지적이 거기서 나왔다). 다만 **게이트 증거로는 세지 않는다** — 판정 문구가 없으면 "봇이 뭔가 답했음"과 "리뷰가 돌았음"을 가를 수 없고, 그 구분이 이 스킬의 존재 이유다 |
 | `RATE_LIMITED` | 할당량 소진 — **일시적** | **먼저 기다렸다 재트리거한다.** 폴백은 그다음 |
 
 > ⚠️ `Review triggered`는 "접수됨"일 뿐 리뷰가 끝났다는 뜻이 아니다. 접수 응답을 리뷰 완료로 읽지 않는다.
 >
-> ⚠️ `REVIEWED`는 **"언젠가 리뷰됐다"는 뜻이지 "지금 head를 리뷰했다"는 뜻이 아니다.** CodeRabbit은 증분 리뷰라 이미 본 커밋을 다시 보지 않는다. 리뷰가 게시된 뒤 커밋을 더 푸시했다면 그 변경은 리뷰되지 않은 것이므로, `@coderabbitai review`로 다시 트리거한다.
+> ⚠️ `REVIEWED`는 **"언젠가 리뷰됐다"는 뜻이지 "지금 head를 리뷰했다"는 뜻이 아니다.** CodeRabbit은 증분 리뷰라 이미 본 커밋을 다시 보지 않는다. 리뷰가 게시된 뒤 커밋을 더 푸시했다면 그 변경은 리뷰되지 않은 것이므로, `@coderabbitai review` **한 줄만 담은 코멘트**로 다시 트리거한다(설명을 붙이면 대화 응답이 온다 — 위 🚨).
 
 `RATE_LIMITED`는 시간 창(rolling window) 제한이라 곧 풀린다. 바로 폴백으로 넘어가지 말고 기다렸다 다시 트리거한다. **단, 봇 안내 문구를 그대로 믿지 마라.**
 
@@ -160,7 +192,14 @@ gh pr view <번호> --json comments,reviews --jq '[.comments[], .reviews[]] | ma
     # ⚠️ 두 값을 `tee >(...)`로 가르지 마라. 프로세스 치환은 파이프라인의 대기·상태 전파
     #    **밖**이라 ①뒤의 `sort`가 기록보다 먼저 돌 수 있고 ②그 안의 실패가 `||`에 안 잡힌다.
     #    파일로 받아 성공을 확인한 뒤 순차로 가른다.
-    gh api --paginate "repos/Jiwonang/KeepCon/issues/$n/comments" --jq '.[] | select(.user.login=="coderabbitai[bot]") | select(.body | test("Actionable comments posted|No actionable comments")) | "\(.created_at) \(.updated_at)"' > "$raw" || { echo "PR #$n 코멘트 조회 실패 — 트리거하지 마라"; exit 1; }
+    # ⚠️ 판정 문구로 **거르지 마라.** CodeRabbit의 **대화 응답**(트리거 코멘트에 설명을 붙였을
+    #    때 오는 형태 — §3 🚨)은 판정 문구가 없는데 **슬롯은 똑같이 쓴다.** 빼고 세면 창을
+    #    이르게 잡아 트리거가 튕기고, 그 실패는 창을 앞당겨 주지도 않는다.
+    #    2026-08-27 실측: #117이 00:47:43Z에 대화 응답을 받았는데 그것이 안 세어져,
+    #    20분 뒤 01:07:08Z의 #119 트리거가 `Review rate limited`로 튕겼다.
+    #    봇의 코멘트는 **전부** 센다(요약/walkthrough 편집이 섞여 창을 늦게 잡는 오차는
+    #    아래 ⚠️의 세 후보 대조로 사람이 가른다 — 늦게 잡는 손해가 슬롯을 버리는 것보다 작다).
+    gh api --paginate "repos/Jiwonang/KeepCon/issues/$n/comments" --jq '.[] | select(.user.login=="coderabbitai[bot]") | "\(.created_at) \(.updated_at)"' > "$raw" || { echo "PR #$n 코멘트 조회 실패 — 트리거하지 마라"; exit 1; }
     cut -d' ' -f1 < "$raw" >> "$cre"
     cut -d' ' -f2 < "$raw" >> "$upd"
   done
@@ -336,11 +375,27 @@ PR도 마커 sha는 head를 가리킬 수 있다** — sha 일치만으로 판�
 `comments-marker verdict`가 `NONE`이 아니거나 본문 있는 `reviews`가 하나라도 있으면
 `STALE`(리뷰는 됐고 head가 아닐 뿐), **둘 다 verdict가 없으면**(마커 sha만 있어도, #113처럼)
 `NO_REVIEW`다. 마커 sha가 있다는 것 자체는 증거로 세지 않는다. `STALE`이면 **그 뒤 커밋은
-리뷰되지 않았다** — `@coderabbitai review`로 재트리거한다. `CURRENT`일 때만 4층(CodeRabbit)이
+리뷰되지 않았다** — `@coderabbitai review` **한 줄만** 담아 재트리거한다. `CURRENT`일 때만 4층(CodeRabbit)이
 채워진 것이다. `NO_REVIEW`면 **3번으로 돌아가 그 PR의 §3 판정을 먼저 본다** — `RATE_LIMITED`면
 창을 계산해 기다렸다 트리거하고(#113이 이 경우), `NOT_TRIGGERED`면 즉시 트리거한다. 어느
 쪽이든 `CURRENT`가 될 때까지 §5의 머지 조건 3은 충족되지 않는다.
 
+> ⚠️ **`STALE`·`NO_REVIEW`가 나왔는데 방금 트리거했다면, 트리거 형식을 먼저 의심하라.**
+> 설명을 붙인 트리거는 대화 응답을 부르고, 대화 응답에는 판정 문구도 마커도 없어 두 소스
+> 모두 head를 못 가리킨다(§3 🚨). 아래로 가른다 — 마지막 판정 증거보다 **뒤에** 대화 응답이
+> 있으면 "리뷰가 안 된 것"이 아니라 **"리뷰 형태로 안 실린 것"**이고, 처방이 다르다
+> (기다림이 아니라 **단독 코멘트로 재트리거**).
+>
+> ```bash
+> gh api --paginate repos/Jiwonang/KeepCon/issues/<번호>/comments \
+>   --jq '.[] | select(.user.login=="coderabbitai[bot]")
+>         | "\(.created_at) verdict=\(if (.body|test("Actionable comments posted|No actionable comments")) then "Y" else "N" end) chat=\(if (.body|test("auto-generated reply by CodeRabbit")) then "Y" else "N" end)"'
+> ```
+>
+> #117이 이 경우였다 — `2f92ed1` 이후 네 라운드 중 세 번이 대화 응답이라 3b가 계속
+> `STALE`이었고, 매번 한 시간을 기다린 뒤 같은 실수를 반복했다. 원인은 봇이 아니라
+> **트리거를 보낸 쪽**이었다.
+>
 > ⚠️ **시각(timestamp)으로 비교하지 마라.** 리뷰 게시 시각과 `commits[].committedDate`를 견주는 방식은 틀린다 — `committedDate`는 푸시 시각이 아니라 **작성자 로컬 시계의 커밋 생성 시각**이다. 리뷰를 기다리는 몇 분 사이에 커밋해 두고 리뷰가 올라온 뒤 푸시하면(흔한 작업 흐름) 커밋이 리뷰보다 **이르게** 찍혀 `CURRENT`로 통과한다 — 3b가 막으려던 바로 그것이다. 작성자 시계가 앞서 있으면 반대로 늘 `STALE`이 되어 소음이 된다. SHA 비교는 시계·푸시 지연과 무관하다.
 
 이 검사가 없으면 눈으로는 못 잡는다. 도입 시점에 돌려 보니 **PR #93·#95 둘 다 `STALE`이었고, #93은 그 상태로 머지됐다**(#93: 리뷰 커밋 `3568d64f` ≠ head `3ff2eb7d`). "리뷰 본문이 있는지"만 확인하는 규칙으로는 여기까지 못 간다.
@@ -399,7 +454,7 @@ EOF
 
 다음이 모두 참일 때만 머지한다.
 
-1. CI 세 잡(`Format · Analyze · Test` · `Firestore rules` · `Markdown lint`) green (1번). `gh pr checks`는 **이름 오름차순**이라 `CodeRabbit`이 보통 **첫 행**에 온다 — 위치가 아니라 **이름으로** 골라라(행 수도 불안정하다: `Markdown lint` 도입 전인 PR #93은 3행뿐이다)
+1. CI 세 잡(`Format · Analyze · Test` · `Firestore rules` · `Markdown lint`) green (1번) — **그 실행의 `headSha`가 현재 `headRefOid`와 같은지 대조한 뒤에**(1번의 ⚠️). `gh pr checks`는 **이름 오름차순**이라 `CodeRabbit`이 보통 **첫 행**에 온다 — 위치가 아니라 **이름으로** 골라라(행 수도 불안정하다: `Markdown lint` 도입 전인 PR #93은 3행뿐이다)
 2. `keepcon-code-reviewer` 지적을 반영 완료 (2번 — 정상 경로에서는 푸시 전에 끝나 있다) **그리고**
    그 뒤 푸시한 커밋이 없다: PR 본문의 `에이전트 리뷰: <SHA>` == `gh pr view <번호> --json headRefOid --jq .headRefOid`.
    다르면 3b와 같은 이유로 **그 뒤 커밋은 기본 층을 안 거쳤다** — 2번에서 그 범위(`<리뷰한 SHA>...<head>`)만 다시 리뷰한다.
@@ -419,6 +474,8 @@ EOF
 - `REVIEWED`만 보고 머지하지 않는다 — **3b가 `CURRENT`인지 확인한다.** 리뷰 뒤 푸시한 커밋은 리뷰되지 않았다.
 - **3b에서 `comments`·`reviews` 어느 한쪽만 보고 결론짓지 않는다** — 형식이 둘로 갈린다. `reviews`는 0건인데 `comments` 마커는 있는 PR(#114·#115)도, 마커는 없는데 `reviews`는 있는 PR(#93·#95·#98·#101·#104·#110·#111)도 실측으로 확인됐다. 둘 다 조회해서 **판정 문구(verdict)를 동반한 증거**가 head를 가리키는 쪽이 하나라도 있으면 `CURRENT`다 — **마커 sha만 head와 같은 것은 증거가 아니다**(#113: 미리뷰, #106: 진행 중이었을 때의 범위).
 - **`created_at` 기준으로 "새 코멘트가 있는가"를 즉흥으로 확인하지 않는다** — CodeRabbit은 요약 코멘트를 계속 수정한다. 현재 본문을 읽어라(위 3b 명령을 그대로 실행).
+- **트리거 코멘트에 설명을 붙이지 않는다** — `@coderabbitai review` 한 줄만 보낸다. 붙이면 대화 응답이 오고, 슬롯을 쓴 채 기계 판정이 안 나온다(§3 🚨 — 5/5 실측).
+- **`gh pr checks` 결과를 head 대조 없이 믿지 않는다** — 푸시 직후에는 옛 커밋의 초록/빨강이 보인다(§1 ⚠️).
 - `RATE_LIMITED`를 보자마자 폴백으로 가지 않는다 — 재시도가 먼저다.
 - 폴백 경로를 기록 없이 지나가지 않는다.
 - **스타가 10개 이상이 되면** 자동 리뷰가 복귀한다. 그때 3번의 `NOT_TRIGGERED` 분기는 드물어지지만 할당량 축은 그대로 남으므로 이 스킬은 유효하다.
