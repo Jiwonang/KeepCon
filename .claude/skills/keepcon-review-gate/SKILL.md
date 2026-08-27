@@ -90,10 +90,17 @@ gh pr checks <번호>
 #    포크 PR이 들어올 수 있다. `feature;id`·`feature$(id)`·`feature|id`는 전부 **유효한 git
 #    브랜치 이름**이므로(`git check-ref-format --branch`로 확인) 그것을 문자열에 끼워
 #    `eval`하면 임의 명령이 돈다(실측 재현). 값은 따로 받아 인용해서만 넘긴다.
-IFS=$'\t' read -r HEAD_OID BR < <(gh pr view <번호> --json headRefOid,headRefName --jq '[.headRefOid, .headRefName] | @tsv')
-gh run list --branch "$BR" --limit 3 --json headSha,createdAt,status,conclusion,databaseId \
-  --jq '.[] | "sha=\(.headSha[0:7]) \(.createdAt) \(.status) \(.conclusion // "-") id=\(.databaseId)"'
-echo "headRefOid: ${HEAD_OID:0:7}"
+# ⚠️ 조회 실패를 삼키지 마라. `gh`가 실패하면(rate limit·오타 PR 번호·인증) 프로세스 치환이
+#    빈 출력을 내고 `read`가 두 변수를 **빈 문자열**로 만든다 — 그대로 두면 `--branch ""`로
+#    남의 run이 섞이고, 빈 `headRefOid`로는 아래 sha 대조 자체가 성립하지 않는다.
+#    (`exit`는 대화 셸을 닫으므로 쓰지 않는다. `read`는 `if` 안에서도 현재 셸에서 돈다.)
+if IFS=$'\t' read -r HEAD_OID BR < <(gh pr view <번호> --json headRefOid,headRefName --jq '[.headRefOid, .headRefName] | @tsv'); then
+  gh run list --branch "$BR" --limit 3 --json headSha,createdAt,status,conclusion,databaseId \
+    --jq '.[] | "sha=\(.headSha[0:7]) \(.createdAt) \(.status) \(.conclusion // "-") id=\(.databaseId)"'
+  echo "headRefOid: ${HEAD_OID:0:7}"
+else
+  echo "PR 조회 실패 — 판정하지 마라(rate limit이면 기다렸다 다시)."
+fi
 # CI는 단일 워크플로(잡 3개)라 푸시당 run 1개다. `status`가 `in_progress`(conclusion `-`)면
 # **아직 판정하지 마라** — 끝날 때까지 기다린다.
 ```
@@ -172,6 +179,7 @@ gh pr view <번호> --json comments,reviews --jq '[.comments[], .reviews[]] | ma
 | `CHAT_ONLY` | 봇이 답했는데 **리뷰 명령으로 접수되지 않음**(회신 마커는 있고 `invocation` 마커가 없음) — 위 🚨의 결과 | **단독 코멘트로 재트리거.** 대화 응답 본문은 읽어라(진짜 지적이 실린다 — #117의 `claim_port` 소유권 지적이 거기서 나왔다). 다만 **게이트 증거로는 세지 않는다** — 판정 문구가 없으면 "봇이 뭔가 답했음"과 "리뷰가 돌았음"을 가를 수 없고, 그 구분이 이 스킬의 존재 이유다 |
 | `ACK_ONLY` | 명령은 **접수됐고**(`invocation` 마커) 판정 문구가 아직 없음 — **리뷰가 도는 중일 수 있다** | **재트리거하지 말고** 몇 분 기다렸다 재판정. #117 실측: 06:04:32Z 접수 → 06:11:39Z 리뷰(7분). 여기서 재트리거하면 슬롯만 하나 더 쓴다 |
 | `RATE_LIMITED` | 할당량 소진 — **일시적** | **먼저 기다렸다 재트리거한다.** 폴백은 그다음 |
+| `NONE` | 아는 문구가 **하나도 없음** — 봇이 이 PR에 아무 응답도 안 했거나 형식이 바뀐 것 | `NOT_TRIGGERED`와 같이 **한 줄 트리거**하되, 먼저 봇이 이 저장소에 붙어 있는지 확인한다(App 접근 범위 — `CLAUDE.md`). 3b의 `verdict: NONE`과 **다른 뜻**이니 섞지 마라 |
 
 > ⚠️ `Review triggered`는 "접수됨"일 뿐 리뷰가 끝났다는 뜻이 아니다. 접수 응답을 리뷰 완료로 읽지 않는다.
 >
@@ -402,7 +410,9 @@ PR도 마커 sha는 head를 가리킬 수 있다** — sha 일치만으로 판�
 `comments-marker verdict`가 `NONE`이 아니거나 본문 있는 `reviews`가 하나라도 있으면
 `STALE`(리뷰는 됐고 head가 아닐 뿐), **둘 다 verdict가 없으면**(마커 sha만 있어도, #113처럼)
 `NO_REVIEW`다. 마커 sha가 있다는 것 자체는 증거로 세지 않는다. `STALE`이면 **그 뒤 커밋은
-리뷰되지 않았다** — `@coderabbitai review` **한 줄만** 담아 재트리거한다. `CURRENT`일 때만 4층(CodeRabbit)이
+리뷰되지 않았다** — `@coderabbitai review` **한 줄만** 담아 재트리거한다. ⚠️ **다만 트리거
+직전에 아래 두 번째 ⚠️("`STALE`이어도…")를 먼저 읽어라** — 리뷰가 이미 도는 중이면 슬롯만
+하나 더 쓴다. `CURRENT`일 때만 4층(CodeRabbit)이
 채워진 것이다. `NO_REVIEW`면 **3번으로 돌아가 그 PR의 §3 판정을 먼저 본다** — `RATE_LIMITED`면
 창을 계산해 기다렸다 트리거하고(#113이 이 경우), `NOT_TRIGGERED`면 즉시 트리거한다. 어느
 쪽이든 `CURRENT`가 될 때까지 §5의 머지 조건 3은 충족되지 않는다.
@@ -416,18 +426,33 @@ PR도 마커 sha는 head를 가리킬 수 있다** — sha 일치만으로 판�
 > `chat=Y`가 있으면 "리뷰 형태로 안 실린 것"이고 처방은 **단독 코멘트로 재트리거**.
 > `verdict=Y`가 하나라도 있으면 리뷰는 됐고 `STALE`이 맞으므로 3b 본문 절차를 따른다.
 >
-> ⚠️ **`STALE`이어도 재트리거 전에 `ack=` 열의 가장 최근 값을 보라.** §3의 판정식은
+> ⚠️ **`STALE`이어도 재트리거 전에 "지금 도는 리뷰가 있는가"를 먼저 보라.** §3의 판정식은
 > `any(...)`라 **과거 기록 전체**에 걸린다 — 옛 `verdict=Y` 하나가 지금의 `ACK_ONLY`를
 > 가리므로, 리뷰가 **이미 오는 중**인데 `REVIEWED`+`STALE`로 읽혀 "재트리거" 처방이 나온다.
-> 가장 최근 봇 코멘트가 `ack=Y`이고 그 뒤로 `verdict=Y`가 없으면 **기다린다**(#117 실측:
-> 접수 → 리뷰 7분). 여기서 트리거하면 시간당 1건짜리 슬롯을 헛되이 하나 더 쓴다.
+> 여기서 트리거하면 시간당 1건짜리 슬롯을 헛되이 하나 더 쓴다.
 > (근본 해결은 "과거 기록"과 "현재 시도"를 분리해 두 값으로 돌려주는 것이다 — 판정식
 >  구조를 바꾸는 별건.)
+>
+> **`ack=Y` 하나로 판단하지 마라 — 셋을 함께 본다.**
+> ① **`RL=Y`인 `ack=Y`는 접수가 아니라 거부다.** `Review rate limited` 회신에도 `invocation`
+>    마커가 붙는다(#119 `01:07:14Z` 실측 `ack=Y RL=Y`). 기다려도 아무것도 오지 않으니 처방은
+>    **창 계산 후 재트리거**다. §3 판정식이 `RATE_LIMITED`를 `ACK_ONLY` 위에 둔 것과 같은
+>    이유이고, 창 계산 스캔도 같은 문구를 제외한다.
+> ② **판정은 `reviews`에도 실린다.** 아래 명령은 `issues/…/comments`만 보므로 `reviews`에만
+>    판정이 있는 PR은 영원히 `verdict=N`이다(#117: 봇 코멘트 5건 전부 `verdict=N`, 실제 리뷰는
+>    `reviews`의 `06:11:39Z`). **판정 유무는 3b 1)·2) 두 소스로 확인하고, `ack=` 열은 "명령이
+>    접수됐는지"에만 쓴다.**
+> ③ **선후를 시각으로 재지 마라** — 바로 위 문단의 이유가 그대로 적용된다. `ack=` 회신과
+>    3b 판정 커밋의 **SHA**를 견준다.
+>
+> **기다리는 경우는 하나뿐이다** — `ack=Y`·`RL=N` 회신이 있고, 3b 두 소스의 판정 커밋이 그
+> 회신이 가리키는 head보다 **앞선 커밋**일 때(#117 실측: 접수 → 리뷰 7분). 그 상태로 **10분**이
+> 지나도 판정이 안 붙으면 형식을 의심하고 단독 코멘트로 재트리거한다.
 >
 > ```bash
 > gh api --paginate repos/Jiwonang/KeepCon/issues/<번호>/comments \
 >   --jq '.[] | select(.user.login=="coderabbitai[bot]")
->         | "\(.created_at) upd=\(.updated_at) verdict=\(if (.body|test("Actionable comments posted|No actionable comments")) then "Y" else "N" end) chat=\(if ((.body|test("auto-generated reply by CodeRabbit")) and (.body|test("CodeRabbit review command invocation")|not)) then "Y" else "N" end) ack=\(if (.body|test("CodeRabbit review command invocation")) then "Y" else "N" end)"'
+>         | "\(.created_at) upd=\(.updated_at) verdict=\(if (.body|test("Actionable comments posted|No actionable comments")) then "Y" else "N" end) chat=\(if ((.body|test("auto-generated reply by CodeRabbit")) and (.body|test("CodeRabbit review command invocation")|not)) then "Y" else "N" end) ack=\(if (.body|test("CodeRabbit review command invocation")) then "Y" else "N" end) RL=\(if (.body|test("Review rate limited")) then "Y" else "N" end)"'
 > ```
 >
 > #117이 이 경우였다 — `2f92ed1` 이후 세 라운드가 전부 대화 응답이라(`chat=Y` 3건, `verdict=Y`는
