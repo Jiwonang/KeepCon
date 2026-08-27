@@ -1,6 +1,6 @@
 ---
 name: keepcon-review-gate
-description: "KeepCon PR을 머지해도 되는지 판정하는 스킬. 트리거 — PR을 올린 뒤, '머지해도 될까', '리뷰 확인해줘', 'CI 확인하고 머지해줘', 'CodeRabbit 결과 봐줘' 등 머지 가부를 묻는 요청. CI green 확인 + keepcon-code-reviewer 리뷰(기본 층 — 푸시 전에 끝났는지 확인하고, 없으면 실행) + CodeRabbit 상태 5분기 판정(리뷰됨/할당량 소진/미트리거/대화응답만/접수만)을 거쳐, 리뷰 없이 머지되는 경로를 차단한다. 후속 작업 — '다시 확인해줘', '지적 반영하고 다시'에도 사용."
+description: "KeepCon PR을 머지해도 되는지 판정하는 스킬. 트리거 — PR을 올린 뒤, '머지해도 될까', '리뷰 확인해줘', 'CI 확인하고 머지해줘', 'CodeRabbit 결과 봐줘' 등 머지 가부를 묻는 요청. CI green 확인 + keepcon-code-reviewer 리뷰(기본 층 — 푸시 전에 끝났는지 확인하고, 없으면 실행) + CodeRabbit 상태 6분기 판정(리뷰됨/할당량 소진/미트리거/대화응답만/접수만/응답없음)을 거쳐, 리뷰 없이 머지되는 경로를 차단한다. 후속 작업 — '다시 확인해줘', '지적 반영하고 다시'에도 사용."
 ---
 
 # KeepCon 리뷰 게이트 — 리뷰 없이 머지되는 경로를 막는다
@@ -86,7 +86,11 @@ CI에서 처음 빨개진다.
 gh pr checks <번호>
 # ⚠️ 결과가 **지금 head의 것인지** 반드시 대조한다 — 아래 참조.
 # 브랜치 이름과 head SHA를 한 번에 — 이 스킬의 나머지 절차와 같이 PR 번호로 시작한다.
-eval "$(gh pr view <번호> --json headRefOid,headRefName --jq '"HEAD_OID=\(.headRefOid) BR=\(.headRefName)"')"
+# ⚠️ **`eval`을 쓰지 마라.** `headRefName`은 PR이 정하는 값이고, 이 저장소는 공개라
+#    포크 PR이 들어올 수 있다. `feature;id`·`feature$(id)`·`feature|id`는 전부 **유효한 git
+#    브랜치 이름**이므로(`git check-ref-format --branch`로 확인) 그것을 문자열에 끼워
+#    `eval`하면 임의 명령이 돈다(실측 재현). 값은 따로 받아 인용해서만 넘긴다.
+IFS=$'\t' read -r HEAD_OID BR < <(gh pr view <번호> --json headRefOid,headRefName --jq '[.headRefOid, .headRefName] | @tsv')
 gh run list --branch "$BR" --limit 3 --json headSha,createdAt,status,conclusion,databaseId \
   --jq '.[] | "sha=\(.headSha[0:7]) \(.createdAt) \(.status) \(.conclusion // "-") id=\(.databaseId)"'
 echo "headRefOid: ${HEAD_OID:0:7}"
@@ -411,6 +415,14 @@ PR도 마커 sha는 head를 가리킬 수 있다** — sha 일치만으로 판�
 > "재트리거 대상"으로 나온다. 기준은 **존재 여부**다 — `verdict=Y`가 **한 건도 없고**
 > `chat=Y`가 있으면 "리뷰 형태로 안 실린 것"이고 처방은 **단독 코멘트로 재트리거**.
 > `verdict=Y`가 하나라도 있으면 리뷰는 됐고 `STALE`이 맞으므로 3b 본문 절차를 따른다.
+>
+> ⚠️ **`STALE`이어도 재트리거 전에 `ack=` 열의 가장 최근 값을 보라.** §3의 판정식은
+> `any(...)`라 **과거 기록 전체**에 걸린다 — 옛 `verdict=Y` 하나가 지금의 `ACK_ONLY`를
+> 가리므로, 리뷰가 **이미 오는 중**인데 `REVIEWED`+`STALE`로 읽혀 "재트리거" 처방이 나온다.
+> 가장 최근 봇 코멘트가 `ack=Y`이고 그 뒤로 `verdict=Y`가 없으면 **기다린다**(#117 실측:
+> 접수 → 리뷰 7분). 여기서 트리거하면 시간당 1건짜리 슬롯을 헛되이 하나 더 쓴다.
+> (근본 해결은 "과거 기록"과 "현재 시도"를 분리해 두 값으로 돌려주는 것이다 — 판정식
+>  구조를 바꾸는 별건.)
 >
 > ```bash
 > gh api --paginate repos/Jiwonang/KeepCon/issues/<번호>/comments \
