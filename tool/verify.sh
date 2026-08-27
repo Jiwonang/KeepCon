@@ -198,47 +198,55 @@ tcp_in_use() {
 #    아래 사다리가 실행마다 한 칸씩 소진되고, 열 번이면 이 게이트가 그 PC에서 영영 막힌다.
 #    그래서 우리가 띄운 포트는 우리가 거둔다.
 #
-# ⚠️ **거둘 자격은 두 겹으로 확인한다.** 이 함수는 프로세스를 `-9`/`-Force`로 죽이는데,
+# ⚠️ **거둘 자격은 세 겹으로 확인한다.** 이 함수는 프로세스를 `-9`/`-Force`로 죽이는데,
 #    잘못 짚으면 개발용 에뮬레이터가 정상 종료를 못 해 `.emulator-local/` 세션 데이터가
 #    통째로 날아간다(되돌릴 수 없다).
-#      ①호출자가 `claim_port`로 **바인드 수준**에서 비어 있는 것을 보고 잡은 포트만 넘긴다.
-#      ②여기서 다시, **부모가 죽은 프로세스만** 죽인다. 누수된 JVM은 정의상 고아이고
-#        (부모 firebase CLI가 이미 종료), 정상 `emulators:start`의 JVM은 부모가 살아 있다
-#        (실측: 개발용 8080의 java는 부모 java가 살아 있고, 누수된 6개는 전부 부모 사망).
-#    ①만으로는 check→bind 사이·검증 도중에 남이 그 포트를 채간 경우를 못 거른다.
+#      ①호출자가 `port_was_free`로 **띄우기 직전에 비어 있던 것을 본** 포트만 넘긴다.
+#      ②**부모가 죽은 프로세스만** 죽인다. 누수된 JVM은 정의상 고아이고(부모 firebase CLI가
+#        이미 종료), 정상 `emulators:start`의 JVM은 부모가 살아 있다(실측: 개발용 8080의
+#        java는 부모 java가 살아 있고, 누수된 것들은 전부 부모 사망).
+#      ③그 프로세스가 **Firestore 에뮬레이터인지** 명령줄로 확인한다.
+#    ①이 소유권 증명이 아니기 때문에 ③이 필요하다 — `port_was_free`는 연결을 시도해 본
+#    것일 뿐 bind도 예약도 아니어서, 확인과 `emulators:exec`의 bind 사이에 남이 그 포트를
+#    잡을 수 있다. 그 남이 마침 고아까지 되면 ①②만으로는 죽인다. ③이 붙으면 남는 경우는
+#    "우리가 비어 있는 것을 본 포트에 붙은, 부모 없는 Firestore 에뮬레이터"뿐이다.
 reap_port() {
-  local port="$1" pid ppid alive
+  local port="$1" pid ppid verdict cmd
   tcp_in_use "${port}" || return 0
   # ⚠️ WSL에는 `powershell.exe`도 PATH에 있다 — 그쪽을 먼저 보면 리스너는 리눅스 프로세스인데
   #    Windows 호스트의 연결 목록을 뒤진다. 못 찾으면 다행이고, 같은 번호를 쓰는 **무관한
   #    Windows 프로세스를 죽일 수도** 있다. 리스너와 같은 커널을 보는 `lsof`를 먼저 쓴다.
   if command -v lsof >/dev/null 2>&1; then
     pid=$(lsof -ti "tcp:${port}" -sTCP:LISTEN 2>/dev/null | head -1)
-    if [[ -n "${pid}" ]]; then
-      ppid=$(ps -o ppid= -p "${pid}" 2>/dev/null | tr -d ' ')
-      # PPID 1 = 부모가 죽어 init(또는 서브리퍼)에 재부모화된 고아.
-      if [[ -z "${ppid}" || "${ppid}" == "1" ]]; then
-        kill -9 "${pid}" 2>/dev/null
-      else
-        echo "  ⚠️ 포트 ${port}의 프로세스(pid=${pid})는 부모가 살아 있다 — 우리 잔재가 아니므로 두고 간다." >&2
-        return 0
-      fi
+    [[ -z "${pid}" ]] && return 0
+    # PPID 1 = 부모가 죽어 init(또는 서브리퍼)에 재부모화된 고아.
+    ppid=$(ps -o ppid= -p "${pid}" 2>/dev/null | tr -d ' ')
+    cmd=$(ps -o command= -p "${pid}" 2>/dev/null)
+    if [[ -n "${ppid}" && "${ppid}" != "1" ]]; then
+      echo "  ⚠️ 포트 ${port}의 프로세스(pid=${pid})는 부모가 살아 있다 — 우리 잔재가 아니므로 두고 간다." >&2
+      return 0
     fi
+    if [[ "${cmd}" != *[Ff]irestore* ]]; then
+      echo "  ⚠️ 포트 ${port}의 프로세스(pid=${pid})는 Firestore 에뮬레이터가 아니다 — 두고 간다." >&2
+      return 0
+    fi
+    kill -9 "${pid}" 2>/dev/null
   elif command -v powershell.exe >/dev/null 2>&1; then
-    pid=$(powershell.exe -NoProfile -Command \
-      "(Get-NetTCPConnection -LocalPort ${port} -State Listen -EA SilentlyContinue).OwningProcess" \
+    # 한 번의 호출로 소유자·부모 생존·명령줄을 함께 판정한다 — powershell 기동이 비싸다.
+    verdict=$(powershell.exe -NoProfile -Command \
+      "\$c = Get-NetTCPConnection -LocalPort ${port} -State Listen -EA SilentlyContinue | Select-Object -First 1; if (-not \$c) { 'NONE'; exit }; \$p = Get-CimInstance Win32_Process -Filter \"ProcessId = \$(\$c.OwningProcess)\" -EA SilentlyContinue; if (-not \$p) { 'NONE'; exit }; if (Get-CimInstance Win32_Process -Filter \"ProcessId = \$(\$p.ParentProcessId)\" -EA SilentlyContinue) { \"PARENT \$(\$p.ProcessId)\"; exit }; if (\$p.CommandLine -notmatch 'firestore') { \"FOREIGN \$(\$p.ProcessId)\"; exit }; \"REAP \$(\$p.ProcessId)\"" \
       2>/dev/null | tr -d '\r' | head -1)
-    if [[ -n "${pid}" ]]; then
-      alive=$(powershell.exe -NoProfile -Command \
-        "\$p = Get-CimInstance Win32_Process -Filter \"ProcessId = ${pid}\" -EA SilentlyContinue; if (\$p -and (Get-CimInstance Win32_Process -Filter \"ProcessId = \$(\$p.ParentProcessId)\" -EA SilentlyContinue)) { 'ALIVE' } else { 'ORPHAN' }" \
-        2>/dev/null | tr -d '\r' | head -1)
-      if [[ "${alive}" == "ORPHAN" ]]; then
-        powershell.exe -NoProfile -Command "Stop-Process -Id ${pid} -Force -EA SilentlyContinue" >/dev/null 2>&1
-      else
-        echo "  ⚠️ 포트 ${port}의 프로세스(pid=${pid})는 부모가 살아 있다 — 우리 잔재가 아니므로 두고 간다." >&2
-        return 0
-      fi
-    fi
+    case "${verdict}" in
+      REAP\ *)
+        powershell.exe -NoProfile -Command "Stop-Process -Id ${verdict#REAP } -Force -EA SilentlyContinue" >/dev/null 2>&1 ;;
+      PARENT\ *)
+        echo "  ⚠️ 포트 ${port}의 프로세스(pid=${verdict#PARENT })는 부모가 살아 있다 — 우리 잔재가 아니므로 두고 간다." >&2
+        return 0 ;;
+      FOREIGN\ *)
+        echo "  ⚠️ 포트 ${port}의 프로세스(pid=${verdict#FOREIGN })는 Firestore 에뮬레이터가 아니다 — 두고 간다." >&2
+        return 0 ;;
+      *) return 0 ;;
+    esac
   fi
   if tcp_in_use "${port}"; then
     echo "  ⚠️ 검증용 에뮬레이터(포트 ${port})를 정리하지 못했다 — 그 포트의 java 프로세스를 직접 종료하라." >&2
@@ -246,14 +254,15 @@ reap_port() {
   return 0
 }
 
-# ⚠️ 거둘 목록. **띄우기 직전에** `claim_port`로 채우고, 끝나면 그 목록만 거둔다.
-#    `fs_up`/`auth_up`은 근거가 되지 못한다 — 그것은 curl **HTTP 프로브**라, 포트를 물고
+# ⚠️ 거둘 후보 목록. **띄우기 직전에** `port_was_free`로 채우고, 끝나면 그 목록만 거둔다.
+#    이름 그대로 "그때 비어 있었다"는 관찰일 뿐 **예약이 아니다** — 소유권 증명은
+#    `reap_port`의 ②③이 맡는다.
+#    `fs_up`/`auth_up`을 근거로 쓰면 안 되는 이유: 그것은 curl **HTTP 프로브**라, 포트를 물고
 #    HTTP를 안 하는 프로세스는 `up=0`으로 읽히는데 포트는 막혀 있다(실측: 조용한 TCP
-#    리스너 → `tcp_in_use`=IN USE / curl 타임아웃). 그 차이를 무시하면 남의 프로세스를
-#    "우리가 띄운 것"으로 착각해 죽인다.
+#    리스너 → `tcp_in_use`=IN USE / curl 타임아웃).
 declare -a REAPABLE=()
 
-claim_port() {
+port_was_free() {
   if tcp_in_use "$1"; then
     return 1
   fi
@@ -348,8 +357,8 @@ JSON
   echo "  (전용 에뮬레이터를 띄운다 — firestore=${ALT_FS} auth=${ALT_AUTH} hub=${ALT_HUB} logging=${ALT_LOG})"
   # check→bind 사이에 남이 채갔을 수 있다. **여기서 다시 확인한 포트만** 거둔다.
   REAPABLE=()
-  claim_port "${ALT_FS}" || echo "  ⚠️ 포트 ${ALT_FS}가 그 사이 사용 중이 됐다 — 거두지 않는다." >&2
-  claim_port "${ALT_AUTH}" || echo "  ⚠️ 포트 ${ALT_AUTH}가 그 사이 사용 중이 됐다 — 거두지 않는다." >&2
+  port_was_free "${ALT_FS}" || echo "  ⚠️ 포트 ${ALT_FS}가 그 사이 사용 중이 됐다 — 거두지 않는다." >&2
+  port_was_free "${ALT_AUTH}" || echo "  ⚠️ 포트 ${ALT_AUTH}가 그 사이 사용 중이 됐다 — 거두지 않는다." >&2
   # Ctrl+C로 끊기면 아래 정리가 통째로 건너뛰어져 임시 config와 좀비 JVM이 함께 남는다.
   trap 'reap_claimed; rm -rf "${dir}"; exit 130' INT TERM
   # 여기서도 셸에 남은 `AUTH_EMULATOR_HOST`가 CLI 주입값을 이기면 죽은 포트로 붙는다.
@@ -399,7 +408,7 @@ run_default_port_rules() {
   #    그대로 거두면 **개발용 에뮬레이터를 강제 종료**해 `.emulator-local/` 세션이 날아간다.
   #    바인드 수준으로 다시 확인하고, 확인된 것만 거둔다.
   REAPABLE=()
-  if ! claim_port "${FS_PORT}" || ! claim_port "${AUTH_PORT}"; then
+  if ! port_was_free "${FS_PORT}" || ! port_was_free "${AUTH_PORT}"; then
     REAPABLE=()
     echo "  ✗ 기본 포트(${FS_PORT}/${AUTH_PORT})가 HTTP에 응답하지 않으면서 사용 중이다."
     echo "     기동 중인 에뮬레이터이거나 남의 프로세스다 — 확인한 뒤 다시 돌려라."
