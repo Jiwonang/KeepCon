@@ -309,9 +309,24 @@ jr_token_doc() {
 # 픽스처도 고정값이 아니라 실행 시각을 쓴다. 하드코딩하면 규칙이 조여지는 순간 깨진다.
 NOW_TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
-# 참여 요청 문서. $1=groupId $2=userId $3=status
+# 참여 요청 문서. $1=groupId $2=userId $3=status $4=credential(토큰 또는 6자리 코드)
+#
+# `credential`은 규칙이 **만료를 판정하는 근거**다. 이 값이 없으면 규칙은 그룹의
+# 24시간 창으로 판정할 수밖에 없고, 그러면 5분짜리 코드가 만료돼도 요청이 통과한다.
 jr_request_doc() {
-  printf '{"fields":{"groupId":{"stringValue":"%s"},"userId":{"stringValue":"%s"},"displayName":{"stringValue":"손님"},"avatarEmoji":{"stringValue":"🙂"},"requestedAt":{"timestampValue":"'"${NOW_TS}"'"},"status":{"stringValue":"%s"}}}' "$1" "$2" "$3"
+  printf '{"fields":{"groupId":{"stringValue":"%s"},"userId":{"stringValue":"%s"},"displayName":{"stringValue":"손님"},"avatarEmoji":{"stringValue":"🙂"},"requestedAt":{"timestampValue":"'"${NOW_TS}"'"},"status":{"stringValue":"%s"},"credential":{"stringValue":"%s"}}}' "$1" "$2" "$3" "$4"
+}
+
+# 초대코드 조회 문서. $1=groupId $2=만료
+jr_code_doc() {
+  printf '{"fields":{"groupId":{"stringValue":"%s"},"expiresAt":{"timestampValue":"%s"}}}' "$1" "$2"
+}
+
+# 초대코드까지 담은 그룹 문서. $1=memberIds $2=members $3=링크만료 $4=groupId
+# $5=6자리코드 $6=코드만료
+jr_group_doc_with_code() {
+  printf '{"fields":{"ownerId":{"stringValue":"%s"},"name":{"stringValue":"가족"},"emoji":{"stringValue":"🎁"},"inviteToken":{"stringValue":"tok-%s"},"inviteOwnerOnly":{"booleanValue":false},"inviteExpiresAt":{"timestampValue":"%s"},"maxMembers":{"integerValue":"10"},"shortInviteCode":{"stringValue":"%s"},"shortInviteCodeExpiresAt":{"timestampValue":"%s"},"members":{"arrayValue":{"values":[%s]}},"memberIds":{"arrayValue":{"values":[%s]}}}}' \
+    "${UID_A}" "$4" "$3" "$5" "$6" "$2" "$1"
 }
 
 # 대기 목록 질의(방장 전용이어야 한다). $1=groupId
@@ -344,17 +359,17 @@ check "기존 토큰을 다른 그룹으로 돌려쓰기 → 차단" 403 -X PATC
 
 # ── joinRequests 생성 ────────────────────────────────────────────────
 check "비멤버(C)가 참여 요청 생성" 200 -X PATCH "${DOCS}/joinRequests/${G_JR}_${UID_C}" \
-  "${AUTH_C[@]}" "${JSON[@]}" -d "$(jr_request_doc "${G_JR}" "${UID_C}" pending)"
+  "${AUTH_C[@]}" "${JSON[@]}" -d "$(jr_request_doc "${G_JR}" "${UID_C}" pending "tok-${G_JR}")"
 check "남의 이름으로 요청 생성 → 차단" 403 -X PATCH "${DOCS}/joinRequests/${G_JR}_${UID_B}" \
-  "${AUTH_C[@]}" "${JSON[@]}" -d "$(jr_request_doc "${G_JR}" "${UID_B}" pending)"
+  "${AUTH_C[@]}" "${JSON[@]}" -d "$(jr_request_doc "${G_JR}" "${UID_B}" pending "tok-${G_JR}")"
 check "문서 id 규약을 어긴 요청 → 차단" 403 -X PATCH "${DOCS}/joinRequests/wrong-${JR_RUN}" \
-  "${AUTH_C[@]}" "${JSON[@]}" -d "$(jr_request_doc "${G_JR}" "${UID_C}" pending)"
+  "${AUTH_C[@]}" "${JSON[@]}" -d "$(jr_request_doc "${G_JR}" "${UID_C}" pending "tok-${G_JR}")"
 check "처음부터 승인 상태로 생성 → 차단" 403 -X PATCH "${DOCS}/joinRequests/${G_EXP}_${UID_C}" \
-  "${AUTH_C[@]}" "${JSON[@]}" -d "$(jr_request_doc "${G_EXP}" "${UID_C}" approved)"
+  "${AUTH_C[@]}" "${JSON[@]}" -d "$(jr_request_doc "${G_EXP}" "${UID_C}" approved "tok-${G_EXP}")"
 check "이미 멤버(B)가 요청 → 차단" 403 -X PATCH "${DOCS}/joinRequests/${G_JR}_${UID_B}" \
-  "${AUTH_B[@]}" "${JSON[@]}" -d "$(jr_request_doc "${G_JR}" "${UID_B}" pending)"
+  "${AUTH_B[@]}" "${JSON[@]}" -d "$(jr_request_doc "${G_JR}" "${UID_B}" pending "tok-${G_JR}")"
 check "만료된 초대로 요청 → 차단" 403 -X PATCH "${DOCS}/joinRequests/${G_EXP}_${UID_C}" \
-  "${AUTH_C[@]}" "${JSON[@]}" -d "$(jr_request_doc "${G_EXP}" "${UID_C}" pending)"
+  "${AUTH_C[@]}" "${JSON[@]}" -d "$(jr_request_doc "${G_EXP}" "${UID_C}" pending "tok-${G_EXP}")"
 
 # ── joinRequests 읽기 — 요청자 본인과 방장만 ─────────────────────────
 check "방장이 대기 목록 질의" 200 -X POST "${DOCS}:runQuery" \
@@ -398,11 +413,11 @@ check "  (준비) 재요청용 그룹 생성" 200 -X PATCH "${DOCS}/groups/${G_R
 check "  (준비) 재요청용 토큰 발급" 200 -X PATCH "${DOCS}/inviteTokens/tok-${G_RE}" \
   "${AUTH_A[@]}" "${JSON[@]}" -d "$(jr_token_doc "${G_RE}" "${FUT}")"
 check "  (준비) C가 요청" 200 -X PATCH "${DOCS}/joinRequests/${G_RE}_${UID_C}" \
-  "${AUTH_C[@]}" "${JSON[@]}" -d "$(jr_request_doc "${G_RE}" "${UID_C}" pending)"
+  "${AUTH_C[@]}" "${JSON[@]}" -d "$(jr_request_doc "${G_RE}" "${UID_C}" pending "tok-${G_RE}")"
 check "방장이 거절" 200 -X PATCH "${DOCS}/joinRequests/${G_RE}_${UID_C}?${MASK_STATUS}" \
   "${AUTH_A[@]}" "${JSON[@]}" -d '{"fields":{"status":{"stringValue":"rejected"}}}'
 check "요청자가 거절된 요청을 다시 대기로(재요청)" 200 -X PATCH "${DOCS}/joinRequests/${G_RE}_${UID_C}" \
-  "${AUTH_C[@]}" "${JSON[@]}" -d "$(jr_request_doc "${G_RE}" "${UID_C}" pending)"
+  "${AUTH_C[@]}" "${JSON[@]}" -d "$(jr_request_doc "${G_RE}" "${UID_C}" pending "tok-${G_RE}")"
 check "방장이 남의 요청 삭제(그룹 소멸 캐스케이드 경로)" 200 -X DELETE \
   "${DOCS}/joinRequests/${G_RE}_${UID_C}" "${AUTH_A[@]}"
 
@@ -413,6 +428,107 @@ check "없는 요청 문서 조회 → 403" 403 -X GET "${DOCS}/joinRequests/abs
 check "없는 요청 문서 삭제 → 403" 403 -X DELETE "${DOCS}/joinRequests/absent-${JR_RUN}" "${AUTH_A[@]}"
 check "일반 멤버(B)가 남의 요청 삭제 → 차단" 403 -X DELETE "${DOCS}/joinRequests/${G_JR}_${UID_C}" "${AUTH_B[@]}"
 check "요청자 본인이 취소" 200 -X DELETE "${DOCS}/joinRequests/${G_JR}_${UID_C}" "${AUTH_C[@]}"
+
+echo "inviteCodes — 6자리 OTP 초대코드 (5분)"
+
+# 이 절의 핵심 불변식은 하나다: **만료 판정이 사용한 자격증명 기준인가.**
+# 그룹의 링크 토큰은 24시간 살아 있는데 코드는 5분이므로, 규칙이 그룹 만료 하나로
+# 판정하면 만료된 코드가 남은 23시간 동안 계속 통과한다 — 6자리를 쓸 수 있게 해 준
+# 전제(짧은 노출 창)가 통째로 무너지는 지점이라 여기서 못박는다.
+
+G_CODE="grpcode-${JR_RUN}"     # 링크는 살아 있고(FUT) 코드는 만료된(PAST) 그룹
+
+# ⚠️ 코드 문서 id는 **실행마다 달라야 한다.** 규칙이 `^[0-9]{6}$`를 요구해 다른
+# 리소스처럼 `${JR_RUN}` 접미를 붙일 수 없으므로, 실행 고유값에서 6자리를 만든다.
+# 고정값을 쓰면 **에뮬레이터를 재사용할 때 앞선 실행의 문서가 남아** 다음 실행의
+# 발급이 '돌려쓰기 금지' 조항에 막혀 403이 된다(케이스가 규칙 결함이 아니라 잔여
+# 상태 때문에 빨개진다 — 이 PR이 실제로 겪은 스테일 문제와 같은 종류다).
+# 아래 정리 케이스가 둘 다 지우지만, id 분리는 그 정리가 실패해도 버티는 백스톱이다.
+CODE_SEED=$(( ($$ * 7919 + RANDOM) % 1000000 ))
+CODE_LIVE=$(printf '%06d' $(( CODE_SEED )))
+CODE_DEAD=$(printf '%06d' $(( (CODE_SEED + 500000) % 1000000 )))
+
+check "  (준비) 코드 보유 그룹 생성(링크 유효·코드 만료)" 200 -X PATCH "${DOCS}/groups/${G_CODE}" \
+  "${AUTH_A[@]}" "${JSON[@]}" \
+  -d "$(jr_group_doc_with_code "${ID_A}" "${M_A}" "${FUT}" "${G_CODE}" "${CODE_DEAD}" "${PAST}")"
+check "  (준비) 링크 토큰 문서 발급" 200 -X PATCH "${DOCS}/inviteTokens/tok-${G_CODE}" \
+  "${AUTH_A[@]}" "${JSON[@]}" -d "$(jr_token_doc "${G_CODE}" "${FUT}")"
+
+# ── 발급 권한·형식 ───────────────────────────────────────────────────
+check "방장이 코드 문서 발급" 200 -X PATCH "${DOCS}/inviteCodes/${CODE_DEAD}" \
+  "${AUTH_A[@]}" "${JSON[@]}" -d "$(jr_code_doc "${G_CODE}" "${PAST}")"
+check "비방장이 코드 문서 발급 → 차단" 403 -X PATCH "${DOCS}/inviteCodes/119284" \
+  "${AUTH_C[@]}" "${JSON[@]}" -d "$(jr_code_doc "${G_CODE}" "${PAST}")"
+check "6자리가 아닌 문서 id → 차단" 403 -X PATCH "${DOCS}/inviteCodes/abc123xyz" \
+  "${AUTH_A[@]}" "${JSON[@]}" -d "$(jr_code_doc "${G_CODE}" "${PAST}")"
+check "숫자 5자리 문서 id → 차단" 403 -X PATCH "${DOCS}/inviteCodes/12345" \
+  "${AUTH_A[@]}" "${JSON[@]}" -d "$(jr_code_doc "${G_CODE}" "${PAST}")"
+# 만료가 그룹 정본과 다르면 거부 — 복제본이 정본보다 길면 만료된 코드가 계속 통과하고,
+# 짧으면 방장 화면의 카운트다운이 거짓말이 된다.
+check "코드 만료가 그룹 정본과 불일치 → 차단" 403 -X PATCH "${DOCS}/inviteCodes/551027" \
+  "${AUTH_A[@]}" "${JSON[@]}" -d "$(jr_code_doc "${G_CODE}" "${FUT}")"
+check "코드 문서에 여분 필드 → 차단" 403 -X PATCH "${DOCS}/inviteCodes/551028" \
+  "${AUTH_A[@]}" "${JSON[@]}" \
+  -d "{\"fields\":{\"groupId\":{\"stringValue\":\"${G_CODE}\"},\"expiresAt\":{\"timestampValue\":\"${PAST}\"},\"name\":{\"stringValue\":\"가족\"}}}"
+# 충돌한 코드를 남의 그룹으로 돌려쓰면 그 그룹의 초대를 탈취하게 된다.
+# ⚠️ 대상 그룹은 반드시 **코드 만료 정본을 가진** 그룹이어야 한다. `jr_group_doc`으로
+#    만든 그룹(= `shortInviteCodeExpiresAt` 없음)을 쓰면, 규칙이 그룹 일치 조항 **앞의**
+#    만료 일치 조항에서 없는 필드에 접근해 평가 오류로 죽는다 — 결과 코드는 403으로
+#    같지만 **검증하려던 조항은 실행조차 되지 않는다**(통과하는데 이유가 틀린 케이스).
+G_CODE2="grpcode2-${JR_RUN}"
+check "  (준비) 두 번째 코드 보유 그룹(만료 정본 일치)" 200 -X PATCH "${DOCS}/groups/${G_CODE2}" \
+  "${AUTH_A[@]}" "${JSON[@]}" \
+  -d "$(jr_group_doc_with_code "${ID_A}" "${M_A}" "${FUT}" "${G_CODE2}" "${CODE_DEAD}" "${PAST}")"
+check "남의 그룹 코드를 돌려쓰기 → 차단" 403 -X PATCH "${DOCS}/inviteCodes/${CODE_DEAD}" \
+  "${AUTH_A[@]}" "${JSON[@]}" -d "$(jr_code_doc "${G_CODE2}" "${PAST}")"
+
+# ── 조회·열거 ────────────────────────────────────────────────────────
+check "비멤버가 코드 문서를 id로 조회(다리 역할)" 200 -X GET "${DOCS}/inviteCodes/${CODE_DEAD}" "${AUTH_C[@]}"
+Q_CODES='{"structuredQuery":{"from":[{"collectionId":"inviteCodes"}]}}'
+check "코드 컬렉션 전체 열거 → 차단" 403 -X POST "${DOCS}:runQuery" \
+  "${AUTH_C[@]}" "${JSON[@]}" -d "${Q_CODES}"
+
+# ── 만료 판정 (이 절의 핵심) ─────────────────────────────────────────
+# ⚠️ 이 그룹의 **링크는 아직 유효하다**(FUT). 예전 규칙처럼 그룹의 inviteExpiresAt으로
+#    판정하면 이 케이스가 200으로 통과한다 — 만료된 코드가 링크의 남은 수명을 물려받는
+#    바로 그 결함이다. 403이어야 한다.
+check "만료된 코드로 참여 요청 → 차단(링크는 살아 있어도)" 403 \
+  -X PATCH "${DOCS}/joinRequests/${G_CODE}_${UID_C}" \
+  "${AUTH_C[@]}" "${JSON[@]}" -d "$(jr_request_doc "${G_CODE}" "${UID_C}" pending "${CODE_DEAD}")"
+check "같은 그룹에 링크 토큰으로는 요청 가능(대조군)" 200 \
+  -X PATCH "${DOCS}/joinRequests/${G_CODE}_${UID_C}" \
+  "${AUTH_C[@]}" "${JSON[@]}" -d "$(jr_request_doc "${G_CODE}" "${UID_C}" pending "tok-${G_CODE}")"
+check "  (정리) 요청 취소" 200 -X DELETE "${DOCS}/joinRequests/${G_CODE}_${UID_C}" "${AUTH_C[@]}"
+
+# 살아 있는 코드는 통과해야 한다 — 위 차단이 "코드는 무조건 막힌다"가 아님을 보인다.
+G_LIVE="grplive-${JR_RUN}"
+check "  (준비) 살아 있는 코드 보유 그룹" 200 -X PATCH "${DOCS}/groups/${G_LIVE}" \
+  "${AUTH_A[@]}" "${JSON[@]}" \
+  -d "$(jr_group_doc_with_code "${ID_A}" "${M_A}" "${FUT}" "${G_LIVE}" "${CODE_LIVE}" "${FUT}")"
+check "  (준비) 살아 있는 코드 문서 발급" 200 -X PATCH "${DOCS}/inviteCodes/${CODE_LIVE}" \
+  "${AUTH_A[@]}" "${JSON[@]}" -d "$(jr_code_doc "${G_LIVE}" "${FUT}")"
+check "살아 있는 코드로 참여 요청" 200 -X PATCH "${DOCS}/joinRequests/${G_LIVE}_${UID_C}" \
+  "${AUTH_C[@]}" "${JSON[@]}" -d "$(jr_request_doc "${G_LIVE}" "${UID_C}" pending "${CODE_LIVE}")"
+
+# 자격증명은 **그 그룹의 것**이어야 한다. 아무 살아 있는 코드나 들고 남의 그룹에
+# 요청할 수 있으면, 코드 하나가 전 그룹의 통행증이 된다.
+check "다른 그룹의 코드로 요청 → 차단" 403 -X PATCH "${DOCS}/joinRequests/${G_JR}_${UID_C}" \
+  "${AUTH_C[@]}" "${JSON[@]}" -d "$(jr_request_doc "${G_JR}" "${UID_C}" pending "${CODE_LIVE}")"
+# 존재하지 않는 자격증명으로는 통과할 수 없다(규칙이 조회 문서를 실제로 읽는지 확인).
+check "없는 자격증명으로 요청 → 차단" 403 -X PATCH "${DOCS}/joinRequests/${G_LIVE}_${UID_B}" \
+  "${AUTH_B[@]}" "${JSON[@]}" -d "$(jr_request_doc "${G_LIVE}" "${UID_B}" pending "999999")"
+# 경로 세그먼트로 쓰이는 값이라 문자 집합을 좁혀 뒀다.
+check "자격증명에 경로 구분자 → 차단" 403 -X PATCH "${DOCS}/joinRequests/${G_LIVE}_${UID_B}" \
+  "${AUTH_B[@]}" "${JSON[@]}" -d "$(jr_request_doc "${G_LIVE}" "${UID_B}" pending "../groups/x")"
+
+check "  (정리) 코드 요청 취소" 200 -X DELETE "${DOCS}/joinRequests/${G_LIVE}_${UID_C}" "${AUTH_C[@]}"
+check "없는 코드 문서 삭제는 no-op" 200 -X DELETE "${DOCS}/inviteCodes/000001" "${AUTH_A[@]}"
+# 만료 케이스용 문서도 거둔다 — 남기면 에뮬레이터 재사용 시 다음 실행의 발급이
+# '돌려쓰기 금지'에 막힌다(id 분리와 겹치는 방어이되, 둘 중 하나만으로는 부족하다:
+# id가 겹칠 확률은 낮아도 0이 아니고, 정리는 앞선 케이스가 실패하면 도달하지 못한다).
+check "  (정리) 만료 코드 문서 삭제" 200 -X DELETE "${DOCS}/inviteCodes/${CODE_DEAD}" "${AUTH_A[@]}"
+check "비방장이 코드 문서 삭제 → 차단" 403 -X DELETE "${DOCS}/inviteCodes/${CODE_LIVE}" "${AUTH_C[@]}"
+check "방장이 코드 문서 삭제" 200 -X DELETE "${DOCS}/inviteCodes/${CODE_LIVE}" "${AUTH_A[@]}"
 
 echo
 echo "결과: 통과 ${pass} / 실패 ${fail}"

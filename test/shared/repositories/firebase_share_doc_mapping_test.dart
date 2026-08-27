@@ -19,6 +19,7 @@
 /// Firestore 인스턴스도 `Firebase.initializeApp()`도 없이 직접 호출한다.
 library;
 
+import 'package:cloud_firestore/cloud_firestore.dart' show Timestamp;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:keepcon/shared/models/group.dart';
 import 'package:keepcon/shared/models/share.dart';
@@ -200,6 +201,100 @@ void main() {
       expect(n.id, 'n1');
       expect(n.title, '');
       expect(n.message, '');
+    });
+  });
+
+  group('초대코드 매퍼 — 코드와 만료는 짝으로 읽는다', () {
+    // [Group] 생성자가 "둘 다 있거나 둘 다 없거나"를 assert로 강제하므로, 한쪽만
+    // 넘기면 **매퍼가 AssertionError로 죽는다** — 관대 매퍼의 존재 이유(목록이 문서
+    // 하나로 죽지 않게)와 정면으로 어긋난다. 그래서 한쪽이 상하면 둘 다 버린다.
+    //
+    // 문서 키가 `shortInviteCode`인 것도 여기서 고정한다. `inviteCode`는 링크 토큰의
+    // **옛 이름**이라, 그 키를 쓰면 레거시 문서의 링크 토큰을 6자리가 덮어 버린다.
+    final Timestamp future = Timestamp.fromDate(DateTime(2030, 1, 1, 12));
+
+    Map<String, dynamic> base() => <String, dynamic>{
+          'name': '가족',
+          'inviteToken': 'tok-abc',
+          'members': owner(),
+        };
+
+    test('코드와 만료가 함께 있으면 둘 다 읽힌다', () {
+      final Group? g =
+          FirebaseShareRepository.groupFromDataOrNull('g1', <String, dynamic>{
+        ...base(),
+        'shortInviteCode': '482913',
+        'shortInviteCodeExpiresAt': future,
+      });
+
+      expect(g, isNotNull);
+      expect(g!.inviteCode, '482913');
+      expect(g.inviteCodeExpiresAt, future.toDate());
+      expect(g.hasActiveInviteCode(DateTime(2029)), isTrue);
+    });
+
+    test('코드만 있고 만료가 없으면 둘 다 버린다(생성자 assert를 안 건드린다)', () {
+      final Group? g = FirebaseShareRepository.groupFromDataOrNull(
+        'g1',
+        <String, dynamic>{...base(), 'shortInviteCode': '482913'},
+      );
+
+      expect(g, isNotNull, reason: '손상 한 필드가 그룹 전체를 죽이면 안 된다');
+      expect(g!.inviteCode, isNull);
+      expect(g.inviteCodeExpiresAt, isNull);
+    });
+
+    test('만료만 있고 코드가 없으면 둘 다 버린다', () {
+      final Group? g = FirebaseShareRepository.groupFromDataOrNull(
+        'g1',
+        <String, dynamic>{...base(), 'shortInviteCodeExpiresAt': future},
+      );
+
+      expect(g, isNotNull);
+      expect(g!.inviteCode, isNull);
+      expect(g.inviteCodeExpiresAt, isNull);
+    });
+
+    test('만료가 손상 타입이면 코드도 함께 버린다', () {
+      final Group? g =
+          FirebaseShareRepository.groupFromDataOrNull('g1', <String, dynamic>{
+        ...base(),
+        'shortInviteCode': '482913',
+        'shortInviteCodeExpiresAt': 'not-a-timestamp',
+      });
+
+      expect(g, isNotNull);
+      expect(g!.inviteCode, isNull);
+      expect(g.inviteCodeExpiresAt, isNull);
+    });
+
+    test('결측은 epoch로 읽지 않는다 — 코드는 없는 것이 기본 상태다', () {
+      // ⚠️ `inviteExpiresAt`과 **다른 규약**이다. 링크는 만료 없는 것이 존재하지
+      //    않으므로 결측을 epoch(=만료)로 닫는 것이 fail-closed지만, 코드는 없는 것이
+      //    정상이라 같은 폴백을 쓰면 **코드를 발급한 적 없는 그룹**이 "만료된 코드를
+      //    가진 그룹"이 되어 발급 화면이 존재한 적 없는 코드의 만료를 표시한다.
+      final Group? g =
+          FirebaseShareRepository.groupFromDataOrNull('g1', base());
+
+      expect(g, isNotNull);
+      expect(g!.inviteCodeExpiresAt, isNull,
+          reason: 'epoch 폴백이 붙으면 여기서 1970-01-01이 나온다');
+      expect(g.hasActiveInviteCode(DateTime(2026)), isFalse);
+    });
+
+    test('레거시 `inviteCode` 키는 여전히 **링크 토큰**으로 읽힌다', () {
+      // 두 이름이 같은 키를 두고 다투지 않는지 — 이 분리가 무너지면 레거시 그룹의
+      // 링크가 6자리 코드에 덮여 사라진다.
+      final Group? g =
+          FirebaseShareRepository.groupFromDataOrNull('g1', <String, dynamic>{
+        'name': '가족',
+        'inviteCode': '123456',
+        'members': owner(),
+      });
+
+      expect(g, isNotNull);
+      expect(g!.inviteToken, '123456', reason: '레거시 키는 토큰이다');
+      expect(g.inviteCode, isNull, reason: '6자리 초대코드로 읽히면 안 된다');
     });
   });
 

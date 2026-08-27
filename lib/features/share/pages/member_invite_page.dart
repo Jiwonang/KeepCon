@@ -1,6 +1,7 @@
 /// share 페이지 — 멤버 초대(전체 화면, KeepCon 틀 재디자인).
 ///
-/// 초대 URL + 초대코드(각 복사 버튼), 유효기간 안내, "방장만 초대" 권한 토글.
+/// 초대 링크(복사 버튼) + 6자리 초대코드(발급·카운트다운), 링크 유효기간 안내,
+/// "방장만 초대" 권한 토글.
 /// 권한 토글은 [ShareRepository.setInviteOwnerOnly]로 그룹 정책에 반영되며
 /// 방장만 편집할 수 있다(그룹 상세의 초대 진입점은 [Group.canInvite]로 게이팅).
 /// 하단 CTA는 OS 공유 시트를 띄워 설치된 앱(카카오톡·디스코드·LINE 등)으로 초대 링크를
@@ -8,7 +9,11 @@
 ///
 /// **만료는 고르는 값이 아니다** — 모든 초대는 발급 시점부터 [Group.inviteValidity](24시간)
 /// 동안만 유효한 고정 정책이라, 이 화면은 남은 유효기간을 **표시만** 한다. 만료된 초대를
-/// 되살리는 경로는 방장의 "코드 재발급"([ShareRepository.regenerateInviteToken])뿐이다.
+/// 되살리는 경로는 방장의 "링크 재발급"([ShareRepository.regenerateInviteToken])이다.
+///
+/// **초대코드는 별개 자격증명이다** — 6자리·5분이고 [ShareRepository.issueInviteCode]로
+/// 발급하며, 링크 재발급과 서로를 무효화하지 않는다. 두 이름을 섞지 말 것:
+/// 이 화면에서 '초대코드'는 오직 6자리를 가리킨다.
 library;
 
 import 'dart:async';
@@ -67,10 +72,62 @@ class _MemberInvitePageState extends ConsumerState<MemberInvitePage> {
     });
   }
 
+  /// 초대코드 카운트다운용 1초 틱.
+  ///
+  /// 링크 만료([_expiryTimer])와 달리 **반복**이어야 한다. 링크는 24시간 뒤 한 번
+  /// 경계를 넘을 뿐이라 그 시각에 한 번만 리빌드하면 되지만, 코드는 5분을 초 단위로
+  /// 세어 보여주므로 매초 다시 그려야 한다("2:47 후 만료").
+  Timer? _codeTicker;
+
+  /// 초대코드를 발급하는 중(버튼 중복 탭 차단).
+  bool _issuingCode = false;
+
+  /// 활성 코드가 있는 동안에만 1초 틱을 돌린다.
+  ///
+  /// 코드가 없거나 만료된 뒤에도 계속 돌면 이 화면을 열어 둔 내내 매초 리빌드가
+  /// 일어난다 — 보여줄 것이 바뀌지도 않는데 배터리만 쓴다.
+  void _syncCodeTicker({required bool active}) {
+    if (active == (_codeTicker != null)) return;
+    if (!active) {
+      _codeTicker?.cancel();
+      _codeTicker = null;
+      return;
+    }
+    _codeTicker = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
   @override
   void dispose() {
     _expiryTimer?.cancel();
+    _codeTicker?.cancel();
     super.dispose();
+  }
+
+  /// 6자리 초대코드를 발급한다(방장 전용 — 버튼 자체를 방장에게만 노출한다).
+  Future<void> _issueCode(String groupId) async {
+    if (_issuingCode) return;
+    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
+    setState(() => _issuingCode = true);
+    try {
+      await ref.read(shareRepositoryProvider).issueInviteCode(groupId: groupId);
+    } catch (e, s) {
+      reportHandledFailure(ref, e, s,
+          context: 'MemberInvitePage.issueInviteCode');
+      // `on StateError`로 좁히지 않는다 — 백엔드가 던지는 예외(권한 거부·네트워크)가
+      // 그대로 빠져나가면 버튼이 죽은 것처럼 보인다(안내가 아예 안 뜬다).
+      if (mounted) {
+        messenger
+          ..hideCurrentSnackBar()
+          ..showSnackBar(const SnackBar(
+            content: Text('초대코드를 발급하지 못했어요. 다시 시도해 주세요.'),
+          ));
+      }
+      return;
+    } finally {
+      if (mounted) setState(() => _issuingCode = false);
+    }
   }
 
   void _copy(String value, String label) {
@@ -133,15 +190,17 @@ class _MemberInvitePageState extends ConsumerState<MemberInvitePage> {
     }
   }
 
-  /// 초대코드를 재발급한다(방장 전용). 기존 코드/링크가 무효화됨을 확인 후 진행한다.
+  /// 초대 **링크**를 재발급한다(방장 전용). 기존 링크가 무효화됨을 확인 후 진행한다.
+  ///
+  /// 6자리 초대코드는 건드리지 않는다 — 아래 다이얼로그 문구가 그것을 명시한다.
   Future<void> _regenerate(String groupId) async {
     final bool ok = await showDialog<bool>(
           context: context,
           builder: (BuildContext ctx) => AlertDialog(
-            title: const Text('초대코드 재발급'),
+            title: const Text('초대 링크 재발급'),
             content: const Text(
-              '재발급하면 기존 코드와 링크는 더 이상 사용할 수 없어요. '
-              '새 코드는 발급 시점부터 24시간 동안 유효해요. 계속할까요?',
+              '재발급하면 기존 초대 링크는 더 이상 사용할 수 없어요. 새 링크는 발급 시점부터 '
+              '24시간 동안 유효해요. (6자리 초대코드는 영향을 받지 않아요.) 계속할까요?',
             ),
             actions: <Widget>[
               TextButton(
@@ -179,7 +238,7 @@ class _MemberInvitePageState extends ConsumerState<MemberInvitePage> {
       messenger
         ..hideCurrentSnackBar()
         ..showSnackBar(
-          const SnackBar(content: Text('초대코드를 재발급하지 못했어요. 다시 시도해 주세요.')),
+          const SnackBar(content: Text('초대 링크를 재발급하지 못했어요. 다시 시도해 주세요.')),
         );
       return;
     }
@@ -187,7 +246,7 @@ class _MemberInvitePageState extends ConsumerState<MemberInvitePage> {
     messenger
       ..hideCurrentSnackBar()
       ..showSnackBar(
-        const SnackBar(content: Text('새 초대코드를 발급했어요. 24시간 동안 유효해요.')),
+        const SnackBar(content: Text('새 초대 링크를 발급했어요. 24시간 동안 유효해요.')),
       );
   }
 
@@ -228,7 +287,13 @@ class _MemberInvitePageState extends ConsumerState<MemberInvitePage> {
       sessionUserProvider.select((AsyncValue<User?> s) => s.valueOrNull?.id),
     );
     final bool iAmOwner = uid != null && g.isOwnedBy(uid);
-    final bool expired = g.isInviteExpired(DateTime.now());
+    // 링크 만료와 코드 카운트다운이 **같은 시각**을 봐야 한다. build 안에서 두 번
+    // `DateTime.now()`를 부르면 그 사이에 경계를 넘는 조합이 생긴다(드물지만, 두 값이
+    // 서로 모순된 화면이 한 프레임 뜬다).
+    final DateTime now = DateTime.now();
+    final bool expired = g.isInviteExpired(now);
+    // 활성 코드가 있는 동안에만 1초 틱을 돌린다(없으면 그릴 것이 바뀌지 않는다).
+    _syncCodeTicker(active: g.hasActiveInviteCode(now));
     // 초대 링크의 도메인은 백엔드마다 다르고, 없는 실행도 있다(안드로이드 + 로컬
     // 에뮬레이터). `null`이면 링크 없이 코드만 공유한다.
     final String? origin = ref.watch(inviteOriginProvider);
@@ -292,29 +357,41 @@ class _MemberInvitePageState extends ConsumerState<MemberInvitePage> {
                       ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
                 ),
               ),
-            const SizedBox(height: 16),
-            _CopyField(
-              label: '초대코드',
-              value: g.inviteToken,
-              emphasize: true,
-              onCopy: expired ? null : () => _copy(g.inviteToken, '초대코드'),
-            ),
-            // 방장만 재발급 가능 — 기존 코드/링크 무효화.
+            // 방장만 재발급 가능 — 기존 링크 무효화.
             if (iAmOwner)
               Align(
                 alignment: Alignment.centerRight,
                 child: TextButton.icon(
                   onPressed: () => _regenerate(g.id),
                   icon: const Icon(Icons.refresh, size: 18),
-                  label: const Text('코드 재발급'),
+                  label: const Text('링크 재발급'),
                 ),
               ),
+            const SizedBox(height: 28),
+
+            // ── 초대코드(6자리 OTP) ─────────────────────────────────
+            //
+            // 링크와 **다른 전달 수단**이다: 링크는 카카오톡으로 보내는 것, 코드는
+            // 옆사람에게 불러주는 것. 그래서 수명도 다르다(24시간 vs 5분) — 6자리는
+            // 열거 가능한 공간이라 짧은 노출 창이 방어의 전부다.
+            //
+            // ⚠️ 여기에 예전처럼 `g.inviteToken`을 "초대코드"라는 이름으로 두면 안 된다.
+            //    22자 토큰은 불러줄 수 없는 값이고, 진짜 코드와 이름이 겹쳐 사용자가
+            //    어느 쪽을 부르는지 알 수 없게 된다. 토큰은 링크가 이미 싣고 있다.
+            _InviteCodeSection(
+              group: g,
+              now: now,
+              iAmOwner: iAmOwner,
+              issuing: _issuingCode,
+              onIssue: () => _issueCode(g.id),
+              onCopy: (String code) => _copy(code, '초대코드'),
+            ),
             const SizedBox(height: 32),
 
             // 초대 유효기간 — 24시간 고정 정책이라 선택지 없이 상태만 보여준다.
             Row(
               children: <Widget>[
-                Text('초대 유효기간', style: context.itemTitleStyle),
+                Text('링크 유효기간', style: context.itemTitleStyle),
                 const Spacer(),
                 Text(
                   expired
@@ -328,9 +405,9 @@ class _MemberInvitePageState extends ConsumerState<MemberInvitePage> {
             Text(
               expired
                   ? (iAmOwner
-                      ? '초대 링크가 만료됐어요. 코드를 재발급하면 24시간 동안 다시 쓸 수 있어요.'
-                      : '초대 링크가 만료됐어요. 방장에게 코드 재발급을 요청하세요.')
-                  : '초대 링크와 초대코드는 발급 후 24시간 동안만 쓸 수 있어요.',
+                      ? '초대 링크가 만료됐어요. 링크를 재발급하면 24시간 동안 다시 쓸 수 있어요.'
+                      : '초대 링크가 만료됐어요. 방장에게 링크 재발급을 요청하세요.')
+                  : '초대 링크는 발급 후 24시간 동안만 쓸 수 있어요.',
               style: theme.textTheme.bodySmall,
             ),
             const SizedBox(height: 20),
@@ -446,6 +523,117 @@ class _NoInviteLinkNotice extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// 6자리 초대코드 구역 — 발급 버튼, 코드 표시, 남은 시간 카운트다운.
+///
+/// 상태는 셋뿐이고 [Group.hasActiveInviteCode] 하나로 갈린다:
+/// - **활성** — 코드와 "N:NN 후 만료"를 보여주고, 방장에게는 다시 발급 버튼을 준다.
+/// - **비활성(방장)** — 발급 버튼과 정책 안내.
+/// - **비활성(멤버)** — 방장에게 요청하라는 안내(발급 권한이 없다).
+///
+/// 코드 값 자체를 `null` 여부로 판정하지 않는 이유는 만료된 값이 그대로 남아 있기
+/// 때문이다([Group.inviteCode] 참조) — 판정은 항상 시각과 함께 한다.
+class _InviteCodeSection extends StatelessWidget {
+  const _InviteCodeSection({
+    required this.group,
+    required this.now,
+    required this.iAmOwner,
+    required this.issuing,
+    required this.onIssue,
+    required this.onCopy,
+  });
+
+  final Group group;
+  final DateTime now;
+  final bool iAmOwner;
+  final bool issuing;
+  final VoidCallback onIssue;
+  final void Function(String code) onCopy;
+
+  /// 남은 시간을 `M:SS`로. 초 단위 올림이라 "0:00"이 뜨지 않는다 —
+  /// 0을 보여주면 아직 쓸 수 있는 코드가 만료된 것처럼 읽힌다.
+  static String _countdown(Duration d) {
+    final int total =
+        d.inMilliseconds <= 0 ? 0 : (d.inMilliseconds / 1000).ceil();
+    final int m = total ~/ 60;
+    final int s = total % 60;
+    return '$m:${s.toString().padLeft(2, '0')}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+    final Duration? left = group.inviteCodeRemaining(now);
+    final String? code = left == null ? null : group.inviteCode;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        Row(
+          children: <Widget>[
+            Text('초대코드', style: context.itemTitleStyle),
+            const Spacer(),
+            if (left != null)
+              Text(
+                '${_countdown(left)} 후 만료',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: scheme.primary,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        if (code != null)
+          _CopyField(
+            label: '옆에 있는 사람에게 불러주세요',
+            value: code,
+            emphasize: true,
+            onCopy: () => onCopy(code),
+          )
+        else
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+            decoration: BoxDecoration(
+              color: scheme.surface,
+              borderRadius: BorderRadius.circular(AppRadii.panel),
+              border: Border.all(color: scheme.outline.withValues(alpha: 0.18)),
+            ),
+            child: Text(
+              iAmOwner
+                  ? '아직 발급된 초대코드가 없어요. 발급하면 5분 동안 쓸 수 있어요.'
+                  : '아직 발급된 초대코드가 없어요. 방장에게 발급을 요청하세요.',
+              style: theme.textTheme.bodySmall,
+            ),
+          ),
+        // 발급은 방장만 — 교체할 때 옛 코드의 조회 문서를 지워야 하는데 그 권한이
+        // 방장에게만 있다(계약 참조). 멤버는 링크로 초대한다.
+        if (iAmOwner)
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton.icon(
+              onPressed: issuing ? null : onIssue,
+              icon: issuing
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.password_outlined, size: 18),
+              label: Text(code != null ? '새 코드 발급' : '초대코드 발급하기'),
+            ),
+          ),
+        const SizedBox(height: 2),
+        Text(
+          '초대코드는 발급 후 5분 동안만 쓸 수 있어요. 새로 발급하면 이전 코드는 바로 만료돼요.',
+          style: theme.textTheme.bodySmall
+              ?.copyWith(color: scheme.onSurfaceVariant),
+        ),
+      ],
     );
   }
 }

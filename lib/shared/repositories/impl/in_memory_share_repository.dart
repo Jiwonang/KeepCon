@@ -22,6 +22,7 @@ import '../../models/group.dart';
 import '../../models/join_request.dart';
 import '../../models/share.dart';
 import '../../models/user.dart';
+import '../../util/invite_code.dart';
 import '../../util/invite_token.dart';
 import '../../util/korean_particle.dart';
 import '../auth_repository.dart';
@@ -299,6 +300,28 @@ class InMemoryShareRepository implements ShareRepository {
     return updated;
   }
 
+  @override
+  Future<Group> issueInviteCode({required String groupId}) async {
+    final User me = _requireUser();
+    final Group g = _requireGroup(groupId);
+    if (!g.isOwnedBy(me.id)) {
+      throw StateError('Only the owner can issue an invite code: $groupId');
+    }
+    // 살아 있는 코드가 있어도 교체한다(그룹당 활성 코드는 항상 하나).
+    //
+    // 충돌 회피는 여기서 하지 않는다. in-memory에는 코드→그룹 조회 문서가 없어서
+    // (`_groupByCodeOrNull`이 그룹 목록을 직접 훑는다) 같은 코드를 두 그룹이 갖는 것이
+    // 저장소 차원에서 막히지 않는다 — Firebase 구현은 문서 id 충돌로 막힌다.
+    // 그래서 조회 쪽에서 **활성 코드만** 매칭해 만료된 중복을 자연히 배제한다.
+    final Group updated = g.copyWith(
+      inviteCode: newInviteCode(),
+      inviteCodeExpiresAt: _now().add(Group.inviteCodeValidity),
+    );
+    _groups[_groupIndex(groupId)] = updated;
+    _emit();
+    return updated;
+  }
+
   /// 멤버십이 끊긴 사람의 참여 요청 기록을 거둔다(나가기·강퇴).
   ///
   /// 남겨 두면 이미 그룹에 없는 사람에게 "승인됨"이 계속 보인다 — 요청 기록이 현재
@@ -335,15 +358,44 @@ class InMemoryShareRepository implements ShareRepository {
     return null;
   }
 
-  @override
-  Future<JoinRequest> requestToJoin(String inviteToken) async {
-    final User me = _requireUser();
-    final Group? g = _groupByTokenOrNull(inviteToken);
-    if (g == null) {
-      throw StateError('No group for invite token: $inviteToken');
+  /// 초대**코드** 문자열로 그룹을 찾는다. 만료 여부는 보지 않는다(호출부가 판정한다).
+  ///
+  /// 만료된 코드도 찾아 주는 것이 요점이다 — 못 찾으면 '없는 코드'가 되어 화면이
+  /// "만료됐다"고 말할 수 없다. 만료를 알리려면 먼저 **찾아야** 한다.
+  Group? _groupByCodeOrNull(String code) {
+    for (final Group g in _groups) {
+      if (g.inviteCode == code) return g;
     }
-    if (g.isInviteExpired(_now())) {
-      throw StateError('Invite token expired: $inviteToken');
+    return null;
+  }
+
+  @override
+  Future<JoinRequest> requestToJoin(String credential) async {
+    final User me = _requireUser();
+    // 자격증명은 모양으로 갈린다 — 6자리 숫자면 초대코드, 아니면 링크 토큰.
+    //
+    // ⚠️ 다만 **배타적으로 고르면 안 된다.** 지금 발급되는 링크 토큰은 base64url 22자라
+    //    겹치지 않지만, v3.0(128비트) 이전 토큰은 **6자리 숫자**였고 그 값들이 아직 살아
+    //    있다(이 파일의 데모 시드 `482913`·`771205`, 팀 공용 에뮬레이터 시드, 레거시
+    //    Firestore 문서). 코드 쪽만 뒤지면 그 링크들이 통째로 '없는 코드'가 된다.
+    //
+    //    코드를 **먼저** 보므로 "만료는 사용한 자격증명 기준"은 그대로다 — 폴백은 그
+    //    값을 코드로 쓰는 그룹이 아예 없을 때만 탄다.
+    final Group? byCode = isWellFormedInviteCode(credential)
+        ? _groupByCodeOrNull(credential)
+        : null;
+    final bool isCode = byCode != null;
+    final Group? g = byCode ?? _groupByTokenOrNull(credential);
+    if (g == null) {
+      throw StateError('No group for invite credential: $credential');
+    }
+    // 만료는 **사용한 자격증명 기준**이다. 코드로 들어왔으면 5분 창을, 링크로 들어왔으면
+    // 24시간 창을 본다 — 둘을 합쳐 판정하면 5분짜리 코드가 링크의 남은 24시간을
+    // 물려받아 "5분 만료"가 화면에만 있는 문구가 된다(계약 참조).
+    final bool expired =
+        isCode ? !g.hasActiveInviteCode(_now()) : g.isInviteExpired(_now());
+    if (expired) {
+      throw InviteExpiredException(credential);
     }
     if (g.isMember(me.id)) {
       throw StateError('Already a member of group: ${g.id}');

@@ -13,7 +13,7 @@ import 'package:keepcon/shared/deeplink/app_destination.dart';
 import 'package:keepcon/shared/providers/deep_link_providers.dart';
 
 void main() {
-  testWidgets('딥링크 초대코드가 있으면 참여 시트가 코드와 함께 열린다', (WidgetTester tester) async {
+  testWidgets('딥링크 링크 토큰이 있으면 참여 시트가 그 값과 함께 열린다', (WidgetTester tester) async {
     await tester.pumpWidget(
       ProviderScope(
         overrides: <Override>[
@@ -31,7 +31,7 @@ void main() {
     expect(find.text('ABC123'), findsOneWidget);
   });
 
-  testWidgets('대기 초대코드가 없으면 참여 시트가 열리지 않는다', (WidgetTester tester) async {
+  testWidgets('대기 중인 링크 토큰이 없으면 참여 시트가 열리지 않는다', (WidgetTester tester) async {
     await tester.pumpWidget(
       ProviderScope(
         overrides: <Override>[

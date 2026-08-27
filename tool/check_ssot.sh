@@ -31,7 +31,7 @@ scan() {
 }
 
 # 1) 공유 모델/enum/인터페이스 재정의 금지 (lib/shared 정본만 사용)
-SHARED_TYPES="AppNotification|GroupNotificationItem|ExpiryNotificationItem|ScheduledExpiryNotification|Group|GroupMember|SharedGifticon|UsageLog|GroupNotification|MyGifticon|Gifticon|User|JoinRequest|ShareStatus|MemberRole|JoinRequestStatus|GroupNotificationType|GifticonStatus|SortOption|FilterOption|ShareStatusTransition|GifticonStatusTransition|ShareRepository|GifticonRepository|AuthRepository|MyGroupsRetry|ErrorReporter"
+SHARED_TYPES="AppNotification|GroupNotificationItem|ExpiryNotificationItem|ScheduledExpiryNotification|Group|GroupMember|SharedGifticon|UsageLog|GroupNotification|MyGifticon|Gifticon|User|JoinRequest|ShareStatus|MemberRole|JoinRequestStatus|GroupNotificationType|GifticonStatus|SortOption|FilterOption|ShareStatusTransition|GifticonStatusTransition|ShareRepository|GifticonRepository|AuthRepository|MyGroupsRetry|ErrorReporter|InviteExpiredException"
 
 # 선행 수식어 `([a-z]+ )*`로 Dart 3 클래스 수식어를 모두 포괄한다:
 # abstract/base/interface/final/sealed/mixin(및 조합, 예: `abstract interface class`,
@@ -69,7 +69,7 @@ fi
 # 시분초를 절삭해 같은 기프티콘을 두고 화면과 통계가 다른 답을 냈다. 가정이 아니라
 # 이미 발생한 재발이라 기계적 가드에 넣는다. 만료 임박 알림이 이 판정 위에 올라가므로
 # 재분기하면 알림까지 어긋난다.
-SSOT_FUNCTIONS="planExpiryNotifications|firedExpiryNotifications|retryNotifications|retrySessionIfFailed|retryMyGroups|foldSessionUser|daysUntilExpiry|isExpiringSoon|isExpiredByDate|inviteUrlFrom|inviteOriginFor|parseInviteToken|isSharableOrigin"
+SSOT_FUNCTIONS="planExpiryNotifications|firedExpiryNotifications|retryNotifications|retrySessionIfFailed|retryMyGroups|foldSessionUser|daysUntilExpiry|isExpiringSoon|isExpiredByDate|inviteUrlFrom|inviteOriginFor|parseInviteToken|isSharableOrigin|newInviteToken|newInviteCode|isWellFormedInviteCode"
 
 # 선언 형태 두 갈래를 잡는다(호출 `retryMyGroups(ref);`·`return foldSessionUser<...>(...)`는
 # 둘 다 통과):

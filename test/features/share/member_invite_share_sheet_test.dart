@@ -209,9 +209,17 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.textContaining('이 환경에서는 초대 링크를 만들 수 없어요'), findsOneWidget);
-    // 링크 복사 필드가 없다 — 토큰만 남는다.
+    // 링크 복사 필드가 없다.
     expect(find.textContaining('/invite/'), findsNothing);
-    expect(find.text(group.inviteToken), findsOneWidget);
+    // 링크가 없을 때 남는 경로는 **6자리 초대코드**다. 예전에는 22자 토큰을
+    // '초대코드'라는 이름으로 그대로 보여줬는데, 그 값은 불러줄 수도 없고 진짜
+    // 초대코드와 이름이 겹쳐 어느 쪽을 부르는 건지 알 수 없었다.
+    expect(find.text(group.inviteToken), findsNothing);
+    expect(find.text('초대코드'), findsOneWidget);
+    expect(
+      find.textContaining('아직 발급된 초대코드가 없어요'),
+      findsOneWidget,
+    );
     // 공유 CTA는 비활성이고 이유를 말한다.
     final ElevatedButton cta = tester.widget<ElevatedButton>(
       find.widgetWithText(ElevatedButton, '이 환경에서는 링크를 공유할 수 없어요'),
@@ -327,9 +335,12 @@ void main() {
 
     expect(find.text('만료됨'), findsOneWidget);
 
-    // 링크·코드 필드 탭 → 복사되지 않는다.
+    // 링크 필드 탭 → 복사되지 않는다.
+    //
+    // 초대코드는 여기서 보지 않는다 — **링크 만료와 무관한 별개 자격증명**이라
+    // (5분 vs 24시간) 링크가 죽었다고 코드까지 잠글 이유가 없다. 코드 쪽 만료는
+    // `share_repository_invite_code_test.dart`가 자기 시계로 검증한다.
     await tester.tap(find.text(inviteUrlOf(g)));
-    await tester.tap(find.text(g.inviteToken));
     await tester.pumpAndSettle();
     expect(clipboardWrites, isEmpty);
 
