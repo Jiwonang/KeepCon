@@ -33,7 +33,6 @@ import 'package:keepcon/features/scan/state/gifticon_form_state.dart';
 import 'package:keepcon/features/scan/util/keep_all_ko.dart';
 import 'package:keepcon/shared/diagnostics/error_reporter.dart';
 import 'package:keepcon/shared/models/gifticon.dart';
-import 'package:keepcon/shared/util/date_format.dart' show formatYmdDot;
 import 'package:keepcon/shared/models/user.dart';
 import 'package:keepcon/shared/providers/error_reporter_provider.dart';
 import 'package:keepcon/shared/providers/repositories.dart';
@@ -41,6 +40,7 @@ import 'package:keepcon/shared/repositories/auth_repository.dart';
 import 'package:keepcon/shared/repositories/impl/in_memory_auth_repository.dart';
 import 'package:keepcon/shared/repositories/impl/in_memory_gifticon_repository.dart';
 import 'package:keepcon/shared/theme/app_theme.dart';
+import 'package:keepcon/shared/util/date_format.dart' show formatYmdDot;
 
 void main() {
   final String myId = InMemoryAuthRepository.defaultUser.id;
@@ -511,13 +511,24 @@ void main() {
     // 유일하게 `2026-09-30`(하이픈)으로 남아 있었다 — **같은 화면의 중복 등록
     // 다이얼로그조차** 점 표기였다. 계약 매트릭스 v2.4가 "통일했다"고 기록했지만
     // 그 전환은 삭제된 죽은 폼에만 적용돼 있었다.
-    await openManualForm(tester);
+    final ProviderContainer container = await openManualForm(tester);
     await pickExpiryDate(tester);
 
-    // 날짜 선택기가 기본값(오늘)으로 확정하므로 그 값을 정본 함수로 만든 문자열이
-    // 화면에 있어야 한다. 함수를 재구현하지 않고 정본을 그대로 호출해 대조한다 —
-    // 여기서 손으로 조립하면 이 테스트가 막으려는 갈라짐을 테스트가 다시 만든다.
-    final String expected = formatYmdDot(DateTime.now());
+    // 기대값을 **라벨이 실제로 읽는 상태**에서 만든다. 정본 함수를 재구현하지 않고
+    // 그대로 호출한다 — 여기서 손으로 조립하면 이 테스트가 막으려는 갈라짐을
+    // 테스트가 다시 만든다.
+    //
+    // `DateTime.now()`로 만들지 않는 이유는 **자정**이다. 선택기가 `initialDate`를
+    // 읽는 순간과 이 줄 사이에는 pumpAndSettle 두 번과 탭 두 번이 끼어 있어, 그
+    // 사이에 날짜가 넘어가면 코드가 아니라 달력 때문에 빨개진다. 이 저장소는 같은
+    // 유형으로 2026-08-27T00:31Z CI가 실제로 터진 이력이 있다
+    // (`test/features/share/notification_center_merge_test.dart:73`).
+    final DateTime? picked =
+        container.read(gifticonFormControllerProvider).expiryDate;
+
+    expect(picked, isNotNull, reason: '날짜 선택기가 값을 확정하지 못했다');
+
+    final String expected = formatYmdDot(picked!);
 
     expect(find.text(expected), findsOneWidget);
 
