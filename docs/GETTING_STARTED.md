@@ -58,8 +58,9 @@ npm install -g firebase-tools
 firebase --version    # 숫자가 나오면 OK
 ```
 
-**Java 11 이상** — https://adoptium.net
-Firestore 에뮬레이터가 Java로 돌아갑니다. **없으면 에뮬레이터가 안 뜹니다.**
+**JDK 21 이상** — https://adoptium.net
+Firestore 에뮬레이터가 Java로 돌아갑니다. **없거나 21보다 낮으면 에뮬레이터가 안 뜹니다** —
+`firebase-tools` 15부터 21 미만을 거부합니다(`firebase-tools no longer supports Java version before 21`).
 
 ```bash
 java -version
@@ -75,7 +76,7 @@ java -version
 
 **웹(Chrome)으로 띄우면 이 항목은 필요 없습니다.** 실기기나 AVD로 띄울 때만 해당합니다.
 
-- **JDK 17 이상** — Android 빌드가 Java 17을 타깃합니다. 모드 B의 "Java 11"만 설치하면 **에뮬레이터는 뜨는데 `flutter run` 이 Gradle에서 실패합니다.**
+- **JDK 17 이상** — Android 빌드가 Java 17을 타깃합니다. 모드 B가 요구하는 **21 이상**을 설치했다면 이 조건도 함께 만족하므로 따로 깔 것이 없습니다.
 - **Android SDK** — `flutter doctor` 의 *Android toolchain* 항목
 
 > 모드 C(dev 서버)도 예외가 아닙니다. "추가 설치 없음"은 **웹으로 띄울 때** 이야기입니다.
@@ -115,7 +116,7 @@ cmd·PowerShell에서 `bash tool/emulators.sh`를 치면 Git Bash가 아니라 *
 WSL (10 - Relay) ERROR: execvpe(/bin/bash) failed: No such file or directory
 ```
 
-`bash`라는 이름이 PATH에서 `C:\Windows\System32\bash.exe`(WSL 런처)로 잡히고, Git Bash가 있는 `C:\Program Files\Git\bin`은 PATH에 없기 때문입니다. cmd냐 PowerShell이냐는 상관없이 똑같이 실패합니다.
+`bash`라는 이름이 PATH에서 **WSL 런처**로 잡히고, Git Bash가 있는 `C:\Program Files\Git\bin`은 PATH에 없기 때문입니다. 런처 위치는 WSL 설치 방식에 따라 `C:\Windows\System32\bash.exe`이거나 `%LOCALAPPDATA%\Microsoft\WindowsApps\bash.exe`인데, **어느 쪽이든 결과는 같습니다.** cmd냐 PowerShell이냐도 상관없습니다.
 
 ⚠️ **WSL이 이미 설치된 PC에서는 위 메시지가 안 나옵니다.** WSL이 정상 동작하므로 스크립트가 **리눅스 안에서** 실제로 돌아가고, 거기서는 Windows에 깔린 Java가 보이지 않아 이렇게 실패합니다:
 
@@ -123,7 +124,7 @@ WSL (10 - Relay) ERROR: execvpe(/bin/bash) failed: No such file or directory
 Error: Could not spawn `java -version`. Please make sure Java is installed and on your system PATH.
 ```
 
-**Java 문제로 보이지만 아닙니다.** 같은 창에서 `java -version`은 멀쩡히 됩니다 — Windows 쪽에서 실행되기 때문입니다. 실측(2026-08-28): PowerShell의 `bash`가 `C:\Users\<user>\AppData\Local\Microsoft\WindowsApps\bash.exe`로 잡히고, 그 안의 `PATH`는 `/usr/bin:/mnt/c/...` 형태이며 `command -v java`가 빈 값이었습니다. 이 오해로 Java 재설치·PATH 수정을 쫓느라 시간을 썼습니다.
+**Java 문제로 보이지만 아닙니다.** 같은 창에서 `java -version`은 멀쩡히 됩니다 — Windows 쪽에서 실행되기 때문입니다. 두 증상을 가르는 것은 런처 **경로**가 아니라 **배포판이 깔려 있는지**입니다. 실측(2026-08-28, WSL2 Ubuntu가 깔린 Windows 11): WSL 안의 `PATH`는 `/usr/bin:/mnt/c/...` 형태이고 `command -v java`가 빈 값이었습니다 — Windows의 `java.exe`는 `/mnt/c/...`로 보이지만 이름이 `java`가 아니라 잡히지 않습니다. 이 오해로 Java 재설치·PATH 수정을 쫓느라 시간을 썼습니다.
 
 "Git Bash를 쓰세요"라고 안내만 할 수도 있었지만, **쓰는 셸에서 그냥 되는 편이** 낫다고 봐서 `.cmd` 버전을 함께 뒀습니다.
 
@@ -268,9 +269,9 @@ flutter run --dart-define=USE_FIREBASE=true     # dev 서버에 붙어 실기기
 | 증상 | 원인과 해결 |
 |------|------------|
 | `bash: command not found` 또는 `WSL ... execvpe(/bin/bash) failed` | cmd/PowerShell에서 `.sh`를 실행한 것. 같은 폴더의 **`.cmd` 버전**을 쓰세요 (`tool\emulators.cmd`). 3번 항목 참고. |
-| **`Could not spawn 'java -version'`** 인데 `java -version`은 잘 됨 | 위와 **같은 원인의 다른 얼굴**입니다 — cmd/PowerShell에서 `bash tool/emulators.sh`를 친 것. WSL이 **설치돼 있는** PC에서는 위 메시지 대신 이게 나옵니다: 스크립트가 WSL(리눅스) 안에서 돌기 때문에 **Windows에 깔린 Java가 안 보입니다.** Java를 다시 깔거나 PATH를 손보지 마세요 — 아무 소용이 없습니다. `tool\emulators.cmd`(PowerShell은 `.\tool\emulators.cmd`)로 바꾸면 그대로 됩니다.<br>확인법: `bash -c "command -v java"`가 비면 그 bash는 WSL입니다. |
+| **``Could not spawn `java -version` ``** 인데 `java -version`이 **21 이상**으로 잘 나옴 | 위와 **같은 원인의 다른 얼굴**입니다 — cmd/PowerShell에서 `bash tool/emulators.sh`를 친 것. WSL이 **설치돼 있는** PC에서는 위 메시지 대신 이게 나옵니다: 스크립트가 WSL(리눅스) 안에서 돌기 때문에 **Windows에 깔린 Java가 안 보입니다.** Java를 다시 깔거나 PATH를 손보지 마세요 — 아무 소용이 없습니다. `tool\emulators.cmd`(PowerShell은 `.\tool\emulators.cmd`)로 바꾸면 그대로 됩니다.<br>확인법: **에러가 난 그 창에서** `bash -c "uname -s"`를 쳐 보세요 — `Linux`가 나오면 WSL, `MINGW64_NT-...`이면 Git Bash입니다. |
 | `Port 8080 is not open` / `Could not start Emulator UI, port taken` | 에뮬레이터가 이미 떠 있거나 다른 프로그램이 그 포트를 씀. 기존 터미널에서 `Ctrl+C`로 끄고 다시 시도하세요. 그래도 안 되면 PC를 재시작하는 게 빠릅니다. |
-| 에뮬레이터가 뜨다 마는데 Java 얘기가 나옴 | **`java -version`을 먼저 쳐 보세요.** 안 되면 Java 미설치 — 1번 항목 참고. **되는데도 실패하면 셸 문제**이지 Java 문제가 아닙니다 — 바로 위 항목을 보세요. |
+| 에뮬레이터가 뜨다 마는데 Java 얘기가 나옴 | **`java -version`을 먼저 쳐 보세요.** ① 안 되면 Java 미설치 — 1번 항목 참고. ② 되는데 **버전이 21보다 낮으면** 그게 원인입니다(`firebase-tools`가 `no longer supports Java version before 21`로 거부합니다) — 1번 항목대로 21 이상을 설치하세요. ③ **21 이상인데도** 실패하면 셸 문제입니다 — 바로 위 항목을 보세요. |
 | 로그인 화면에서 계정이 안 먹음 | 시드가 안 올라온 것. 터미널 A 로그에 `Importing accounts from ...` 이 있는지 보세요. 없다면 **프로젝트 폴더가 아닌 곳**에서 실행했을 가능성이 큽니다. |
 | 앱이 로그인 화면 없이 바로 목록으로 감 | `--dart-define=USE_DEMO=true` 로 뜬 것. 플래그를 빼면 에뮬레이터로 갑니다. |
 | **"에뮬레이터가 떠 있지 않습니다"** 안내 화면이 뜸 | 터미널 A를 안 띄운 것. 화면에 적힌 명령을 그대로 실행하고 앱을 다시 실행하세요. |
