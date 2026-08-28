@@ -149,6 +149,13 @@ void main() {
     );
   }
 
+  /// 입력 필드에 **지금 들어 있는 값**을 읽는다.
+  ///
+  /// `find.text`로는 대신할 수 없다 — 그건 화면 어딘가에 그 문자열이 있는지를 볼
+  /// 뿐이라, 필드가 비어도 다른 위젯이 같은 문자열을 그리면 통과한다.
+  String? fieldText(WidgetTester tester, String label) =>
+      tester.widget<TextFormField>(fieldByLabel(label)).controller?.text;
+
   Future<void> fillRequired(
     WidgetTester tester, {
     String brand = '스타벅스',
@@ -419,6 +426,13 @@ void main() {
       // 저장되지도 않고, 폼을 닫지도 않는다(입력을 잃으면 재시도 안내가 무의미하다).
       expect(await repo.getGifticons(myId), hasLength(limit));
       expect(find.text('기프티콘 정보 확인'), findsOneWidget);
+
+      // **화면이 남아 있는 것만으로는 부족하다.** 폼을 유지한 채 입력만 비우는
+      // 회귀도 위 단언을 통과한다 — 그러면 "다시 시도"가 처음부터 다시 치라는
+      // 말이 되어 안내가 무의미해진다. 실제로 값이 남았는지 본다.
+      expect(fieldText(tester, '브랜드 / 사용처'), '스타벅스');
+      expect(fieldText(tester, '상품명'), '아메리카노 T');
+      expect(fieldText(tester, '바코드 번호'), '8801234567890');
     });
   });
 
