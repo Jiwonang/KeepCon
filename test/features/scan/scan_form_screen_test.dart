@@ -27,8 +27,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:keepcon/features/scan/scan_page.dart';
 import 'package:keepcon/features/scan/state/gifticon_form_state.dart';
 import 'package:keepcon/features/scan/util/keep_all_ko.dart';
+import 'package:keepcon/shared/diagnostics/error_reporter.dart';
 import 'package:keepcon/shared/models/gifticon.dart';
 import 'package:keepcon/shared/models/user.dart';
+import 'package:keepcon/shared/providers/error_reporter_provider.dart';
 import 'package:keepcon/shared/providers/repositories.dart';
 import 'package:keepcon/shared/repositories/auth_repository.dart';
 import 'package:keepcon/shared/repositories/impl/in_memory_auth_repository.dart';
@@ -44,17 +46,26 @@ void main() {
   /// 플랜을 바꿔 가며 검사하려면 auth 구현도 손에 쥐고 있어야 한다.
   late InMemoryAuthRepository auth;
 
+  /// 진단 경로가 실제로 불렸는지 보기 위한 스파이.
+  ///
+  /// 늘 주입한다 — 기본 구현([DebugPrintErrorReporter])을 그대로 두면 실패 경로
+  /// 테스트마다 스택트레이스가 통째로 찍혀 출력이 묻힌다.
+  late _SpyErrorReporter reporter;
+
   ProviderContainer makeContainer({
     List<Gifticon> seed = const <Gifticon>[],
     InMemoryAuthRepository? authRepository,
+    InMemoryGifticonRepository? gifticonRepository,
   }) {
-    repo = InMemoryGifticonRepository(seed: seed);
+    repo = gifticonRepository ?? InMemoryGifticonRepository(seed: seed);
     auth = authRepository ?? InMemoryAuthRepository();
+    reporter = _SpyErrorReporter();
 
     final ProviderContainer container = ProviderContainer(
       overrides: <Override>[
         gifticonRepositoryProvider.overrideWithValue(repo),
         authRepositoryProvider.overrideWithValue(auth),
+        errorReporterProvider.overrideWithValue(reporter),
       ],
     );
     addTearDown(container.dispose);
@@ -100,6 +111,7 @@ void main() {
     WidgetTester tester, {
     List<Gifticon> seed = const <Gifticon>[],
     InMemoryAuthRepository? authRepository,
+    InMemoryGifticonRepository? gifticonRepository,
   }) async {
     // 폼 전체가 한 화면에 들어와야 탭이 스크롤에 걸리지 않는다.
     tester.view.physicalSize = const Size(1200, 2600);
@@ -110,6 +122,7 @@ void main() {
     final ProviderContainer container = makeContainer(
       seed: seed,
       authRepository: authRepository,
+      gifticonRepository: gifticonRepository,
     );
 
     await tester.pumpWidget(
@@ -448,6 +461,46 @@ void main() {
     });
   });
 
+  testWidgets('저장 목록 조회가 실패하면 원시 예외가 화면에 새지 않는다', (WidgetTester tester) async {
+    // 이 경로도 여태 어느 테스트도 지나지 않았다 — in-memory 구현은 조회가
+    // 실패하지 않으므로, 실패를 만들려면 던지는 구현을 넣어야 한다.
+    await openManualForm(
+      tester,
+      gifticonRepository: _ThrowingGifticonRepository(),
+    );
+
+    await fillRequired(tester, barcode: '8801234567890');
+    await pickExpiryDate(tester);
+    await tapSave(tester);
+
+    expect(
+      keepAllText('저장 목록을 확인하지 못했어요. 네트워크 연결을 확인한 뒤 다시 시도해 주세요.'),
+      findsOneWidget,
+    );
+
+    // **핵심 단언.** 예전에는 `'저장 목록을 확인하지 못했습니다: $e'`로 예외를 그대로
+    // 실어 `[cloud_firestore/unavailable]` 같은 내부 식별자가 화면에 나왔다.
+    // 문구가 다시 그렇게 바뀌면 여기서 빨개진다.
+    expect(
+      find.byWidgetPredicate(
+        (Widget w) =>
+            w is Text &&
+            ((w.semanticsLabel ?? w.data) ?? '').contains(_thrownMarker),
+      ),
+      findsNothing,
+      reason: '예외 문자열이 사용자 문구에 실렸다',
+    );
+
+    // 폼은 유지된다 — 재시도 안내가 의미를 가지려면 입력이 남아야 한다.
+    expect(find.text('기프티콘 정보 확인'), findsOneWidget);
+
+    // **원인이 사라지지는 않았다.** 화면에서 걷어낸 것은 진단으로 옮긴 것이지
+    // 버린 것이 아니다 — 이 단언이 없으면 `_reportFailure` 호출을 통째로 지워도
+    // 초록불이다.
+    expect(reporter.contexts, contains('GifticonFormController.getGifticons'));
+    expect(reporter.errors.single.toString(), contains(_thrownMarker));
+  });
+
   testWidgets('바코드를 고치면 중복 안내가 사라진다', (WidgetTester tester) async {
     const String duplicated = '8801234567890';
 
@@ -507,5 +560,31 @@ class _PlanUnavailableAuthRepository extends InMemoryAuthRepository {
       AuthErrorCode.unknown,
       'getPlan failed: offline',
     );
+  }
+}
+
+/// 진단 경로가 무엇을 받았는지 들여다보는 스파이.
+class _SpyErrorReporter implements ErrorReporter {
+  final List<String> contexts = <String>[];
+  final List<Object> errors = <Object>[];
+
+  @override
+  void report(Object error, StackTrace stack, {required String context}) {
+    contexts.add(context);
+    errors.add(error);
+  }
+}
+
+/// 조회가 실패했을 때 예외 문자열이 화면에 새는지 보기 위한 표식.
+///
+/// 실제 백엔드가 내는 모양(`[cloud_firestore/…]`)을 흉내 낸다 — 사용자가 읽을 것도
+/// 할 수 있는 것도 없는 내부 식별자다.
+const String _thrownMarker = '[cloud_firestore/unavailable]';
+
+/// 저장 목록 조회만 실패하는 기프티콘 저장소 — 오프라인·백엔드 장애 재현용.
+class _ThrowingGifticonRepository extends InMemoryGifticonRepository {
+  @override
+  Future<List<Gifticon>> getGifticons(String ownerId) async {
+    throw Exception('$_thrownMarker backend unavailable');
   }
 }

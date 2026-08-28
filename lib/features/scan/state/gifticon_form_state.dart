@@ -35,11 +35,11 @@
 /// - id/registeredAt은 Repository 발급에 위임(빈 id/생성시각 채워 전달)한다.
 library;
 
-import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../shared/models/gifticon.dart';
 import '../../../shared/models/user.dart';
+import '../../../shared/providers/error_reporter_provider.dart';
 import '../../../shared/providers/repositories.dart';
 
 /// scan 입력 경로 구분.
@@ -262,11 +262,15 @@ class GifticonFormController extends StateNotifier<GifticonFormState> {
           .read(authRepositoryProvider)
           .getPlan()
           .timeout(const Duration(seconds: 15));
-    } catch (e) {
+    } catch (e, s) {
       // **free로 간주하지 않는다.** 그러면 결제한 사용자가 인프라 오류 하나로
       // 저장을 막힌다 — 한도는 과금 정책이지 보안 경계가 아니므로, 모르는 상태에서
       // 사용자를 벌하는 쪽보다 "확인 못 했으니 다시" 쪽이 옳다. null로 알린다.
-      debugPrint('KeepCon: 플랜 조회 실패 — 한도 판정 보류: $e');
+      //
+      // 진단은 형제들과 같은 경로로 보낸다 — 여기만 손으로 debugPrint를 찍으면
+      // 같은 클래스 안에 두 관용구가 남고, release에서 메시지를 가리는 방어도
+      // 이 자리만 빠진다.
+      _reportFailure('_readPlan', e, s);
       return null;
     }
   }
@@ -321,9 +325,15 @@ class GifticonFormController extends StateNotifier<GifticonFormState> {
       allGifticons = await _ref
           .read(gifticonRepositoryProvider)
           .getGifticons(currentUser.id);
-    } catch (e) {
+    } catch (e, s) {
+      // **원시 예외를 사용자 문구에 넣지 않는다.** `[cloud_firestore/unavailable]`
+      // 같은 내부 식별자는 사용자가 읽을 것도, 할 수 있는 것도 없다. 원인은
+      // 로그로 남기고 화면에는 다음 행동만 적는다.
+      _reportFailure('getGifticons', e, s);
       state = state.copyWith(
-        submit: ScanSubmitFailure('저장 목록을 확인하지 못했습니다: $e'),
+        submit: const ScanSubmitFailure(
+          '저장 목록을 확인하지 못했어요. 네트워크 연결을 확인한 뒤 다시 시도해 주세요.',
+        ),
       );
       return null;
     }
@@ -463,8 +473,13 @@ class GifticonFormController extends StateNotifier<GifticonFormState> {
             orElse: () => throw Exception('지정된 그룹을 찾을 수 없습니다.'),
           );
           sharedGroupName = targetGroup.name;
-        } catch (e) {
-          shareError = '그룹 공유 실패: $e';
+        } catch (e, s) {
+          // ⚠️ 이 문자열은 지금 **어디에서도 표시되지 않는다** — 소비자는
+          // `ScanSubmitSuccess.sharedToGroup`뿐이라 null 여부만 본다(전수 확인:
+          // `shareError` 참조가 이 파일 밖에 없다). 그래도 원시 예외를 담아 두면
+          // 표시하기 시작하는 순간 그대로 새어 나가므로 프로즈로 둔다.
+          _reportFailure('shareGifticon', e, s);
+          shareError = '그룹에 공유하지 못했어요.';
         }
       }
 
@@ -477,11 +492,37 @@ class GifticonFormController extends StateNotifier<GifticonFormState> {
       );
 
       return saved;
-    } catch (e) {
+    } catch (e, s) {
+      _reportFailure('submit', e, s);
       state = state.copyWith(
-        submit: ScanSubmitFailure('저장에 실패했습니다: $e'),
+        submit: const ScanSubmitFailure(
+          '저장하지 못했어요. 네트워크 연결을 확인한 뒤 다시 시도해 주세요.',
+        ),
       );
       return null;
+    }
+  }
+
+  /// 처리된 실패를 개발자에게 남긴다 — 사용자 문구에서 걷어낸 원인이 여기로 온다.
+  ///
+  /// ⚠️ 공유 계약의 `reportHandledFailure`는 [WidgetRef]를 받아 이 컨트롤러([Ref])가
+  /// 쓰지 못한다. 그래서 **래퍼만** 지역에서 다시 쓰고, 리포터 자체는 SSOT provider에서
+  /// 받는다. 손으로 [debugPrint]를 찍으면 안 된다 — `DebugPrintErrorReporter`는
+  /// `includeMessage: kDebugMode`라 **release에서 예외 메시지를 일부러 가리는데**
+  /// (저장소 예외에 그룹·기프티콘 id가 실린다), 직접 찍으면 그 방어를 우회해
+  /// 원시 예외를 화면 대신 플랫폼 로그로 옮겨 놓게 된다.
+  ///
+  /// `try/catch`는 래퍼의 계약("진단은 원래 실패를 절대 가리지 않는다")을 옮긴 것이다.
+  /// 계약에 [Ref] 오버로드가 생기면 이 래퍼를 지운다.
+  void _reportFailure(String context, Object error, StackTrace stack) {
+    try {
+      _ref.read(errorReporterProvider).report(
+            error,
+            stack,
+            context: 'GifticonFormController.$context',
+          );
+    } catch (_) {
+      // 폐기된 컨테이너·리포터 자체 실패 — 여기서 새면 원래 실패의 안내가 사라진다.
     }
   }
 }

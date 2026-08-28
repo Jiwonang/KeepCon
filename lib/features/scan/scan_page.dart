@@ -7,6 +7,7 @@
 library;
 
 import 'dart:io';
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -19,6 +20,7 @@ import 'package:keepcon/features/scan/state/gifticon_form_state.dart';
 import 'package:keepcon/features/scan/util/keep_all_ko.dart';
 import 'package:keepcon/features/scan/util/price_input_formatter.dart';
 import 'package:keepcon/features/scan/widgets/barcode_scanner_screen.dart';
+import 'package:keepcon/shared/diagnostics/report_handled_failure.dart';
 import 'package:keepcon/shared/models/gifticon.dart';
 import 'package:keepcon/shared/theme/theme_tokens.dart';
 import 'package:keepcon/shared/util/date_format.dart';
@@ -165,7 +167,19 @@ class _ScanPageState extends ConsumerState<ScanPage> {
               imagePath: file.path,
             );
           } catch (e) {
-            debugPrint('KeepCon: 스캔 프레임 OCR 실패(바코드만 사용): $e');
+            // **여기는 보고 대상이 아니다.** OCR은 덤이고 바코드는 이미 유효하므로
+            // 작업 자체는 성공한다 — 이건 실패가 아니라 성능 저하다. 프레임 품질에
+            // 따라 흔히 일어나므로 [ErrorReporter]로 보내면 진짜 실패가 묻힌다.
+            // 그래서 형제들과 달리 의도적으로 로그만 남긴다.
+            //
+            // ⚠️ 그래도 **release에서는 예외를 찍지 않는다.** [debugPrint]는 release
+            // 빌드에서도 플랫폼 로그로 나가므로, 보고를 안 한다고 해서 원시 예외를
+            // 그대로 실어도 되는 것은 아니다 — 이 PR이 없애려는 유출이 여기만
+            // 남는다. `DebugPrintErrorReporter`가 `includeMessage: kDebugMode`로
+            // 하는 것과 같은 판단이다.
+            if (kDebugMode) {
+              debugPrint('KeepCon: 스캔 프레임 OCR 실패(바코드만 사용): $e');
+            }
           }
         }
 
@@ -209,14 +223,19 @@ class _ScanPageState extends ConsumerState<ScanPage> {
           builder: (_) => const _GifticonFormScreen(),
         ),
       );
-    } catch (e) {
+    } catch (e, s) {
+      // **원인은 로그로, 화면에는 다음 행동만.** 여기 오는 것은 이미지 디코딩·
+      // ML Kit 실패라 사용자가 예외 문자열로 할 수 있는 것이 없다. 진단은 공유
+      // 계약의 진입점으로 넘긴다 — 이 자리는 [WidgetRef]가 있어 그대로 쓸 수 있다
+      // (컨트롤러 쪽은 [Ref]라 못 쓴다. `gifticon_form_state.dart` 참조).
+      reportHandledFailure(ref, e, s, context: 'ScanPage._openForm');
+
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
+        const SnackBar(
           // 이 파일의 스낵바 중 유일하게 어절 보호가 빠져 있던 자리다. 좁은
-          // 폭에서 '오류가 발/생했습니다'처럼 갈라진다. `$e`를 품지만 어절
-          // 보호가 그것을 넘치게 만들지는 않는다(아래 실패 스낵바 주석 참조).
-          content: KeepAllText('이미지를 처리하는 중 오류가 발생했습니다: $e'),
+          // 폭에서 '오류가 발/생했습니다'처럼 갈라진다.
+          content: KeepAllText('이미지를 처리하지 못했어요. 다시 시도해 주세요.'),
         ),
       );
     } finally {
@@ -1058,11 +1077,10 @@ class __GifticonFormScreenState extends ConsumerState<_GifticonFormScreen> {
         // 829행)은 모두 [KeepAllText]다. 그래서 문구가 길어질수록 이 스낵바만
         // 어절이 갈라졌다('네트'/'워크').
         //
-        // 이 자리를 지나는 메시지 둘(gifticon_form_state.dart 326·482행)은
-        // `'…: $e'` 꼴이라 원시 예외를 품는다. 그래도 어절 보호가 그 식별자를
-        // 넘치게 만들지는 않는다 — SkParagraph는 줄보다 긴 어절을 강제로 끊는다
-        // (실측: 249자짜리 인덱스 URL을 320dp 스낵바에 넣어도 넘치지 않았다).
-        // 원시 예외를 사용자 문구에서 걷어내는 것은 별개 과제로 남는다.
+        // 이 자리를 지나는 메시지는 이제 전부 프로즈다 — 예전에는 둘이
+        // `'…: $e'` 꼴로 원시 예외를 품었고, 그래서 어절 보호가 긴 식별자를
+        // 넘치게 하지 않는지가 문제였다. 원인을 로그로 옮기면서 그 전제가
+        // 사라졌다(`gifticon_form_state.dart`의 `_reportFailure`).
         messenger.showSnackBar(
           SnackBar(
             content: KeepAllText(message),
