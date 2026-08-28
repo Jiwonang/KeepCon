@@ -167,7 +167,7 @@ CI 잡이 하나라도 red면 **여기서 멈춘다.** ⚠️ **`Firestore rules
 > 이 규칙을 어긴 대가는 **한 시간짜리 슬롯을 쓰고도 기계 판정이 안 나오는 것**이고,
 > 실제로 #117에서 세 라운드 연속 그렇게 됐다.
 
-세 상태 모두 코멘트를 남기므로 **코멘트 유무가 아니라 본문으로 구분한다.**
+아래 여섯 중 `NONE`을 뺀 다섯은 모두 코멘트를 남기므로 **코멘트 유무가 아니라 본문으로 구분한다**(`NONE`은 그 다섯 중 어느 문구도 없는 상태다).
 
 ```bash
 gh pr view <번호> --json comments,reviews --jq '[.comments[], .reviews[]] | map(select(.author.login=="coderabbitai").body) | if any(test("Actionable comments posted|No actionable comments")) then "REVIEWED" elif any(test("Review rate limited")) then "RATE_LIMITED" elif any(test("Review available on request")) then "NOT_TRIGGERED" elif any(test("auto-generated reply by CodeRabbit") and (test("CodeRabbit review command invocation")|not)) then "CHAT_ONLY" elif any(test("CodeRabbit review command invocation")) then "ACK_ONLY" else "NONE" end'
