@@ -1,3 +1,5 @@
+import 'dart:ui' as ui;
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -11,6 +13,9 @@ const String _wordJoiner = '\u2060';
 /// 문자열 비교가 아니라 **실제 레이아웃 엔진의 줄바꿈 결과**를 본다 — U+2060이
 /// 줄바꿈을 막는다는 것은 유니코드 규격의 주장이므로, Flutter가 그 규격을
 /// 따르는지는 재어서 확인해야 한다.
+///
+/// [_widestLine]과 같은 Ahem 전제 위에 있다(그 dartdoc 참조). 다만 이쪽은 폭이
+/// 아니라 줄의 **내용**을 보므로 글자 폭이 결과를 바꾸지 않는다.
 List<String> _layoutLines(String text, double maxWidth) {
   final TextPainter painter = TextPainter(
     text: TextSpan(text: text, style: const TextStyle(fontSize: 14)),
@@ -29,6 +34,42 @@ List<String> _layoutLines(String text, double maxWidth) {
   }
   painter.dispose();
   return lines;
+}
+
+/// [text]를 [maxWidth]로 접었을 때 **가장 긴 줄의 실제 폭**.
+///
+/// 엔진이 내놓는 줄 메트릭을 그대로 읽는다. 갈림길은 줄을 어떻게 나누느냐가 아니라
+/// **어느 API로 재느냐**다 — `computeLineMetrics().width`는 줄 끝 공백을 제외하고,
+/// `TextPainter.width`(=`maxIntrinsicWidth`)는 포함한다. `'AAAAA '`는 **둘 다 단독
+/// 측정인데** 전자로 70px, 후자로 84px다. 폭 80px에서 `'tion] '` 줄을 후자로 읽어
+/// 84가 나오는 바람에 정반대 결론을 낼 뻔했다.
+///
+/// 그러니 [_layoutLines]로 나눈 줄을 떼어내 **이 함수로** 다시 재는 것은 안전하다 —
+/// 부분문자열의 단독 폭이 접힌 메트릭과 일치한다. 여기서 메트릭을 직접 읽는 것은
+/// 중간 단계가 없어서이지, 다시 재면 틀려서가 아니다.
+///
+/// ⚠️ `flutter test`의 기본 폰트는 모든 글리프가 1em 정사각(Ahem)이다
+/// (`'AB'` @14px = 28.0). 그래서 재는 것은 **엔진의 줄 나눔 동작**이지 실제 폰트의
+/// 글자 폭이 아니다. 강제 끊김은 폰트가 아니라 엔진 속성이므로 결론은 실기기에도
+/// 옮겨 간다.
+///
+/// 수치가 `floor(폭 / fontSize) × fontSize`로 떨어지는 것은 **줄보다 긴 단일
+/// 토큰**을 유한 폭에서 잰 경우뿐이다(줄이 끝까지 채워지므로). 어절이 접히는
+/// 표본은 그렇지 않고(`'무료 플랜은 …'` @300px는 294가 아니라 280), `maxWidth`가
+/// `double.infinity`면 공식 자체가 성립하지 않는다(아래 테스트가 그렇게 호출한다).
+double _widestLine(String text, double maxWidth) {
+  final TextPainter painter = TextPainter(
+    text: TextSpan(text: text, style: const TextStyle(fontSize: 14)),
+    textDirection: TextDirection.ltr,
+  )..layout(maxWidth: maxWidth);
+
+  double widest = 0;
+  for (final ui.LineMetrics metrics in painter.computeLineMetrics()) {
+    if (metrics.width > widest) widest = metrics.width;
+  }
+
+  painter.dispose();
+  return widest;
 }
 
 /// 접힌 줄들이 원문의 어절을 **쪼개지 않고** 담고 있는가.
@@ -105,10 +146,100 @@ void main() {
       expect(_keepsWordsWhole(sentence, kept), isTrue);
     });
 
+    test('줄보다 긴 어절도 넘치지 않는다 — 엔진이 강제로 끊는다', () {
+      // 이 함수의 dartdoc은 오랫동안 "끊을 곳이 없어 넘친다"고 적어 두었고,
+      // PR #123이 그 문장을 근거로 원시 예외를 품는 문구에는 어절 보호를 걸 수
+      // 없다고 판단했다가 실측에서 뒤집혔다. 서술로만 남겨 두면 다시 갈라지므로
+      // 재어서 못박는다 — 이 테스트가 그 dartdoc의 근거다.
+      //
+      // ⚠️ 이것이 고정하는 것은 **엔진 속성**이지 [keepAllKo]가 아니다. 강제
+      // 끊김은 원문에도 성립하므로 어절 보호를 빼도 통과한다 — 그래서 아래에서
+      // 원문·보호본을 나란히 재고, 요지를 "어절 보호가 이 성질을 깨지 않는다"로
+      // 둔다. [keepAllKo] 고유의 성질은 다음 테스트가 본다.
+      //
+      // 표본은 실제로 사용자에게 나갈 수 있는 모양이다(Firestore 예외 + 인덱스
+      // 생성 URL). 공백이 없는 토큰이 줄 폭보다 훨씬 길다.
+      const String withLongToken =
+          '저장에 실패했습니다: [cloud_firestore/failed-precondition] '
+          'https://console.firebase.google.com/v1/r/project/keepcon-dev/firestore/indexes?create_composite=ClFwcm9qZWN0cy9rZWVwY29u';
+
+      // 전제: 가장 긴 토큰이 최대 시험 폭보다 넓어야 '강제로 끊는다'가 시험된다.
+      // 이것이 없으면 표본이 짧아지는 순간 이 테스트는 공허하게 초록이 된다
+      // (뮤테이션으로 확인 — 표본을 짧게 바꿔도 통과했다).
+      final String longestToken = withLongToken
+          .split(' ')
+          .reduce((String a, String b) => a.length >= b.length ? a : b);
+
+      expect(
+        _widestLine(longestToken, double.infinity),
+        greaterThan(320),
+        reason: '가장 긴 토큰이 시험 폭보다 좁으면 강제 끊김이 일어나지 않는다',
+      );
+
+      // 272px는 320dp 기기의 스낵바 콘텐츠 폭, 40px는 그보다 한참 좁은 하한 표본이다.
+      //
+      // ⚠️ "좁을수록 어렵다"가 아니다 — 엔진은 자소 클러스터 하나보다 좁게 끊지
+      // 못하므로 폭 < 14px(=fontSize)에서는 원문도 보호본도 14px를 낸다. 여기서
+      // 재는 것은 "글자 하나는 들어가는 폭에서 강제 끊김이 동작한다"까지다.
+      // 미확인: textScaler(접근성 글자 확대)를 켜면 그 하한도 함께 올라간다 —
+      //         이 테스트는 배율 1.0만 잰다.
+      for (final double width in <double>[40, 80, 272, 320]) {
+        expect(
+          _widestLine(withLongToken, width),
+          lessThanOrEqualTo(width),
+          reason: '전제: 원문부터 폭 ${width}px에서 넘치지 않아야 한다',
+        );
+        expect(
+          _widestLine(keepAllKo(withLongToken), width),
+          lessThanOrEqualTo(width),
+          reason: '폭 ${width}px에서 넘쳤다',
+        );
+      }
+    });
+
+    test('긴 URL·식별자에서는 있던 끊김 자리를 잃는다', () {
+      // dartdoc이 "걸어도 얻는 것이 없다"에 더해 **잃는 것이 있다**고 적은 근거다.
+      // 원문은 UAX #14대로 `/`·`-` 뒤에서 끊기는데, 어절 보호가 그 기회를 없앤다.
+      // 앞 테스트와 달리 이것은 [keepAllKo] 고유의 성질이라 함수를 빼면 죽는다
+      // (뮤테이션으로 확인).
+      const String withUrl =
+          '저장에 실패했습니다: [cloud_firestore/failed-precondition] '
+          'https://console.firebase.google.com/v1/r/project/keepcon-dev/firestore/indexes';
+      const double width = 272; // 320dp 기기의 스낵바 콘텐츠 폭
+
+      final List<String> plain = _layoutLines(withUrl, width);
+      final List<String> kept = _layoutLines(keepAllKo(withUrl), width)
+          .map((String line) => line.replaceAll(_wordJoiner, ''))
+          .toList();
+
+      // 끊는 자리가 실제로 달라진다.
+      expect(kept, isNot(equals(plain)));
+
+      // 그리고 그 차이는 **자연스러운 자리를 잃는** 쪽이다. `/`·`-`로 끝나는 줄이
+      // 곧 UAX #14가 준 끊김 기회를 쓴 자리다.
+      int naturalBreaks(List<String> lines) =>
+          lines.where((String l) => l.endsWith('/') || l.endsWith('-')).length;
+
+      expect(
+        naturalBreaks(kept),
+        lessThan(naturalBreaks(plain)),
+        reason: '어절 보호가 URL의 끊김 자리를 없애지 못했다면 dartdoc이 과장이다',
+      );
+    });
+
     test('폭이 달라져도 어절 단위가 유지된다', () {
       const String sentence = '무료 플랜은 10개까지 보관할 수 있어, 이번 기프티콘은 저장하지 않았어요.';
 
       for (final double width in <double>[110, 160, 220, 300]) {
+        // 전제: 이 폭에서 실제로 접혀야 어절 보존을 검증하게 된다. 문장이
+        // 짧아지면 한 줄에 들어가 공허하게 초록이 된다(형제 테스트가 같은
+        // 전제를 못박아 두었는데 여기만 빠져 있었다).
+        expect(
+          _layoutLines(sentence, width).length,
+          greaterThan(1),
+          reason: '폭 ${width}px에서 한 줄에 들어가면 줄바꿈 규칙을 검증하지 못한다',
+        );
+
         final List<String> kept = _layoutLines(keepAllKo(sentence), width);
         expect(
           _keepsWordsWhole(sentence, kept),
