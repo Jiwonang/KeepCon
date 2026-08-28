@@ -26,9 +26,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:keepcon/features/scan/scan_page.dart';
 import 'package:keepcon/features/scan/state/gifticon_form_state.dart';
+import 'package:keepcon/features/scan/util/keep_all_ko.dart';
 import 'package:keepcon/shared/models/gifticon.dart';
 import 'package:keepcon/shared/models/user.dart';
 import 'package:keepcon/shared/providers/repositories.dart';
+import 'package:keepcon/shared/repositories/auth_repository.dart';
 import 'package:keepcon/shared/repositories/impl/in_memory_auth_repository.dart';
 import 'package:keepcon/shared/repositories/impl/in_memory_gifticon_repository.dart';
 import 'package:keepcon/shared/theme/app_theme.dart';
@@ -42,9 +44,12 @@ void main() {
   /// 플랜을 바꿔 가며 검사하려면 auth 구현도 손에 쥐고 있어야 한다.
   late InMemoryAuthRepository auth;
 
-  ProviderContainer makeContainer({List<Gifticon> seed = const <Gifticon>[]}) {
+  ProviderContainer makeContainer({
+    List<Gifticon> seed = const <Gifticon>[],
+    InMemoryAuthRepository? authRepository,
+  }) {
     repo = InMemoryGifticonRepository(seed: seed);
-    auth = InMemoryAuthRepository();
+    auth = authRepository ?? InMemoryAuthRepository();
 
     final ProviderContainer container = ProviderContainer(
       overrides: <Override>[
@@ -91,15 +96,21 @@ void main() {
   }
 
   /// [ScanPage]를 띄우고 '직접 입력하기'로 진짜 폼 화면까지 들어간다.
-  Future<ProviderContainer> openManualForm(WidgetTester tester,
-      {List<Gifticon> seed = const <Gifticon>[]}) async {
+  Future<ProviderContainer> openManualForm(
+    WidgetTester tester, {
+    List<Gifticon> seed = const <Gifticon>[],
+    InMemoryAuthRepository? authRepository,
+  }) async {
     // 폼 전체가 한 화면에 들어와야 탭이 스크롤에 걸리지 않는다.
     tester.view.physicalSize = const Size(1200, 2600);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
 
-    final ProviderContainer container = makeContainer(seed: seed);
+    final ProviderContainer container = makeContainer(
+      seed: seed,
+      authRepository: authRepository,
+    );
 
     await tester.pumpWidget(
       UncontrolledProviderScope(
@@ -138,6 +149,13 @@ void main() {
       matching: find.byType(TextFormField),
     );
   }
+
+  /// 입력 필드에 **지금 들어 있는 값**을 읽는다.
+  ///
+  /// `find.text`로는 대신할 수 없다 — 그건 화면 어딘가에 그 문자열이 있는지를 볼
+  /// 뿐이라, 필드가 비어도 다른 위젯이 같은 문자열을 그리면 통과한다.
+  String? fieldText(WidgetTester tester, String label) =>
+      tester.widget<TextFormField>(fieldByLabel(label)).controller?.text;
 
   Future<void> fillRequired(
     WidgetTester tester, {
@@ -381,6 +399,53 @@ void main() {
       expect(find.text('이미 등록된 바코드 번호입니다.'), findsNothing);
       expect(find.text('이미 등록된 기프티콘'), findsNothing);
     });
+
+    testWidgets('플랜을 확인하지 못하면 한도로 단정하지 않고 연결 확인을 안내한다',
+        (WidgetTester tester) async {
+      // 이 경로는 여태 어느 테스트도 지나지 않았다 — in-memory 구현은 조회가
+      // 실패하지 않으므로, 실패를 만들려면 던지는 구현을 넣어야 한다.
+      await openManualForm(
+        tester,
+        seed: filledWallet(limit),
+        authRepository: _PlanUnavailableAuthRepository(),
+      );
+
+      await fillRequired(tester, barcode: '8801234567890');
+      await pickExpiryDate(tester);
+      await tapSave(tester);
+
+      // `find.text`로는 못 찾는다 — 스낵바가 [KeepAllText]라 표시본에 보이지 않는
+      // WORD JOINER가 섞인다. 그대로 두면 문구가 안 떠도 초록불이 된다.
+      expect(
+        keepAllText('플랜 정보를 확인하지 못했어요. 네트워크 연결을 확인한 뒤 다시 시도해 주세요.'),
+        findsOneWidget,
+      );
+
+      // **표시본이 실제로 어절 보호를 거치는지 따로 못박는다.** 위 [keepAllText]는
+      // `semanticsLabel ?? data`로 보므로 평범한 [Text]도 통과한다 — 그것만으로는
+      // 이 스낵바를 [KeepAllText]에서 [Text]로 되돌려도 초록불이다(뮤테이션으로
+      // 확인했다). 보호본을 직접 찾아야 그 되돌림이 빨개진다.
+      expect(
+        find.text(
+          keepAllKo('플랜 정보를 확인하지 못했어요. 네트워크 연결을 확인한 뒤 다시 시도해 주세요.'),
+        ),
+        findsOneWidget,
+      );
+
+      // 한도 안내로 단정하지 않는다 — 프리미엄이었을 수도 있다.
+      expect(find.text('저장 한도에 도달했어요'), findsNothing);
+
+      // 저장되지도 않고, 폼을 닫지도 않는다(입력을 잃으면 재시도 안내가 무의미하다).
+      expect(await repo.getGifticons(myId), hasLength(limit));
+      expect(find.text('기프티콘 정보 확인'), findsOneWidget);
+
+      // **화면이 남아 있는 것만으로는 부족하다.** 폼을 유지한 채 입력만 비우는
+      // 회귀도 위 단언을 통과한다 — 그러면 "다시 시도"가 처음부터 다시 치라는
+      // 말이 되어 안내가 무의미해진다. 실제로 값이 남았는지 본다.
+      expect(fieldText(tester, '브랜드 / 사용처'), '스타벅스');
+      expect(fieldText(tester, '상품명'), '아메리카노 T');
+      expect(fieldText(tester, '바코드 번호'), '8801234567890');
+    });
   });
 
   testWidgets('바코드를 고치면 중복 안내가 사라진다', (WidgetTester tester) async {
@@ -428,4 +493,19 @@ void main() {
     expect(results.where((Gifticon? g) => g != null), hasLength(1));
     expect(await repo.getGifticons(myId), hasLength(1));
   });
+}
+
+/// 플랜 조회만 실패하는 auth 구현 — 오프라인(그리고 권한·서버 오류) 재현용.
+///
+/// Firebase 구현이 `Source.server`로 읽어 캐시로 폴백하지 않으므로, 연결이 없으면
+/// [AuthRepository.getPlan]은 [AuthException]을 던진다. 나머지 동작은 그대로
+/// 물려받는다 — 바꾸려는 것은 그 한 경로뿐이다.
+class _PlanUnavailableAuthRepository extends InMemoryAuthRepository {
+  @override
+  Future<UserPlan> getPlan() async {
+    throw const AuthException(
+      AuthErrorCode.unknown,
+      'getPlan failed: offline',
+    );
+  }
 }

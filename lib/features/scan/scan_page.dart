@@ -213,7 +213,10 @@ class _ScanPageState extends ConsumerState<ScanPage> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('이미지를 처리하는 중 오류가 발생했습니다: $e'),
+          // 이 파일의 스낵바 중 유일하게 어절 보호가 빠져 있던 자리다. 좁은
+          // 폭에서 '오류가 발/생했습니다'처럼 갈라진다. `$e`를 품지만 어절
+          // 보호가 그것을 넘치게 만들지는 않는다(아래 실패 스낵바 주석 참조).
+          content: KeepAllText('이미지를 처리하는 중 오류가 발생했습니다: $e'),
         ),
       );
     } finally {
@@ -1049,9 +1052,20 @@ class __GifticonFormScreenState extends ConsumerState<_GifticonFormScreen> {
       case ScanSubmitFailure(:final String message):
         // 실패 시 화면을 닫지 않는다 — 닫으면 입력이 사라지고 사용자는 무엇이
         // 잘못됐는지 알 수 없다(유효기간 미선택 등이 여기로 온다).
+        //
+        // 어절 보호를 **여기서** 건다. 상태 쪽 주석이 "표시 지점에서만 건다"고
+        // 가리키는 지점이 여기인데 정작 빠져 있었다 — 형제 스낵바 셋(219·800·
+        // 829행)은 모두 [KeepAllText]다. 그래서 문구가 길어질수록 이 스낵바만
+        // 어절이 갈라졌다('네트'/'워크').
+        //
+        // 이 자리를 지나는 메시지 둘(gifticon_form_state.dart 326·482행)은
+        // `'…: $e'` 꼴이라 원시 예외를 품는다. 그래도 어절 보호가 그 식별자를
+        // 넘치게 만들지는 않는다 — SkParagraph는 줄보다 긴 어절을 강제로 끊는다
+        // (실측: 249자짜리 인덱스 URL을 320dp 스낵바에 넣어도 넘치지 않았다).
+        // 원시 예외를 사용자 문구에서 걷어내는 것은 별개 과제로 남는다.
         messenger.showSnackBar(
           SnackBar(
-            content: Text(message),
+            content: KeepAllText(message),
             backgroundColor: scheme.error,
           ),
         );
