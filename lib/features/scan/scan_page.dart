@@ -1099,8 +1099,12 @@ class __GifticonFormScreenState extends ConsumerState<_GifticonFormScreen> {
     final formState = ref.watch(gifticonFormControllerProvider);
     final theme = Theme.of(context);
 
-    final expiryDateText = formState.expiryDate != null
-        ? '${formState.expiryDate!.year}-${formState.expiryDate!.month.toString().padLeft(2, '0')}-${formState.expiryDate!.day.toString().padLeft(2, '0')}'
+    // 날짜 표기는 공유 정본([formatYmdDot])을 쓴다 — 손으로 조립하면 여기만
+    // 갈라진다. 실제로 그랬다: 이 라벨이 `lib/` 전체에서 유일하게 `2026-09-30`
+    // 이었고, **같은 화면의 중복 등록 다이얼로그**(위 `_DuplicateDialog`)조차
+    // `2026.09.30`을 쓰고 있었다. 같은 유효기간이 한 화면에서 두 모양으로 보였다.
+    final String expiryDateText = formState.expiryDate != null
+        ? formatYmdDot(formState.expiryDate!)
         : '날짜를 선택해 주세요';
 
     return Scaffold(

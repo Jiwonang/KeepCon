@@ -40,6 +40,7 @@ import 'package:keepcon/shared/repositories/auth_repository.dart';
 import 'package:keepcon/shared/repositories/impl/in_memory_auth_repository.dart';
 import 'package:keepcon/shared/repositories/impl/in_memory_gifticon_repository.dart';
 import 'package:keepcon/shared/theme/app_theme.dart';
+import 'package:keepcon/shared/util/date_format.dart' show formatYmdDot;
 
 void main() {
   final String myId = InMemoryAuthRepository.defaultUser.id;
@@ -503,6 +504,36 @@ void main() {
     // 초록불이다.
     expect(reporter.contexts, contains('GifticonFormController.getGifticons'));
     expect(reporter.errors.single.toString(), contains(_thrownMarker));
+  });
+
+  testWidgets('유효기간 라벨이 공유 정본 표기(YYYY.MM.DD)를 쓴다', (WidgetTester tester) async {
+    // 이 라벨은 여태 어느 테스트도 고정하지 않았고, 그래서 `lib/` 전체에서
+    // 유일하게 `2026-09-30`(하이픈)으로 남아 있었다 — **같은 화면의 중복 등록
+    // 다이얼로그조차** 점 표기였다. 계약 매트릭스 v2.4가 "통일했다"고 기록했지만
+    // 그 전환은 삭제된 죽은 폼에만 적용돼 있었다.
+    final ProviderContainer container = await openManualForm(tester);
+    await pickExpiryDate(tester);
+
+    // 기대값을 **라벨이 실제로 읽는 상태**에서 만든다. 정본 함수를 재구현하지 않고
+    // 그대로 호출한다 — 여기서 손으로 조립하면 이 테스트가 막으려는 갈라짐을
+    // 테스트가 다시 만든다.
+    //
+    // `DateTime.now()`로 만들지 않는 이유는 **자정**이다. 선택기가 `initialDate`를
+    // 읽는 순간과 이 줄 사이에는 pumpAndSettle 두 번과 탭 두 번이 끼어 있어, 그
+    // 사이에 날짜가 넘어가면 코드가 아니라 달력 때문에 빨개진다. 이 저장소는 같은
+    // 유형으로 2026-08-27T00:31Z CI가 실제로 터진 이력이 있다
+    // (`test/features/share/notification_center_merge_test.dart:73`).
+    final DateTime? picked =
+        container.read(gifticonFormControllerProvider).expiryDate;
+
+    expect(picked, isNotNull, reason: '날짜 선택기가 값을 확정하지 못했다');
+
+    final String expected = formatYmdDot(picked!);
+
+    expect(find.text(expected), findsOneWidget);
+
+    // 옛 표기가 남아 있지 않은지도 본다(둘 다 뜨는 상태를 통과시키지 않는다).
+    expect(find.text(expected.replaceAll('.', '-')), findsNothing);
   });
 
   testWidgets('바코드를 고치면 중복 안내가 사라진다', (WidgetTester tester) async {
