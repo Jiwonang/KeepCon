@@ -386,7 +386,14 @@ then echo "reviews commit_id:     ${rsha:-NONE}"
 else echo "reviews 조회 실패 — 판정 불가(빈 결과와 구분하라)"
 fi
 
-echo "headRefOid:            $(gh pr view <번호> --json headRefOid --jq .headRefOid)"
+# ⚠️ 이 값이 위 두 소스와의 **비교 기준**이다. 조회가 실패하면(rate limit·오타 PR 번호·인증)
+#    빈 문자열이 되고, 어떤 sha와도 같지 않으니 판정이 **항상 `STALE`**로 나온다 — 방향은
+#    안전하지만 그 대가가 시간당 1건짜리 슬롯이다(재트리거 → 한 시간 대기). 실패와
+#    "정말 다르다"를 구분한다. (이 세션에서만 API 한도에 네 번 걸렸다 — 가상의 실패가 아니다.)
+if head_oid=$(set -o pipefail; gh pr view <번호> --json headRefOid --jq .headRefOid) && [ -n "${head_oid}" ]
+then echo "headRefOid:            ${head_oid}"
+else echo "headRefOid 조회 실패 — 판정 불가(빈 값으로 대조하면 항상 STALE이 된다)"
+fi
 ```
 
 > ⚠️ **본문을 `tail -1`로 그대로 자르지 마라 — 코멘트가 아니라 그 안의 마지막 줄만 남는다.**
@@ -452,10 +459,14 @@ PR도 마커 sha는 head를 가리킬 수 있다** — sha 일치만으로 판�
 > 회신이 가리키는 head보다 **앞선 커밋**일 때(#117 실측: 접수 → 리뷰 7분). 그 상태로 **10분**이
 > 지나도 판정이 안 붙으면 형식을 의심하고 단독 코멘트로 재트리거한다.
 >
+> ⚠️ 조회 실패를 "해당 없음"으로 읽지 마라 — 빈 출력은 `ack=Y`가 **없는** 것처럼 보여
+> "기다리지 말고 재트리거"로 가고, 그러면 도는 중인 리뷰 위에 슬롯을 하나 더 쓴다.
+>
 > ```bash
 > gh api --paginate repos/Jiwonang/KeepCon/issues/<번호>/comments \
 >   --jq '.[] | select(.user.login=="coderabbitai[bot]")
->         | "\(.created_at) upd=\(.updated_at) verdict=\(if (.body|test("Actionable comments posted|No actionable comments")) then "Y" else "N" end) chat=\(if ((.body|test("auto-generated reply by CodeRabbit")) and (.body|test("CodeRabbit review command invocation")|not)) then "Y" else "N" end) ack=\(if (.body|test("CodeRabbit review command invocation")) then "Y" else "N" end) RL=\(if (.body|test("Review rate limited")) then "Y" else "N" end)"'
+>         | "\(.created_at) upd=\(.updated_at) verdict=\(if (.body|test("Actionable comments posted|No actionable comments")) then "Y" else "N" end) chat=\(if ((.body|test("auto-generated reply by CodeRabbit")) and (.body|test("CodeRabbit review command invocation")|not)) then "Y" else "N" end) ack=\(if (.body|test("CodeRabbit review command invocation")) then "Y" else "N" end) RL=\(if (.body|test("Review rate limited")) then "Y" else "N" end)"' \
+>   || echo "코멘트 조회 실패 — 판정 불가(빈 출력을 'ack 없음'으로 읽지 마라)"
 > ```
 >
 > #117이 이 경우였다 — `2f92ed1` 이후 세 라운드가 전부 대화 응답이라(`chat=Y` 3건, `verdict=Y`는
