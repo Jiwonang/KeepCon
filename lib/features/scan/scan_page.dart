@@ -7,6 +7,7 @@
 library;
 
 import 'dart:io';
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -170,7 +171,15 @@ class _ScanPageState extends ConsumerState<ScanPage> {
             // 작업 자체는 성공한다 — 이건 실패가 아니라 성능 저하다. 프레임 품질에
             // 따라 흔히 일어나므로 [ErrorReporter]로 보내면 진짜 실패가 묻힌다.
             // 그래서 형제들과 달리 의도적으로 로그만 남긴다.
-            debugPrint('KeepCon: 스캔 프레임 OCR 실패(바코드만 사용): $e');
+            //
+            // ⚠️ 그래도 **release에서는 예외를 찍지 않는다.** [debugPrint]는 release
+            // 빌드에서도 플랫폼 로그로 나가므로, 보고를 안 한다고 해서 원시 예외를
+            // 그대로 실어도 되는 것은 아니다 — 이 PR이 없애려는 유출이 여기만
+            // 남는다. `DebugPrintErrorReporter`가 `includeMessage: kDebugMode`로
+            // 하는 것과 같은 판단이다.
+            if (kDebugMode) {
+              debugPrint('KeepCon: 스캔 프레임 OCR 실패(바코드만 사용): $e');
+            }
           }
         }
 
