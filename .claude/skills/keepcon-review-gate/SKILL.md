@@ -80,8 +80,8 @@ CI에서 처음 빨개진다.
 
 ## 봇 응답 술어 — 여기가 정본
 
-판정 명령이 봇 응답을 가르는 문자열은 **아래 다섯 개뿐**이다. 각 술어가 여러 명령에 흩어져
-있으므로, **하나를 고치면 「쓰이는 곳」 열을 전부 함께 고친다.**
+판정 명령이 봇 응답을 가르는 문자열은 **아래 표가 전부**다. 각 술어가 여러 명령에 흩어져
+있으므로, **하나를 고치면 「쓰이는 곳」 열과 이 표의 술어 칸을 함께 고친다.**
 
 ⚠️ 이 표가 있는 이유: 2026-08-27~28에 같은 술어를 한 곳만 고쳐 판정이 갈라지는 사고가
    네 번 났다(`CLAUDE.md`만 고치고 `README.md`를 빠뜨림 · 3b만 가드하고 §3·§4·§5를 남김 등).
@@ -93,6 +93,7 @@ CI에서 처음 빨개진다.
 | `CodeRabbit review command invocation` | **명령 접수 회신.** 리뷰 명령으로 받아들여졌다 — 성공·거부 **둘 다**에 붙는다 | §3 판정식(`ACK_ONLY`) · 창 계산(comments) · 3b 진단(`ack=`) |
 | `auto-generated reply by CodeRabbit` | 봇의 회신 일반. **접수 회신에도 붙어 판별력이 없다** — 반드시 위 접수 마커와 함께 본다 | §3 판정식(`CHAT_ONLY`) · 창 계산(comments) · 3b 진단(`chat=`) |
 | `Review rate limited` \| `Action not completed` | **거부.** 슬롯을 쓰지 않는다 | §3 판정식(`RATE_LIMITED`) · 창 계산에서 **제외** · 3b 진단(`RL=`) |
+| `Review available on request` | **미트리거 안내.** 스타 10개 미만이라 자동 리뷰가 안 도는 상태 | §3 판정식(`NOT_TRIGGERED`) |
 | `recent_review_start` … `recent_review_end` | 요약 코멘트의 **마커 블록**. 판정 문구와 `between … and <sha>`가 여기 들어온다 | 3b 1) |
 
 ⚠️ 계정 이름이 API마다 다르다 — REST(`issues`·`pulls`)는 `coderabbitai[bot]`, GraphQL
@@ -107,15 +108,17 @@ CI에서 처음 빨개진다.
   3.2이고, `bad substitution`은 치명적 확장 오류라 **스크립트 전체가 그 자리에서 죽는다**.
   (2026-08-27 `tool/verify.sh`에서 실제로 그렇게 됐다. 대소문자 무시는 `*[Ff][Ii]…*` 문자
   클래스로 한다.)
-- **PR에서 온 값을 `eval`이나 명령 위치에 넣지 않는다.** `headRefName`은 PR이 정하고 이
-  저장소는 공개라 포크 PR이 들어온다 — `feature;id`·`feature$(id)`는 **유효한 git 브랜치
-  이름**이다(`git check-ref-format --branch`로 확인). 값은 `read`로 받아 인용해서만 쓴다.
-- **모든 `gh` 호출에 실패 가드를 단다.** 실패의 빈 출력은 "해당 없음"과 구분되지 않고, 이
-  스킬에서 그 오독의 대가는 **시간당 1건짜리 슬롯**이다. `if v=$(…) && [ -n "$v" ]` 또는
-  `|| { echo "… 판정 불가"; }` 형태로 닫는다.
-- **봇 코멘트의 선후를 시각으로 재지 않는다.** 요약 마커는 생성된 뒤 **편집**으로 판정이
-  채워져 `created_at`이 늘 뒤 코멘트보다 앞에 온다. 선후가 필요하면 **SHA**를 견준다.
-- **술어를 바꾸면 위 표의 「쓰이는 곳」을 전부 고친다.** 한 곳만 고치면 명령마다 다른 답을
+- **PR에서 온 값을 `eval`이나 명령 위치에 넣지 않는다.** 값은 `read`로 받아 인용해서만
+  쓴다. 근거(포크 PR · 유효한 브랜치 이름 · 실측 재현)는 §1 명령의 ⚠️가 정본이다.
+- **출력을 판정에 쓰는 `gh` 호출에는 전부 실패 가드를 단다.** 실패의 빈 출력은 "해당 없음"과
+  구분되지 않고, 이 스킬에서 그 오독의 대가는 **시간당 1건짜리 슬롯**이다.
+  `if v=$(…) && [ -n "$v" ]` 또는 `|| { echo "… 판정 불가"; }` 형태로 닫는다.
+  ⚠️ 예외는 `gh pr checks` 하나다 — 0이 아닌 종료 코드가 조회 실패가 아니라 **체크 상태**를
+  뜻한다(`8: Checks pending`, `gh pr checks --help`). 같은 가드를 달면 정상 pending에서
+  오경보가 난다.
+- **봇 코멘트의 선후를 시각으로 재지 않는다.** 선후가 필요하면 **SHA**를 견준다. 근거
+  (마커가 생성 뒤 편집으로 채워진다 — #114·#115 실측)는 3b 1)의 ⚠️가 정본이다.
+- **술어를 바꾸면 위 표의 술어 칸과 「쓰이는 곳」을 전부 고친다.** 한 곳만 고치면 명령마다 다른 답을
   낸다.
 
 ## 절차
@@ -138,8 +141,11 @@ gh pr checks <번호>
 #    두 번째 변수를 빈 문자열로 둔다(실측). 두 값이 다 찼는지 함께 확인한다.
 if IFS=$'\t' read -r HEAD_OID BR < <(gh pr view <번호> --json headRefOid,headRefName --jq '[.headRefOid, .headRefName] | @tsv') \
    && [[ -n "${HEAD_OID}" && -n "${BR}" ]]; then
+  # ⚠️ 여기도 가드한다 — 실패의 0행과 "아직 큐에 있음"(푸시 직후의 정상 상태)이 화면에서
+  #    구분되지 않는다. 그대로 두면 `gh pr checks`의 옛 실행 초록으로 판정하게 된다.
   gh run list --branch "$BR" --limit 3 --json headSha,createdAt,status,conclusion,databaseId \
-    --jq '.[] | "sha=\(.headSha[0:7]) \(.createdAt) \(.status) \(.conclusion // "-") id=\(.databaseId)"'
+    --jq '.[] | "sha=\(.headSha[0:7]) \(.createdAt) \(.status) \(.conclusion // "-") id=\(.databaseId)"' \
+    || echo "run 조회 실패 — 판정하지 마라(0행은 실패와 '아직 큐에 있음'이 구분되지 않는다)"
   echo "headRefOid: ${HEAD_OID:0:7}"
 else
   echo "PR 조회 실패 — 판정하지 마라(rate limit이면 기다렸다 다시)."
@@ -179,7 +185,7 @@ CI 잡이 하나라도 red면 **여기서 멈춘다.** ⚠️ **`Firestore rules
 ### 3. CodeRabbit 상태 판정
 
 아래 명령이 쓰는 문자열은 「봇 응답 술어」 표가 정본이다. **하나를 고치면 그 표의
-「쓰이는 곳」을 전부 함께 고친다** — 한 곳만 고치면 명령마다 다른 답을 낸다.
+술어 칸과 「쓰이는 곳」을 전부 함께 고친다** — 한 곳만 고치면 명령마다 다른 답을 낸다.
 
 > 🚨 **트리거 코멘트에는 `@coderabbitai review` 한 줄만 쓴다.** 설명·반영 내역을 같은
 > 코멘트에 붙이면 CodeRabbit이 그것을 **채팅 질문**으로 받아 대화체로 답하고, **리뷰 객체도
@@ -215,7 +221,7 @@ CI 잡이 하나라도 red면 **여기서 멈춘다.** ⚠️ **`Firestore rules
 ```bash
 # ⚠️ 조회가 실패하면 stdout이 비고, 그 빈 출력은 아래 표의 `NONE`과 구분되지 않는다 —
 #    `NONE`의 처방은 "한 줄 트리거"라 실패 한 번이 슬롯 하나다. 3b와 같은 이유로 가드한다.
-if verdict=$(gh pr view <번호> --json comments,reviews --jq '[.comments[], .reviews[]] | map(select(.author.login=="coderabbitai").body) | if any(test("Actionable comments posted|No actionable comments")) then "REVIEWED" elif any(test("Review rate limited")) then "RATE_LIMITED" elif any(test("Review available on request")) then "NOT_TRIGGERED" elif any(test("auto-generated reply by CodeRabbit") and (test("CodeRabbit review command invocation")|not)) then "CHAT_ONLY" elif any(test("CodeRabbit review command invocation")) then "ACK_ONLY" else "NONE" end')
+if verdict=$(gh pr view <번호> --json comments,reviews --jq '[.comments[], .reviews[]] | map(select(.author.login=="coderabbitai").body) | if any(test("Actionable comments posted|No actionable comments")) then "REVIEWED" elif any(test("Review rate limited|Action not completed")) then "RATE_LIMITED" elif any(test("Review available on request")) then "NOT_TRIGGERED" elif any(test("auto-generated reply by CodeRabbit") and (test("CodeRabbit review command invocation")|not)) then "CHAT_ONLY" elif any(test("CodeRabbit review command invocation")) then "ACK_ONLY" else "NONE" end')
 then echo "${verdict:-NONE}"
 else echo "§3 조회 실패 — 판정 불가(빈 출력을 NONE으로 읽지 마라. 트리거하면 슬롯을 버린다)"
 fi
@@ -517,7 +523,7 @@ PR도 마커 sha는 head를 가리킬 수 있다** — sha 일치만으로 판�
 > ```bash
 > if out=$(gh api --paginate repos/Jiwonang/KeepCon/issues/<번호>/comments \
 >   --jq '.[] | select(.user.login=="coderabbitai[bot]")
->         | "\(.created_at) upd=\(.updated_at) verdict=\(if (.body|test("Actionable comments posted|No actionable comments")) then "Y" else "N" end) chat=\(if ((.body|test("auto-generated reply by CodeRabbit")) and (.body|test("CodeRabbit review command invocation")|not)) then "Y" else "N" end) ack=\(if (.body|test("CodeRabbit review command invocation")) then "Y" else "N" end) RL=\(if (.body|test("Review rate limited")) then "Y" else "N" end)"')
+>         | "\(.created_at) upd=\(.updated_at) verdict=\(if (.body|test("Actionable comments posted|No actionable comments")) then "Y" else "N" end) chat=\(if ((.body|test("auto-generated reply by CodeRabbit")) and (.body|test("CodeRabbit review command invocation")|not)) then "Y" else "N" end) ack=\(if (.body|test("CodeRabbit review command invocation")) then "Y" else "N" end) RL=\(if (.body|test("Review rate limited|Action not completed")) then "Y" else "N" end)"')
 > then
 >   if [ -n "${out}" ]; then printf '%s\n' "${out}"; else echo "봇 코멘트 0건 — 조회는 성공"; fi
 > else
