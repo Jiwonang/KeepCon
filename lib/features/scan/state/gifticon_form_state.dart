@@ -321,9 +321,15 @@ class GifticonFormController extends StateNotifier<GifticonFormState> {
       allGifticons = await _ref
           .read(gifticonRepositoryProvider)
           .getGifticons(currentUser.id);
-    } catch (e) {
+    } catch (e, s) {
+      // **원시 예외를 사용자 문구에 넣지 않는다.** `[cloud_firestore/unavailable]`
+      // 같은 내부 식별자는 사용자가 읽을 것도, 할 수 있는 것도 없다. 원인은
+      // 로그로 남기고 화면에는 다음 행동만 적는다.
+      _reportFailure('getGifticons', e, s);
       state = state.copyWith(
-        submit: ScanSubmitFailure('저장 목록을 확인하지 못했습니다: $e'),
+        submit: const ScanSubmitFailure(
+          '저장 목록을 확인하지 못했어요. 네트워크 연결을 확인한 뒤 다시 시도해 주세요.',
+        ),
       );
       return null;
     }
@@ -463,8 +469,13 @@ class GifticonFormController extends StateNotifier<GifticonFormState> {
             orElse: () => throw Exception('지정된 그룹을 찾을 수 없습니다.'),
           );
           sharedGroupName = targetGroup.name;
-        } catch (e) {
-          shareError = '그룹 공유 실패: $e';
+        } catch (e, s) {
+          // ⚠️ 이 문자열은 지금 **어디에서도 표시되지 않는다** — 소비자는
+          // `ScanSubmitSuccess.sharedToGroup`뿐이라 null 여부만 본다(전수 확인:
+          // `shareError` 참조가 이 파일 밖에 없다). 그래도 원시 예외를 담아 두면
+          // 표시하기 시작하는 순간 그대로 새어 나가므로 프로즈로 둔다.
+          _reportFailure('shareGifticon', e, s);
+          shareError = '그룹에 공유하지 못했어요.';
         }
       }
 
@@ -477,12 +488,28 @@ class GifticonFormController extends StateNotifier<GifticonFormState> {
       );
 
       return saved;
-    } catch (e) {
+    } catch (e, s) {
+      _reportFailure('submit', e, s);
       state = state.copyWith(
-        submit: ScanSubmitFailure('저장에 실패했습니다: $e'),
+        submit: const ScanSubmitFailure(
+          '저장하지 못했어요. 네트워크 연결을 확인한 뒤 다시 시도해 주세요.',
+        ),
       );
       return null;
     }
+  }
+
+  /// 처리된 실패를 개발자에게 남긴다 — 사용자 문구에서 걷어낸 원인이 여기로 온다.
+  ///
+  /// ⚠️ 공유 계약의 `reportHandledFailure`를 쓰지 못한다. 그 함수는 [WidgetRef]를
+  /// 받는데 이 컨트롤러는 [Ref]를 들기 때문이다(둘은 다른 타입이다). 계약을 넓히는
+  /// 것은 계약 소유자 영역이라 여기서는 같은 형태로 남기기만 한다 —
+  /// `ErrorReporter`의 기본 구현(`DebugPrintErrorReporter`)도 `KeepCon:` 접두를
+  /// 붙여 [debugPrint]로 남기므로 **지금 동작은 같다.** 차이는 나중에 원격 수집을
+  /// 붙일 때 이 자리만 따라오지 못한다는 것이고, 그때 계약을 넓히면 된다.
+  void _reportFailure(String context, Object error, StackTrace stack) {
+    debugPrint('KeepCon: GifticonFormController.$context 실패 — $error');
+    debugPrint('$stack');
   }
 }
 
