@@ -26,6 +26,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:keepcon/features/scan/scan_page.dart';
 import 'package:keepcon/features/scan/state/gifticon_form_state.dart';
+import 'package:keepcon/features/scan/util/keep_all_ko.dart';
 import 'package:keepcon/shared/models/gifticon.dart';
 import 'package:keepcon/shared/models/user.dart';
 import 'package:keepcon/shared/providers/repositories.dart';
@@ -417,6 +418,17 @@ void main() {
       // WORD JOINER가 섞인다. 그대로 두면 문구가 안 떠도 초록불이 된다.
       expect(
         keepAllText('플랜 정보를 확인하지 못했어요. 네트워크 연결을 확인한 뒤 다시 시도해 주세요.'),
+        findsOneWidget,
+      );
+
+      // **표시본이 실제로 어절 보호를 거치는지 따로 못박는다.** 위 [keepAllText]는
+      // `semanticsLabel ?? data`로 보므로 평범한 [Text]도 통과한다 — 그것만으로는
+      // 이 스낵바를 [KeepAllText]에서 [Text]로 되돌려도 초록불이다(뮤테이션으로
+      // 확인했다). 보호본을 직접 찾아야 그 되돌림이 빨개진다.
+      expect(
+        find.text(
+          keepAllKo('플랜 정보를 확인하지 못했어요. 네트워크 연결을 확인한 뒤 다시 시도해 주세요.'),
+        ),
         findsOneWidget,
       );
 
