@@ -33,6 +33,7 @@ import 'package:keepcon/features/scan/state/gifticon_form_state.dart';
 import 'package:keepcon/features/scan/util/keep_all_ko.dart';
 import 'package:keepcon/shared/diagnostics/error_reporter.dart';
 import 'package:keepcon/shared/models/gifticon.dart';
+import 'package:keepcon/shared/util/date_format.dart' show formatYmdDot;
 import 'package:keepcon/shared/models/user.dart';
 import 'package:keepcon/shared/providers/error_reporter_provider.dart';
 import 'package:keepcon/shared/providers/repositories.dart';
@@ -503,6 +504,25 @@ void main() {
     // 초록불이다.
     expect(reporter.contexts, contains('GifticonFormController.getGifticons'));
     expect(reporter.errors.single.toString(), contains(_thrownMarker));
+  });
+
+  testWidgets('유효기간 라벨이 공유 정본 표기(YYYY.MM.DD)를 쓴다', (WidgetTester tester) async {
+    // 이 라벨은 여태 어느 테스트도 고정하지 않았고, 그래서 `lib/` 전체에서
+    // 유일하게 `2026-09-30`(하이픈)으로 남아 있었다 — **같은 화면의 중복 등록
+    // 다이얼로그조차** 점 표기였다. 계약 매트릭스 v2.4가 "통일했다"고 기록했지만
+    // 그 전환은 삭제된 죽은 폼에만 적용돼 있었다.
+    await openManualForm(tester);
+    await pickExpiryDate(tester);
+
+    // 날짜 선택기가 기본값(오늘)으로 확정하므로 그 값을 정본 함수로 만든 문자열이
+    // 화면에 있어야 한다. 함수를 재구현하지 않고 정본을 그대로 호출해 대조한다 —
+    // 여기서 손으로 조립하면 이 테스트가 막으려는 갈라짐을 테스트가 다시 만든다.
+    final String expected = formatYmdDot(DateTime.now());
+
+    expect(find.text(expected), findsOneWidget);
+
+    // 옛 표기가 남아 있지 않은지도 본다(둘 다 뜨는 상태를 통과시키지 않는다).
+    expect(find.text(expected.replaceAll('.', '-')), findsNothing);
   });
 
   testWidgets('바코드를 고치면 중복 안내가 사라진다', (WidgetTester tester) async {
