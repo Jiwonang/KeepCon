@@ -8,7 +8,7 @@
 /// - share 유효기간/초대 만료 라벨 — `formatExpiryLabel`·`formatInviteExpiry`
 ///   (lib/features/share/widgets/share_format.dart)
 /// - scan 날짜 선택 버튼 라벨 — 인라인 `padLeft` 조립
-///   (lib/features/scan/widgets/gifticon_form.dart)
+///   (lib/features/scan/scan_page.dart)
 ///
 /// 승격 대상은 **코어 [formatYmdDot] 하나**다. share의 `~` 접두·`HH:mm` 조합,
 /// 상대 시각(`formatRelativeKo`), main의 D-day 라벨(`formatDDay`)처럼

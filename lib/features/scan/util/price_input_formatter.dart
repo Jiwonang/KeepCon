@@ -27,8 +27,8 @@ import '../../../shared/util/money_format.dart' show digitsOnly, groupThousands;
 
 /// 공유 정본의 천 단위 포맷 함수를 그대로 노출한다.
 ///
-/// `gifticon_form.dart` 등 기존 소비자가 import 경로를 바꾸지 않고 쓰도록
-/// 재export하며, 구현은 `lib/shared/util/money_format.dart` 한 곳뿐이다.
+/// scan 소비자가 import 경로를 바꾸지 않고 쓰도록 재export하며,
+/// 구현은 `lib/shared/util/money_format.dart` 한 곳뿐이다.
 export '../../../shared/util/money_format.dart' show formatThousands;
 
 /// 선행 0 (예: "007"의 "00").

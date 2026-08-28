@@ -1,8 +1,7 @@
 /// scan — '저장할 그룹 선택' 실연동 테스트.
 ///
 /// 검증 대상:
-/// 1. 선택한 groupId가 폼 세션으로 전달되고('내 지갑'=null), '저장 후 계속 등록' 시에도
-///    같은 대상 그룹이 유지된다.
+/// 1. 선택한 groupId가 폼 세션으로 전달되고('내 지갑'=null), reset이 그것을 비운다.
 /// 2. 저장(addGifticon) 성공 후, 대상 그룹이 있으면 `ShareRepository.shareGifticon`이
 ///    호출되고 '내 지갑'이면 호출되지 않는다.
 /// 3. 그룹 공유가 실패해도(예: 사라진 그룹) 저장은 성공으로 유지된다(부분 실패 정책).
@@ -15,7 +14,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:keepcon/features/scan/scan_page.dart';
 import 'package:keepcon/features/scan/state/gifticon_form_state.dart';
 import 'package:keepcon/features/scan/state/scan_target_group_state.dart';
-import 'package:keepcon/features/scan/widgets/gifticon_form.dart';
 import 'package:keepcon/shared/models/gifticon.dart';
 import 'package:keepcon/shared/models/group.dart';
 import 'package:keepcon/shared/models/share.dart';
@@ -284,54 +282,6 @@ void main() {
         container.read(gifticonFormControllerProvider).targetGroupId,
         isNull,
       );
-    });
-  });
-
-  group('저장 후 계속 등록', () {
-    Future<void> pumpForm(
-      WidgetTester tester, {
-      String? targetGroupId,
-    }) async {
-      tester.view.physicalSize = const Size(1200, 2600);
-      tester.view.devicePixelRatio = 1.0;
-
-      addTearDown(tester.view.resetPhysicalSize);
-      addTearDown(tester.view.resetDevicePixelRatio);
-
-      final ProviderContainer container = makeContainer();
-
-      final GifticonFormController controller =
-          container.read(gifticonFormControllerProvider.notifier);
-
-      controller.startWith(ScanSource.manual, targetGroupId: targetGroupId);
-      fillValidForm(controller);
-
-      await tester.pumpWidget(
-        UncontrolledProviderScope(
-          container: container,
-          child: MaterialApp(
-            theme: AppTheme.light,
-            home: const Scaffold(body: GifticonForm()),
-          ),
-        ),
-      );
-
-      await tester.pumpAndSettle();
-    }
-
-    testWidgets('대상 그룹을 유지하고 공유 결과를 안내한다', (WidgetTester tester) async {
-      final Group target = dummyGroups().first;
-
-      await pumpForm(tester, targetGroupId: target.id);
-    });
-
-    testWidgets('공유가 실패했으면 다음 세션에 그 그룹을 물려주지 않는다(내 지갑 폴백)',
-        (WidgetTester tester) async {
-      await pumpForm(tester, targetGroupId: 'g_gone');
-    });
-
-    testWidgets("'내 지갑' 저장은 공유 안내 문구가 붙지 않는다", (WidgetTester tester) async {
-      await pumpForm(tester);
     });
   });
 }
