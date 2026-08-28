@@ -29,6 +29,7 @@ import 'package:keepcon/features/scan/state/gifticon_form_state.dart';
 import 'package:keepcon/shared/models/gifticon.dart';
 import 'package:keepcon/shared/models/user.dart';
 import 'package:keepcon/shared/providers/repositories.dart';
+import 'package:keepcon/shared/repositories/auth_repository.dart';
 import 'package:keepcon/shared/repositories/impl/in_memory_auth_repository.dart';
 import 'package:keepcon/shared/repositories/impl/in_memory_gifticon_repository.dart';
 import 'package:keepcon/shared/theme/app_theme.dart';
@@ -42,9 +43,12 @@ void main() {
   /// 플랜을 바꿔 가며 검사하려면 auth 구현도 손에 쥐고 있어야 한다.
   late InMemoryAuthRepository auth;
 
-  ProviderContainer makeContainer({List<Gifticon> seed = const <Gifticon>[]}) {
+  ProviderContainer makeContainer({
+    List<Gifticon> seed = const <Gifticon>[],
+    InMemoryAuthRepository? authRepository,
+  }) {
     repo = InMemoryGifticonRepository(seed: seed);
-    auth = InMemoryAuthRepository();
+    auth = authRepository ?? InMemoryAuthRepository();
 
     final ProviderContainer container = ProviderContainer(
       overrides: <Override>[
@@ -91,15 +95,21 @@ void main() {
   }
 
   /// [ScanPage]를 띄우고 '직접 입력하기'로 진짜 폼 화면까지 들어간다.
-  Future<ProviderContainer> openManualForm(WidgetTester tester,
-      {List<Gifticon> seed = const <Gifticon>[]}) async {
+  Future<ProviderContainer> openManualForm(
+    WidgetTester tester, {
+    List<Gifticon> seed = const <Gifticon>[],
+    InMemoryAuthRepository? authRepository,
+  }) async {
     // 폼 전체가 한 화면에 들어와야 탭이 스크롤에 걸리지 않는다.
     tester.view.physicalSize = const Size(1200, 2600);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
 
-    final ProviderContainer container = makeContainer(seed: seed);
+    final ProviderContainer container = makeContainer(
+      seed: seed,
+      authRepository: authRepository,
+    );
 
     await tester.pumpWidget(
       UncontrolledProviderScope(
@@ -381,6 +391,33 @@ void main() {
       expect(find.text('이미 등록된 바코드 번호입니다.'), findsNothing);
       expect(find.text('이미 등록된 기프티콘'), findsNothing);
     });
+
+    testWidgets('플랜을 확인하지 못하면 한도로 단정하지 않고 연결 확인을 안내한다',
+        (WidgetTester tester) async {
+      // 이 경로는 여태 어느 테스트도 지나지 않았다 — in-memory 구현은 조회가
+      // 실패하지 않으므로, 실패를 만들려면 던지는 구현을 넣어야 한다.
+      await openManualForm(
+        tester,
+        seed: filledWallet(limit),
+        authRepository: _PlanUnavailableAuthRepository(),
+      );
+
+      await fillRequired(tester, barcode: '8801234567890');
+      await pickExpiryDate(tester);
+      await tapSave(tester);
+
+      expect(
+        find.text('플랜 정보를 확인하지 못했어요. 네트워크 연결을 확인한 뒤 다시 시도해 주세요.'),
+        findsOneWidget,
+      );
+
+      // 한도 안내로 단정하지 않는다 — 프리미엄이었을 수도 있다.
+      expect(find.text('저장 한도에 도달했어요'), findsNothing);
+
+      // 저장되지도 않고, 폼을 닫지도 않는다(입력을 잃으면 재시도 안내가 무의미하다).
+      expect(await repo.getGifticons(myId), hasLength(limit));
+      expect(find.text('기프티콘 정보 확인'), findsOneWidget);
+    });
   });
 
   testWidgets('바코드를 고치면 중복 안내가 사라진다', (WidgetTester tester) async {
@@ -428,4 +465,19 @@ void main() {
     expect(results.where((Gifticon? g) => g != null), hasLength(1));
     expect(await repo.getGifticons(myId), hasLength(1));
   });
+}
+
+/// 플랜 조회만 실패하는 auth 구현 — 오프라인(그리고 권한·서버 오류) 재현용.
+///
+/// 계약이 이 조회를 서버 확인으로 못박아 캐시로 폴백하지 않으므로, 연결이 없으면
+/// [AuthRepository.getPlan]은 [AuthException]을 던진다. 나머지 동작은 그대로
+/// 물려받는다 — 바꾸려는 것은 그 한 경로뿐이다.
+class _PlanUnavailableAuthRepository extends InMemoryAuthRepository {
+  @override
+  Future<UserPlan> getPlan() async {
+    throw const AuthException(
+      AuthErrorCode.unknown,
+      'getPlan failed: offline',
+    );
+  }
 }
