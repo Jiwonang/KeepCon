@@ -55,6 +55,31 @@ class BarcodeScanResult {
   final Uint8List? imageBytes;
 }
 
+/// 인식 결과 묶음에서 **쓸 수 있는 첫 바코드**를 고른다. 없으면 `null`.
+///
+/// 한 프레임에 여러 바코드가 잡힐 수 있고, 그중 값이 비어 있는 것도 섞인다.
+/// 이 함수는 그 선별만 한다 — 화면·네비게이션과 얽히지 않아 테스트할 수 있다.
+/// (`_onDetect`가 이것을 쓴다. 카메라 없이 검증되는 부분을 여기로 모았다.)
+///
+/// `displayValue`가 아니라 [Barcode.rawValue]를 쓴다: 폼의 바코드 필드는 "실제
+/// 스캔되는 값"을 담아야 하고, `displayValue`는 QR 등에서 사람이 읽기 좋게 가공된
+/// 값일 수 있다.
+///
+/// 공백뿐인 값도 버린다 — 저장하면 바코드가 있는 것처럼 보이지만 매장에서 못 쓴다.
+/// 다만 돌려주는 것은 **원본 그대로**다(양끝 공백을 다듬지 않는다) — 판정과 값을
+/// 분리해, 나중에 다듬기 규칙이 바뀌어도 이 함수의 계약은 그대로다.
+String? firstUsableBarcode(BarcodeCapture capture) {
+  for (final Barcode barcode in capture.barcodes) {
+    final String? raw = barcode.rawValue;
+
+    if (raw != null && raw.trim().isNotEmpty) {
+      return raw;
+    }
+  }
+
+  return null;
+}
+
 /// 실시간 카메라 바코드/QR 스캔 화면.
 ///
 /// 첫 유효 바코드를 감지하면 즉시 스캐너를 멈추고 결과를 pop한다.
@@ -137,21 +162,8 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
     // 이미 처리했으면 이후 프레임은 전부 무시한다.
     if (_handled) return;
 
-    // rawValue가 null이거나 빈 문자열인 인식 결과는 쓸 수 없다.
-    //
-    // displayValue가 아니라 rawValue를 사용한다:
-    // 폼의 바코드 필드는 "실제 스캔되는 값"을 담아야 하고,
-    // displayValue는 QR 등에서 사람이 읽기 좋게 가공된 값일 수 있다.
-    String? value;
-
-    for (final Barcode barcode in capture.barcodes) {
-      final String? raw = barcode.rawValue;
-
-      if (raw != null && raw.trim().isNotEmpty) {
-        value = raw;
-        break;
-      }
-    }
+    // 쓸 수 있는 첫 바코드를 고른다(선별 규칙은 [firstUsableBarcode]의 doc 참조).
+    final String? value = firstUsableBarcode(capture);
 
     // 유효한 값이 없으면 계속 스캔한다(아직 처리한 것이 아니므로 가드도 세우지 않는다).
     if (value == null) return;
