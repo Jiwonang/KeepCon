@@ -170,7 +170,12 @@ CI 잡이 하나라도 red면 **여기서 멈춘다.** ⚠️ **`Firestore rules
 아래 여섯 중 `NONE`을 뺀 다섯은 모두 코멘트를 남기므로 **코멘트 유무가 아니라 본문으로 구분한다**(`NONE`은 그 다섯 중 어느 문구도 없는 상태다).
 
 ```bash
-gh pr view <번호> --json comments,reviews --jq '[.comments[], .reviews[]] | map(select(.author.login=="coderabbitai").body) | if any(test("Actionable comments posted|No actionable comments")) then "REVIEWED" elif any(test("Review rate limited")) then "RATE_LIMITED" elif any(test("Review available on request")) then "NOT_TRIGGERED" elif any(test("auto-generated reply by CodeRabbit") and (test("CodeRabbit review command invocation")|not)) then "CHAT_ONLY" elif any(test("CodeRabbit review command invocation")) then "ACK_ONLY" else "NONE" end'
+# ⚠️ 조회가 실패하면 stdout이 비고, 그 빈 출력은 아래 표의 `NONE`과 구분되지 않는다 —
+#    `NONE`의 처방은 "한 줄 트리거"라 실패 한 번이 슬롯 하나다. 3b와 같은 이유로 가드한다.
+if verdict=$(gh pr view <번호> --json comments,reviews --jq '[.comments[], .reviews[]] | map(select(.author.login=="coderabbitai").body) | if any(test("Actionable comments posted|No actionable comments")) then "REVIEWED" elif any(test("Review rate limited")) then "RATE_LIMITED" elif any(test("Review available on request")) then "NOT_TRIGGERED" elif any(test("auto-generated reply by CodeRabbit") and (test("CodeRabbit review command invocation")|not)) then "CHAT_ONLY" elif any(test("CodeRabbit review command invocation")) then "ACK_ONLY" else "NONE" end')
+then echo "${verdict:-NONE}"
+else echo "§3 조회 실패 — 판정 불가(빈 출력을 NONE으로 읽지 마라. 트리거하면 슬롯을 버린다)"
+fi
 ```
 
 > ⚠️ `comments`만 보면 안 된다. CodeRabbit의 리뷰 본문은 PR에 따라 **일반 코멘트(`comments`)에 오기도 하고 리뷰(`reviews`)에 오기도 한다** — 한쪽만 조회하면 실제로 리뷰된 PR(#93·#95)이 `NOT_TRIGGERED`로 잘못 판정된다. 두 배열을 합쳐서 본다.
@@ -386,7 +391,16 @@ then echo "reviews commit_id:     ${rsha:-NONE}"
 else echo "reviews 조회 실패 — 판정 불가(빈 결과와 구분하라)"
 fi
 
-echo "headRefOid:            $(gh pr view <번호> --json headRefOid --jq .headRefOid)"
+# ⚠️ 이 값이 위 두 소스와의 **비교 기준**이다. 조회가 실패하면(rate limit·오타 PR 번호·인증)
+#    빈 문자열이 되고, 어떤 sha와도 같지 않으니 `CURRENT`가 **원리상 나올 수 없다** —
+#    아래 판정식대로 verdict가 있으면 `STALE`, 없으면 `NO_REVIEW`가 된다(둘을 뭉뚱그리지
+#    마라 — `NO_REVIEW`의 처방도 똑같이 슬롯을 쓴다). 방향은 안전하지만 그 대가가 시간당
+#    1건짜리 슬롯이다(재트리거 → 한 시간 대기). 실패와 "정말 다르다"를 구분한다.
+#    (2026-08-28 #120 후속 작업 중 GitHub API 한도에 네 번 걸렸다 — 가상의 실패가 아니다.)
+if head_oid=$(gh pr view <번호> --json headRefOid --jq .headRefOid) && [ -n "${head_oid}" ]
+then echo "headRefOid:            ${head_oid}"
+else echo "headRefOid 조회 실패 — 판정 불가(빈 값으로 대조하면 CURRENT가 원리상 안 나온다)"
+fi
 ```
 
 > ⚠️ **본문을 `tail -1`로 그대로 자르지 마라 — 코멘트가 아니라 그 안의 마지막 줄만 남는다.**
@@ -452,10 +466,20 @@ PR도 마커 sha는 head를 가리킬 수 있다** — sha 일치만으로 판�
 > 회신이 가리키는 head보다 **앞선 커밋**일 때(#117 실측: 접수 → 리뷰 7분). 그 상태로 **10분**이
 > 지나도 판정이 안 붙으면 형식을 의심하고 단독 코멘트로 재트리거한다.
 >
+> ⚠️ 조회 실패를 "해당 없음"으로 읽지 마라 — `ack=Y`가 **없는** 것처럼 보여 "기다리지 말고
+> 재트리거"로 가고, 그러면 도는 중인 리뷰 위에 슬롯을 하나 더 쓴다. **출력을 변수에 담는다**
+> — `--paginate`는 페이지 단위로 즉시 찍으므로 중간 페이지에서 실패하면 **데이터 몇 행 +
+> 오류 문구**가 함께 남고, 그 부분 목록을 완전한 목록으로 읽게 된다.
+>
 > ```bash
-> gh api --paginate repos/Jiwonang/KeepCon/issues/<번호>/comments \
+> if out=$(gh api --paginate repos/Jiwonang/KeepCon/issues/<번호>/comments \
 >   --jq '.[] | select(.user.login=="coderabbitai[bot]")
->         | "\(.created_at) upd=\(.updated_at) verdict=\(if (.body|test("Actionable comments posted|No actionable comments")) then "Y" else "N" end) chat=\(if ((.body|test("auto-generated reply by CodeRabbit")) and (.body|test("CodeRabbit review command invocation")|not)) then "Y" else "N" end) ack=\(if (.body|test("CodeRabbit review command invocation")) then "Y" else "N" end) RL=\(if (.body|test("Review rate limited")) then "Y" else "N" end)"'
+>         | "\(.created_at) upd=\(.updated_at) verdict=\(if (.body|test("Actionable comments posted|No actionable comments")) then "Y" else "N" end) chat=\(if ((.body|test("auto-generated reply by CodeRabbit")) and (.body|test("CodeRabbit review command invocation")|not)) then "Y" else "N" end) ack=\(if (.body|test("CodeRabbit review command invocation")) then "Y" else "N" end) RL=\(if (.body|test("Review rate limited")) then "Y" else "N" end)"')
+> then
+>   if [ -n "${out}" ]; then printf '%s\n' "${out}"; else echo "봇 코멘트 0건 — 조회는 성공"; fi
+> else
+>   echo "코멘트 조회 실패 — 판정 불가(부분 출력도 완전한 목록이 아니다. 'ack 없음'으로 읽지 마라)"
+> fi
 > ```
 >
 > #117이 이 경우였다 — `2f92ed1` 이후 세 라운드가 전부 대화 응답이라(`chat=Y` 3건, `verdict=Y`는
@@ -514,7 +538,7 @@ gh pr comment <번호> --body "$(cat <<'EOF'
 
 (사유: CodeRabbit 체크는 리뷰 여부와 무관하게 항상 pass라 게이트가 아니며, 이 기록이 어느 경로로 통과했는지를 남기는 유일한 수단이다.)
 EOF
-)"
+)" || echo "폴백 기록 게시 실패 — 머지하지 마라(기록 없는 머지와 구분되지 않는다)"
 ```
 
 **기록을 남기지 않으면 "그냥 머지"와 구분되지 않는다.** 나중에 이 PR이 어떤 검증을 거쳤는지 아무도 모른다.
@@ -525,7 +549,11 @@ EOF
 
 1. CI 세 잡(`Format · Analyze · Test` · `Firestore rules` · `Markdown lint`) green (1번) — **그 실행의 `headSha`가 현재 `headRefOid`와 같은지 대조한 뒤에**(1번의 ⚠️). `gh pr checks`는 **이름 오름차순**이라 `CodeRabbit`이 보통 **첫 행**에 온다 — 위치가 아니라 **이름으로** 골라라(행 수도 불안정하다: `Markdown lint` 도입 전인 PR #93은 3행뿐이다)
 2. `keepcon-code-reviewer` 지적을 반영 완료 (2번 — 정상 경로에서는 푸시 전에 끝나 있다) **그리고**
-   그 뒤 푸시한 커밋이 없다: PR 본문의 `에이전트 리뷰: <SHA>` == `gh pr view <번호> --json headRefOid --jq .headRefOid`.
+   그 뒤 푸시한 커밋이 없다: PR 본문의 `에이전트 리뷰: <SHA>` == `headRefOid`.
+   ⚠️ **`headRefOid`는 3b의 가드된 형태로 받아라**(3b 코드블록 마지막 `if head_oid=$(…) && [ -n … ]`).
+   맨손 `gh pr view … --jq .headRefOid`를 그대로 비교에 쓰면 조회 실패가 빈 문자열이 되어 **항상 불일치**로
+   읽히고, 그러면 에이전트 리뷰를 다시 돌려 head를 움직여 CodeRabbit 라운드를 하나 더 쓴다.
+   아래 재리뷰 범위 `<리뷰한 SHA>...<head>`도 head가 비어 성립하지 않는다.
    다르면 3b와 같은 이유로 **그 뒤 커밋은 기본 층을 안 거쳤다** — 2번에서 그 범위(`<리뷰한 SHA>...<head>`)만 다시 리뷰한다.
    ⚠️ **이 대조는 기계적 게이트가 아니라 자기 신고다.** PR 본문의 SHA는 작성자가 고칠 수 있고,
    그 SHA에서 에이전트가 실제로 돌았다는 증거는 어디에도 남지 않는다(보호된 상태 체크도 봇 코멘트도
