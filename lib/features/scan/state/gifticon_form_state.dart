@@ -35,11 +35,11 @@
 /// - id/registeredAt은 Repository 발급에 위임(빈 id/생성시각 채워 전달)한다.
 library;
 
-import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../shared/models/gifticon.dart';
 import '../../../shared/models/user.dart';
+import '../../../shared/providers/error_reporter_provider.dart';
 import '../../../shared/providers/repositories.dart';
 
 /// scan 입력 경로 구분.
@@ -262,11 +262,15 @@ class GifticonFormController extends StateNotifier<GifticonFormState> {
           .read(authRepositoryProvider)
           .getPlan()
           .timeout(const Duration(seconds: 15));
-    } catch (e) {
+    } catch (e, s) {
       // **free로 간주하지 않는다.** 그러면 결제한 사용자가 인프라 오류 하나로
       // 저장을 막힌다 — 한도는 과금 정책이지 보안 경계가 아니므로, 모르는 상태에서
       // 사용자를 벌하는 쪽보다 "확인 못 했으니 다시" 쪽이 옳다. null로 알린다.
-      debugPrint('KeepCon: 플랜 조회 실패 — 한도 판정 보류: $e');
+      //
+      // 진단은 형제들과 같은 경로로 보낸다 — 여기만 손으로 debugPrint를 찍으면
+      // 같은 클래스 안에 두 관용구가 남고, release에서 메시지를 가리는 방어도
+      // 이 자리만 빠진다.
+      _reportFailure('_readPlan', e, s);
       return null;
     }
   }
@@ -501,15 +505,25 @@ class GifticonFormController extends StateNotifier<GifticonFormState> {
 
   /// 처리된 실패를 개발자에게 남긴다 — 사용자 문구에서 걷어낸 원인이 여기로 온다.
   ///
-  /// ⚠️ 공유 계약의 `reportHandledFailure`를 쓰지 못한다. 그 함수는 [WidgetRef]를
-  /// 받는데 이 컨트롤러는 [Ref]를 들기 때문이다(둘은 다른 타입이다). 계약을 넓히는
-  /// 것은 계약 소유자 영역이라 여기서는 같은 형태로 남기기만 한다 —
-  /// `ErrorReporter`의 기본 구현(`DebugPrintErrorReporter`)도 `KeepCon:` 접두를
-  /// 붙여 [debugPrint]로 남기므로 **지금 동작은 같다.** 차이는 나중에 원격 수집을
-  /// 붙일 때 이 자리만 따라오지 못한다는 것이고, 그때 계약을 넓히면 된다.
+  /// ⚠️ 공유 계약의 `reportHandledFailure`는 [WidgetRef]를 받아 이 컨트롤러([Ref])가
+  /// 쓰지 못한다. 그래서 **래퍼만** 지역에서 다시 쓰고, 리포터 자체는 SSOT provider에서
+  /// 받는다. 손으로 [debugPrint]를 찍으면 안 된다 — `DebugPrintErrorReporter`는
+  /// `includeMessage: kDebugMode`라 **release에서 예외 메시지를 일부러 가리는데**
+  /// (저장소 예외에 그룹·기프티콘 id가 실린다), 직접 찍으면 그 방어를 우회해
+  /// 원시 예외를 화면 대신 플랫폼 로그로 옮겨 놓게 된다.
+  ///
+  /// `try/catch`는 래퍼의 계약("진단은 원래 실패를 절대 가리지 않는다")을 옮긴 것이다.
+  /// 계약에 [Ref] 오버로드가 생기면 이 래퍼를 지운다.
   void _reportFailure(String context, Object error, StackTrace stack) {
-    debugPrint('KeepCon: GifticonFormController.$context 실패 — $error');
-    debugPrint('$stack');
+    try {
+      _ref.read(errorReporterProvider).report(
+            error,
+            stack,
+            context: 'GifticonFormController.$context',
+          );
+    } catch (_) {
+      // 폐기된 컨테이너·리포터 자체 실패 — 여기서 새면 원래 실패의 안내가 사라진다.
+    }
   }
 }
 

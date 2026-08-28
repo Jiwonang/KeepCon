@@ -27,8 +27,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:keepcon/features/scan/scan_page.dart';
 import 'package:keepcon/features/scan/state/gifticon_form_state.dart';
 import 'package:keepcon/features/scan/util/keep_all_ko.dart';
+import 'package:keepcon/shared/diagnostics/error_reporter.dart';
 import 'package:keepcon/shared/models/gifticon.dart';
 import 'package:keepcon/shared/models/user.dart';
+import 'package:keepcon/shared/providers/error_reporter_provider.dart';
 import 'package:keepcon/shared/providers/repositories.dart';
 import 'package:keepcon/shared/repositories/auth_repository.dart';
 import 'package:keepcon/shared/repositories/impl/in_memory_auth_repository.dart';
@@ -44,6 +46,12 @@ void main() {
   /// 플랜을 바꿔 가며 검사하려면 auth 구현도 손에 쥐고 있어야 한다.
   late InMemoryAuthRepository auth;
 
+  /// 진단 경로가 실제로 불렸는지 보기 위한 스파이.
+  ///
+  /// 늘 주입한다 — 기본 구현([DebugPrintErrorReporter])을 그대로 두면 실패 경로
+  /// 테스트마다 스택트레이스가 통째로 찍혀 출력이 묻힌다.
+  late _SpyErrorReporter reporter;
+
   ProviderContainer makeContainer({
     List<Gifticon> seed = const <Gifticon>[],
     InMemoryAuthRepository? authRepository,
@@ -51,11 +59,13 @@ void main() {
   }) {
     repo = gifticonRepository ?? InMemoryGifticonRepository(seed: seed);
     auth = authRepository ?? InMemoryAuthRepository();
+    reporter = _SpyErrorReporter();
 
     final ProviderContainer container = ProviderContainer(
       overrides: <Override>[
         gifticonRepositoryProvider.overrideWithValue(repo),
         authRepositoryProvider.overrideWithValue(auth),
+        errorReporterProvider.overrideWithValue(reporter),
       ],
     );
     addTearDown(container.dispose);
@@ -483,6 +493,12 @@ void main() {
 
     // 폼은 유지된다 — 재시도 안내가 의미를 가지려면 입력이 남아야 한다.
     expect(find.text('기프티콘 정보 확인'), findsOneWidget);
+
+    // **원인이 사라지지는 않았다.** 화면에서 걷어낸 것은 진단으로 옮긴 것이지
+    // 버린 것이 아니다 — 이 단언이 없으면 `_reportFailure` 호출을 통째로 지워도
+    // 초록불이다.
+    expect(reporter.contexts, contains('GifticonFormController.getGifticons'));
+    expect(reporter.errors.single.toString(), contains(_thrownMarker));
   });
 
   testWidgets('바코드를 고치면 중복 안내가 사라진다', (WidgetTester tester) async {
@@ -537,6 +553,28 @@ void main() {
 /// Firebase 구현이 `Source.server`로 읽어 캐시로 폴백하지 않으므로, 연결이 없으면
 /// [AuthRepository.getPlan]은 [AuthException]을 던진다. 나머지 동작은 그대로
 /// 물려받는다 — 바꾸려는 것은 그 한 경로뿐이다.
+class _PlanUnavailableAuthRepository extends InMemoryAuthRepository {
+  @override
+  Future<UserPlan> getPlan() async {
+    throw const AuthException(
+      AuthErrorCode.unknown,
+      'getPlan failed: offline',
+    );
+  }
+}
+
+/// 진단 경로가 무엇을 받았는지 들여다보는 스파이.
+class _SpyErrorReporter implements ErrorReporter {
+  final List<String> contexts = <String>[];
+  final List<Object> errors = <Object>[];
+
+  @override
+  void report(Object error, StackTrace stack, {required String context}) {
+    contexts.add(context);
+    errors.add(error);
+  }
+}
+
 /// 조회가 실패했을 때 예외 문자열이 화면에 새는지 보기 위한 표식.
 ///
 /// 실제 백엔드가 내는 모양(`[cloud_firestore/…]`)을 흉내 낸다 — 사용자가 읽을 것도
@@ -548,15 +586,5 @@ class _ThrowingGifticonRepository extends InMemoryGifticonRepository {
   @override
   Future<List<Gifticon>> getGifticons(String ownerId) async {
     throw Exception('$_thrownMarker backend unavailable');
-  }
-}
-
-class _PlanUnavailableAuthRepository extends InMemoryAuthRepository {
-  @override
-  Future<UserPlan> getPlan() async {
-    throw const AuthException(
-      AuthErrorCode.unknown,
-      'getPlan failed: offline',
-    );
   }
 }

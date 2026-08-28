@@ -166,6 +166,10 @@ class _ScanPageState extends ConsumerState<ScanPage> {
               imagePath: file.path,
             );
           } catch (e) {
+            // **여기는 보고 대상이 아니다.** OCR은 덤이고 바코드는 이미 유효하므로
+            // 작업 자체는 성공한다 — 이건 실패가 아니라 성능 저하다. 프레임 품질에
+            // 따라 흔히 일어나므로 [ErrorReporter]로 보내면 진짜 실패가 묻힌다.
+            // 그래서 형제들과 달리 의도적으로 로그만 남긴다.
             debugPrint('KeepCon: 스캔 프레임 OCR 실패(바코드만 사용): $e');
           }
         }
