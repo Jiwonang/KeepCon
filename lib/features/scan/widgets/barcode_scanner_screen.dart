@@ -68,6 +68,7 @@ class BarcodeScanResult {
 /// 공백뿐인 값도 버린다 — 저장하면 바코드가 있는 것처럼 보이지만 매장에서 못 쓴다.
 /// 다만 돌려주는 것은 **원본 그대로**다(양끝 공백을 다듬지 않는다) — 판정과 값을
 /// 분리해, 나중에 다듬기 규칙이 바뀌어도 이 함수의 계약은 그대로다.
+@visibleForTesting
 String? firstUsableBarcode(BarcodeCapture capture) {
   for (final Barcode barcode in capture.barcodes) {
     final String? raw = barcode.rawValue;
