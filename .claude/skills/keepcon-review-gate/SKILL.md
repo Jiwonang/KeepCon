@@ -94,7 +94,10 @@ gh pr checks <번호>
 #    빈 출력을 내고 `read`가 두 변수를 **빈 문자열**로 만든다 — 그대로 두면 `--branch ""`로
 #    남의 run이 섞이고, 빈 `headRefOid`로는 아래 sha 대조 자체가 성립하지 않는다.
 #    (`exit`는 대화 셸을 닫으므로 쓰지 않는다. `read`는 `if` 안에서도 현재 셸에서 돈다.)
-if IFS=$'\t' read -r HEAD_OID BR < <(gh pr view <번호> --json headRefOid,headRefName --jq '[.headRefOid, .headRefName] | @tsv'); then
+#    ⚠️ 종료 코드만 보면 안 된다 — `read`는 **필드가 하나뿐인 입력도 성공(0)**으로 처리하고
+#    두 번째 변수를 빈 문자열로 둔다(실측). 두 값이 다 찼는지 함께 확인한다.
+if IFS=$'\t' read -r HEAD_OID BR < <(gh pr view <번호> --json headRefOid,headRefName --jq '[.headRefOid, .headRefName] | @tsv') \
+   && [[ -n "${HEAD_OID}" && -n "${BR}" ]]; then
   gh run list --branch "$BR" --limit 3 --json headSha,createdAt,status,conclusion,databaseId \
     --jq '.[] | "sha=\(.headSha[0:7]) \(.createdAt) \(.status) \(.conclusion // "-") id=\(.databaseId)"'
   echo "headRefOid: ${HEAD_OID:0:7}"
