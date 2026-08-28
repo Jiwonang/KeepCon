@@ -93,7 +93,7 @@ CI에서 처음 빨개진다.
 | `CodeRabbit review command invocation` | **명령 접수 회신.** 리뷰 명령으로 받아들여졌다 — 성공·거부 **둘 다**에 붙는다 | §3 판정식(`ACK_ONLY`) · 창 계산(comments) · 3b 진단(`ack=`) |
 | `auto-generated reply by CodeRabbit` | 봇의 회신 일반. **접수 회신에도 붙어 판별력이 없다** — 반드시 위 접수 마커와 함께 본다 | §3 판정식(`CHAT_ONLY`) · 창 계산(comments) · 3b 진단(`chat=`) |
 | `Review rate limited` | **할당량 거부.** 슬롯을 쓰지 않는다 | §3 판정식(`RATE_LIMITED`) · 창 계산에서 **제외** · 3b 진단(`RL=`) |
-| `Action not completed` | 봇의 **범용 실패 헤더**. 할당량 거부에도 붙지만 그것만이 아니다 — `Pull request is closed.`도 이 헤더로 온다(#106 `05:44:33Z`·#113 `19:10:26Z` 실측). **단독으로는 아무 판정에도 쓰지 마라**(위 행과 묶으면 닫힌 PR을 할당량 초과로 오판해 "기다렸다 재트리거"를 낸다). 창 계산에서도 **제외하지 않는다** — 슬롯을 썼는지 확인되지 않았다 | (판정 없음 — 진단용) |
+| `Action not completed` | 봇의 **범용 실패 헤더**. 할당량 거부에도 붙지만 그것만이 아니다 — `Pull request is closed.`도 이 헤더로 온다(#106 `05:44:33Z`·#113 `19:10:26Z` 실측). ⚠️ **이 헤더가 붙은 회신은 접수가 아니라 실패다** — `invocation` 마커도 함께 달고 오므로(실측 `ack=Y`) 걸러내지 않으면 `ACK_ONLY`("기다려라")로 떨어져 오지 않을 리뷰를 기다린다. 위 행과 묶어서도 안 된다(닫힌 PR을 할당량 초과로 오판한다). 창 계산에서도 **제외하지 않는다** — 슬롯을 썼는지 확인되지 않았다 | §3 판정식·3b 진단에서 **`ACK_ONLY`/`ack=`의 제외 조건**으로만 |
 | `Review available on request` | **미트리거 안내.** 스타 10개 미만이라 자동 리뷰가 안 도는 상태 | §3 판정식(`NOT_TRIGGERED`) |
 | `recent_review_start` … `recent_review_end` | 요약 코멘트의 **마커 블록**. 판정 문구와 `between … and <sha>`가 여기 들어온다 | 3b 1) |
 
@@ -223,7 +223,7 @@ CI 잡이 하나라도 red면 **여기서 멈춘다.** ⚠️ **`Firestore rules
 ```bash
 # ⚠️ 조회가 실패하면 stdout이 비고, 그 빈 출력은 아래 표의 `NONE`과 구분되지 않는다 —
 #    `NONE`의 처방은 "한 줄 트리거"라 실패 한 번이 슬롯 하나다. 3b와 같은 이유로 가드한다.
-if verdict=$(gh pr view <번호> --json comments,reviews --jq '[.comments[], .reviews[]] | map(select(.author.login=="coderabbitai").body) | if any(test("Actionable comments posted|No actionable comments")) then "REVIEWED" elif any(test("Review rate limited")) then "RATE_LIMITED" elif any(test("Review available on request")) then "NOT_TRIGGERED" elif any(test("auto-generated reply by CodeRabbit") and (test("CodeRabbit review command invocation")|not)) then "CHAT_ONLY" elif any(test("CodeRabbit review command invocation")) then "ACK_ONLY" else "NONE" end')
+if verdict=$(gh pr view <번호> --json comments,reviews --jq '[.comments[], .reviews[]] | map(select(.author.login=="coderabbitai").body) | if any(test("Actionable comments posted|No actionable comments")) then "REVIEWED" elif any(test("Review rate limited")) then "RATE_LIMITED" elif any(test("Review available on request")) then "NOT_TRIGGERED" elif any(test("auto-generated reply by CodeRabbit") and (test("CodeRabbit review command invocation")|not)) then "CHAT_ONLY" elif any(test("CodeRabbit review command invocation") and (test("Action not completed")|not)) then "ACK_ONLY" else "NONE" end')
 then echo "${verdict:-NONE}"
 else echo "§3 조회 실패 — 판정 불가(빈 출력을 NONE으로 읽지 마라. 트리거하면 슬롯을 버린다)"
 fi
@@ -528,7 +528,7 @@ PR도 마커 sha는 head를 가리킬 수 있다** — sha 일치만으로 판�
 > ```bash
 > if out=$(gh api --paginate repos/Jiwonang/KeepCon/issues/<번호>/comments \
 >   --jq '.[] | select(.user.login=="coderabbitai[bot]")
->         | "\(.created_at) upd=\(.updated_at) verdict=\(if (.body|test("Actionable comments posted|No actionable comments")) then "Y" else "N" end) chat=\(if ((.body|test("auto-generated reply by CodeRabbit")) and (.body|test("CodeRabbit review command invocation")|not)) then "Y" else "N" end) ack=\(if (.body|test("CodeRabbit review command invocation")) then "Y" else "N" end) RL=\(if (.body|test("Review rate limited")) then "Y" else "N" end)"')
+>         | "\(.created_at) upd=\(.updated_at) verdict=\(if (.body|test("Actionable comments posted|No actionable comments")) then "Y" else "N" end) chat=\(if ((.body|test("auto-generated reply by CodeRabbit")) and (.body|test("CodeRabbit review command invocation")|not)) then "Y" else "N" end) ack=\(if ((.body|test("CodeRabbit review command invocation")) and (.body|test("Action not completed")|not)) then "Y" else "N" end) RL=\(if (.body|test("Review rate limited")) then "Y" else "N" end)"')
 > then
 >   if [ -n "${out}" ]; then printf '%s\n' "${out}"; else echo "봇 코멘트 0건 — 조회는 성공"; fi
 > else
