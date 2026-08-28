@@ -117,6 +117,14 @@ WSL (10 - Relay) ERROR: execvpe(/bin/bash) failed: No such file or directory
 
 `bash`라는 이름이 PATH에서 `C:\Windows\System32\bash.exe`(WSL 런처)로 잡히고, Git Bash가 있는 `C:\Program Files\Git\bin`은 PATH에 없기 때문입니다. cmd냐 PowerShell이냐는 상관없이 똑같이 실패합니다.
 
+⚠️ **WSL이 이미 설치된 PC에서는 위 메시지가 안 나옵니다.** WSL이 정상 동작하므로 스크립트가 **리눅스 안에서** 실제로 돌아가고, 거기서는 Windows에 깔린 Java가 보이지 않아 이렇게 실패합니다:
+
+```text
+Error: Could not spawn `java -version`. Please make sure Java is installed and on your system PATH.
+```
+
+**Java 문제로 보이지만 아닙니다.** 같은 창에서 `java -version`은 멀쩡히 됩니다 — Windows 쪽에서 실행되기 때문입니다. 실측(2026-08-28): PowerShell의 `bash`가 `C:\Users\<user>\AppData\Local\Microsoft\WindowsApps\bash.exe`로 잡히고, 그 안의 `PATH`는 `/usr/bin:/mnt/c/...` 형태이며 `command -v java`가 빈 값이었습니다. 이 오해로 Java 재설치·PATH 수정을 쫓느라 시간을 썼습니다.
+
 "Git Bash를 쓰세요"라고 안내만 할 수도 있었지만, **쓰는 셸에서 그냥 되는 편이** 낫다고 봐서 `.cmd` 버전을 함께 뒀습니다.
 
 </details>
@@ -260,8 +268,9 @@ flutter run --dart-define=USE_FIREBASE=true     # dev 서버에 붙어 실기기
 | 증상 | 원인과 해결 |
 |------|------------|
 | `bash: command not found` 또는 `WSL ... execvpe(/bin/bash) failed` | cmd/PowerShell에서 `.sh`를 실행한 것. 같은 폴더의 **`.cmd` 버전**을 쓰세요 (`tool\emulators.cmd`). 3번 항목 참고. |
+| **`Could not spawn 'java -version'`** 인데 `java -version`은 잘 됨 | 위와 **같은 원인의 다른 얼굴**입니다 — cmd/PowerShell에서 `bash tool/emulators.sh`를 친 것. WSL이 **설치돼 있는** PC에서는 위 메시지 대신 이게 나옵니다: 스크립트가 WSL(리눅스) 안에서 돌기 때문에 **Windows에 깔린 Java가 안 보입니다.** Java를 다시 깔거나 PATH를 손보지 마세요 — 아무 소용이 없습니다. `tool\emulators.cmd`(PowerShell은 `.\tool\emulators.cmd`)로 바꾸면 그대로 됩니다.<br>확인법: `bash -c "command -v java"`가 비면 그 bash는 WSL입니다. |
 | `Port 8080 is not open` / `Could not start Emulator UI, port taken` | 에뮬레이터가 이미 떠 있거나 다른 프로그램이 그 포트를 씀. 기존 터미널에서 `Ctrl+C`로 끄고 다시 시도하세요. 그래도 안 되면 PC를 재시작하는 게 빠릅니다. |
-| 에뮬레이터가 뜨다 마는데 Java 얘기가 나옴 | Java 미설치. 1번 항목 참고. |
+| 에뮬레이터가 뜨다 마는데 Java 얘기가 나옴 | **`java -version`을 먼저 쳐 보세요.** 안 되면 Java 미설치 — 1번 항목 참고. **되는데도 실패하면 셸 문제**이지 Java 문제가 아닙니다 — 바로 위 항목을 보세요. |
 | 로그인 화면에서 계정이 안 먹음 | 시드가 안 올라온 것. 터미널 A 로그에 `Importing accounts from ...` 이 있는지 보세요. 없다면 **프로젝트 폴더가 아닌 곳**에서 실행했을 가능성이 큽니다. |
 | 앱이 로그인 화면 없이 바로 목록으로 감 | `--dart-define=USE_DEMO=true` 로 뜬 것. 플래그를 빼면 에뮬레이터로 갑니다. |
 | **"에뮬레이터가 떠 있지 않습니다"** 안내 화면이 뜸 | 터미널 A를 안 띄운 것. 화면에 적힌 명령을 그대로 실행하고 앱을 다시 실행하세요. |
