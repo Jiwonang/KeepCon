@@ -1049,9 +1049,20 @@ class __GifticonFormScreenState extends ConsumerState<_GifticonFormScreen> {
       case ScanSubmitFailure(:final String message):
         // 실패 시 화면을 닫지 않는다 — 닫으면 입력이 사라지고 사용자는 무엇이
         // 잘못됐는지 알 수 없다(유효기간 미선택 등이 여기로 온다).
+        //
+        // 어절 보호를 **여기서** 건다. 상태 쪽 주석이 "표시 지점에서만 건다"고
+        // 가리키는 지점이 여기인데 정작 빠져 있었다 — 형제 스낵바 둘(797·826행)은
+        // 이미 [KeepAllText]다. 그래서 문구가 길어질수록 이 스낵바만 어절이
+        // 갈라졌다('네트'/'워크').
+        //
+        // ⚠️ 미고침: 이 자리를 지나는 메시지 중 `'…: $e'` 꼴 셋
+        // (gifticon_form_state.dart 326·464·479행)은 원시 예외를 품는다. 예외
+        // 문자열의 긴 식별자는 어절 보호가 끊을 자리를 없애 넘칠 수 있다
+        // (keep_all_ko.dart의 경고). 조건 분기로 덮을 문제가 아니라 원시 예외를
+        // 사용자 문구에서 걷어내야 하는 문제라, 그 작업에서 함께 지운다.
         messenger.showSnackBar(
           SnackBar(
-            content: Text(message),
+            content: KeepAllText(message),
             backgroundColor: scheme.error,
           ),
         );

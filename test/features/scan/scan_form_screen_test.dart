@@ -406,8 +406,10 @@ void main() {
       await pickExpiryDate(tester);
       await tapSave(tester);
 
+      // `find.text`로는 못 찾는다 — 스낵바가 [KeepAllText]라 표시본에 보이지 않는
+      // WORD JOINER가 섞인다. 그대로 두면 문구가 안 떠도 초록불이 된다.
       expect(
-        find.text('플랜 정보를 확인하지 못했어요. 네트워크 연결을 확인한 뒤 다시 시도해 주세요.'),
+        keepAllText('플랜 정보를 확인하지 못했어요. 네트워크 연결을 확인한 뒤 다시 시도해 주세요.'),
         findsOneWidget,
       );
 
@@ -469,7 +471,7 @@ void main() {
 
 /// 플랜 조회만 실패하는 auth 구현 — 오프라인(그리고 권한·서버 오류) 재현용.
 ///
-/// 계약이 이 조회를 서버 확인으로 못박아 캐시로 폴백하지 않으므로, 연결이 없으면
+/// Firebase 구현이 `Source.server`로 읽어 캐시로 폴백하지 않으므로, 연결이 없으면
 /// [AuthRepository.getPlan]은 [AuthException]을 던진다. 나머지 동작은 그대로
 /// 물려받는다 — 바꾸려는 것은 그 한 경로뿐이다.
 class _PlanUnavailableAuthRepository extends InMemoryAuthRepository {
