@@ -1,7 +1,7 @@
 /// 스캔/추가 페이지.
 ///
 /// 카메라 스캔 / 갤러리 불러오기 / 수동 입력 세 가지 경로를 제공한다.
-/// 세 경로는 최종적으로 모두 [GifticonForm]으로 이동한다.
+/// 세 경로는 최종적으로 모두 이 파일의 `_GifticonFormScreen`으로 이동한다.
 ///
 /// route: [AppRoutes.scan]
 library;
