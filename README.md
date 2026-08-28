@@ -64,8 +64,8 @@ lib/
 ### 사전 준비
 - [Flutter SDK](https://docs.flutter.dev/get-started/install) 3.27 이상 (Dart 3.6+) — `Color.withValues()` 등 3.27+ API 사용
 - 확인: `flutter doctor`
-- *(에뮬레이터로 띄울 경우 추가)* Node.js 20+ (`npm i -g firebase-tools`), **Java 11+** — Firestore 에뮬레이터 구동용
-- *(Android 기기로 띄울 경우 추가)* **JDK 17+** · Android SDK — 웹으로만 개발하면 필요 없습니다. [Android 기기로 띄우기](#-android-기기로-띄우기-실기기--avd) 참조
+- *(에뮬레이터로 띄울 경우 추가)* Node.js 20+ (`npm i -g firebase-tools`), **JDK 21+** — Firestore 에뮬레이터 구동용(`firebase-tools` 15부터 21 미만을 거부합니다)
+- *(Android 기기로 띄울 경우 추가)* **JDK 17+**(위 21+를 깔았다면 충족) · Android SDK — 웹으로만 개발하면 필요 없습니다. [Android 기기로 띄우기](#-android-기기로-띄우기-실기기--avd) 참조
 
 ### 설치 (처음 한 번만)
 
@@ -194,11 +194,11 @@ flutter run --dart-define=USE_FIREBASE=true       # dev 서버에 붙어 실기�
 
 | 항목 | 버전 | 왜 |
 |------|------|-----|
-| **JDK** | **17 이상** | Android 빌드가 Java 17을 타깃합니다([`android/app/build.gradle.kts`](android/app/build.gradle.kts)의 `jvmTarget = JVM_17`). 21도 됩니다 |
+| **JDK** | **21 이상** | Android 빌드는 Java 17을 타깃하지만([`android/app/build.gradle.kts`](android/app/build.gradle.kts)의 `jvmTarget = JVM_17`), 에뮬레이터가 21 이상을 요구하므로 **21로 맞추면 둘 다 됩니다** |
 | **Android SDK** | Platform 35 · Platform-Tools · Command-line Tools | `flutter doctor`의 *Android toolchain* 항목이 검사합니다 |
 | **Android Emulator + 시스템 이미지** | AVD로 띄울 때만 | 실기기만 쓸 거면 설치하지 마세요(수 GB 절약) |
 
-> ⚠️ **에뮬레이터용 `Java 11+` 와 Android 빌드용 `JDK 17+` 는 별개입니다.** 위 사전 준비의 "Java 11+"만 보고 딱 11을 설치하면 **에뮬레이터는 뜨는데 `flutter run`이 Gradle에서 실패합니다.** Android도 하실 거면 처음부터 17 이상을 설치하세요.
+> ⚠️ **JDK는 21 이상 하나로 맞추세요.** 예전에는 에뮬레이터용 `Java 11+`와 Android 빌드용 `JDK 17+`가 별개라 낮은 쪽만 깔면 한쪽이 깨졌는데, 지금은 `firebase-tools` 15가 **21 미만을 거부**해서 에뮬레이터 쪽 하한이 더 높습니다. 21 이상을 깔면 Android의 17+ 요구도 함께 만족합니다.
 
 #### Android SDK 위치 — `%LOCALAPPDATA%` 아래는 피하세요
 
@@ -450,7 +450,7 @@ flutter run -d chrome --dart-define=USE_FIREBASE=true
 
 실행 명령은 **[시작하기 › 실행 방법](#실행-방법)** 에 셸별로 정리돼 있습니다(bash · cmd · flutter). 여기서는 알아둘 점만 적습니다.
 
-- 준비물: **Java 11+** (Firestore 에뮬레이터가 Java로 동작), **Firebase CLI** (`npm i -g firebase-tools`)
+- 준비물: **JDK 21+** (Firestore 에뮬레이터가 Java로 동작 — `firebase-tools` 15부터 21 미만 거부), **Firebase CLI** (`npm i -g firebase-tools`)
 - 포트: Auth `9099` · Firestore `8080` · **Emulator UI `http://localhost:4000`**
 - 앱 콘솔에 `KeepCon: Firebase 에뮬레이터 연결됨 …` 이 찍히면 연결된 것입니다.
 - 저장된 계정·문서는 Emulator UI에서 눈으로 확인할 수 있고, 앱에서 만든 데이터가 즉시 반영됩니다.
