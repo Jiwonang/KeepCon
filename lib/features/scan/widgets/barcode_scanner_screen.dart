@@ -565,7 +565,7 @@ class _ScannerError extends StatelessWidget {
               const SizedBox(height: 16),
               // [reason]은 권한 거부 경우에만 줄바꿈을 품는다. 줄 단위로 나눠
               // 적용해 그 의도된 줄바꿈은 그대로 두고, 각 줄 안에서만 어절을
-              // 보호한다(다른 안내 문구와 같은 방식 — 가운데 정렬이라 갈라지면 더 어수선하다).
+              // 보호한다(안내 문구와 같은 처방 — 가운데 정렬이라 갈라지면 더 어수선하다).
               Text(
                 reason.split('\n').map(keepAllKo).join('\n'),
                 // 원문을 낭독·탐색용으로 남긴다([KeepAllText]와 같은 이유).
