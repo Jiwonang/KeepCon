@@ -1,3 +1,5 @@
+import 'dart:ui' as ui;
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -29,6 +31,28 @@ List<String> _layoutLines(String text, double maxWidth) {
   }
   painter.dispose();
   return lines;
+}
+
+/// [text]를 [maxWidth]로 접었을 때 **가장 긴 줄의 실제 폭**.
+///
+/// 엔진이 내놓는 줄 메트릭을 그대로 읽는다. 위 [_layoutLines]로 나눈 줄을 다시
+/// 재는 방식으로는 안 된다 — `getLineBoundary`는 **끊어도 되는 자리**를 기준으로
+/// 순회하므로, 엔진이 어절 한가운데를 강제로 끊은 자리는 재현되지 않는다. 그러면
+/// 긴 토큰이 한 줄로 돌아와 넘친 것처럼 보인다(이 함수를 그렇게 짰다가 정반대
+/// 결론을 낼 뻔했다).
+double _widestLine(String text, double maxWidth) {
+  final TextPainter painter = TextPainter(
+    text: TextSpan(text: text, style: const TextStyle(fontSize: 14)),
+    textDirection: TextDirection.ltr,
+  )..layout(maxWidth: maxWidth);
+
+  double widest = 0;
+  for (final ui.LineMetrics metrics in painter.computeLineMetrics()) {
+    if (metrics.width > widest) widest = metrics.width;
+  }
+
+  painter.dispose();
+  return widest;
 }
 
 /// 접힌 줄들이 원문의 어절을 **쪼개지 않고** 담고 있는가.
@@ -103,6 +127,29 @@ void main() {
 
       // 수정 후 — 끊기는 자리가 띄어쓰기로만 제한된다.
       expect(_keepsWordsWhole(sentence, kept), isTrue);
+    });
+
+    test('줄보다 긴 어절도 넘치지 않는다 — 엔진이 강제로 끊는다', () {
+      // 이 함수의 dartdoc은 오랫동안 "끊을 곳이 없어 넘친다"고 적어 두었고,
+      // PR #123이 그 문장을 근거로 원시 예외를 품는 문구에는 어절 보호를 걸 수
+      // 없다고 판단했다가 실측에서 뒤집혔다. 서술로만 남겨 두면 다시 갈라지므로
+      // 재어서 못박는다 — 이 테스트가 그 dartdoc의 근거다.
+      //
+      // 표본은 실제로 사용자에게 나갈 수 있는 모양이다(Firestore 예외 + 인덱스
+      // 생성 URL). 공백이 없는 토큰이 줄 폭보다 훨씬 길다.
+      const String withLongToken =
+          '저장에 실패했습니다: [cloud_firestore/failed-precondition] '
+          'https://console.firebase.google.com/v1/r/project/keepcon-dev/firestore/indexes?create_composite=ClFwcm9qZWN0cy9rZWVwY29u';
+
+      // 40px는 어떤 기기보다도 좁다 — 여기서도 안 넘치면 실제 폭에서는 안전하다.
+      // 272px는 320dp 기기의 스낵바 콘텐츠 폭이다.
+      for (final double width in <double>[40, 80, 272, 320]) {
+        expect(
+          _widestLine(keepAllKo(withLongToken), width),
+          lessThanOrEqualTo(width),
+          reason: '폭 ${width}px에서 넘쳤다',
+        );
+      }
     });
 
     test('폭이 달라져도 어절 단위가 유지된다', () {
