@@ -19,8 +19,8 @@ import 'package:keepcon/features/scan/services/ml_kit_service.dart';
 import 'package:keepcon/features/scan/state/gifticon_form_state.dart';
 import 'package:keepcon/features/scan/state/scan_target_group_state.dart';
 import 'package:keepcon/features/scan/util/keep_all_ko.dart';
-import 'package:keepcon/features/scan/util/save_result_message.dart';
 import 'package:keepcon/features/scan/util/price_input_formatter.dart';
+import 'package:keepcon/features/scan/util/save_result_message.dart';
 import 'package:keepcon/features/scan/widgets/barcode_scanner_screen.dart';
 import 'package:keepcon/shared/diagnostics/report_handled_failure.dart';
 import 'package:keepcon/shared/models/gifticon.dart';
@@ -466,6 +466,10 @@ class _ScanPageState extends ConsumerState<ScanPage> {
 /// 위해서다. 예전에는 '내 지갑' 타일만 인라인으로 있었고, 그룹 타일을 따로 짜면
 /// 테두리 두께·색·체크 아이콘이 조용히 어긋난다.
 class _TargetTile extends StatelessWidget {
+  /// 그룹 이모지 글자 크기. 형제 [_GroupTile]의 `_emojiSize`(30)와 다른 값이다 —
+  /// 저쪽은 격자 카드, 이쪽은 한 줄짜리 목록 타일이라 시각 무게가 다르다.
+  static const double _emojiSize = 22;
+
   const _TargetTile({
     required this.icon,
     required this.label,
@@ -507,11 +511,25 @@ class _TargetTile extends StatelessWidget {
         ),
         child: Row(
           children: <Widget>[
+            // 이모지는 [Text]라 글자 확대 설정을 따라 커지는데 [Icon]은
+            // `applyTextScaling` 기본값이 false라 그대로다. 그냥 두면 '내 지갑'
+            // 타일과 그룹 타일의 높이가 **모든 배율에서 어긋난다**(실측: 1.0배
+            // 64 vs 69, 2.0배 88 vs 101). 형제 [_GroupTile]이 같은 함정을 겪고
+            // doc에 적어 뒀다 — 오버플로 예외를 던지지 않아 눈으로만 보인다.
+            //
+            // 저쪽은 격자라 칸을 넓히는 쪽으로 풀었지만(`_iconExtentFor`), 여기는
+            // 유연한 Row라 **아이콘도 함께 확대**시키는 편이 단순하고, 라벨이
+            // 이미 확대되므로 셋의 배율이 한 축으로 모인다.
             if (hasEmoji)
-              Text(trimmedEmoji, style: const TextStyle(fontSize: 22))
+              // height: 1 — 없으면 기본 줄높이가 붙어 아이콘 갈래보다 크다.
+              Text(
+                trimmedEmoji,
+                style: const TextStyle(fontSize: _emojiSize, height: 1),
+              )
             else
               Icon(
                 icon,
+                applyTextScaling: true,
                 color: selected ? scheme.primary : scheme.onSurfaceVariant,
               ),
             const SizedBox(width: 12),
@@ -938,6 +956,7 @@ class __GifticonFormScreenState extends ConsumerState<_GifticonFormScreen> {
       case ScanSubmitSuccess(
           :final String? shareError,
           :final String? sharedGroupName,
+          :final bool sharedToGroup,
         ):
         messenger.showSnackBar(
           SnackBar(
@@ -945,6 +964,9 @@ class __GifticonFormScreenState extends ConsumerState<_GifticonFormScreen> {
               saveResultMessage(
                 shareError: shareError,
                 sharedGroupName: sharedGroupName,
+                // 이름을 못 읽어도 공유됐다는 사실은 알려야 한다 — 안 그러면
+                // 지갑 저장과 같은 문구가 되어 이 화면이 고치려던 상태로 돌아간다.
+                sharedToGroup: sharedToGroup,
               ),
             ),
             // 공유 실패는 저장 성공과 함께 오므로 놓치기 쉽다. 읽을 시간을 준다.

@@ -48,6 +48,28 @@ class _NameLookupFailingShareRepository extends InMemoryShareRepository {
       Stream<List<Group>>.value(const <Group>[]);
 }
 
+/// 이름 조회가 **영영 응답하지 않는** 저장소 — 5초 상한 자체를 검증한다.
+///
+/// 위 [_NameLookupFailingShareRepository]는 동기 빈 방출이라 `orElse` 갈래만
+/// 치고 `.timeout()`을 한 번도 발화시키지 않는다. 그래서 상한을 지워도 테스트가
+/// 전부 통과했다(리뷰에서 뮤테이션으로 확인됐다). 상한이 지키는 것은 화면이
+/// `ScanSubmitInProgress`로 영영 멈추는 것 — 저장 버튼이 잠긴 채다 — 이라
+/// 무방비로 둘 수 없다.
+class _NameLookupHangingShareRepository extends InMemoryShareRepository {
+  _NameLookupHangingShareRepository({
+    required super.authRepository,
+    required super.gifticonRepository,
+  });
+
+  /// 하루에 한 번 방출 = 테스트 시간 안에서는 무응답이고, 닫히지도 않는다.
+  @override
+  Stream<List<Group>> watchGroups(String userId) =>
+      Stream<List<Group>>.periodic(
+        const Duration(days: 1),
+        (_) => const <Group>[],
+      );
+}
+
 void main() {
   final String myId = InMemoryAuthRepository.defaultUser.id;
 
@@ -305,16 +327,70 @@ void main() {
       expect(success.sharedGroupName, isNull);
       expect(success.sharedToGroup, isTrue);
 
-      // 그래서 사용자가 보는 문구도 '공유 실패'가 아니다.
-      expect(
-        saveResultMessage(
-          shareError: success.shareError,
-          sharedGroupName: success.sharedGroupName,
-        ),
-        // 어간으로 본다 — 2번 지적(안내 경로 문구)으로 이 문장이 바뀌어도
-        // 이 테스트가 지키려는 것("공유 실패라고 말하지 않는다")은 그대로다.
-        isNot(contains('공유하지 못했')),
+      // 그래서 사용자가 보는 문구는 '공유 실패'가 아니고, **지갑 저장과도
+      // 달라야 한다** — 같으면 자기가 고른 그룹에 들어갔는지 알 수 없다.
+      final String message = saveResultMessage(
+        shareError: success.shareError,
+        sharedGroupName: success.sharedGroupName,
+        sharedToGroup: success.sharedToGroup,
       );
+
+      // 어간으로 본다 — 안내 경로 문구가 바뀌어도 이 테스트가 지키려는 것
+      // ("공유 실패라고 말하지 않는다")은 그대로다.
+      expect(message, isNot(contains('공유하지 못했')));
+      // 공유됐다는 사실은 말해야 한다. 이 단언이 없으면 지갑 문구도 통과한다.
+      expect(message, contains('공유'));
+      expect(
+        message,
+        isNot(saveResultMessage(shareError: null, sharedGroupName: null)),
+      );
+    });
+
+    test('이름 조회가 응답하지 않아도 5초 상한이 저장을 끝내 준다', () async {
+      // 상한이 없으면 `.first`가 영영 기다려 폼이 ScanSubmitInProgress에 갇힌다
+      // (저장 버튼도 잠긴 채). 그 상한을 지우면 이 테스트는 통과가 아니라
+      // **프레임워크 타임아웃으로 죽는다** — 그게 이 테스트의 존재 이유다.
+      //
+      // ⚠️ 실시간 5초를 그대로 쓴다. `testWidgets` + `tester.pump(6초)`로 가짜
+      // 시계를 넘기는 방법을 먼저 시도했는데 **테스트가 그대로 멈췄다**(300초
+      // 무응답 확인). 여기서 기다리는 것은 위젯 프레임이 아니라 저장소 스트림이라
+      // 바인딩의 가짜 시계가 닿지 않는다. 느린 대신 확실한 쪽을 택했다.
+      final InMemoryAuthRepository auth = InMemoryAuthRepository();
+      final InMemoryGifticonRepository gifticons = InMemoryGifticonRepository();
+      final _NameLookupHangingShareRepository repo =
+          _NameLookupHangingShareRepository(
+        authRepository: auth,
+        gifticonRepository: gifticons,
+      );
+
+      addTearDown(() {
+        repo.dispose();
+        gifticons.dispose();
+        auth.dispose();
+      });
+
+      final ProviderContainer container = ProviderContainer(
+        overrides: <Override>[
+          authRepositoryProvider.overrideWithValue(auth),
+          gifticonRepositoryProvider.overrideWithValue(gifticons),
+          shareRepositoryProvider.overrideWithValue(repo),
+          scanTargetGroupsProvider.overrideWith((Ref ref) => dummyGroups()),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      final Gifticon? saved =
+          await saveOnce(container, targetGroupId: 'g_family');
+
+      expect(saved, isNotNull);
+
+      final ScanSubmitSuccess success = container
+          .read(gifticonFormControllerProvider)
+          .submit as ScanSubmitSuccess;
+
+      // 상한에 걸린 것은 이름 조회일 뿐 — 공유 실패가 아니다.
+      expect(success.shareError, isNull);
+      expect(success.sharedGroupName, isNull);
     });
   });
 

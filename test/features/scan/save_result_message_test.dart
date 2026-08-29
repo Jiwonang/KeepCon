@@ -79,16 +79,38 @@ void main() {
       );
     });
 
-    test('공유는 됐는데 그룹 이름을 못 읽으면 기본 문구로 떨어진다', () {
+    test('공유는 됐는데 그룹 이름을 못 읽으면 이름 없이 공유를 알린다', () {
       // 이름 조회는 별도 스트림이라 타임아웃될 수 있다
       // (`gifticon_form_state.dart`가 5초 상한을 건다). 그때 `null 그룹에
       // 공유했어요` 같은 문구가 나가면 안 된다.
       final String message = saveResultMessage(
         shareError: null,
         sharedGroupName: null,
+        sharedToGroup: true,
       );
 
       expect(message, isNot(contains('null')));
+      expect(message, '그룹에 공유했어요.');
+    });
+
+    test('이름을 못 읽은 공유와 지갑 저장은 서로 다른 문구다', () {
+      // 같으면 사용자는 자기가 고른 그룹에 실제로 들어갔는지 알 수 없다 —
+      // 이 파일이 없애려던 바로 그 상태다. 게다가 확인하러 가도 막다른 길이다:
+      // 이미 공유된 기프티콘은 `unsharedGifticonsProvider`가 후보에서 빼므로
+      // 공유 탭에는 "공유할 수 있는 기프티콘이 없어요."만 뜬다.
+      final String sharedNoName = saveResultMessage(
+        shareError: null,
+        sharedGroupName: null,
+        sharedToGroup: true,
+      );
+      final String wallet = saveResultMessage(
+        shareError: null,
+        sharedGroupName: null,
+      );
+
+      expect(sharedNoName, isNot(wallet));
+      expect(sharedNoName, contains('공유'));
+      expect(wallet, isNot(contains('공유')));
     });
   });
 }

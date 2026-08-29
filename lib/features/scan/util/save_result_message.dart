@@ -24,13 +24,20 @@ library;
 /// 그 시트의 후보는 "아직 어느 그룹에도 공유되지 않은 내 기프티콘"이라, 공유가
 /// 실패한 이 기프티콘은 후보에 포함된다(경로가 실제로 열려 있다).
 ///
-/// `sharedGroupName`이 null인데 `shareError`도 null이면 지갑 저장이다
-/// (`gifticon_form_state.dart`는 대상 그룹이 있을 때만 공유를 시도한다).
-/// 공유는 성공했는데 그룹 이름을 못 읽은 경우도 이름 없이 안내한다 — 이름
-/// 조회는 별도 스트림이라 타임아웃될 수 있다.
+/// 갈래를 가르는 것은 세 값이다. `shareError`가 있으면 실패, 없고
+/// `sharedGroupName`이 있으면 이름까지 아는 성공, 이름을 못 읽었으면
+/// `sharedToGroup`이 지갑 저장과 갈라 준다.
+///
+/// ⚠️ `sharedToGroup`이 없으면 **공유 성공(이름 X)과 지갑 저장이 같은 문구가
+/// 된다.** 그것은 이 파일이 없애려던 바로 그 상태다 — 사용자는 자기가 고른
+/// 그룹에 실제로 들어갔는지 알 수 없다. 게다가 확인하러 가도 막다른 길이다:
+/// 그 기프티콘은 이미 공유돼 있어 `unsharedGifticonsProvider`가 후보에서
+/// 제외하므로, 공유 탭에는 "공유할 수 있는 기프티콘이 없어요."만 뜬다.
+/// (공유가 **실패**한 경우는 반대다 — 어디에도 안 실려 있어 후보에 포함된다.)
 String saveResultMessage({
   required String? shareError,
   required String? sharedGroupName,
+  bool sharedToGroup = false,
 }) {
   if (shareError != null) {
     return '기프티콘은 저장했지만 그룹에 공유하지 못했어요. '
@@ -40,6 +47,10 @@ String saveResultMessage({
   if (sharedGroupName != null) {
     return '$sharedGroupName 그룹에 공유했어요.';
   }
+
+  // 이름 조회만 실패했다(별도 스트림이라 5초 상한에 걸릴 수 있다). 공유됐다는
+  // 사실은 확실하므로 그것까지 지우지 않는다 — 어느 그룹인지만 뺀다.
+  if (sharedToGroup) return '그룹에 공유했어요.';
 
   return '기프티콘이 성공적으로 저장되었습니다.';
 }
