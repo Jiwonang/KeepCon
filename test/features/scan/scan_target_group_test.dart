@@ -5,6 +5,8 @@
 /// 2. 저장(addGifticon) 성공 후, 대상 그룹이 있으면 `ShareRepository.shareGifticon`이
 ///    호출되고 '내 지갑'이면 호출되지 않는다.
 /// 3. 그룹 공유가 실패해도(예: 사라진 그룹) 저장은 성공으로 유지된다(부분 실패 정책).
+///    반대로 **공유는 성공했는데 그룹 이름 조회만** 실패한 경우는 공유 실패가
+///    아니다 — 그렇게 알리면 사용자가 성공한 공유를 다시 해서 중복이 생긴다.
 /// 4. **선택 UI** — `내 지갑` 아래에 내 그룹 타일이 그려지고, 고르면 그 groupId가
 ///    폼 세션으로 넘어가며, 목록에서 사라진 그룹은 '내 지갑'으로 되돌아간다.
 /// 5. **저장 결과 안내** — 지갑/그룹 공유가 스낵바 문구로 구분된다. 문구 조립 자체는
@@ -18,12 +20,33 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:keepcon/features/scan/scan_page.dart';
 import 'package:keepcon/features/scan/state/gifticon_form_state.dart';
 import 'package:keepcon/features/scan/state/scan_target_group_state.dart';
+import 'package:keepcon/features/scan/util/save_result_message.dart';
 import 'package:keepcon/shared/models/gifticon.dart';
 import 'package:keepcon/shared/models/group.dart';
 import 'package:keepcon/shared/models/share.dart';
 import 'package:keepcon/shared/providers/repositories.dart';
 import 'package:keepcon/shared/repositories/impl/in_memory_auth_repository.dart';
+import 'package:keepcon/shared/repositories/impl/in_memory_gifticon_repository.dart';
+import 'package:keepcon/shared/repositories/impl/in_memory_share_repository.dart';
 import 'package:keepcon/shared/theme/app_theme.dart';
+
+/// 공유는 성공시키되 **그룹 이름 조회만** 실패시키는 저장소.
+///
+/// 이름 조회는 `watchGroups`의 첫 방출에서 대상 그룹을 찾는다. 실제로는 느린
+/// 네트워크(5초 상한)나 그 그룹이 아직 실리지 않은 첫 방출로 실패할 수 있는데,
+/// 그 시점에는 **공유가 이미 끝나 있다.** 그것을 '공유 실패'로 알리면 사용자가
+/// 성공한 공유를 다시 해서 같은 기프티콘을 두 번 넣는다.
+class _NameLookupFailingShareRepository extends InMemoryShareRepository {
+  _NameLookupFailingShareRepository({
+    required super.authRepository,
+    required super.gifticonRepository,
+  });
+
+  /// 대상 그룹이 실리지 않은 첫 방출. `shareGifticon`은 계약 구현 그대로 성공한다.
+  @override
+  Stream<List<Group>> watchGroups(String userId) =>
+      Stream<List<Group>>.value(const <Group>[]);
+}
 
 void main() {
   final String myId = InMemoryAuthRepository.defaultUser.id;
@@ -232,6 +255,66 @@ void main() {
       expect(success.sharedToGroup, isFalse);
       expect(success.sharedGroupId, 'g_gone');
       expect(success.shareError, isNotNull);
+    });
+
+    test('공유는 성공했는데 그룹 이름만 못 읽으면 공유 실패로 알리지 않는다', () async {
+      final InMemoryAuthRepository auth = InMemoryAuthRepository();
+      final InMemoryGifticonRepository gifticons = InMemoryGifticonRepository();
+      final _NameLookupFailingShareRepository repo =
+          _NameLookupFailingShareRepository(
+        authRepository: auth,
+        gifticonRepository: gifticons,
+      );
+
+      addTearDown(() {
+        repo.dispose();
+        gifticons.dispose();
+        auth.dispose();
+      });
+
+      final ProviderContainer container = ProviderContainer(
+        overrides: <Override>[
+          authRepositoryProvider.overrideWithValue(auth),
+          gifticonRepositoryProvider.overrideWithValue(gifticons),
+          shareRepositoryProvider.overrideWithValue(repo),
+          scanTargetGroupsProvider.overrideWith((Ref ref) => dummyGroups()),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      final Gifticon? saved =
+          await saveOnce(container, targetGroupId: 'g_family');
+
+      expect(saved, isNotNull);
+
+      // 공유는 **실제로 일어났다** — 이 사실이 이 테스트의 전제다.
+      final List<SharedGifticon> shared =
+          await repo.getSharedGifticons('g_family');
+      expect(
+        shared.any((SharedGifticon s) => s.gifticonId == saved!.id),
+        isTrue,
+      );
+
+      final ScanSubmitSuccess success = container
+          .read(gifticonFormControllerProvider)
+          .submit as ScanSubmitSuccess;
+
+      // 핵심: 이름을 못 읽었을 뿐이므로 shareError는 비어 있어야 한다.
+      // (예전에는 이름 조회가 공유와 한 try에 묶여 있어 여기가 isNotNull이었다.)
+      expect(success.shareError, isNull);
+      expect(success.sharedGroupName, isNull);
+      expect(success.sharedToGroup, isTrue);
+
+      // 그래서 사용자가 보는 문구도 '공유 실패'가 아니다.
+      expect(
+        saveResultMessage(
+          shareError: success.shareError,
+          sharedGroupName: success.sharedGroupName,
+        ),
+        // 어간으로 본다 — 2번 지적(안내 경로 문구)으로 이 문장이 바뀌어도
+        // 이 테스트가 지키려는 것("공유 실패라고 말하지 않는다")은 그대로다.
+        isNot(contains('공유하지 못했')),
+      );
     });
   });
 

@@ -453,33 +453,48 @@ class GifticonFormController extends StateNotifier<GifticonFormState> {
       String? sharedGroupName;
 
       if (saved.targetGroupId != null) {
+        final shareRepo = _ref.read(shareRepositoryProvider);
+
+        // ① 공유 자체. **여기서 실패해야만 '공유 실패'다.**
         try {
-          final shareRepo = _ref.read(shareRepositoryProvider);
           await shareRepo.shareGifticon(
             groupId: saved.targetGroupId!,
             gifticon: saved,
           );
-
-          // 여기도 상한을 건다. 이 지점은 addGifticon이 **이미 성공한 뒤**라,
-          // 스트림이 방출하지 않으면 저장은 됐는데 화면만 ScanSubmitInProgress로
-          // 영영 멈춘다(저장 버튼도 잠긴 채). 예외는 아래 catch가 공유 실패로
-          // 흡수하므로 사용자 경로로 새지 않는다.
-          final groups = await shareRepo
-              .watchGroups(currentUser.id)
-              .timeout(const Duration(seconds: 5))
-              .first;
-          final targetGroup = groups.firstWhere(
-            (g) => g.id == saved.targetGroupId,
-            orElse: () => throw Exception('지정된 그룹을 찾을 수 없습니다.'),
-          );
-          sharedGroupName = targetGroup.name;
         } catch (e, s) {
-          // ⚠️ 이 문자열은 지금 **어디에서도 표시되지 않는다** — 소비자는
-          // `ScanSubmitSuccess.sharedToGroup`뿐이라 null 여부만 본다(전수 확인:
-          // `shareError` 참조가 이 파일 밖에 없다). 그래도 원시 예외를 담아 두면
-          // 표시하기 시작하는 순간 그대로 새어 나가므로 프로즈로 둔다.
+          // ⚠️ 이 문자열은 스낵바에 **그대로 표시된다**(`scan_page.dart`가
+          // `saveResultMessage`로 읽는다). 그래서 원시 예외를 담으면 안 된다 —
+          // 저장소 예외에는 그룹·기프티콘 id가 실려 사용자 화면으로 샌다.
           _reportFailure('shareGifticon', e, s);
           shareError = '그룹에 공유하지 못했어요.';
+        }
+
+        // ② 그룹 이름 조회. 공유가 **이미 끝난 뒤의 표시용 조회**라, 여기서
+        // 실패한 것은 공유 실패가 아니다.
+        //
+        // 예전에는 ①과 한 try에 묶여 있어서 스트림이 5초를 넘기거나 첫 방출에
+        // 그 그룹이 없기만 해도 "공유하지 못했어요"가 떴다 — 공유는 성공했는데.
+        // 사용자는 그 말을 믿고 재공유해 같은 기프티콘을 두 번 넣게 된다.
+        // 이름을 못 읽으면 `sharedGroupName`을 null로 남기고, 화면은 그룹 이름
+        // 없는 일반 성공 문구로 떨어진다(`save_result_message.dart` doc 참조).
+        if (shareError == null) {
+          // 상한을 거는 이유: 이 지점은 addGifticon이 **이미 성공한 뒤**라,
+          // 스트림이 방출하지 않으면 저장은 됐는데 화면만 ScanSubmitInProgress로
+          // 영영 멈춘다(저장 버튼도 잠긴 채).
+          try {
+            final groups = await shareRepo
+                .watchGroups(currentUser.id)
+                .timeout(const Duration(seconds: 5))
+                .first;
+            final targetGroup = groups.firstWhere(
+              (g) => g.id == saved.targetGroupId,
+              orElse: () => throw Exception('지정된 그룹을 찾을 수 없습니다.'),
+            );
+            sharedGroupName = targetGroup.name;
+          } catch (e, s) {
+            // 공유는 성공했다. 이름만 비운 채 진행한다.
+            _reportFailure('resolveSharedGroupName', e, s);
+          }
         }
       }
 
