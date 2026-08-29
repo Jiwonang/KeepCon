@@ -53,12 +53,18 @@ void main() {
   });
 
   group('노이즈 줄 제거', () {
-    test('상단 상태바 시각을 브랜드로 쓰지 않는다', () {
-      final GifticonOcrResult result = parser.parse(
-        '9:27\n감성커피\n아메리카노',
-      );
+    test('상단 상태바 시각을 브랜드로 쓰지 않는다 — 2자리·3자리 오인식 모두', () {
+      // 실제 OCR은 초 자리가 딸려 들어와 `9:274`처럼 **세 자리**로 읽기도 한다
+      // (gifticon_ocr_fixture_test.dart의 카카오톡 원문이 그 사례다).
+      // 정규식이 `\d{2,3}`인 이유이고, 두 자리만 테스트하면 세 자리 분기가 비어
+      // `\d{2}`로 좁혀도 스캔 테스트가 전부 통과한다.
+      for (final String clock in <String>['9:27', '09:27', '9:274']) {
+        final GifticonOcrResult result = parser.parse(
+          '$clock\n감성커피\n아메리카노',
+        );
 
-      expect(result.brand, '감성커피');
+        expect(result.brand, '감성커피', reason: '시각 표기: $clock');
+      }
     });
 
     test('"○○의 선물" 보낸 사람 줄을 브랜드로 쓰지 않는다', () {
