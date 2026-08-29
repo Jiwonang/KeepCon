@@ -53,6 +53,23 @@ void main() {
       expect(message, contains('다시 공유'));
     });
 
+    test('재공유 경로로 실재하는 곳을 가리킨다', () {
+      // 처음에는 '내 지갑에서 다시 공유할 수 있어요'라고 적었다. 그런데 내 지갑
+      // (`lib/features/main`)에는 공유 액션이 **없다** — 그 화면은 오히려
+      // "공유 탭에서 해주세요"라고 안내한다. 기존 기프티콘의 재공유 진입점은
+      // 공유 탭 → 그룹 상세의 '공유' pill 하나뿐이다.
+      //
+      // 없는 경로로 안내하면 사용자는 시키는 대로 하고도 아무것도 찾지 못한다.
+      // 다음 행동을 알려 주는 문구일수록 그 행동이 실재해야 한다.
+      final String message = saveResultMessage(
+        shareError: '그룹에 공유하지 못했어요.',
+        sharedGroupName: null,
+      );
+
+      expect(message, contains('공유 탭'));
+      expect(message, isNot(contains('내 지갑')));
+    });
+
     test('공유 실패가 그룹 이름보다 우선한다', () {
       // 이름을 읽은 뒤에 공유가 실패하는 순서는 없지만, 둘이 함께 오면
       // **실패를 알리는 쪽**이 맞다 — 성공했다고 말하면 거짓이 된다.
