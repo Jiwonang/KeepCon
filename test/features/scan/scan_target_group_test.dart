@@ -232,6 +232,12 @@ void main() {
   });
 
   group('_GroupSelector 위젯', () {
+    /// 화면이 보는 그룹 목록. 테스트 도중 바꿀 수 있어야 "그룹이 사라지는" 상황을
+    /// 재현할 수 있다(`updateOverrides`는 이미 마운트된 화면을 다시 그리지 않았다).
+    late List<Group> visibleGroups;
+
+    setUp(() => visibleGroups = dummyGroups());
+
     Future<ProviderContainer> pumpScanPage(WidgetTester tester) async {
       tester.view.physicalSize = const Size(1200, 2600);
       tester.view.devicePixelRatio = 1.0;
@@ -239,7 +245,12 @@ void main() {
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
 
-      final ProviderContainer container = makeContainer();
+      final ProviderContainer container = ProviderContainer(
+        overrides: <Override>[
+          scanTargetGroupsProvider.overrideWith((Ref ref) => visibleGroups),
+        ],
+      );
+      addTearDown(container.dispose);
 
       await tester.pumpWidget(
         UncontrolledProviderScope(
@@ -258,18 +269,61 @@ void main() {
 
     testWidgets("'내 지갑'과 실제 그룹 타일이 함께 표시된다", (WidgetTester tester) async {
       await pumpScanPage(tester);
-      final List<Group> groups = dummyGroups();
 
       expect(find.text('내 지갑'), findsWidgets);
 
-      for (final Group g in groups) {
-        expect(find.text(g.name), findsNothing);
+      // ⚠️ 이 단언은 예전에 `findsNothing`이었다 — 이름은 "함께 표시된다"인데
+      // 실제로는 그룹 타일이 **아예 그려지지 않는 상태**를 고정하고 있었다.
+      // 그룹 선택 UI가 미구현이었기 때문이다.
+      for (final Group g in dummyGroups()) {
+        expect(find.text(g.name), findsOneWidget, reason: '그룹 타일: ${g.name}');
       }
     });
 
     testWidgets('그룹 타일을 고르면 폼 세션에 그 groupId가 전달된다',
         (WidgetTester tester) async {
-      await pumpScanPage(tester);
+      // ⚠️ 이 테스트는 예전에 **본문이 비어 있었다**(pump만 하고 단언 없음).
+      final ProviderContainer container = await pumpScanPage(tester);
+      final Group target = dummyGroups().first;
+
+      await tester.tap(find.text(target.name));
+      await tester.pumpAndSettle();
+
+      // 선택은 폼을 열 때 세션으로 넘어간다 — 수동 입력이 그 경로 중 백엔드를
+      // 타지 않는 유일한 것이라 여기서 쓴다.
+      await tester.tap(find.text('직접 입력하기'));
+      await tester.pumpAndSettle();
+
+      expect(
+        container.read(gifticonFormControllerProvider).targetGroupId,
+        target.id,
+      );
+    });
+
+    testWidgets('목록에서 사라진 그룹을 골라 뒀으면 내 지갑으로 되돌린다', (WidgetTester tester) async {
+      // 다른 기기에서 탈퇴·강퇴됐거나 그룹 스트림이 실패해 목록이 빈 경우.
+      // 저장해 둔 id를 그대로 쓰면 **화면에는 아무것도 선택돼 있지 않은데 저장은
+      // 그 그룹을 노려**, 표시되지 않는 부분 실패로 빠진다.
+      final ProviderContainer container = await pumpScanPage(tester);
+      final Group target = dummyGroups().first;
+
+      await tester.tap(find.text(target.name));
+      await tester.pumpAndSettle();
+
+      // 그룹이 목록에서 사라진다.
+      visibleGroups = const <Group>[];
+      container.invalidate(scanTargetGroupsProvider);
+      await tester.pumpAndSettle();
+
+      expect(find.text(target.name), findsNothing);
+
+      await tester.tap(find.text('직접 입력하기'));
+      await tester.pumpAndSettle();
+
+      expect(
+        container.read(gifticonFormControllerProvider).targetGroupId,
+        isNull,
+      );
     });
 
     testWidgets("'내 지갑'을 고르면 대상 그룹이 없다", (WidgetTester tester) async {
