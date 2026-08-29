@@ -94,6 +94,18 @@ BarcodeCapture _capture(List<String?> raws) =>
     BarcodeCapture(barcodes: raws.map(_barcode).toList());
 
 void main() {
+  /// 가짜 플랫폼은 **모든 그룹에** 설치한다.
+  ///
+  /// [MobileScannerPlatform.instance]는 전역이라, 한 그룹에만 설치하면 그 그룹이
+  /// 남긴 상태에 다른 그룹이 의존한다 — 단독 실행하면 진짜 플랫폼을 쓰고, 전체
+  /// 실행하면 순서에 따라 결과가 달라진다. 매번 새 인스턴스로 덮어 그 의존을 끊는다.
+  late _FakeScannerPlatform fake;
+
+  setUp(() {
+    fake = _FakeScannerPlatform();
+    MobileScannerPlatform.instance = fake;
+  });
+
   group('firstUsableBarcode — 인식 결과에서 쓸 값 고르기', () {
     test('빈 목록이면 null', () {
       expect(firstUsableBarcode(_capture(<String?>[])), isNull);
@@ -138,13 +150,6 @@ void main() {
   });
 
   group('_onDetect — 가짜 플랫폼으로 인식 결과를 밀어 넣는다', () {
-    late _FakeScannerPlatform fake;
-
-    setUp(() {
-      fake = _FakeScannerPlatform();
-      MobileScannerPlatform.instance = fake;
-    });
-
     /// 앞에 쓸 수 없는 것이 섞인 프레임 — **선별이 실제로 돌아야** 통과한다.
     ///
     /// 유효값 하나만 담은 프레임으로는 `barcodes.first.rawValue` 뮤테이션과
