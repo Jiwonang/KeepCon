@@ -56,20 +56,24 @@
 /// **픽스처 무결성 트립와이어**를 갖고 있어, 누가 상수를 조용히 편집하면 그쪽이
 /// 먼저 울기 때문이다.
 ///
-///   - 독립 회귀 가드 9건: 종합 4건(카카오 상세·기프티쇼·노랑통닭·도미노) ·
-///     금액 인과 1건 · 상품명 시작 1건 · 주문번호 배제 1건 · 무결성 2건
-///   - 종합 테스트에 종속(문서 + 트립와이어) 8건: 도장 · 시계 · 유효기간 ·
-///     사전 · 라벨분리 · 로고 · 구두점반증 · 라벨한줄
+/// 기준은 **파서 뮤테이션으로 단독 실패할 수 있는가** 하나다.
 ///
-/// 뮤테이션으로 확인한 분류다. 픽스처 원문만으로는 브랜드가 0번 줄이라 로고·
-/// 숫자열의 차례가 오지 않아 배제가 검증되지 않는데, **주문번호 쪽은 같은 토큰을
-/// 브랜드 후보보다 앞에 둔 입력을 더해** 실제 가드를 물게 했다(`_looksLikeBarcode`를
-/// 끄면 그 테스트가 죽는다). 로고 쪽은 그렇게 하지 못한다 — 배제 규칙이 아예
-/// 없어서, 앞에 두면 그대로 브랜드가 된다. 그 입력을 고정하면 결함을 계약으로
-/// 승격시키므로 사실만 남겼다.
+///   - 독립 회귀 가드 7건: 종합 4건(카카오 상세·기프티쇼·노랑통닭·도미노) ·
+///     금액 인과 1건 · 상품명 시작 1건 · 주문번호 배제 1건
+///   - 종합 테스트에 종속(문서) 7건: 도장 · 시계 · 유효기간 · 사전 ·
+///     라벨분리 · 로고 · 라벨한줄
+///   - 파서를 부르지 않는 **픽스처 트립와이어 3건**: 구두점반증 · 무결성 2건 —
+///     파서 뮤테이션으로는 절대 죽지 않고, 픽스처를 편집하면 **단독으로** 운다
+///     (실측: 도미노의 잘린 두 줄을 합치면 구두점반증 1건만 실패한다).
 ///
-/// `구두점반증`은 파서가 아니라 **픽스처 상수 자체**를 고정하므로 설계상 파서
-/// 뮤테이션으로 죽지 않는다.
+/// 픽스처 원문만으로는 브랜드가 0번 줄이라 로고·숫자열의 차례가 오지 않아 배제가
+/// 검증되지 않는다. **주문번호 쪽은 같은 토큰을 브랜드 후보보다 앞에 둔 입력을
+/// 더해 가드를 격리해** 물게 했다 — 새 커버리지는 아니다. 같은 가드·같은 폴백
+/// 경로를 `gifticon_ocr_brand_product_test.dart`가 이미 고정하고 있고, 여기서
+/// 더하는 것은 그 파일이 네 가드를 한 입력에 섞어 놓아 잃은 **분해능**이다.
+///
+/// 로고 쪽은 그렇게 하지 못한다 — 배제 규칙이 아예 없어서 앞에 두면 그대로
+/// 브랜드가 된다. 그 입력을 고정하면 결함을 계약으로 승격시키므로 사실만 남겼다.
 ///
 /// 도미노 쪽 만료일 단언도 날짜 뮤테이션으로 죽지 않는다 — `2016.02.12`는
 /// `fullDatePattern`을 꺼도 `shortDatePattern`(`16.02.12` → 2000+16)이 **같은
@@ -164,6 +168,11 @@ const String _kakaoBarcodeCardOcr = '노랑통닭\n'
 /// 로고에서 `Demins's` / `Pirza`(Domino's Pizza 오인식)가 텍스트로 읽히고,
 /// `교환처`의 값은 브랜드가 `도미노파자`로 오인식돼 사전에 걸리지 않는다 —
 /// 사전 매칭이 성공하는 것은 0번 줄 하나뿐이다.
+///
+/// 1자 줄 `L`(피자 사이즈)도 섞인다 — **어떤 가드도 길이를 보지 않아** 앞 후보가
+/// 없으면 그대로 상품명이 된다(실측: `parse('노랑통닭\nL\n치킨세트')` → product=`L`).
+/// 로고도 같다 — `parse("Demins's\n노랑통닭\n치킨세트")` → brand=`Demins's`.
+/// 노랑통닭의 `pepsi`와 합쳐 **로고 비대칭이 두 픽스처에서 확인된 셈**이다.
 const String _dominoBarcodeCardOcr = '도미노피자 웹사이트\n'
     '슈퍼슈프림(오리지\n'
     '널)L+갈릭&윙스+콜라\n'
@@ -175,6 +184,19 @@ const String _dominoBarcodeCardOcr = '도미노피자 웹사이트\n'
     '교환처 :도미노파자 웹사이트\n'
     '유효기간 :2016.02.12\n'
     '주문번호 :13572468';
+
+/// 픽스처 정본. 새 픽스처를 더할 때 **여기 한 줄만** 늘리면 두 무결성 테스트가
+/// 함께 따라온다.
+///
+/// 예전에는 상수 목록을 OR 사슬·`fixtures` 맵 두 곳에 손으로 유지했는데, 하나만
+/// 빠뜨리면 "픽스처마다 서로 다른 숫자열을 쓴다"가 **조용히 통과**했다(리뷰에서
+/// 5번째 픽스처로 재현 — 남의 주문번호를 그대로 심어도 17/17 green이었다).
+const Map<String, String> _fixtures = <String, String>{
+  'kakaoGift': _kakaoGiftOcr,
+  'giftishow': _giftishowOcr,
+  'barcodeCard': _kakaoBarcodeCardOcr,
+  'domino': _dominoBarcodeCardOcr,
+};
 
 void main() {
   const GifticonOcrParser parser = GifticonOcrParser();
@@ -338,6 +360,12 @@ void main() {
       // 않는다 — 그것만으로는 배제를 증명하지 못한다(`_looksLikeBarcode`를
       // 꺼도 통과한다). 그래서 **같은 토큰을 브랜드 후보보다 앞에 둔 입력**으로
       // 실제 배제를 건다. `노랑통닭`은 사전 밖이라 폴백 경로를 탄다.
+      //
+      // ⚠️ 새 커버리지는 아니다 — 같은 가드·같은 폴백 경로를
+      // gifticon_ocr_brand_product_test.dart의 `금액·날짜·바코드·유효기간 줄은
+      // 브랜드 후보가 아니다`가 이미 고정한다(뮤테이션 시 셋이 함께 죽는다).
+      // 여기서 더하는 것은 **격리**다: 저쪽은 네 가드를 한 입력에 섞어 놓아
+      // 어느 가드가 죽었는지 실패 이름만으로 가려지지 않는다.
       expect(
         parser.parse('1029384756\n노랑통닭\n치킨세트').brand,
         '노랑통닭',
@@ -381,7 +409,9 @@ void main() {
       // 없다는 뜻이고, 날짜가 두 배치 모두에서 나오는 것은 `_extractExpiryDate`가
       // 라벨과의 인접성이 아니라 **원문 전체의 날짜 모양**을 보기 때문이다.
       expect(_dominoBarcodeCardOcr.contains('유효기간 :2016.02.12'), isTrue);
-      expect(_kakaoBarcodeCardOcr.contains('유효기간\npepsi'), isTrue);
+      // 앞 픽스처(노랑통닭) 쪽 트립와이어는 `라벨 칸과 값 칸이 분리돼도…`가
+      // 정본이다. 여기 복제하면 노랑통닭 상수를 손댈 때 서로 다른 이유로 둘이
+      // 함께 울어 어느 쪽이 정본인지 알 수 없게 된다.
 
       expect(
         parser.parse(_dominoBarcodeCardOcr).expiryDate,
@@ -403,12 +433,7 @@ void main() {
         '8805 5566 7788', // 도미노 바코드 카드 — 바코드
         '13572468', // 도미노 바코드 카드 — 주문번호
       ]) {
-        expect(
-            _kakaoGiftOcr.contains(line) ||
-                _giftishowOcr.contains(line) ||
-                _kakaoBarcodeCardOcr.contains(line) ||
-                _dominoBarcodeCardOcr.contains(line),
-            isTrue,
+        expect(_fixtures.values.any((String t) => t.contains(line)), isTrue,
             reason: '픽스처에 없는 줄: $line');
 
         // 콤마가 들어가면 금액으로, `.`/`-`/`/`가 들어가면 날짜로 새어
@@ -433,15 +458,8 @@ void main() {
         '13572468': 'domino',
       };
 
-      final Map<String, String> fixtures = <String, String>{
-        'kakaoGift': _kakaoGiftOcr,
-        'giftishow': _giftishowOcr,
-        'barcodeCard': _kakaoBarcodeCardOcr,
-        'domino': _dominoBarcodeCardOcr,
-      };
-
       owner.forEach((String line, String ownerName) {
-        fixtures.forEach((String name, String text) {
+        _fixtures.forEach((String name, String text) {
           if (name == ownerName) return;
           expect(text.contains(line), isFalse,
               reason: '$line 이(가) $ownerName 말고 $name 에도 있다');
