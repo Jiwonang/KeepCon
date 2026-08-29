@@ -25,6 +25,26 @@
     // 표 앞뒤 빈 줄 — 없으면 표가 앞 문단에 붙어 표로 렌더링되지 않는다. (#64)
     "MD058": true
   },
+  // 저장소에 **없는** 파일은 검사하지 않는다.
+  //
+  // 이게 없으면 로컬에서 101개를 검사한다 — 추적 파일이 24개뿐인데도. 나머지
+  // 77개는 `flutter build`가 만드는 `*/flutter/ephemeral/.plugin_symlinks/` 아래
+  // **서드파티 플러그인 README**다(gtk·jni·app_links·firebase_auth 등). 남의
+  // 저장소 파일이라 고칠 수도 없고, git은 심볼릭 링크 너머라 주소조차 잡지
+  // 못한다(`git ls-files` 0건).
+  //
+  // 그래서 데스크톱 빌드를 한 번이라도 돌린 PC에서는 `tool/verify.sh`가 **항상**
+  // red였다 — 진짜 실패와 구분이 안 된다. CI는 그 심볼릭 링크가 없는 깨끗한
+  // 체크아웃에서 돌아 green이므로, 로컬만 거짓 경보를 내며 게이트를 소음으로
+  // 만든다. 이 파일 맨 위에 적은 "전부 켜면 게이트가 아니라 소음이 되고, 소음은
+  // 결국 꺼진다"가 룰이 아니라 **대상 범위** 쪽에서 재현되고 있었다.
+  //
+  // `gitignore: true`는 린트 대상을 "저장소에 있는 것"으로 맞춰, 로컬이 CI와
+  // 같은 것을 보게 한다(101 → 24, 위반 12 → 0).
+  "gitignore": true,
   "globs": ["**/*.md"],
+  // ⚠️ 아래 목록은 `gitignore: true`가 있어도 지울 수 없다. `.dart_tool/`·`build/`는
+  // `.gitignore`에 있어 중복이지만, `node_modules`·`.claude/worktrees`는
+  // **`.gitignore`에 없어서**(`git check-ignore`로 확인) 이 목록이 유일한 방어다.
   "ignores": ["node_modules/**", ".dart_tool/**", "build/**", ".claude/worktrees/**"]
 }
