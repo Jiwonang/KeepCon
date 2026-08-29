@@ -300,6 +300,64 @@ void main() {
       );
     });
 
+    /// 스낵바 문구를 찾는다.
+    ///
+    /// `find.text`로는 **못 찾는다** — [KeepAllText]가 어절 보호를 위해 보이지
+    /// 않는 WORD JOINER를 섞기 때문이다. 원문은 `semanticsLabel`에 남는다.
+    Finder keepAllText(String plain) => find.byWidgetPredicate(
+          (Widget w) => w is Text && (w.semanticsLabel ?? w.data) == plain,
+        );
+
+    /// 폼을 채우고 저장한다(수동 입력 경로 — 백엔드를 타지 않는 유일한 경로).
+    Future<void> fillAndSave(WidgetTester tester) async {
+      await tester.tap(find.text('직접 입력하기'));
+      await tester.pumpAndSettle();
+
+      Finder fieldByLabel(String label) => find.ancestor(
+            of: find.text(label),
+            matching: find.byType(TextFormField),
+          );
+
+      await tester.enterText(fieldByLabel('브랜드 / 사용처'), '스타벅스');
+      await tester.enterText(fieldByLabel('상품명'), '아메리카노 T');
+      await tester.enterText(fieldByLabel('바코드 번호'), '9001002003004');
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('날짜를 선택해 주세요'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('OK'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.widgetWithText(ElevatedButton, '저장하기'));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('그룹에 공유되면 스낵바가 그 그룹 이름을 말한다', (WidgetTester tester) async {
+      // ⚠️ 예전에는 지갑에 넣든 그룹에 공유하든 **같은 문구**였다. 그래서
+      // 사용자는 자기가 고른 그룹에 실제로 들어갔는지 알 수 없었다. 실제 앱으로
+      // 세 번 저장해 스낵바가 매번 같은 것을 확인한 뒤 고쳤고, 이 테스트가
+      // 그 회귀를 막는다(문구 조립은 save_result_message_test.dart가 따로 덮는다 —
+      // 여기서 보는 것은 **화면이 그것을 실제로 쓰는가**다).
+      await pumpScanPage(tester);
+
+      await tester.tap(find.text(dummyGroups().first.name));
+      await tester.pumpAndSettle();
+
+      await fillAndSave(tester);
+
+      expect(keepAllText('가족 그룹에 공유했어요.'), findsOneWidget);
+      expect(keepAllText('기프티콘이 성공적으로 저장되었습니다.'), findsNothing);
+    });
+
+    testWidgets("'내 지갑'에 저장하면 스낵바가 공유를 언급하지 않는다", (WidgetTester tester) async {
+      await pumpScanPage(tester);
+
+      // '내 지갑'이 기본 선택이다 — 아무것도 고르지 않고 그대로 저장한다.
+      await fillAndSave(tester);
+
+      expect(keepAllText('기프티콘이 성공적으로 저장되었습니다.'), findsOneWidget);
+    });
+
     testWidgets('목록에서 사라진 그룹을 골라 뒀으면 내 지갑으로 되돌린다', (WidgetTester tester) async {
       // 다른 기기에서 탈퇴·강퇴됐거나 그룹 스트림이 실패해 목록이 빈 경우.
       // 저장해 둔 id를 그대로 쓰면 **화면에는 아무것도 선택돼 있지 않은데 저장은

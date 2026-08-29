@@ -19,6 +19,7 @@ import 'package:keepcon/features/scan/services/ml_kit_service.dart';
 import 'package:keepcon/features/scan/state/gifticon_form_state.dart';
 import 'package:keepcon/features/scan/state/scan_target_group_state.dart';
 import 'package:keepcon/features/scan/util/keep_all_ko.dart';
+import 'package:keepcon/features/scan/util/save_result_message.dart';
 import 'package:keepcon/features/scan/util/price_input_formatter.dart';
 import 'package:keepcon/features/scan/widgets/barcode_scanner_screen.dart';
 import 'package:keepcon/shared/diagnostics/report_handled_failure.dart';
@@ -928,10 +929,28 @@ class __GifticonFormScreenState extends ConsumerState<_GifticonFormScreen> {
     final ColorScheme scheme = Theme.of(context).colorScheme;
 
     switch (formState.submit) {
-      case ScanSubmitSuccess():
+      // 저장은 성공했다. 다만 **그룹 공유는 별개의 결과**라 함께 알린다.
+      //
+      // 예전에는 세 경우가 모두 같은 문구였다 — 지갑에 넣었을 때도, 그룹에
+      // 공유됐을 때도, **공유만 실패했을 때도.** 그래서 사용자는 자기가 고른
+      // 그룹에 실제로 들어갔는지 알 수 없었고, 부분 실패는 조용히 묻혔다
+      // (상태에는 `sharedGroupName`·`shareError`가 담겨 있는데 화면이 안 썼다).
+      case ScanSubmitSuccess(
+          :final String? shareError,
+          :final String? sharedGroupName,
+        ):
         messenger.showSnackBar(
-          const SnackBar(
-            content: KeepAllText('기프티콘이 성공적으로 저장되었습니다.'),
+          SnackBar(
+            content: KeepAllText(
+              saveResultMessage(
+                shareError: shareError,
+                sharedGroupName: sharedGroupName,
+              ),
+            ),
+            // 공유 실패는 저장 성공과 함께 오므로 놓치기 쉽다. 읽을 시간을 준다.
+            duration: shareError == null
+                ? const Duration(seconds: 4)
+                : const Duration(seconds: 6),
           ),
         );
         navigator.popUntil((route) => route.isFirst);
