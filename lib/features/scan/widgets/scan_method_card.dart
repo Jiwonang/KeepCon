@@ -125,10 +125,16 @@ class ManualEntryCard extends StatelessWidget {
                         fontWeight: FontWeight.w700,
                       ),
                     ),
-                    // 위 [ScanMethodCard]의 `subtitle`과 같은 역할·같은
-                    // 화면이다. 한쪽만 처리하면
-                    // 320~375px에서 위는 어절 경계로, 아래는 어절 한가운데로
-                    // 갈라져 같은 화면 안에서 문단 모양이 어긋난다.
+                    // 섹션 부제('바코드 이미지 분석 또는 수동 입력이 가능합니다.'
+                    // — `scan_page.dart`)와 같은 역할·같은 화면이다. 한쪽만
+                    // 처리하면 320~375px에서 위는 어절 경계로, 아래는 어절
+                    // 한가운데로 갈라져 같은 화면 안에서 문단 모양이 어긋난다.
+                    //
+                    // ⚠️ 이 주석은 원래 `:258`이라는 줄번호를 가리켰는데 **그
+                    // 번호는 처음부터 틀려 있었다**(그 자리는 `[Ref]` 관련
+                    // 주석이었다). 분할하며 대상을 실제로 찾아 이름으로 바꿨다.
+                    // 위 [ScanMethodCard]의 `subtitle`은 이 짝이 아니다 —
+                    // 그쪽은 카드 안 보조 설명이라 일반 [Text]로 둔다.
                     KeepAllText(
                       '이미지 없이 정보를 직접 작성합니다.',
                       style: theme.textTheme.bodySmall?.copyWith(
