@@ -497,11 +497,13 @@ class _TargetTile extends StatelessWidget {
 
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(16),
+      // `AppRadii.panel`(16) — 토큰 doc이 용도로 '이모지 타일'을 명시한다.
+      // 값은 리터럴 16과 같아 모양은 그대로다.
+      borderRadius: BorderRadius.circular(AppRadii.panel),
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 16),
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(AppRadii.panel),
           border: Border.all(
             color: selected
                 ? scheme.primary
