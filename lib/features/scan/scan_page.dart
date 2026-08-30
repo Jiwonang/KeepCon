@@ -38,7 +38,7 @@ class ScanPage extends ConsumerStatefulWidget {
 }
 
 class _ScanPageState extends ConsumerState<ScanPage> {
-  GifticonCategory _selectedGroup = GifticonCategory.cafe;
+  GifticonCategory _selectedCategory = GifticonCategory.cafe;
   String? _selectedTargetGroupId; // null이면 내 지갑(개인 소장)
   bool _busy = false;
 
@@ -92,7 +92,7 @@ class _ScanPageState extends ConsumerState<ScanPage> {
 
     try {
       if (source == ScanSource.manual) {
-        controller.setCategory(_selectedGroup.label);
+        controller.setCategory(_selectedCategory.label);
         if (!mounted) return;
         await Navigator.of(context).push(
           MaterialPageRoute(
@@ -109,7 +109,7 @@ class _ScanPageState extends ConsumerState<ScanPage> {
       // 돌려, 촬영 방식이 해 주던 프리필(브랜드·상품명·금액·유효기간·이미지)을
       // 그대로 유지한다.
       if (source == ScanSource.camera) {
-        controller.setCategory(_selectedGroup.label);
+        controller.setCategory(_selectedCategory.label);
         if (!mounted) return;
 
         final BarcodeScanResult? scan =
@@ -142,7 +142,7 @@ class _ScanPageState extends ConsumerState<ScanPage> {
               brand: parsed.brand,
               productName: parsed.productName,
               price: parsed.price,
-              category: _selectedGroup.label,
+              category: _selectedCategory.label,
               expiryDate: parsed.expiryDate,
               imagePath: file.path,
             );
@@ -192,7 +192,7 @@ class _ScanPageState extends ConsumerState<ScanPage> {
         productName: parsed.productName,
         price: parsed.price,
         barcode: scanResult.firstBarcodeValue,
-        category: _selectedGroup.label,
+        category: _selectedCategory.label,
         expiryDate: parsed.expiryDate,
         imagePath: file.path,
       );
@@ -357,16 +357,16 @@ class _ScanPageState extends ConsumerState<ScanPage> {
                       ),
                       itemCount: GifticonCategory.values.length,
                       itemBuilder: (BuildContext context, int index) {
-                        final group = GifticonCategory.values[index];
-                        final selected = _selectedGroup == group;
+                        final category = GifticonCategory.values[index];
+                        final selected = _selectedCategory == category;
 
                         return CategoryTile(
-                          data: group,
+                          data: category,
                           selected: selected,
                           onTap: () {
                             HapticFeedback.selectionClick();
                             setState(() {
-                              _selectedGroup = group;
+                              _selectedCategory = category;
                             });
                           },
                         );
