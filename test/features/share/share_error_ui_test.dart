@@ -14,6 +14,13 @@
 /// 실제 계약 구현([InMemoryShareRepository])에 위임해, 테스트가 "호출됐는가"가 아니라
 /// **실제 readAt이 갱신됐는가**를 단언하도록 했다. 세션은 계약 mock
 /// [InMemoryAuthRepository](기본 = 로그인 상태)를 그대로 쓴다.
+///
+/// ℹ️ **위치를 `test/shared/widgets/`로 옮기지 않는 이유.** 배너가 `lib/shared`로 승격됐지만
+/// 이 파일이 고정하는 것은 위젯 자체가 아니라 **share 화면들의 에러 UI 배선**이다 — (a)(b)(c)
+/// 전부 share 페이지를 pump해 provider 폴딩·재구독·읽음 가드를 검증하고, 위젯 단독 케이스는
+/// '배너 위젯 규약' 그룹 하나뿐이다. 그 한 그룹 때문에 파일을 옮기면 나머지가 소유자에서
+/// 멀어진다. 위젯 단독 계약(접미 문구·버튼 유무)을 소비자와 무관하게 고정할 필요가 커지면
+/// 그때 그 그룹만 `test/shared/widgets/`로 분리한다.
 library;
 
 import 'dart:async';
@@ -25,7 +32,6 @@ import 'package:keepcon/features/share/pages/notification_center_page.dart';
 import 'package:keepcon/features/share/pages/shared_gifticon_detail_page.dart';
 import 'package:keepcon/features/share/pages/usage_log_page.dart';
 import 'package:keepcon/features/share/share_page.dart';
-import 'package:keepcon/shared/widgets/inline_error_banner.dart';
 import 'package:keepcon/features/share/widgets/share_sheets.dart';
 import 'package:keepcon/shared/models/group.dart';
 import 'package:keepcon/shared/models/share.dart';
@@ -37,6 +43,7 @@ import 'package:keepcon/shared/repositories/impl/in_memory_auth_repository.dart'
 import 'package:keepcon/shared/repositories/impl/in_memory_gifticon_repository.dart';
 import 'package:keepcon/shared/repositories/impl/in_memory_share_repository.dart';
 import 'package:keepcon/shared/repositories/share_repository.dart';
+import 'package:keepcon/shared/widgets/inline_error_banner.dart';
 
 /// 스트림별로 "실패/성공"을 토글할 수 있고 **구독 횟수를 세는** 테스트용 [ShareRepository].
 ///
@@ -725,9 +732,18 @@ void main() {
       );
 
       expect(find.text('다시 시도'), findsNothing);
+      // 접미를 상수 보간으로 기대하면 **문구를 바꿔도 기대값이 함께 바뀌어 통과한다**
+      // (뮤테이션으로 확인: 상수를 아무 문자열로 바꿔도 전 케이스 green이었다).
+      // 표시 문자열은 리터럴로 고정한다.
       expect(
-        find.text('문제가 생겼어요. ${InlineErrorBanner.retryUnavailableGuide}'),
+        find.text('문제가 생겼어요. 연결 상태를 확인한 뒤 앱을 다시 열어 주세요.'),
         findsOneWidget,
+      );
+      // 그리고 상수와 실제 표시가 갈라지지 않는지도 함께 못박는다 — 호출부(`lib`)는
+      // 접미를 조립하지 않고 이 상수를 참조하므로, 상수가 바뀌면 화면 문구가 바뀐다.
+      expect(
+        InlineErrorBanner.retryUnavailableGuide,
+        '연결 상태를 확인한 뒤 앱을 다시 열어 주세요.',
       );
     });
   });
