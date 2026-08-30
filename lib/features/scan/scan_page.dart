@@ -144,6 +144,14 @@ class _ScanPageState extends ConsumerState<ScanPage> {
               price: parsed.price,
               category: _selectedCategory.label,
               expiryDate: parsed.expiryDate,
+              // ⚠️ 이 값은 **저장되지 않는다**(`gifticon_form_state.dart`의
+              // `submit()` 주석 참조 — 표시되지도 않고 곧 깨지는 경로라 뺐다).
+              // 그렇다고 죽은 인자가 아니다: 폼 미리보기(`gifticon_form_page.dart`의
+              // `formState.imagePath` 분기)의 **유일한 입력**이다.
+              //
+              // 지우면 저장 전 확인 화면에서 방금 찍은 사진이 사라지는데,
+              // **테스트는 652건 전부 통과한다**(실측). named 인자라 컴파일도
+              // analyze도 막지 않는다 — 이 주석이 유일한 방어다.
               imagePath: file.path,
             );
           } catch (e) {
@@ -194,6 +202,8 @@ class _ScanPageState extends ConsumerState<ScanPage> {
         barcode: scanResult.firstBarcodeValue,
         category: _selectedCategory.label,
         expiryDate: parsed.expiryDate,
+        // ⚠️ 저장되지 않지만 **지우면 안 된다** — 폼 미리보기의 유일한 입력이다.
+        // 위 카메라 경로와 같은 이유이고, 지워도 테스트가 전부 통과한다.
         imagePath: file.path,
       );
 

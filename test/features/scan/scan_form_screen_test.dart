@@ -26,6 +26,9 @@
 /// 3. 금액 입력에 천 단위 콤마가 붙고, 계약에는 콤마 없는 정수로 들어간다.
 /// 4. 이미 등록된 바코드는 저장되지 않고 필드에 안내가 뜬다.
 /// 5. 저장 버튼 연타로 같은 기프티콘이 두 번 저장되지 않는다.
+/// 6. 저장물에 로컬 이미지 경로가 실리지 않고, 폼 상태에는 남는다
+///    (⚠️ **미리보기 쪽은 이 파일이 지키지 않는다** — `scan_page.dart`의
+///    `imagePath: file.path` 두 줄을 지워도 전체 652건이 통과한다).
 library;
 
 import 'package:flutter/material.dart';
@@ -583,6 +586,51 @@ void main() {
 
     expect(results.where((Gifticon? g) => g != null), hasLength(1));
     expect(await repo.getGifticons(myId), hasLength(1));
+  });
+
+  test('저장물에는 로컬 이미지 경로가 실리지 않는다 — 미리보기용 폼 상태에는 남는다', () async {
+    // 스캔·갤러리 경로가 실제로 넣는 값은 **로컬 파일 경로**다(image_picker의
+    // 임시 파일 / `Directory.systemTemp`의 프레임). 그 경로는 어디에서도
+    // 표시되지 않고(홈 카드는 `http(s)`만 렌더, 상세는 이미지를 안 싣는다) OS가
+    // 임시 디렉터리를 청소하면 무효가 되는데, Firestore 구현은 그것을 문서에
+    // 그대로 쓴다 — 즉 채우면 깨진 경로가 쌓인다.
+    //
+    // 이 테스트가 없으면 그냥 지웠을 때 **아무 테스트도 죽지 않아서**, 다음
+    // 사람이 "빠뜨린 필드"로 읽고 되돌려도 CI가 초록이다.
+    const String localFramePath = '/tmp/keepcon_scan/frame.jpg';
+
+    final ProviderContainer container = makeContainer();
+
+    final GifticonFormController controller =
+        container.read(gifticonFormControllerProvider.notifier);
+
+    controller.startWith(ScanSource.camera);
+    controller.setBrand('노랑통닭');
+    controller.setProductName('(오리지널/순살)3종세트');
+    controller.setBarcode('8801234567890');
+    controller.setExpiryDate(DateTime(2027, 1, 31));
+    controller.setImagePath(localFramePath);
+
+    final Gifticon? saved = await controller.submit();
+
+    expect(saved, isNotNull);
+
+    // 저장물에는 실리지 않는다 — 반환값과 저장소 양쪽으로 본다.
+    //
+    // ⚠️ 다만 in-memory 구현은 `addGifticon`이 저장한 **바로 그 인스턴스**를
+    //    돌려주므로(`_store.add(saved); return saved;`) 아래 두 줄은 원리상
+    //    갈라질 수 없다 — 중복 방어이지 "리포지토리가 따로 채워 넣는 경우"의
+    //    보증이 아니다. 그 축이 실재하는 곳은 문서 왕복을 거치는 Firebase
+    //    구현(`_toDoc`/`_fromDoc`)인데 `flutter test`는 in-memory만 돌린다.
+    expect(saved!.imagePath, isNull);
+    expect((await repo.getGifticons(myId)).single.imagePath, isNull);
+
+    // 폼 상태에는 그대로 남는다 — 미리보기(`gifticon_form_page.dart`)가 쓰는
+    // 값이라, 저장이 그것까지 지우면 저장 전 화면이 깨진다.
+    expect(
+      container.read(gifticonFormControllerProvider).imagePath,
+      localFramePath,
+    );
   });
 }
 
