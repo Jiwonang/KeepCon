@@ -18,9 +18,9 @@ import '../../../shared/theme/brand_palette.dart';
 import '../../../shared/theme/theme_tokens.dart';
 import '../../../shared/util/korean_particle.dart';
 import '../../../shared/widgets/gifticon_detail_widgets.dart';
+import '../../../shared/widgets/inline_error_banner.dart';
 import '../state/share_providers.dart';
 import '../widgets/share_common.dart';
-import '../widgets/share_error_banner.dart';
 import '../widgets/share_format.dart';
 
 /// 공유 기프티콘 상세 화면. 셸의 push 패턴으로 전체화면 이동한다.
@@ -55,7 +55,7 @@ class SharedGifticonDetailPage extends ConsumerWidget {
                 padding: const EdgeInsets.fromLTRB(24, 24, 24, 24),
                 child: Align(
                   alignment: Alignment.topCenter,
-                  child: ShareErrorBanner(
+                  child: InlineErrorBanner(
                     message: '공유 기프티콘 정보를 불러오지 못했어요.',
                     onRetry: () => retrySharedItemLookup(ref),
                   ),

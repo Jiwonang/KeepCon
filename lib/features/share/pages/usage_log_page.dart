@@ -15,8 +15,8 @@ import '../../../shared/providers/my_groups_provider.dart'
     show myGroupsProvider, retryMyGroups;
 import '../../../shared/theme/brand_palette.dart';
 import '../../../shared/theme/theme_tokens.dart';
+import '../../../shared/widgets/inline_error_banner.dart';
 import '../state/share_providers.dart';
-import '../widgets/share_error_banner.dart';
 import '../widgets/share_format.dart';
 
 /// 사용 이력 로그 화면. 공유 메인의 '최근 사용 이력'에서 push 한다.
@@ -93,7 +93,7 @@ class _UsageLogPageState extends ConsumerState<UsageLogPage> {
             if (groupsUnavailable)
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
-                child: ShareErrorBanner(
+                child: InlineErrorBanner(
                   message: '그룹 목록을 불러오지 못했어요.',
                   onRetry: () => retryMyGroups(ref),
                 ),
@@ -101,7 +101,7 @@ class _UsageLogPageState extends ConsumerState<UsageLogPage> {
             if (hasError)
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
-                child: ShareErrorBanner(
+                child: InlineErrorBanner(
                   message: '사용 이력을 불러오지 못했어요.',
                   onRetry: () => retryUsageLogs(ref),
                 ),

@@ -281,7 +281,14 @@
      조합은 허용된다(Riverpod 2.6 확인, 테스트로 고정).
      ✅ **share 화면 에러 표시/재시도 완료(main 목록·scan 타일은 후속).** 폴딩(`valueOrNull`)은
      그대로 두고, 화면이 **원천 provider의 `hasError`를 함께 관찰**해 인라인 배너
-     (`lib/features/share/widgets/share_error_banner.dart`)를 얹는다. 재시도는 **사용자 액션
+     (`InlineErrorBanner` — `lib/shared/widgets/inline_error_banner.dart`)를 얹는다.
+     ✅ **배너 승격 완료(v3.2).** scan에 그룹 선택 타일이 들어오며(PR #137) 두 번째 소비자
+     조건이 충족되어 share 페이지 폴더에서 `lib/shared/widgets/`로 옮기고 `Share` 접두를
+     떼었다(공유 도메인 전용이 아니게 됐다). **이동·개명만이며 렌더링·동작은 불변**이다.
+     소비 지점은 share 6파일 9곳 + 테스트 1파일이고, 옛 이름은 `lib`·`test`에 0건이다.
+     새 소비자(scan 타일, main·auth의 raw 예외 노출)는 **자기 배너를 만들지 말고** 이
+     정본을 import 한다 — `tool/check_ssot.sh`가 페이지 내 동명 재정의를 CI에서 막는다.
+     재시도는 **사용자 액션
      전용**이며(자동 재시도 금지 — 장애 중 retry storm) 구현은 원천 `ref.invalidate`다
      (`retryNotifications`/`retryUsageLogs`/`retrySharedGifticons`/`retryShareCandidates`).
      재시도 스코프 규약: **에러인 원천 인스턴스만** invalidate한다(멀쩡한 스트림 재구독 =

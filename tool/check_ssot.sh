@@ -31,7 +31,21 @@ scan() {
 }
 
 # 1) 공유 모델/enum/인터페이스 재정의 금지 (lib/shared 정본만 사용)
-SHARED_TYPES="AppNotification|GroupNotificationItem|ExpiryNotificationItem|ScheduledExpiryNotification|Group|GroupMember|SharedGifticon|UsageLog|GroupNotification|MyGifticon|Gifticon|User|JoinRequest|ShareStatus|MemberRole|JoinRequestStatus|GroupNotificationType|GifticonStatus|SortOption|FilterOption|ShareStatusTransition|GifticonStatusTransition|ShareRepository|GifticonRepository|AuthRepository|MyGroupsRetry|ErrorReporter|InviteExpiredException"
+#
+# `InlineErrorBanner`(`lib/shared/widgets/`)를 넣은 근거 — 이 목록의 유일한 위젯이다.
+# 위젯이라서가 아니라 **행위 계약을 실어 나르기 때문에** 넣는다: 자동 재시도 금지
+# (장애 중 전 화면 재구독 = retry storm, #13), 내부 예외 메시지 비노출, `onRetry`가
+# null일 때 복구 안내 접미를 배너가 스스로 붙이는 분기. 사본은 이 셋을 **컴파일러에
+# 안 잡힌 채** 떨어뜨리고, 그 결과가 정확히 이 가드가 막으려는 종류의 경계면 버그다.
+# 타이밍도 지금이다 — 승격 직후 main·auth의 raw 예외 노출(`'$e'`) 교체가 예정돼 있어,
+# "그냥 내 배너 하나 만들자"가 실제로 일어날 창이 열려 있다. 헤더 doc이 승격 전부터
+# "새 배너를 만들지 말고 승격을 요청할 것"이라고 적어 뒀지만 그건 문서일 뿐 게이트가
+# 아니었고, PR #116에서 신규 공유 타입을 이 목록에 빠뜨려 우회가 실제로 CI를 통과한
+# 전례가 있다.
+# ⚠️ 한계(provider 항목과 같다): 이름 기반이라 **다른 이름의 사본**(`_MainErrorBanner`)은
+# 못 잡는다. 그리고 `lib/shared/widgets/`의 나머지 위젯(`NotificationBell` 등)은 아직
+# 등록돼 있지 않다 — 그것들은 행위 계약이 아니라 표시 조각이라 우선순위가 낮다.
+SHARED_TYPES="AppNotification|GroupNotificationItem|ExpiryNotificationItem|ScheduledExpiryNotification|Group|GroupMember|SharedGifticon|UsageLog|GroupNotification|MyGifticon|Gifticon|User|JoinRequest|ShareStatus|MemberRole|JoinRequestStatus|GroupNotificationType|GifticonStatus|SortOption|FilterOption|ShareStatusTransition|GifticonStatusTransition|ShareRepository|GifticonRepository|AuthRepository|MyGroupsRetry|ErrorReporter|InviteExpiredException|InlineErrorBanner"
 
 # 선행 수식어 `([a-z]+ )*`로 Dart 3 클래스 수식어를 모두 포괄한다:
 # abstract/base/interface/final/sealed/mixin(및 조합, 예: `abstract interface class`,

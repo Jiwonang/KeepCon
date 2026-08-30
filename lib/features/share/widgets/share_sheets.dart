@@ -16,9 +16,9 @@ import '../../../shared/providers/repositories.dart';
 import '../../../shared/repositories/share_repository.dart';
 import '../../../shared/util/invite_code.dart';
 import '../../../shared/util/korean_particle.dart';
+import '../../../shared/widgets/inline_error_banner.dart';
 import '../state/share_providers.dart';
 import 'share_common.dart';
-import 'share_error_banner.dart';
 import 'share_format.dart';
 
 /// 바텀시트 공통 컨테이너 — 키보드 인셋·핸들·패딩을 통일한다.
@@ -393,7 +393,7 @@ class _ShareGifticonSheet extends ConsumerWidget {
     final bool pending = (mineAsync.isLoading && !mineAsync.hasValue) ||
         ref.watch(sharedGifticonsPendingProvider);
     final Widget? errorBanner = hasError
-        ? ShareErrorBanner(
+        ? InlineErrorBanner(
             message: '공유할 기프티콘 목록을 불러오지 못했어요.',
             onRetry: () => retryShareCandidates(ref),
           )

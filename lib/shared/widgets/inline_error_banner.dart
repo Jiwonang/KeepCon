@@ -1,4 +1,4 @@
-/// share 페이지 — 인라인 에러 배너(표시 + 수동 재시도).
+/// 공유 위젯 — 인라인 에러 배너(표시 + 수동 재시도).
 ///
 /// ## 왜 필요한가
 /// 이 앱의 화면들은 [AsyncValue]를 `valueOrNull ?? []`로 접어(폴딩) 크래시를 막는다
@@ -12,7 +12,8 @@
 ///   재시도는 사용자가 [onRetry]를 누를 때만 일어나고, 구현은 해당 **원천** provider의
 ///   `ref.invalidate`다(폴딩된 파생은 에러 정보가 이미 없어 재시도 지점이 될 수 없다).
 /// - **내부 에러 메시지 비노출.** [message]에는 한국어 중립 문구만 넣는다
-///   (`StateError.message` 등 영문·raw id는 share 페이지 규약상 사용자에게 노출하지 않는다).
+///   (`StateError.message` 등 영문·raw id는 사용자에게 노출하지 않는다 — share 페이지에서
+///   출발한 규약이고, 승격 후에는 이 배너를 쓰는 모든 페이지에 적용된다).
 /// - [onRetry]가 null이면 재시도 버튼을 숨기고, 대신 복구 안내 접미(연결 확인 후 앱
 ///   재시작)를 **배너가 스스로** 문구에 덧붙인다 — **재시도 경로가 실제로 없는 원천**
 ///   에서 동작하지 않는 버튼을 보여 주지 않되 사용자가 취할 수 있는 행동은 알리기
@@ -20,28 +21,40 @@
 ///   컴파일러에 안 잡힌 채 갈라진다).
 ///   ℹ️ **현재 share에는 null 사이트가 없다(규약은 휴면 상태).** 마지막 남아 있던
 ///   원천인 내 그룹 목록이 계약 재시도 훅(`retryMyGroups` — `lib/shared`)을 갖게 되면서
-///   모든 배너가 실제 재시도를 넘긴다. 그래도 이 분기를 지우지 않는 이유는, 아래 승격
-///   대상인 main·scan에 재시도 경로가 없는 에러 지점이 남아 있어 **승격 시 안전망**이
+///   share의 모든 배너가 실제 재시도를 넘긴다. 그래도 이 분기를 지우지 않는 이유는, 아래
+///   **남은 소비 후보**인 main·auth에 재시도 경로가 없는 에러 지점이 있어 **안전망**이
 ///   필요하기 때문이다(경로 없는 곳에서 죽은 버튼이 부활하지 않게 한다).
 ///
-/// ## 승격(늦게 승격 규칙)
-/// 지금은 share 전용이라 페이지 폴더에 둔다. main 목록·scan 타일에서 **두 번째 소비자**가
-/// 생기면 그때 `contract-architect`에게 `lib/shared/widgets/`로의 승격을 요청한다
-/// (투기적 승격 금지 — CLAUDE.md 승격 워크플로 ③). 예정된 첫 후보: main에는 raw 예외를
-/// 그대로 노출하는 에러 UI(`main_page.dart`의 `'$e'` 표시, `auth_gate.dart` 동일)가 있어
-/// 그 교체 작업이 사실상 두 번째 소비자다 — main 담당은 새 배너를 만들지 말고 승격을 요청할 것.
+/// ## 승격 이력 — 완료됨(2026-08-30)
+/// 원래 위치는 share 페이지 폴더(`lib/features/share/widgets/`)였고 이름에도 `Share`
+/// 접두가 붙어 있었다 — 두 번째 소비자가 생길 때까지 페이지 안에 두는 규칙을 따른 것이다
+/// (투기적 승격 금지 — CLAUDE.md 승격 워크플로 ③). **scan에 그룹 선택 타일이 들어오면서
+/// (PR #137) 그 조건이 충족되어** `lib/shared/widgets/`로 옮기고 `InlineErrorBanner`로
+/// 개명했다 — 공유 도메인 전용이 아니게 되어 옛 접두가 사실과 어긋나기 때문이다.
+/// (옛 이름은 이 저장소에 더 이상 남아 있지 않다 — grep 0건.)
+///
+/// ## 남은 소비 후보(아직 교체되지 않았다 — 이 목록을 지우지 말 것)
+/// - **scan** — `scanTargetGroupsProvider`가 로딩·미로그인·에러를 **모두 빈 목록으로 접어**
+///   "그룹을 못 불러옴"과 "그룹 없음"이 구분되지 않는다. 재시도 훅은 계약에 이미 있다
+///   (`retryMyGroups`). 승격을 촉발한 지점이지만 배선은 별도 PR(scan 담당)이다.
+/// - **main** — `main_page.dart`가 raw 예외를 `'$e'`로 그대로 노출한다(내부 메시지 비노출
+///   규약 위반). `auth_gate.dart`도 동일하다. 재시도 경로가 없는 지점이라 `onRetry: null`
+///   분기(위 규약)를 그대로 타면 된다.
+///
+/// 새 배너를 만들지 말고 이 위젯을 소비할 것. 문구·색·레이아웃을 바꿔야 하면
+/// `contract-architect`에게 요청한다(`lib/shared`는 `CODEOWNERS` 대상).
 library;
 
 import 'package:flutter/material.dart';
 
-import '../../../shared/theme/theme_tokens.dart';
+import '../theme/theme_tokens.dart';
 
 /// 목록/섹션 위에 얹는 인라인 에러 배너.
 ///
 /// 색은 전부 `Theme.of(context).colorScheme`(error 계열)에서 오고 라운드는 [AppRadii]를
 /// 쓴다 — 하드코딩 색·raw 반경 없음(공유 테마 SSOT 규약).
-class ShareErrorBanner extends StatelessWidget {
-  const ShareErrorBanner({
+class InlineErrorBanner extends StatelessWidget {
+  const InlineErrorBanner({
     super.key,
     required this.message,
     this.onRetry,

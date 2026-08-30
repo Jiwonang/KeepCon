@@ -9,7 +9,7 @@
 /// 아니게 됐다. 이름이 내용과 어긋나면 다음 사람이 "여긴 그룹 것만"이라고 읽고 개인 축을
 /// 빠뜨린다.
 ///
-/// 상대 시각 포맷은 소비자(UI) 책임. 색 하드코딩 없음. 스트림 에러는 [ShareErrorBanner]로
+/// 상대 시각 포맷은 소비자(UI) 책임. 색 하드코딩 없음. 스트림 에러는 [InlineErrorBanner]로
 /// 표시하고 재시도는 사용자 액션으로만 한다(자동 재시도 금지 — 크로스페이지 주의점 #13).
 library;
 
@@ -27,7 +27,7 @@ import '../../../shared/providers/group_notifications_provider.dart';
 import '../../../shared/providers/now_provider.dart';
 import '../../../shared/providers/repositories.dart';
 import '../../../shared/theme/theme_tokens.dart';
-import '../widgets/share_error_banner.dart';
+import '../../../shared/widgets/inline_error_banner.dart';
 import '../widgets/share_format.dart';
 
 /// 알림 센터 화면. 홈·공유 탭 헤더의 벨과 마이페이지에서 push 한다.
@@ -135,7 +135,7 @@ class _NotificationCenterPageState
             if (hasError)
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 18, 20, 0),
-                child: ShareErrorBanner(
+                child: InlineErrorBanner(
                   message: '알림을 불러오지 못했어요.',
                   onRetry: () => retryNotifications(ref),
                 ),

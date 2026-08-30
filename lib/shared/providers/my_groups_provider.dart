@@ -135,7 +135,7 @@ final AutoDisposeProvider<AsyncValue<List<Group>>> myGroupsProvider =
 ///
 /// 사용(share 등 소비 화면):
 /// ```dart
-/// ShareErrorBanner(
+/// InlineErrorBanner(
 ///   // 이제 재시도 경로가 있으므로 onRetry를 null로 낮추지 않아도 된다.
 ///   onRetry: () => retryMyGroups(ref), // 또는 ref.read(myGroupsRetryProvider).retry()
 /// );

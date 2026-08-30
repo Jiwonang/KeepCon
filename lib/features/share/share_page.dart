@@ -26,6 +26,7 @@ import '../../shared/providers/my_groups_provider.dart'
 import '../../shared/providers/session_provider.dart';
 import '../../shared/providers/shared_gifticons_provider.dart';
 import '../../shared/theme/theme_tokens.dart';
+import '../../shared/widgets/inline_error_banner.dart';
 import '../../shared/widgets/notification_bell.dart';
 import 'pages/group_detail_page.dart';
 import 'pages/notification_center_page.dart';
@@ -33,7 +34,6 @@ import 'pages/shared_gifticon_detail_page.dart';
 import 'pages/usage_log_page.dart';
 import 'state/share_providers.dart';
 import 'widgets/my_join_requests_card.dart';
-import 'widgets/share_error_banner.dart';
 import 'widgets/share_format.dart';
 import 'widgets/share_sheets.dart';
 import 'widgets/shared_gifticon_card.dart';
@@ -96,7 +96,7 @@ class SharePage extends ConsumerWidget {
               // **private 체인**(lib/shared)에 캐시돼 페이지의
               // `invalidate(myGroupsProvider)`로는 되살릴 수 없기 때문이다(#13 실측).
               // `retryMyGroups`가 세션·그룹 두 계층 중 에러인 것만 재구독한다.
-              ShareErrorBanner(
+              InlineErrorBanner(
                 message: '그룹 목록을 불러오지 못했어요.',
                 onRetry: () => retryMyGroups(ref),
               ),
@@ -129,7 +129,7 @@ class SharePage extends ConsumerWidget {
             const _SectionHeader(title: '공유 기프티콘'),
             const SizedBox(height: 12),
             if (sharedHaveError) ...<Widget>[
-              ShareErrorBanner(
+              InlineErrorBanner(
                 message: '공유 기프티콘을 불러오지 못했어요.',
                 onRetry: () => retrySharedGifticons(ref),
               ),
@@ -175,7 +175,7 @@ class SharePage extends ConsumerWidget {
             ),
             const SizedBox(height: 4),
             if (logsHaveError) ...<Widget>[
-              ShareErrorBanner(
+              InlineErrorBanner(
                 message: '사용 이력을 불러오지 못했어요.',
                 onRetry: () => retryUsageLogs(ref),
               ),
