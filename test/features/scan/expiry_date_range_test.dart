@@ -27,31 +27,4 @@ void main() {
       expect(DateTime(2016, 2, 12).isBefore(expirySelectableFrom), isTrue);
     });
   });
-
-  group('지난 날짜 판정', () {
-    final DateTime now = DateTime(2026, 8, 30, 14, 30);
-
-    test('어제는 지났다', () {
-      expect(isPastExpiry(DateTime(2026, 8, 29), now: now), isTrue);
-    });
-
-    test('오늘은 지나지 않았다 — 유효기간은 그날까지 유효하다', () {
-      // 시각을 함께 비교하면 오늘 만료가 지난 것으로 잡힌다. 14:30에 열어도
-      // 오늘 만료 기프티콘은 아직 쓸 수 있다.
-      expect(isPastExpiry(DateTime(2026, 8, 30), now: now), isFalse);
-    });
-
-    test('같은 날이면 시각이 앞서도 지나지 않았다', () {
-      // 자정(00:00)으로 들어온 값이 14:30과 비교돼 '지남'이 되면 안 된다.
-      expect(isPastExpiry(DateTime(2026, 8, 30, 0, 0), now: now), isFalse);
-    });
-
-    test('내일은 지나지 않았다', () {
-      expect(isPastExpiry(DateTime(2026, 8, 31), now: now), isFalse);
-    });
-
-    test('OCR이 흔히 내는 과거 연도는 지났다', () {
-      expect(isPastExpiry(DateTime(2016, 2, 12), now: now), isTrue);
-    });
-  });
 }

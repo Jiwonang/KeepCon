@@ -80,9 +80,33 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text(pastNotice), findsOneWidget);
-    // 필수 항목 안내는 유효기간이 아니라 **다른 칸** 때문에 떠야 한다.
-    // 유효기간이 저장을 막았다면 '유효기간을 선택해 주세요.'가 뜬다.
-    expect(find.text('유효기간을 선택해 주세요.'), findsNothing);
+
+    // ⚠️ 저장 버튼을 **실제로 눌러야** validator가 돈다.
+    // `autovalidateMode: onUserInteraction`이라 누르지 않으면 validator가
+    // 호출조차 되지 않아, 지난 날짜를 막든 안 막든 아래 단언이 무조건 통과한다
+    // (리뷰에서 뮤테이션으로 드러났다 — 막도록 뒤집어도 전부 초록이었다).
+    await tester.tap(find.text('저장하기'));
+    await tester.pumpAndSettle();
+
+    // 지난 날짜가 저장을 막았다면 유효기간 칸에 그 사유가 뜬다.
+    expect(find.textContaining('지난 날짜는'), findsNothing);
+    // 안내는 저장을 눌러도 남는다 — 에러가 아니라 확인 요청이다.
+    expect(find.text(pastNotice), findsOneWidget);
+  });
+
+  testWidgets('상한 밖 값이 프리필돼 있어도 날짜 칸을 눌러 열 수 있다', (WidgetTester tester) async {
+    // 하한과 **같은 크래시의 반대 방향**이다. 파서의 연도 패턴이 `20\d{2}`와
+    // `2000 + \d{2}`라 상한(2035) 밖을 낸다 — `유효기간 2099.12.31`은 2099년,
+    // 일련번호에 섞인 `40.12.31`은 2040년으로 읽힌다.
+    final ProviderContainer container = await openForm(tester);
+
+    prefillExpiry(container, DateTime(2099, 12, 31));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('2099.12.31'));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(DatePickerDialog), findsOneWidget);
   });
 
   testWidgets('오늘 만료는 안내하지 않는다 — 그날까지 유효하다', (WidgetTester tester) async {

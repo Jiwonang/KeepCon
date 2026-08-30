@@ -22,6 +22,7 @@ import 'package:keepcon/features/scan/util/save_result_message.dart';
 import 'package:keepcon/features/scan/widgets/result_dialog.dart';
 import 'package:keepcon/shared/models/gifticon.dart';
 import 'package:keepcon/shared/providers/now_provider.dart';
+import 'package:keepcon/shared/util/expiry_policy.dart';
 import 'package:keepcon/shared/theme/theme_tokens.dart';
 import 'package:keepcon/shared/util/date_format.dart';
 
@@ -84,7 +85,7 @@ class _GifticonFormScreenState extends ConsumerState<GifticonFormScreen> {
     // 조정한다(클램프한 값을 저장하지 않는다. 사용자가 고르지 않은 날짜를
     // 조용히 바꿔 넣는 셈이 된다).
     final DateTime initialDate = _clampToSelectableRange(
-      currentState.expiryDate ?? DateTime.now(),
+      currentState.expiryDate ?? ref.read(nowProvider),
     );
 
     final picked = await showDatePicker(
@@ -578,7 +579,7 @@ class _GifticonFormScreenState extends ConsumerState<GifticonFormScreen> {
                   // 전에 상태에 들어가므로 둘이 갈라질 수 있다.
                   final DateTime? expiry = formState.expiryDate;
                   final String? pastNotice = expiry != null &&
-                          isPastExpiry(expiry, now: ref.watch(nowProvider))
+                          isExpiredByDate(expiry, now: ref.watch(nowProvider))
                       ? '이미 지난 날짜예요. 맞는지 확인해 주세요.'
                       : null;
 
