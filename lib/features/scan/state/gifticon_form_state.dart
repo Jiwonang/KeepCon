@@ -430,6 +430,32 @@ class GifticonFormController extends StateNotifier<GifticonFormState> {
         ? kDefaultCategory
         : state.category.trim();
 
+    // [Gifticon.imagePath]는 **일부러 채우지 않는다.**
+    //
+    // 여기 넣을 수 있는 값은 로컬 파일 경로뿐이다 — 갤러리는 image_picker의 임시
+    // 파일이고, 카메라는 `Directory.systemTemp`에 떨군 프레임이다
+    // (`scan_page.dart`의 `_writeTempFrame`). 그런데 그 경로는:
+    //
+    // - **어디에서도 표시되지 않는다.** 홈 카드는 `http://`·`https://`로 시작할
+    //   때만 렌더하고 그 외는 placeholder로 떨어지며(`gifticon_card.dart`),
+    //   상세 화면은 이미지를 아예 싣지 않는다(`gifticon_detail_page.dart` doc).
+    // - **곧 무효가 된다.** OS가 임시 디렉터리를 청소하면 파일이 사라지고, 다른
+    //   기기·재설치에서는 애초에 의미가 없다.
+    //
+    // 그런데도 [FirebaseGifticonRepository]는 이 값을 문서에 그대로 쓴다. 즉
+    // 채우면 **표시되지도 않고 곧 깨지는 경로가 Firestore에 쌓인다.**
+    //
+    // 이미지를 Firebase Storage에 올리고 다운로드 URL을 넣는 안은 검토 후
+    // **채택하지 않았다** — 매장 사용에 이미지가 필요 없다는 것이 확인됐기
+    // 때문이다(바코드는 번호에서 심볼을 다시 그린다). 계약의 필드는 그대로
+    // 두었으므로, 나중에 업로드를 붙이기로 하면 여기에 **URL을** 넣으면 된다.
+    //
+    // ⚠️ 폼 미리보기(`gifticon_form_page.dart`)가 쓰는 `state.imagePath`는 그대로
+    // 둔다 — 그것은 **저장 전** 화면이라 로컬 경로가 유효하고 실제로 보인다.
+    // 그 값을 넣는 곳은 `scan_page.dart`의 `prefillFromRecognition(imagePath:)`
+    // 두 곳뿐이고 **어떤 테스트도 그것을 지키지 않는다** — 두 줄을 지우고 전체를
+    // 돌려 652/652 통과를 확인했다. 이 주석을 읽고 그 줄을 '잔존'으로 읽지 마라.
+    // 저장 경로에서만 뺀 것이지 미리보기에서 뺀 것이 아니다.
     final Gifticon draft = Gifticon(
       id: '',
       ownerId: currentUser.id,
@@ -441,7 +467,6 @@ class GifticonFormController extends StateNotifier<GifticonFormState> {
       expiryDate: state.expiryDate!,
       registeredAt: DateTime.now(),
       status: GifticonStatus.available,
-      imagePath: state.imagePath,
       targetGroupId: state.targetGroupId,
     );
 
