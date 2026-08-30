@@ -38,5 +38,17 @@ void main() {
       expect(expirySelectableTo.month, 12);
       expect(expirySelectableTo.day, 31);
     });
+
+    test('하한은 어느 해든 그 해의 첫날이다 — 상한과 반대편이다', () {
+      // 상한의 "월·일 생략 금지"를 이쪽에 적용해 `DateTime(2020, 12, 31)`로
+      // 고치면 2020년의 364일이 조용히 잘린다 — OCR이 낸 2020-03-15를 클램프가
+      // 연말로 밀어 올려 피커가 엉뚱한 날에서 열린다.
+      //
+      // 그런데 기존 단언만으로는 **아무것도 죽지 않는다**(뮤테이션 확인: scan
+      // 149건 전부 초록). `from < to`는 그때도 참이고 하한 관련 단언은 2016년만
+      // 본다. 상한만 지키면 "왜 얘는 생략하지" 하는 다음 사람이 CI 초록을 믿는다.
+      expect(expirySelectableFrom.month, 1);
+      expect(expirySelectableFrom.day, 1);
+    });
   });
 }
