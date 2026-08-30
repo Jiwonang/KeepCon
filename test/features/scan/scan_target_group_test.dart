@@ -5,6 +5,12 @@
 /// 2. 저장(addGifticon) 성공 후, 대상 그룹이 있으면 `ShareRepository.shareGifticon`이
 ///    호출되고 '내 지갑'이면 호출되지 않는다.
 /// 3. 그룹 공유가 실패해도(예: 사라진 그룹) 저장은 성공으로 유지된다(부분 실패 정책).
+///    반대로 **공유는 성공했는데 그룹 이름 조회만** 실패한 경우는 공유 실패가
+///    아니다 — 그렇게 알리면 사용자가 성공한 공유를 다시 해서 중복이 생긴다.
+/// 4. **선택 UI** — `내 지갑` 아래에 내 그룹 타일이 그려지고, 고르면 그 groupId가
+///    폼 세션으로 넘어가며, 목록에서 사라진 그룹은 '내 지갑'으로 되돌아간다.
+/// 5. **저장 결과 안내** — 지갑/그룹 공유가 스낵바 문구로 구분된다. 문구 조립 자체는
+///    `save_result_message_test.dart`가 덮고, 여기서는 **화면이 그것을 쓰는지**를 본다.
 
 library;
 
@@ -14,12 +20,55 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:keepcon/features/scan/scan_page.dart';
 import 'package:keepcon/features/scan/state/gifticon_form_state.dart';
 import 'package:keepcon/features/scan/state/scan_target_group_state.dart';
+import 'package:keepcon/features/scan/util/save_result_message.dart';
 import 'package:keepcon/shared/models/gifticon.dart';
 import 'package:keepcon/shared/models/group.dart';
 import 'package:keepcon/shared/models/share.dart';
 import 'package:keepcon/shared/providers/repositories.dart';
 import 'package:keepcon/shared/repositories/impl/in_memory_auth_repository.dart';
+import 'package:keepcon/shared/repositories/impl/in_memory_gifticon_repository.dart';
+import 'package:keepcon/shared/repositories/impl/in_memory_share_repository.dart';
 import 'package:keepcon/shared/theme/app_theme.dart';
+
+/// 공유는 성공시키되 **그룹 이름 조회만** 실패시키는 저장소.
+///
+/// 이름 조회는 `watchGroups`의 첫 방출에서 대상 그룹을 찾는다. 실제로는 느린
+/// 네트워크(5초 상한)나 그 그룹이 아직 실리지 않은 첫 방출로 실패할 수 있는데,
+/// 그 시점에는 **공유가 이미 끝나 있다.** 그것을 '공유 실패'로 알리면 사용자가
+/// 성공한 공유를 다시 해서 같은 기프티콘을 두 번 넣는다.
+class _NameLookupFailingShareRepository extends InMemoryShareRepository {
+  _NameLookupFailingShareRepository({
+    required super.authRepository,
+    required super.gifticonRepository,
+  });
+
+  /// 대상 그룹이 실리지 않은 첫 방출. `shareGifticon`은 계약 구현 그대로 성공한다.
+  @override
+  Stream<List<Group>> watchGroups(String userId) =>
+      Stream<List<Group>>.value(const <Group>[]);
+}
+
+/// 이름 조회가 **영영 응답하지 않는** 저장소 — 5초 상한 자체를 검증한다.
+///
+/// 위 [_NameLookupFailingShareRepository]는 동기 빈 방출이라 `orElse` 갈래만
+/// 치고 `.timeout()`을 한 번도 발화시키지 않는다. 그래서 상한을 지워도 테스트가
+/// 전부 통과했다(리뷰에서 뮤테이션으로 확인됐다). 상한이 지키는 것은 화면이
+/// `ScanSubmitInProgress`로 영영 멈추는 것 — 저장 버튼이 잠긴 채다 — 이라
+/// 무방비로 둘 수 없다.
+class _NameLookupHangingShareRepository extends InMemoryShareRepository {
+  _NameLookupHangingShareRepository({
+    required super.authRepository,
+    required super.gifticonRepository,
+  });
+
+  /// 하루에 한 번 방출 = 테스트 시간 안에서는 무응답이고, 닫히지도 않는다.
+  @override
+  Stream<List<Group>> watchGroups(String userId) =>
+      Stream<List<Group>>.periodic(
+        const Duration(days: 1),
+        (_) => const <Group>[],
+      );
+}
 
 void main() {
   final String myId = InMemoryAuthRepository.defaultUser.id;
@@ -229,9 +278,129 @@ void main() {
       expect(success.sharedGroupId, 'g_gone');
       expect(success.shareError, isNotNull);
     });
+
+    test('공유는 성공했는데 그룹 이름만 못 읽으면 공유 실패로 알리지 않는다', () async {
+      final InMemoryAuthRepository auth = InMemoryAuthRepository();
+      final InMemoryGifticonRepository gifticons = InMemoryGifticonRepository();
+      final _NameLookupFailingShareRepository repo =
+          _NameLookupFailingShareRepository(
+        authRepository: auth,
+        gifticonRepository: gifticons,
+      );
+
+      addTearDown(() {
+        repo.dispose();
+        gifticons.dispose();
+        auth.dispose();
+      });
+
+      final ProviderContainer container = ProviderContainer(
+        overrides: <Override>[
+          authRepositoryProvider.overrideWithValue(auth),
+          gifticonRepositoryProvider.overrideWithValue(gifticons),
+          shareRepositoryProvider.overrideWithValue(repo),
+          scanTargetGroupsProvider.overrideWith((Ref ref) => dummyGroups()),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      final Gifticon? saved =
+          await saveOnce(container, targetGroupId: 'g_family');
+
+      expect(saved, isNotNull);
+
+      // 공유는 **실제로 일어났다** — 이 사실이 이 테스트의 전제다.
+      final List<SharedGifticon> shared =
+          await repo.getSharedGifticons('g_family');
+      expect(
+        shared.any((SharedGifticon s) => s.gifticonId == saved!.id),
+        isTrue,
+      );
+
+      final ScanSubmitSuccess success = container
+          .read(gifticonFormControllerProvider)
+          .submit as ScanSubmitSuccess;
+
+      // 핵심: 이름을 못 읽었을 뿐이므로 shareError는 비어 있어야 한다.
+      // (예전에는 이름 조회가 공유와 한 try에 묶여 있어 여기가 isNotNull이었다.)
+      expect(success.shareError, isNull);
+      expect(success.sharedGroupName, isNull);
+      expect(success.sharedToGroup, isTrue);
+
+      // 그래서 사용자가 보는 문구는 '공유 실패'가 아니고, **지갑 저장과도
+      // 달라야 한다** — 같으면 자기가 고른 그룹에 들어갔는지 알 수 없다.
+      final String message = saveResultMessage(
+        shareError: success.shareError,
+        sharedGroupName: success.sharedGroupName,
+        sharedToGroup: success.sharedToGroup,
+      );
+
+      // 어간으로 본다 — 안내 경로 문구가 바뀌어도 이 테스트가 지키려는 것
+      // ("공유 실패라고 말하지 않는다")은 그대로다.
+      expect(message, isNot(contains('공유하지 못했')));
+      // 공유됐다는 사실은 말해야 한다. 이 단언이 없으면 지갑 문구도 통과한다.
+      expect(message, contains('공유'));
+      expect(
+        message,
+        isNot(saveResultMessage(shareError: null, sharedGroupName: null)),
+      );
+    });
+
+    test('이름 조회가 응답하지 않아도 5초 상한이 저장을 끝내 준다', () async {
+      // 상한이 없으면 `.first`가 영영 기다려 폼이 ScanSubmitInProgress에 갇힌다
+      // (저장 버튼도 잠긴 채). 그 상한을 지우면 이 테스트는 통과가 아니라
+      // **프레임워크 타임아웃으로 죽는다** — 그게 이 테스트의 존재 이유다.
+      //
+      // ⚠️ 실시간 5초를 그대로 쓴다. `testWidgets` + `tester.pump(6초)`로 가짜
+      // 시계를 넘기는 방법을 먼저 시도했는데 **테스트가 그대로 멈췄다**(300초
+      // 무응답 확인). 여기서 기다리는 것은 위젯 프레임이 아니라 저장소 스트림이라
+      // 바인딩의 가짜 시계가 닿지 않는다. 느린 대신 확실한 쪽을 택했다.
+      final InMemoryAuthRepository auth = InMemoryAuthRepository();
+      final InMemoryGifticonRepository gifticons = InMemoryGifticonRepository();
+      final _NameLookupHangingShareRepository repo =
+          _NameLookupHangingShareRepository(
+        authRepository: auth,
+        gifticonRepository: gifticons,
+      );
+
+      addTearDown(() {
+        repo.dispose();
+        gifticons.dispose();
+        auth.dispose();
+      });
+
+      final ProviderContainer container = ProviderContainer(
+        overrides: <Override>[
+          authRepositoryProvider.overrideWithValue(auth),
+          gifticonRepositoryProvider.overrideWithValue(gifticons),
+          shareRepositoryProvider.overrideWithValue(repo),
+          scanTargetGroupsProvider.overrideWith((Ref ref) => dummyGroups()),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      final Gifticon? saved =
+          await saveOnce(container, targetGroupId: 'g_family');
+
+      expect(saved, isNotNull);
+
+      final ScanSubmitSuccess success = container
+          .read(gifticonFormControllerProvider)
+          .submit as ScanSubmitSuccess;
+
+      // 상한에 걸린 것은 이름 조회일 뿐 — 공유 실패가 아니다.
+      expect(success.shareError, isNull);
+      expect(success.sharedGroupName, isNull);
+    });
   });
 
-  group('_GroupSelector 위젯', () {
+  group('저장 대상 선택 UI', () {
+    /// 화면이 보는 그룹 목록. 테스트 도중 바꿀 수 있어야 "그룹이 사라지는" 상황을
+    /// 재현할 수 있다(`updateOverrides`는 이미 마운트된 화면을 다시 그리지 않았다).
+    late List<Group> visibleGroups;
+
+    setUp(() => visibleGroups = dummyGroups());
+
     Future<ProviderContainer> pumpScanPage(WidgetTester tester) async {
       tester.view.physicalSize = const Size(1200, 2600);
       tester.view.devicePixelRatio = 1.0;
@@ -239,7 +408,12 @@ void main() {
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
 
-      final ProviderContainer container = makeContainer();
+      final ProviderContainer container = ProviderContainer(
+        overrides: <Override>[
+          scanTargetGroupsProvider.overrideWith((Ref ref) => visibleGroups),
+        ],
+      );
+      addTearDown(container.dispose);
 
       await tester.pumpWidget(
         UncontrolledProviderScope(
@@ -258,18 +432,119 @@ void main() {
 
     testWidgets("'내 지갑'과 실제 그룹 타일이 함께 표시된다", (WidgetTester tester) async {
       await pumpScanPage(tester);
-      final List<Group> groups = dummyGroups();
 
       expect(find.text('내 지갑'), findsWidgets);
 
-      for (final Group g in groups) {
-        expect(find.text(g.name), findsNothing);
+      // ⚠️ 이 단언은 예전에 `findsNothing`이었다 — 이름은 "함께 표시된다"인데
+      // 실제로는 그룹 타일이 **아예 그려지지 않는 상태**를 고정하고 있었다.
+      // 그룹 선택 UI가 미구현이었기 때문이다.
+      for (final Group g in dummyGroups()) {
+        expect(find.text(g.name), findsOneWidget, reason: '그룹 타일: ${g.name}');
       }
     });
 
     testWidgets('그룹 타일을 고르면 폼 세션에 그 groupId가 전달된다',
         (WidgetTester tester) async {
+      // ⚠️ 이 테스트는 예전에 **본문이 비어 있었다**(pump만 하고 단언 없음).
+      final ProviderContainer container = await pumpScanPage(tester);
+      final Group target = dummyGroups().first;
+
+      await tester.tap(find.text(target.name));
+      await tester.pumpAndSettle();
+
+      // 선택은 폼을 열 때 세션으로 넘어간다 — 수동 입력이 그 경로 중 백엔드를
+      // 타지 않는 유일한 것이라 여기서 쓴다.
+      await tester.tap(find.text('직접 입력하기'));
+      await tester.pumpAndSettle();
+
+      expect(
+        container.read(gifticonFormControllerProvider).targetGroupId,
+        target.id,
+      );
+    });
+
+    /// 스낵바 문구를 찾는다.
+    ///
+    /// `find.text`로는 **못 찾는다** — [KeepAllText]가 어절 보호를 위해 보이지
+    /// 않는 WORD JOINER를 섞기 때문이다. 원문은 `semanticsLabel`에 남는다.
+    Finder keepAllText(String plain) => find.byWidgetPredicate(
+          (Widget w) => w is Text && (w.semanticsLabel ?? w.data) == plain,
+        );
+
+    /// 폼을 채우고 저장한다(수동 입력 경로 — 백엔드를 타지 않는 유일한 경로).
+    Future<void> fillAndSave(WidgetTester tester) async {
+      await tester.tap(find.text('직접 입력하기'));
+      await tester.pumpAndSettle();
+
+      Finder fieldByLabel(String label) => find.ancestor(
+            of: find.text(label),
+            matching: find.byType(TextFormField),
+          );
+
+      await tester.enterText(fieldByLabel('브랜드 / 사용처'), '스타벅스');
+      await tester.enterText(fieldByLabel('상품명'), '아메리카노 T');
+      await tester.enterText(fieldByLabel('바코드 번호'), '9001002003004');
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('날짜를 선택해 주세요'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('OK'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.widgetWithText(ElevatedButton, '저장하기'));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('그룹에 공유되면 스낵바가 그 그룹 이름을 말한다', (WidgetTester tester) async {
+      // ⚠️ 예전에는 지갑에 넣든 그룹에 공유하든 **같은 문구**였다. 그래서
+      // 사용자는 자기가 고른 그룹에 실제로 들어갔는지 알 수 없었다. 실제 앱으로
+      // 세 번 저장해 스낵바가 매번 같은 것을 확인한 뒤 고쳤고, 이 테스트가
+      // 그 회귀를 막는다(문구 조립은 save_result_message_test.dart가 따로 덮는다 —
+      // 여기서 보는 것은 **화면이 그것을 실제로 쓰는가**다).
       await pumpScanPage(tester);
+
+      await tester.tap(find.text(dummyGroups().first.name));
+      await tester.pumpAndSettle();
+
+      await fillAndSave(tester);
+
+      expect(keepAllText('가족 그룹에 공유했어요.'), findsOneWidget);
+      expect(keepAllText('기프티콘이 성공적으로 저장되었습니다.'), findsNothing);
+    });
+
+    testWidgets("'내 지갑'에 저장하면 스낵바가 공유를 언급하지 않는다", (WidgetTester tester) async {
+      await pumpScanPage(tester);
+
+      // '내 지갑'이 기본 선택이다 — 아무것도 고르지 않고 그대로 저장한다.
+      await fillAndSave(tester);
+
+      expect(keepAllText('기프티콘이 성공적으로 저장되었습니다.'), findsOneWidget);
+    });
+
+    testWidgets('목록에서 사라진 그룹을 골라 뒀으면 내 지갑으로 되돌린다', (WidgetTester tester) async {
+      // 다른 기기에서 탈퇴·강퇴됐거나 그룹 스트림이 실패해 목록이 빈 경우.
+      // 저장해 둔 id를 그대로 쓰면 **화면에는 아무것도 선택돼 있지 않은데 저장은
+      // 그 그룹을 노려**, 표시되지 않는 부분 실패로 빠진다.
+      final ProviderContainer container = await pumpScanPage(tester);
+      final Group target = dummyGroups().first;
+
+      await tester.tap(find.text(target.name));
+      await tester.pumpAndSettle();
+
+      // 그룹이 목록에서 사라진다.
+      visibleGroups = const <Group>[];
+      container.invalidate(scanTargetGroupsProvider);
+      await tester.pumpAndSettle();
+
+      expect(find.text(target.name), findsNothing);
+
+      await tester.tap(find.text('직접 입력하기'));
+      await tester.pumpAndSettle();
+
+      expect(
+        container.read(gifticonFormControllerProvider).targetGroupId,
+        isNull,
+      );
     });
 
     testWidgets("'내 지갑'을 고르면 대상 그룹이 없다", (WidgetTester tester) async {

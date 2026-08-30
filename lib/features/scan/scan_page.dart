@@ -17,11 +17,14 @@ import 'package:image_picker/image_picker.dart';
 import 'package:keepcon/features/scan/services/gifticon_ocr_parser.dart';
 import 'package:keepcon/features/scan/services/ml_kit_service.dart';
 import 'package:keepcon/features/scan/state/gifticon_form_state.dart';
+import 'package:keepcon/features/scan/state/scan_target_group_state.dart';
 import 'package:keepcon/features/scan/util/keep_all_ko.dart';
 import 'package:keepcon/features/scan/util/price_input_formatter.dart';
+import 'package:keepcon/features/scan/util/save_result_message.dart';
 import 'package:keepcon/features/scan/widgets/barcode_scanner_screen.dart';
 import 'package:keepcon/shared/diagnostics/report_handled_failure.dart';
 import 'package:keepcon/shared/models/gifticon.dart';
+import 'package:keepcon/shared/models/group.dart';
 import 'package:keepcon/shared/theme/theme_tokens.dart';
 import 'package:keepcon/shared/util/date_format.dart';
 
@@ -85,6 +88,25 @@ class _ScanPageState extends ConsumerState<ScanPage> {
   String? _selectedTargetGroupId; // null이면 내 지갑(개인 소장)
   bool _busy = false;
 
+  /// 지금 실제로 저장 대상이 되는 그룹 id.
+  ///
+  /// 골라 둔 그룹이 목록에서 사라질 수 있다 — 다른 기기에서 탈퇴·강퇴됐거나,
+  /// 그룹 스트림이 실패해 파생 provider가 빈 목록으로 접었을 때다. 그때 저장해 둔
+  /// id를 그대로 쓰면 **화면에는 아무 타일도 선택돼 있지 않은데 저장은 그 그룹을
+  /// 노려**, 공유만 실패하는 부분 실패로 빠진다(그 실패 문구는 지금 어디에도
+  /// 표시되지 않는다 — `gifticon_form_state.dart`의 `shareError` 주석 참조).
+  ///
+  /// 그래서 목록에 없으면 '내 지갑'으로 되돌린다 — 보이는 것과 저장되는 곳이
+  /// 일치한다. 대가로, 스트림 실패로 목록이 접힌 경우 사용자가 고른 그룹 대신
+  /// 지갑에 조용히 저장된다. 그 상태를 알리는 것은 에러 배너의 몫이고 후속
+  /// 과제다(`scan_target_group_state.dart` doc).
+  String? _resolveTargetGroupId(List<Group> groups) {
+    final String? id = _selectedTargetGroupId;
+    if (id == null) return null;
+
+    return groups.any((Group g) => g.id == id) ? id : null;
+  }
+
   /// 스캔 프레임(JPEG)을 임시 파일로 떨군다.
   ///
   /// ML Kit의 [InputImage.fromFilePath]와 폼의 이미지 미리보기([Image.file])가
@@ -106,7 +128,10 @@ class _ScanPageState extends ConsumerState<ScanPage> {
     HapticFeedback.lightImpact();
 
     final controller = ref.read(gifticonFormControllerProvider.notifier);
-    controller.startWith(source, targetGroupId: _selectedTargetGroupId);
+    controller.startWith(
+      source,
+      targetGroupId: _resolveTargetGroupId(ref.read(scanTargetGroupsProvider)),
+    );
 
     MlKitService? mlKitService;
 
@@ -253,6 +278,11 @@ class _ScanPageState extends ConsumerState<ScanPage> {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
 
+    // 저장 대상으로 고를 수 있는 내 그룹. 로딩·미로그인·에러는 파생 provider가
+    // 빈 목록으로 접으므로 여기서는 목록만 본다.
+    final List<Group> targetGroups = ref.watch(scanTargetGroupsProvider);
+    final String? selectedTargetId = _resolveTargetGroupId(targetGroups);
+
     return Scaffold(
       backgroundColor: scheme.surface,
       appBar: AppBar(
@@ -393,59 +423,136 @@ class _ScanPageState extends ConsumerState<ScanPage> {
                   ),
                 ),
                 const SizedBox(height: 12),
-                InkWell(
-                  onTap: () {
-                    setState(() {
-                      _selectedTargetGroupId = null; // 내 지갑 선택
-                    });
-                  },
-                  borderRadius: BorderRadius.circular(16),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      vertical: 18,
-                      horizontal: 16,
-                    ),
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(
-                        color: _selectedTargetGroupId == null
-                            ? scheme.primary
-                            : scheme.outline.withValues(alpha: 0.25),
-                        width: _selectedTargetGroupId == null ? 2 : 1,
-                      ),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(
-                          Icons.account_balance_wallet_rounded,
-                          color: _selectedTargetGroupId == null
-                              ? scheme.primary
-                              : scheme.onSurfaceVariant,
-                        ),
-                        const SizedBox(width: 12),
-                        Text(
-                          '내 지갑',
-                          style: theme.textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.w700,
-                            color: _selectedTargetGroupId == null
-                                ? scheme.primary
-                                : scheme.onSurface,
-                          ),
-                        ),
-                        const Spacer(),
-                        if (_selectedTargetGroupId == null)
-                          Icon(
-                            Icons.check_circle_rounded,
-                            color: scheme.primary,
-                          ),
-                      ],
-                    ),
-                  ),
+
+                // '내 지갑'(개인 소장)은 **항상 첫 번째**다. 그룹이 없거나 아직
+                // 못 불러온 상태에서도 사용자는 언제나 저장을 진행할 수 있어야
+                // 하므로, 이 타일은 목록과 무관하게 존재한다.
+                _TargetTile(
+                  icon: Icons.account_balance_wallet_rounded,
+                  label: '내 지갑',
+                  selected: selectedTargetId == null,
+                  onTap: () => setState(() => _selectedTargetGroupId = null),
                 ),
+
+                // 내가 속한 그룹. 목록이 비면(그룹 없음·로딩·미로그인·에러 —
+                // 파생 provider가 모두 빈 목록으로 접는다) 아무것도 그리지 않고
+                // '내 지갑'만 남는다. 에러를 구분해 알리는 배너는 후속 과제다
+                // (`scan_target_group_state.dart` doc 참조).
+                for (final Group group in targetGroups) ...<Widget>[
+                  const SizedBox(height: 10),
+                  _TargetTile(
+                    emoji: group.emoji,
+                    icon: Icons.groups_rounded,
+                    label: group.name,
+                    selected: selectedTargetId == group.id,
+                    onTap: () =>
+                        setState(() => _selectedTargetGroupId = group.id),
+                  ),
+                ],
+
                 const SizedBox(height: 20),
               ],
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// '저장할 그룹 선택'의 타일 하나 — '내 지갑'과 그룹이 같은 모양을 쓴다.
+///
+/// 둘을 한 위젯으로 두는 이유는 **선택 상태의 시각 언어가 갈라지지 않게** 하기
+/// 위해서다. 예전에는 '내 지갑' 타일만 인라인으로 있었고, 그룹 타일을 따로 짜면
+/// 테두리 두께·색·체크 아이콘이 조용히 어긋난다.
+class _TargetTile extends StatelessWidget {
+  /// 그룹 이모지 글자 크기. 형제 [_GroupTile]의 `_emojiSize`(30)와 다른 값이다 —
+  /// 저쪽은 격자 카드, 이쪽은 한 줄짜리 목록 타일이라 시각 무게가 다르다.
+  static const double _emojiSize = 22;
+
+  const _TargetTile({
+    required this.icon,
+    required this.label,
+    required this.selected,
+    required this.onTap,
+    this.emoji,
+  });
+
+  /// 이모지가 없을 때 쓰는 대체 아이콘.
+  final IconData icon;
+
+  /// 그룹 이모지. 그룹이 설정해 두지 않았으면 null이고 [icon]으로 떨어진다.
+  final String? emoji;
+
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+    final String? trimmedEmoji = emoji?.trim();
+    final bool hasEmoji = trimmedEmoji != null && trimmedEmoji.isNotEmpty;
+
+    return InkWell(
+      onTap: onTap,
+      // `AppRadii.panel`(16) — 토큰 doc이 용도로 '이모지 타일'을 명시한다.
+      // 값은 리터럴 16과 같아 모양은 그대로다.
+      borderRadius: BorderRadius.circular(AppRadii.panel),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 16),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(AppRadii.panel),
+          border: Border.all(
+            color: selected
+                ? scheme.primary
+                : scheme.outline.withValues(alpha: 0.25),
+            width: selected ? 2 : 1,
+          ),
+        ),
+        child: Row(
+          children: <Widget>[
+            // 이모지는 [Text]라 글자 확대 설정을 따라 커지는데 [Icon]은
+            // `applyTextScaling` 기본값이 false라 그대로다. 그냥 두면 '내 지갑'
+            // 타일과 그룹 타일의 높이가 **모든 배율에서 어긋난다**(실측: 1.0배
+            // 64 vs 69, 2.0배 88 vs 101). 형제 [_GroupTile]이 같은 함정을 겪고
+            // doc에 적어 뒀다 — 오버플로 예외를 던지지 않아 눈으로만 보인다.
+            //
+            // 저쪽은 격자라 칸을 넓히는 쪽으로 풀었지만(`_iconExtentFor`), 여기는
+            // 유연한 Row라 **아이콘도 함께 확대**시키는 편이 단순하고, 라벨이
+            // 이미 확대되므로 셋의 배율이 한 축으로 모인다.
+            if (hasEmoji)
+              // height: 1 — 없으면 기본 줄높이가 붙어 아이콘 갈래보다 크다.
+              Text(
+                trimmedEmoji,
+                style: const TextStyle(fontSize: _emojiSize, height: 1),
+              )
+            else
+              Icon(
+                icon,
+                applyTextScaling: true,
+                color: selected ? scheme.primary : scheme.onSurfaceVariant,
+              ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                label,
+                // 그룹 이름은 사용자가 짓는 값이라 길 수 있다. '내 지갑'과 달리
+                // 폭을 가정할 수 없어 한 줄로 잘라 낸다.
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w700,
+                  color: selected ? scheme.primary : scheme.onSurface,
+                ),
+              ),
+            ),
+            if (selected) ...<Widget>[
+              const SizedBox(width: 8),
+              Icon(Icons.check_circle_rounded, color: scheme.primary),
+            ],
+          ],
         ),
       ),
     );
@@ -842,10 +949,32 @@ class __GifticonFormScreenState extends ConsumerState<_GifticonFormScreen> {
     final ColorScheme scheme = Theme.of(context).colorScheme;
 
     switch (formState.submit) {
-      case ScanSubmitSuccess():
+      // 저장은 성공했다. 다만 **그룹 공유는 별개의 결과**라 함께 알린다.
+      //
+      // 예전에는 세 경우가 모두 같은 문구였다 — 지갑에 넣었을 때도, 그룹에
+      // 공유됐을 때도, **공유만 실패했을 때도.** 그래서 사용자는 자기가 고른
+      // 그룹에 실제로 들어갔는지 알 수 없었고, 부분 실패는 조용히 묻혔다
+      // (상태에는 `sharedGroupName`·`shareError`가 담겨 있는데 화면이 안 썼다).
+      case ScanSubmitSuccess(
+          :final String? shareError,
+          :final String? sharedGroupName,
+          :final bool sharedToGroup,
+        ):
         messenger.showSnackBar(
-          const SnackBar(
-            content: KeepAllText('기프티콘이 성공적으로 저장되었습니다.'),
+          SnackBar(
+            content: KeepAllText(
+              saveResultMessage(
+                shareError: shareError,
+                sharedGroupName: sharedGroupName,
+                // 이름을 못 읽어도 공유됐다는 사실은 알려야 한다 — 안 그러면
+                // 지갑 저장과 같은 문구가 되어 이 화면이 고치려던 상태로 돌아간다.
+                sharedToGroup: sharedToGroup,
+              ),
+            ),
+            // 공유 실패는 저장 성공과 함께 오므로 놓치기 쉽다. 읽을 시간을 준다.
+            duration: shareError == null
+                ? const Duration(seconds: 4)
+                : const Duration(seconds: 6),
           ),
         );
         navigator.popUntil((route) => route.isFirst);
