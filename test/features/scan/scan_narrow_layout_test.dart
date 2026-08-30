@@ -25,7 +25,7 @@
 ///   폴백이 없고 여섯 라벨 실측이 전부 같아진다 — `minExtentFor`가 최댓값 루프를
 ///   도는 유일한 이유를 이 환경에서는 재현할 수 없다.
 /// - `minExtentFor`의 `+ 1` 반올림 여유.
-/// - `_ResultDialog.mutedStyle`의 행간 값.
+/// - `ScanResultDialog.mutedStyle`의 행간 값.
 library;
 
 import 'package:flutter/material.dart';
@@ -138,7 +138,7 @@ void main() {
     // 원리상 못 잡고, 칸 높이를 직접 재야 한다.
     testWidgets('아이콘 칸이 글자 배율을 따라간다', (WidgetTester tester) async {
       const double scale = 2.0;
-      const double emojiSize = 30; // _GroupTile._emojiSize
+      const double emojiSize = 30; // CategoryTile._emojiSize
 
       await pumpScanAt(
         tester,
