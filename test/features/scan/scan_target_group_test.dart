@@ -48,6 +48,32 @@ class _NameLookupFailingShareRepository extends InMemoryShareRepository {
       Stream<List<Group>>.value(const <Group>[]);
 }
 
+/// 그룹 목록 스트림을 **껐다 켤 수 있는** 저장소 — 에러 배너와 재시도를 계측한다.
+///
+/// `watchGroups`가 첫 구독에서 에러를 던지면 정본 [myGroupsProvider]는 값 없는
+/// `AsyncError`가 되고, 그때만 배너가 뜬다(`hasError && !hasValue`). `groupsFail`을
+/// 끄고 '다시 시도'를 누르면 계약 훅이 그 계층만 재구독해 회복된다 — 구독 카운터로
+/// 실제 재구독을 확인한다(자동 재시도가 없다는 것도 같은 카운터가 지킨다).
+class _FlakyGroupsShareRepository extends InMemoryShareRepository {
+  _FlakyGroupsShareRepository({
+    required super.authRepository,
+    required super.gifticonRepository,
+    super.seed,
+  });
+
+  bool groupsFail = false;
+  int groupsSubscriptions = 0;
+
+  @override
+  Stream<List<Group>> watchGroups(String userId) {
+    groupsSubscriptions++;
+    if (groupsFail) {
+      return Stream<List<Group>>.error(StateError('groups down'));
+    }
+    return super.watchGroups(userId);
+  }
+}
+
 /// 이름 조회가 **영영 응답하지 않는** 저장소 — 5초 상한 자체를 검증한다.
 ///
 /// 위 [_NameLookupFailingShareRepository]는 동기 빈 방출이라 `orElse` 갈래만
@@ -557,6 +583,109 @@ void main() {
         container.read(gifticonFormControllerProvider).targetGroupId,
         isNull,
       );
+    });
+  });
+
+  group('그룹 목록 에러 — 배너와 재시도', () {
+    /// 여기서는 파생 provider를 override하지 **않는다.** 검증 대상이 정본
+    /// (`myGroupsProvider`) → 파생 → 화면으로 이어지는 **실제 체인**이고, 재시도 훅
+    /// `retryMyGroups`도 그 체인의 private 계층을 되살리는 것이라 파생을 갈아 끼우면
+    /// 검증할 것이 남지 않는다. 저장소만 계측용으로 바꾼다.
+    late InMemoryAuthRepository auth;
+    late InMemoryGifticonRepository gifticons;
+    late _FlakyGroupsShareRepository repo;
+
+    /// ⚠️ [failGroups]는 **pump 전에** 켜야 한다. 화면이 마운트된 뒤에 켜면 정본이
+    /// 이미 성공 방출을 갖고 있어(`hasValue`) 배너가 뜨지 않는다 — 그게 설계다
+    /// (보존 값이 있으면 목록이 그대로 선택되므로 사용자가 할 일이 없다).
+    Future<void> pumpScanPage(
+      WidgetTester tester, {
+      bool seed = true,
+      bool failGroups = false,
+    }) async {
+      tester.view.physicalSize = const Size(1200, 2600);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      auth = InMemoryAuthRepository();
+      gifticons = InMemoryGifticonRepository();
+      repo = _FlakyGroupsShareRepository(
+        authRepository: auth,
+        gifticonRepository: gifticons,
+        seed: seed,
+      )..groupsFail = failGroups;
+      addTearDown(() {
+        repo.dispose();
+        gifticons.dispose();
+        auth.dispose();
+      });
+
+      final ProviderContainer container = ProviderContainer(
+        overrides: <Override>[
+          authRepositoryProvider.overrideWithValue(auth),
+          gifticonRepositoryProvider.overrideWithValue(gifticons),
+          shareRepositoryProvider.overrideWithValue(repo),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: MaterialApp(theme: AppTheme.light, home: const ScanPage()),
+        ),
+      );
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('못 불러오면 배너를 띄운다 — "그룹 없음"으로 위장하지 않는다',
+        (WidgetTester tester) async {
+      // 이 배선의 존재 이유다. 배너가 없으면 사용자는 고를 그룹이 화면에 없다는
+      // 사실만 보고 "그룹이 하나도 없구나"로 읽는다.
+      await pumpScanPage(tester, failGroups: true);
+
+      expect(find.text('그룹 목록을 불러오지 못했어요.'), findsOneWidget);
+      expect(find.text('다시 시도'), findsOneWidget);
+      // 저장 경로는 살아 있어야 한다 — 그룹을 못 불러온 것이 저장을 막지는 않는다.
+      expect(find.text('내 지갑'), findsWidgets);
+    });
+
+    testWidgets('그룹이 정말 없을 때는 배너를 띄우지 않는다', (WidgetTester tester) async {
+      // 배너의 값어치는 "못 불러옴"과 "없음"을 가르는 데 있다. 후자에까지 뜨면
+      // 그 구분이 사라져 정상 상태를 오류처럼 보이게 한다.
+      await pumpScanPage(tester, seed: false);
+
+      expect(find.text('그룹 목록을 불러오지 못했어요.'), findsNothing);
+      expect(find.text('다시 시도'), findsNothing);
+      expect(find.text('내 지갑'), findsWidgets);
+    });
+
+    testWidgets("'다시 시도'가 계약 훅으로 실제 재구독시킨다", (WidgetTester tester) async {
+      await pumpScanPage(tester, failGroups: true);
+
+      final int before = repo.groupsSubscriptions;
+      expect(find.text('그룹 목록을 불러오지 못했어요.'), findsOneWidget);
+
+      repo.groupsFail = false;
+      await tester.tap(find.text('다시 시도'));
+      await tester.pumpAndSettle();
+
+      expect(repo.groupsSubscriptions, greaterThan(before),
+          reason: '재시도는 원천을 실제로 재구독해야 한다');
+      expect(find.text('그룹 목록을 불러오지 못했어요.'), findsNothing);
+      expect(find.text('가족'), findsOneWidget, reason: '회복하면 타일이 돌아온다');
+    });
+
+    testWidgets('자동 재시도는 없다 — 사용자가 누를 때만 재구독한다', (WidgetTester tester) async {
+      // 장애 중 전 화면이 스스로 재구독하면 retry storm이 된다(#13).
+      await pumpScanPage(tester, failGroups: true);
+
+      final int settled = repo.groupsSubscriptions;
+      await tester.pump(const Duration(seconds: 3));
+      await tester.pumpAndSettle();
+
+      expect(repo.groupsSubscriptions, settled);
     });
   });
 }
