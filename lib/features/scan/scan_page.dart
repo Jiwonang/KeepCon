@@ -25,8 +25,10 @@ import 'package:keepcon/features/scan/widgets/barcode_scanner_screen.dart';
 import 'package:keepcon/shared/diagnostics/report_handled_failure.dart';
 import 'package:keepcon/shared/models/gifticon.dart';
 import 'package:keepcon/shared/models/group.dart';
+import 'package:keepcon/shared/providers/my_groups_provider.dart';
 import 'package:keepcon/shared/theme/theme_tokens.dart';
 import 'package:keepcon/shared/util/date_format.dart';
+import 'package:keepcon/shared/widgets/inline_error_banner.dart';
 
 enum _GifticonGroup {
   cafe(label: '카페/음료', emoji: '☕', icon: null),
@@ -98,8 +100,9 @@ class _ScanPageState extends ConsumerState<ScanPage> {
   ///
   /// 그래서 목록에 없으면 '내 지갑'으로 되돌린다 — 보이는 것과 저장되는 곳이
   /// 일치한다. 대가로, 스트림 실패로 목록이 접힌 경우 사용자가 고른 그룹 대신
-  /// 지갑에 조용히 저장된다. 그 상태를 알리는 것은 에러 배너의 몫이고 후속
-  /// 과제다(`scan_target_group_state.dart` doc).
+  /// 지갑에 조용히 저장된다. 그 상태는 이제 섹션 맨 위 배너·진행 표시가 알린다
+  /// ([scanGroupsUnavailableProvider]·[scanGroupsPendingProvider] —
+  /// `scan_target_group_state.dart` doc).
   String? _resolveTargetGroupId(List<Group> groups) {
     final String? id = _selectedTargetGroupId;
     if (id == null) return null;
@@ -279,8 +282,11 @@ class _ScanPageState extends ConsumerState<ScanPage> {
     final scheme = theme.colorScheme;
 
     // 저장 대상으로 고를 수 있는 내 그룹. 로딩·미로그인·에러는 파생 provider가
-    // 빈 목록으로 접으므로 여기서는 목록만 본다.
+    // 빈 목록으로 접는다 — 그래서 목록만으로는 "그룹 없음"과 "못 불러옴"이 같아
+    // 보인다. 둘을 가르는 판정은 별도 provider가 맡는다.
     final List<Group> targetGroups = ref.watch(scanTargetGroupsProvider);
+    final bool groupsUnavailable = ref.watch(scanGroupsUnavailableProvider);
+    final bool groupsPending = ref.watch(scanGroupsPendingProvider);
     final String? selectedTargetId = _resolveTargetGroupId(targetGroups);
 
     return Scaffold(
@@ -424,6 +430,21 @@ class _ScanPageState extends ConsumerState<ScanPage> {
                 ),
                 const SizedBox(height: 12),
 
+                // 그룹을 못 불러왔을 때만 뜬다(`hasError && !hasValue`). 이전 값이
+                // 보존된 순단 에러에는 띄우지 않는다 — 목록이 그대로 선택되므로
+                // 사용자가 할 일이 없다(판정 근거는 provider doc).
+                //
+                // 재시도는 계약 정본의 훅으로 한다. 그룹 목록의 에러는 정본이
+                // watch하는 **private 체인**(`lib/shared`)에 캐시돼 페이지에서
+                // `invalidate(myGroupsProvider)`로는 되살릴 수 없다(#13 실측).
+                if (groupsUnavailable) ...<Widget>[
+                  InlineErrorBanner(
+                    message: '그룹 목록을 불러오지 못했어요.',
+                    onRetry: () => retryMyGroups(ref),
+                  ),
+                  const SizedBox(height: 12),
+                ],
+
                 // '내 지갑'(개인 소장)은 **항상 첫 번째**다. 그룹이 없거나 아직
                 // 못 불러온 상태에서도 사용자는 언제나 저장을 진행할 수 있어야
                 // 하므로, 이 타일은 목록과 무관하게 존재한다.
@@ -434,10 +455,28 @@ class _ScanPageState extends ConsumerState<ScanPage> {
                   onTap: () => setState(() => _selectedTargetGroupId = null),
                 ),
 
-                // 내가 속한 그룹. 목록이 비면(그룹 없음·로딩·미로그인·에러 —
-                // 파생 provider가 모두 빈 목록으로 접는다) 아무것도 그리지 않고
-                // '내 지갑'만 남는다. 에러를 구분해 알리는 배너는 후속 과제다
-                // (`scan_target_group_state.dart` doc 참조).
+                // 아직 첫 방출 전이면 진행 표시를 둔다 — 이 화면은 '그룹 없음'을
+                // 타일의 **부재**로 말하므로, 로딩을 무음으로 두면 위 배너가 가른
+                // 것과 똑같은 위장이 로딩 축에 남는다(실측: 콜드 스타트 화면이
+                // "정말 그룹이 없을 때"와 픽셀 단위로 같았다).
+                //
+                // 재시도 중에도 뜬다 — 그때 상태는 `AsyncError(isLoading: true)`라
+                // 배너와 **공존**한다(배너=원인, 이것=진행 중). 배너를 숨기지 않는
+                // 이유는 계약 정본의 왕복 깜빡임 규약이다.
+                if (groupsPending) ...<Widget>[
+                  const SizedBox(height: 14),
+                  const Center(
+                    child: SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  ),
+                ],
+
+                // 내가 속한 그룹. 목록이 비면 아무것도 그리지 않고 '내 지갑'만
+                // 남는다 — 그 이유가 '그룹 없음'인지 '못 불러옴'인지는 위 배너가,
+                // '아직 못 받음'인지는 위 진행 표시가 가른다.
                 for (final Group group in targetGroups) ...<Widget>[
                   const SizedBox(height: 10),
                   _TargetTile(
