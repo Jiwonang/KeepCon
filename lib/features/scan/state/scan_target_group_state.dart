@@ -57,14 +57,43 @@ final AutoDisposeProvider<List<Group>> scanTargetGroupsProvider =
 ///
 /// ⚠️ **share에 같은 규칙의 provider가 따로 있다**(`myGroupListUnavailableProvider`).
 /// 여기 한 벌 더 두는 것은 페이지가 서로를 import하지 않기 위해서다 — 판정식이 갈라지면
-/// 두 화면의 에러 표시 기준이 달라진다. 셋째 소비자가 생기면 그때 `contract-architect`에게
-/// `lib/shared`로의 승격을 요청할 것(늦게 승격 규칙 ③ — 지금 승격하면 한 줄짜리 파생을
-/// 계약 표면에 올리는 셈이라, 공유물인 [myGroupsProvider]·`retryMyGroups`가 이미
-/// `lib/shared`에 있다는 점과 저울질해 미뤘다).
+/// 두 화면의 에러 표시 기준이 달라진다.
+///
+/// 📌 **승격 트리거는 이미 당겨졌다 — 미룬 것이 아니라 이 담당이 실행할 수 없을 뿐이다.**
+/// CLAUDE.md 승격 규칙 ③의 방아쇠는 "셋째"가 아니라 **실제 두 번째 소비자**이고,
+/// share가 첫째·이 선언이 둘째다(`InlineErrorBanner` 승격도 같은 근거를 썼다).
+/// 실행에 필요한 파일이 전부 이 담당의 수정 금지 영역이라(`lib/shared`·`tool/`·
+/// `lib/features/share`) 인계한다. 인계 항목 둘:
+///   1. `contract-architect`에게 `lib/shared`로의 승격 요청(두 선언을 하나로).
+///   2. 승격 전까지는 `tool/check_ssot.sh`의 `SSOT_PROVIDERS`에 두 이름을 등록해
+///      갈라짐을 CI가 잡게 할 것 — 지금은 **어느 가드도 이 복제를 보지 않는다**.
 ///
 /// autoDispose 근거는 [scanTargetGroupsProvider]와 같다.
 final AutoDisposeProvider<bool> scanGroupsUnavailableProvider =
     Provider.autoDispose<bool>((ref) {
   final AsyncValue<List<Group>> groups = ref.watch(myGroupsProvider);
   return groups.hasError && !groups.hasValue;
+});
+
+/// 그룹 목록이 **아직 첫 방출 전**(값 없는 로딩)인가 — 로딩을 '그룹 없음'으로
+/// 위장하지 않기 위한 게이트.
+///
+/// [scanGroupsUnavailableProvider]와 **같은 문제의 다른 축**이다. 이 화면에서
+/// '그룹 없음'은 타일의 **부재**로 표현되므로, 원인이 로딩이어도 확정 부재와 똑같이
+/// 보인다(실측: 콜드 스타트에서 배너 0·타일 0·진행표시 0 — "정말 그룹이 없을 때"와
+/// 픽셀 단위로 같았다). 에러 축만 막고 이 축을 두면 같은 위장이 절반 남는다.
+///
+/// share에도 같은 규칙이 있다 — `groupsPending`(`share_page.dart`),
+/// `sharedGifticonsPendingProvider`, `usage_log_page`의 `isPending`.
+///
+/// ⚠️ 이 값과 [scanGroupsUnavailableProvider]는 **동시에 참일 수 있다.** `invalidate`가
+/// 만드는 재시도 상태는 `AsyncError(isLoading: true)`이기 때문이다 — 계약 정본이
+/// `hasError`를 `isLoading`보다 **먼저** 검사해 그렇게 유지한다(`session_provider.dart`:
+/// 로딩을 먼저 보면 재시도를 누르는 순간 배너가 사라졌다 재등장하는 왕복 깜빡임이 된다).
+/// 그때는 배너(원인)와 진행 표시(지금 뭔가 하고 있음)가 **함께** 떠야 맞다 —
+/// 배너를 숨기지 말 것.
+final AutoDisposeProvider<bool> scanGroupsPendingProvider =
+    Provider.autoDispose<bool>((ref) {
+  final AsyncValue<List<Group>> groups = ref.watch(myGroupsProvider);
+  return groups.isLoading && !groups.hasValue;
 });

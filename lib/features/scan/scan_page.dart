@@ -100,8 +100,9 @@ class _ScanPageState extends ConsumerState<ScanPage> {
   ///
   /// 그래서 목록에 없으면 '내 지갑'으로 되돌린다 — 보이는 것과 저장되는 곳이
   /// 일치한다. 대가로, 스트림 실패로 목록이 접힌 경우 사용자가 고른 그룹 대신
-  /// 지갑에 조용히 저장된다. 그 상태를 알리는 것은 에러 배너의 몫이고 후속
-  /// 과제다(`scan_target_group_state.dart` doc).
+  /// 지갑에 조용히 저장된다. 그 상태는 이제 섹션 맨 위 배너·진행 표시가 알린다
+  /// ([scanGroupsUnavailableProvider]·[scanGroupsPendingProvider] —
+  /// `scan_target_group_state.dart` doc).
   String? _resolveTargetGroupId(List<Group> groups) {
     final String? id = _selectedTargetGroupId;
     if (id == null) return null;
@@ -285,6 +286,7 @@ class _ScanPageState extends ConsumerState<ScanPage> {
     // 보인다. 둘을 가르는 판정은 별도 provider가 맡는다.
     final List<Group> targetGroups = ref.watch(scanTargetGroupsProvider);
     final bool groupsUnavailable = ref.watch(scanGroupsUnavailableProvider);
+    final bool groupsPending = ref.watch(scanGroupsPendingProvider);
     final String? selectedTargetId = _resolveTargetGroupId(targetGroups);
 
     return Scaffold(
@@ -453,9 +455,28 @@ class _ScanPageState extends ConsumerState<ScanPage> {
                   onTap: () => setState(() => _selectedTargetGroupId = null),
                 ),
 
+                // 아직 첫 방출 전이면 진행 표시를 둔다 — 이 화면은 '그룹 없음'을
+                // 타일의 **부재**로 말하므로, 로딩을 무음으로 두면 위 배너가 가른
+                // 것과 똑같은 위장이 로딩 축에 남는다(실측: 콜드 스타트 화면이
+                // "정말 그룹이 없을 때"와 픽셀 단위로 같았다).
+                //
+                // 재시도 중에도 뜬다 — 그때 상태는 `AsyncError(isLoading: true)`라
+                // 배너와 **공존**한다(배너=원인, 이것=진행 중). 배너를 숨기지 않는
+                // 이유는 계약 정본의 왕복 깜빡임 규약이다.
+                if (groupsPending) ...<Widget>[
+                  const SizedBox(height: 14),
+                  const Center(
+                    child: SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  ),
+                ],
+
                 // 내가 속한 그룹. 목록이 비면 아무것도 그리지 않고 '내 지갑'만
-                // 남는다 — 그 이유가 '그룹 없음'인지 '못 불러옴'인지는 위 배너가
-                // 가른다(`scan_target_group_state.dart` doc 참조).
+                // 남는다 — 그 이유가 '그룹 없음'인지 '못 불러옴'인지는 위 배너가,
+                // '아직 못 받음'인지는 위 진행 표시가 가른다.
                 for (final Group group in targetGroups) ...<Widget>[
                   const SizedBox(height: 10),
                   _TargetTile(

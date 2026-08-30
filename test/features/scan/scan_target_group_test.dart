@@ -14,6 +14,8 @@
 
 library;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -62,11 +64,22 @@ class _FlakyGroupsShareRepository extends InMemoryShareRepository {
   });
 
   bool groupsFail = false;
+
+  /// 켜면 구독은 되지만 **영영 방출하지 않는다** — 값 없는 로딩(첫 방출 전)을
+  /// 재현한다. 에러와 달리 이 상태는 `hasError`가 거짓이라 배너로는 안 잡힌다.
+  bool groupsHang = false;
+
   int groupsSubscriptions = 0;
 
   @override
   Stream<List<Group>> watchGroups(String userId) {
     groupsSubscriptions++;
+    if (groupsHang) {
+      // 영영 완료되지 않는 future = 방출도 종료도 없다. `Stream.periodic`을 쓰지
+      // 않는 이유는 **타이머를 남겨** 위젯 테스트가 teardown에서 'Pending timers'로
+      // 죽기 때문이다(실측).
+      return Stream<List<Group>>.fromFuture(Completer<List<Group>>().future);
+    }
     if (groupsFail) {
       return Stream<List<Group>>.error(StateError('groups down'));
     }
@@ -602,6 +615,7 @@ void main() {
       WidgetTester tester, {
       bool seed = true,
       bool failGroups = false,
+      bool hangGroups = false,
     }) async {
       tester.view.physicalSize = const Size(1200, 2600);
       tester.view.devicePixelRatio = 1.0;
@@ -614,7 +628,9 @@ void main() {
         authRepository: auth,
         gifticonRepository: gifticons,
         seed: seed,
-      )..groupsFail = failGroups;
+      )
+        ..groupsFail = failGroups
+        ..groupsHang = hangGroups;
       addTearDown(() {
         repo.dispose();
         gifticons.dispose();
@@ -636,7 +652,15 @@ void main() {
           child: MaterialApp(theme: AppTheme.light, home: const ScanPage()),
         ),
       );
-      await tester.pumpAndSettle();
+
+      if (hangGroups) {
+        // 진행 표시(CircularProgressIndicator)는 **영영 애니메이션한다** —
+        // `pumpAndSettle`을 쓰면 타임아웃으로 죽는다(실측). 프레임만 넘긴다.
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 16));
+      } else {
+        await tester.pumpAndSettle();
+      }
     }
 
     testWidgets('못 불러오면 배너를 띄운다 — "그룹 없음"으로 위장하지 않는다',
@@ -675,6 +699,37 @@ void main() {
           reason: '재시도는 원천을 실제로 재구독해야 한다');
       expect(find.text('그룹 목록을 불러오지 못했어요.'), findsNothing);
       expect(find.text('가족'), findsOneWidget, reason: '회복하면 타일이 돌아온다');
+    });
+
+    testWidgets('아직 못 받았을 때는 진행 표시를 둔다 — "그룹 없음"으로 위장하지 않는다',
+        (WidgetTester tester) async {
+      // 배너가 가르는 것은 **값 없는 에러**뿐이다. 로딩 축을 무음으로 두면 콜드
+      // 스타트 화면이 "정말 그룹이 없을 때"와 픽셀 단위로 같아진다 — 배너로 막은
+      // 위장이 절반 남는다.
+      await pumpScanPage(tester, hangGroups: true);
+
+      expect(find.byType(CircularProgressIndicator), findsOneWidget);
+      expect(find.text('그룹 목록을 불러오지 못했어요.'), findsNothing,
+          reason: '로딩은 에러가 아니다');
+      expect(find.text('내 지갑'), findsWidgets, reason: '저장 경로는 항상 살아 있다');
+    });
+
+    testWidgets('재시도 중에는 배너와 진행 표시가 함께 뜬다', (WidgetTester tester) async {
+      // `invalidate`가 만드는 상태는 `AsyncError(isLoading: true)`라 둘이 동시에
+      // 참이다. 배너를 숨기면 눌렀다 실패할 때 왕복 깜빡임이 되고(계약 정본 규약),
+      // 진행 표시가 없으면 눌러도 화면이 하나도 안 변한다.
+      await pumpScanPage(tester, failGroups: true);
+      expect(find.text('그룹 목록을 불러오지 못했어요.'), findsOneWidget);
+      expect(find.byType(CircularProgressIndicator), findsNothing);
+
+      repo.groupsHang = true; // 재구독은 되지만 응답하지 않는다
+      await tester.tap(find.text('다시 시도'));
+      await tester.pump();
+
+      expect(find.text('그룹 목록을 불러오지 못했어요.'), findsOneWidget,
+          reason: '원인은 계속 보여야 한다(왕복 깜빡임 금지)');
+      expect(find.byType(CircularProgressIndicator), findsOneWidget,
+          reason: '눌렀다는 피드백이 있어야 한다');
     });
 
     testWidgets('자동 재시도는 없다 — 사용자가 누를 때만 재구독한다', (WidgetTester tester) async {
