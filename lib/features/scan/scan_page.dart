@@ -419,9 +419,14 @@ class _ScanPageState extends ConsumerState<ScanPage> {
                 if (groupsPending) ...<Widget>[
                   const SizedBox(height: 14),
                   const Center(
+                    // 팔레트에 크기 토큰이 없어 리터럴이다. 저장소의 인라인
+                    // 스피너는 16·18·22로 갈려 있고 **그것들은 모두 버튼 아이콘
+                    // 슬롯**이라, 목록 아래 독립 스피너인 이 자리에 정확히
+                    // 대응하는 선례는 없다. 가장 작은 값을 골라 목록을 밀어내지
+                    // 않게 한다.
                     child: SizedBox(
-                      width: 20,
-                      height: 20,
+                      width: 16,
+                      height: 16,
                       child: CircularProgressIndicator(strokeWidth: 2),
                     ),
                   ),
