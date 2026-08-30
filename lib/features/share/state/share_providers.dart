@@ -177,7 +177,7 @@ final unsharedGifticonsProvider = Provider<List<Gifticon>>((ref) {
 /// 사용자가 취할 행동이 없는 배너를 띄울 이유가 없다(다음 방출이 성공하면 조용히 회복).
 /// 따라서 판정식(`hasError && !hasValue`)은 유지한다.
 ///
-/// **더 이상 "재시도 불가"의 뜻이 아니다.** 이 값이 true여도 배너는 [ShareErrorBanner]에
+/// **더 이상 "재시도 불가"의 뜻이 아니다.** 이 값이 true여도 배너는 [InlineErrorBanner]에
 /// 실제 재시도를 넘긴다 — 계약 정본이 [retryMyGroups](세션 + 그룹 스트림 중 **에러인
 /// 계층만** 재구독)를 제공하기 때문이다. 승격 전에는 에러가 정본의 private 체인에 캐시되고
 /// `invalidate(myGroupsProvider)`가 dependency로 전파되지 않아(#13 실측) 배너들이

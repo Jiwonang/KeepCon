@@ -22,10 +22,10 @@ import '../../../shared/providers/session_provider.dart';
 import '../../../shared/providers/shared_gifticons_provider.dart';
 import '../../../shared/theme/brand_palette.dart';
 import '../../../shared/theme/theme_tokens.dart';
+import '../../../shared/widgets/inline_error_banner.dart';
 import '../state/share_providers.dart';
 import '../widgets/pending_join_requests_section.dart';
 import '../widgets/share_common.dart';
-import '../widgets/share_error_banner.dart';
 import '../widgets/share_format.dart';
 import '../widgets/share_sheets.dart';
 import 'member_invite_page.dart';
@@ -185,7 +185,7 @@ class _GroupDetailBody extends ConsumerWidget {
             ),
             const SizedBox(height: 12),
             if (sharedHasError) ...<Widget>[
-              ShareErrorBanner(
+              InlineErrorBanner(
                 message: '공유 기프티콘을 불러오지 못했어요.',
                 // 이 화면은 이 그룹의 스트림만 본다 → 그 인스턴스만 재구독한다
                 // (전체 family 무효화는 멀쩡한 그룹까지 재구독시켜 읽기·과금을 늘린다).

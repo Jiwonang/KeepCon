@@ -14,6 +14,13 @@
 /// 실제 계약 구현([InMemoryShareRepository])에 위임해, 테스트가 "호출됐는가"가 아니라
 /// **실제 readAt이 갱신됐는가**를 단언하도록 했다. 세션은 계약 mock
 /// [InMemoryAuthRepository](기본 = 로그인 상태)를 그대로 쓴다.
+///
+/// ℹ️ **위치를 `test/shared/widgets/`로 옮기지 않는 이유.** 배너가 `lib/shared`로 승격됐지만
+/// 이 파일이 고정하는 것은 위젯 자체가 아니라 **share 화면들의 에러 UI 배선**이다 — (a)(b)(c)
+/// 전부 share 페이지를 pump해 provider 폴딩·재구독·읽음 가드를 검증하고, 위젯 단독 케이스는
+/// '배너 위젯 규약' 그룹 하나뿐이다. 그 한 그룹 때문에 파일을 옮기면 나머지가 소유자에서
+/// 멀어진다. 위젯 단독 계약(접미 문구·버튼 유무)을 소비자와 무관하게 고정할 필요가 커지면
+/// 그때 그 그룹만 `test/shared/widgets/`로 분리한다.
 library;
 
 import 'dart:async';
@@ -25,7 +32,6 @@ import 'package:keepcon/features/share/pages/notification_center_page.dart';
 import 'package:keepcon/features/share/pages/shared_gifticon_detail_page.dart';
 import 'package:keepcon/features/share/pages/usage_log_page.dart';
 import 'package:keepcon/features/share/share_page.dart';
-import 'package:keepcon/features/share/widgets/share_error_banner.dart';
 import 'package:keepcon/features/share/widgets/share_sheets.dart';
 import 'package:keepcon/shared/models/group.dart';
 import 'package:keepcon/shared/models/share.dart';
@@ -37,6 +43,7 @@ import 'package:keepcon/shared/repositories/impl/in_memory_auth_repository.dart'
 import 'package:keepcon/shared/repositories/impl/in_memory_gifticon_repository.dart';
 import 'package:keepcon/shared/repositories/impl/in_memory_share_repository.dart';
 import 'package:keepcon/shared/repositories/share_repository.dart';
+import 'package:keepcon/shared/widgets/inline_error_banner.dart';
 
 /// 스트림별로 "실패/성공"을 토글할 수 있고 **구독 횟수를 세는** 테스트용 [ShareRepository].
 ///
@@ -434,7 +441,7 @@ void main() {
 
       await pumpPage(tester, const NotificationCenterPage());
 
-      expect(find.byType(ShareErrorBanner), findsOneWidget);
+      expect(find.byType(InlineErrorBanner), findsOneWidget);
       expect(find.text('알림을 불러오지 못했어요.'), findsOneWidget);
       expect(repo.notificationSubscriptions, 1,
           reason: '자동 재시도 금지 — 사용자가 누르기 전에는 재구독하지 않는다(retry storm 방어)');
@@ -455,7 +462,7 @@ void main() {
 
       expect(repo.notificationSubscriptions, 2,
           reason: '원천 provider가 invalidate돼야 한다');
-      expect(find.byType(ShareErrorBanner), findsNothing);
+      expect(find.byType(InlineErrorBanner), findsNothing);
       expect(find.text('새 기프티콘'), findsOneWidget);
     });
 
@@ -464,7 +471,7 @@ void main() {
       repo.sharedFail = true;
 
       await pumpPage(tester, const SharedGifticonDetailPage(itemId: 'missing'));
-      expect(find.byType(ShareErrorBanner), findsOneWidget);
+      expect(find.byType(InlineErrorBanner), findsOneWidget);
       final int before = repo.sharedSubscriptions;
       expect(before, greaterThanOrEqualTo(1));
 
@@ -492,7 +499,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(repo.usageLogSubscriptions, greaterThan(before));
-      expect(find.byType(ShareErrorBanner), findsNothing);
+      expect(find.byType(InlineErrorBanner), findsNothing);
     });
 
     testWidgets('공유 시트 배너의 재시도가 후보 원천을 재구독한다', (WidgetTester tester) async {
@@ -537,7 +544,7 @@ void main() {
 
       expect(repo.groupSubscriptions, greaterThan(before),
           reason: '정본의 그룹 스트림 인스턴스가 재구독돼야 한다');
-      expect(find.byType(ShareErrorBanner), findsNothing);
+      expect(find.byType(InlineErrorBanner), findsNothing);
       expect(find.text('가족'), findsOneWidget, reason: '회복되면 그룹 목록이 표시된다');
     });
 
@@ -547,7 +554,7 @@ void main() {
 
       await pumpPage(tester, const SharedGifticonDetailPage(itemId: 'missing'));
 
-      expect(find.byType(ShareErrorBanner), findsOneWidget);
+      expect(find.byType(InlineErrorBanner), findsOneWidget);
       expect(find.text('기프티콘을 찾을 수 없어요.'), findsNothing);
       expect(find.text('다시 시도'), findsOneWidget);
       final int before = repo.groupSubscriptions;
@@ -557,7 +564,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(repo.groupSubscriptions, greaterThan(before));
-      expect(find.byType(ShareErrorBanner), findsNothing);
+      expect(find.byType(InlineErrorBanner), findsNothing);
       // 조회 경로가 살아났고 항목은 실제로 없다 → 비로소 "없음"을 확정할 수 있다.
       expect(find.text('기프티콘을 찾을 수 없어요.'), findsOneWidget);
     });
@@ -570,7 +577,7 @@ void main() {
       await tester.tap(find.text('공유 시트 열기'));
       await tester.pumpAndSettle();
 
-      expect(find.byType(ShareErrorBanner), findsOneWidget);
+      expect(find.byType(InlineErrorBanner), findsOneWidget);
       expect(find.text('다시 시도'), findsOneWidget);
       final int before = repo.groupSubscriptions;
 
@@ -580,7 +587,7 @@ void main() {
 
       expect(repo.groupSubscriptions, greaterThan(before),
           reason: 'retryShareCandidates가 그룹 축(내 그룹 목록)도 되살려야 한다');
-      expect(find.byType(ShareErrorBanner), findsNothing);
+      expect(find.byType(InlineErrorBanner), findsNothing);
     });
 
     testWidgets('사용 이력 — 그룹 배너 재시도로 필터 칩이 돌아온다', (WidgetTester tester) async {
@@ -599,7 +606,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(repo.groupSubscriptions, greaterThan(before));
-      expect(find.byType(ShareErrorBanner), findsNothing);
+      expect(find.byType(InlineErrorBanner), findsNothing);
       expect(find.text('가족'), findsOneWidget, reason: '그룹 필터 칩이 복구된다');
     });
 
@@ -650,7 +657,7 @@ void main() {
       expect(find.textContaining('아메리카노'), findsWidgets,
           reason: '같은 순단에 사용 이력만 사라지는 비대칭이 없어야 한다');
       expect(find.text('사용 이력이 없어요.'), findsNothing);
-      expect(find.byType(ShareErrorBanner), findsNothing,
+      expect(find.byType(InlineErrorBanner), findsNothing,
           reason: '보존된 값으로 계속 표시 중이므로 실패를 알릴 이유가 없다');
     });
 
@@ -665,7 +672,7 @@ void main() {
       expect(container.read(sessionUserProvider).hasError, isTrue);
 
       expect(find.text('새 기프티콘'), findsOneWidget);
-      expect(find.byType(ShareErrorBanner), findsNothing);
+      expect(find.byType(InlineErrorBanner), findsNothing);
       expect(find.text('알림이 없어요.'), findsNothing);
     });
 
@@ -683,7 +690,7 @@ void main() {
           ProviderScope.containerOf(tester.element(find.byType(_SheetHost)));
       expect(container.read(sessionUserProvider).hasError, isTrue);
 
-      expect(find.byType(ShareErrorBanner), findsNothing);
+      expect(find.byType(InlineErrorBanner), findsNothing);
       expect(find.text('공유할 수 있는 기프티콘이 없어요.'), findsOneWidget,
           reason: '후보 계산은 보존 user로 계속되고, 실제로 후보가 0개다');
     });
@@ -720,14 +727,23 @@ void main() {
       // 규약이 조용히 썩지 않도록 위젯 단위로 직접 고정한다.
       await tester.pumpWidget(
         const MaterialApp(
-          home: Scaffold(body: ShareErrorBanner(message: '문제가 생겼어요.')),
+          home: Scaffold(body: InlineErrorBanner(message: '문제가 생겼어요.')),
         ),
       );
 
       expect(find.text('다시 시도'), findsNothing);
+      // 접미를 상수 보간으로 기대하면 **문구를 바꿔도 기대값이 함께 바뀌어 통과한다**
+      // (뮤테이션으로 확인: 상수를 아무 문자열로 바꿔도 전 케이스 green이었다).
+      // 표시 문자열은 리터럴로 고정한다.
       expect(
-        find.text('문제가 생겼어요. ${ShareErrorBanner.retryUnavailableGuide}'),
+        find.text('문제가 생겼어요. 연결 상태를 확인한 뒤 앱을 다시 열어 주세요.'),
         findsOneWidget,
+      );
+      // 그리고 상수와 실제 표시가 갈라지지 않는지도 함께 못박는다 — 호출부(`lib`)는
+      // 접미를 조립하지 않고 이 상수를 참조하므로, 상수가 바뀌면 화면 문구가 바뀐다.
+      expect(
+        InlineErrorBanner.retryUnavailableGuide,
+        '연결 상태를 확인한 뒤 앱을 다시 열어 주세요.',
       );
     });
   });
@@ -755,7 +771,7 @@ void main() {
       await pumpPage(tester, const SharePage());
 
       expect(find.text('공유된 기프티콘이 없어요.'), findsOneWidget);
-      expect(find.byType(ShareErrorBanner), findsNothing);
+      expect(find.byType(InlineErrorBanner), findsNothing);
     });
   });
 
@@ -824,7 +840,7 @@ void main() {
         findsNothing,
       );
       expect(find.text('공유된 기프티콘이 없어요.'), findsNothing);
-      expect(find.byType(ShareErrorBanner), findsNothing);
+      expect(find.byType(InlineErrorBanner), findsNothing);
     });
   });
 
@@ -847,7 +863,7 @@ void main() {
       await pumpPage(tester, const SharedGifticonDetailPage(itemId: 'missing'));
 
       expect(find.text('기프티콘을 찾을 수 없어요.'), findsOneWidget);
-      expect(find.byType(ShareErrorBanner), findsNothing);
+      expect(find.byType(InlineErrorBanner), findsNothing);
     });
   });
 }
