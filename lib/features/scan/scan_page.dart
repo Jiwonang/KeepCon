@@ -419,9 +419,13 @@ class _ScanPageState extends ConsumerState<ScanPage> {
                 if (groupsPending) ...<Widget>[
                   const SizedBox(height: 14),
                   const Center(
+                    // 크기·굵기는 share의 같은 인라인 스피너와 맞춘다
+                    // (`member_invite_page.dart` — 저장소의 유일한 선례).
+                    // 팔레트에 크기 토큰이 없어 리터럴이지만, 임의 값이 아니라
+                    // 형제와 같은 값이다.
                     child: SizedBox(
-                      width: 20,
-                      height: 20,
+                      width: 16,
+                      height: 16,
                       child: CircularProgressIndicator(strokeWidth: 2),
                     ),
                   ),

@@ -15,11 +15,13 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:keepcon/features/scan/state/gifticon_form_state.dart';
+import 'package:keepcon/features/scan/util/expiry_date_range.dart';
 import 'package:keepcon/features/scan/util/keep_all_ko.dart';
 import 'package:keepcon/features/scan/util/price_input_formatter.dart';
 import 'package:keepcon/features/scan/util/save_result_message.dart';
 import 'package:keepcon/features/scan/widgets/result_dialog.dart';
 import 'package:keepcon/shared/models/gifticon.dart';
+import 'package:keepcon/shared/providers/now_provider.dart';
 import 'package:keepcon/shared/theme/theme_tokens.dart';
 import 'package:keepcon/shared/util/date_format.dart';
 
@@ -72,17 +74,36 @@ class _GifticonFormScreenState extends ConsumerState<GifticonFormScreen> {
     final formNotifier = ref.read(gifticonFormControllerProvider.notifier);
     final currentState = ref.read(gifticonFormControllerProvider);
 
-    final initialDate = currentState.expiryDate ?? DateTime.now();
+    // 폼이 들고 있는 값이 피커가 받아들이는 범위 밖일 수 있다 — 그 값은 사용자가
+    // 고른 것이 아니라 **OCR이 프리필한 것**이기 때문이다. 파서는 이미지에 적힌
+    // 것을 그대로 읽으므로 2020년 이전도 낸다(픽스처 테스트가
+    // `DateTime(2016, 2, 12)`로 못박고 있다).
+    //
+    // `showDatePicker`는 `initialDate`가 범위 밖이면 **assert로 죽는다.** 그래서
+    // 여기서 좁혀 넣는다 — 값 자체는 폼에 그대로 두고, 피커를 여는 시작 위치만
+    // 조정한다(클램프한 값을 저장하지 않는다. 사용자가 고르지 않은 날짜를
+    // 조용히 바꿔 넣는 셈이 된다).
+    final DateTime initialDate = _clampToSelectableRange(
+      currentState.expiryDate ?? DateTime.now(),
+    );
+
     final picked = await showDatePicker(
       context: context,
       initialDate: initialDate,
-      firstDate: DateTime(2020),
-      lastDate: DateTime(2035),
+      firstDate: expirySelectableFrom,
+      lastDate: expirySelectableTo,
     );
 
     if (picked != null) {
       formNotifier.setExpiryDate(picked);
     }
+  }
+
+  /// [date]를 피커가 받아들이는 범위로 좁힌다.
+  DateTime _clampToSelectableRange(DateTime date) {
+    if (date.isBefore(expirySelectableFrom)) return expirySelectableFrom;
+    if (date.isAfter(expirySelectableTo)) return expirySelectableTo;
+    return date;
   }
 
   /// 저장 버튼 처리.
@@ -542,6 +563,25 @@ class _GifticonFormScreenState extends ConsumerState<GifticonFormScreen> {
                   return null;
                 },
                 builder: (FormFieldState<DateTime> field) {
+                  // 지난 날짜는 **막지 않고 알린다.** `GifticonStatus.expired`가
+                  // 계약상 정상 상태라(`available → expired` 전이가 정의돼 있다)
+                  // 이미 만료된 것을 기록해 두는 것도 정당한 사용이다. 진짜
+                  // 위험은 OCR이 잘못 읽은 날짜를 사용자가 모르고 저장하는 쪽이라,
+                  // 저장을 막는 대신 눈에 띄게 해 준다.
+                  //
+                  // 시각은 계약 정본 [nowProvider]에서 받는다 — 여기서
+                  // `DateTime.now()`를 직접 읽으면 자정 경계에서 화면과 다른
+                  // 소비자의 판정이 갈린다(main이 같은 이유로 그렇게 한다).
+                  // 판정 대상은 `field.value`가 아니라 **폼 상태의 날짜**다.
+                  // [FormField]는 자기 내부 값을 들고 있어서 `initialValue` 이후
+                  // 컨트롤러가 바뀌어도 따라오지 않는다 — OCR 프리필은 폼이 열리기
+                  // 전에 상태에 들어가므로 둘이 갈라질 수 있다.
+                  final DateTime? expiry = formState.expiryDate;
+                  final String? pastNotice = expiry != null &&
+                          isPastExpiry(expiry, now: ref.watch(nowProvider))
+                      ? '이미 지난 날짜예요. 맞는지 확인해 주세요.'
+                      : null;
+
                   return InkWell(
                     onTap: () async {
                       await _selectExpiryDate(context);
@@ -558,6 +598,15 @@ class _GifticonFormScreenState extends ConsumerState<GifticonFormScreen> {
                         border: const OutlineInputBorder(),
                         suffixIcon: const Icon(Icons.calendar_today_rounded),
                         errorText: field.errorText,
+                        // `errorText`가 있으면 Material이 helper를 감춘다 — 값이
+                        // 아예 없을 때(필수 항목 안내)와 값은 있는데 지난 날짜일
+                        // 때가 겹치지 않으므로 그대로 둔다.
+                        helperText: pastNotice,
+                        helperMaxLines: 2,
+                        // 경고용 색이 팔레트에 따로 없다. 테두리는 정상으로 두고
+                        // 글자만 danger로 칠해 "막힌 것이 아니라 확인하라"는
+                        // 뜻이 되게 한다.
+                        helperStyle: TextStyle(color: theme.colorScheme.error),
                       ),
                       child: Text(
                         expiryDateText,
