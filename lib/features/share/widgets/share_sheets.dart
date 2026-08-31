@@ -299,12 +299,22 @@ class _JoinGroupSheetState extends ConsumerState<_JoinGroupSheet> {
       //
       // ⚠️ 그런데 그 예외는 **초대코드 전용이 아니다** — 계약이 `credential`을 "링크
       //    토큰 또는 6자리 코드"로 정의하므로 만료된 **링크**도 같은 예외를 던진다.
-      //    확인 모드가 보내는 것은 딥링크의 링크 토큰이므로, 하나로 뭉뚱그리면
-      //    링크가 만료된 사람에게 "새 **코드**를 요청하세요"라고 말하게 된다 —
-      //    코드를 받아 와도 만료된 링크는 그대로라 다음 행동이 틀린 안내다.
-      //    어느 쪽이 만료됐는지는 보낸 자격증명의 모양으로 가른다.
+      //    하나로 뭉뚱그리면 링크가 만료된 사람에게 "새 **코드**를 요청하세요"라고
+      //    말하게 된다 — 코드를 받아 와도 만료된 링크는 그대로라 다음 행동이 틀린
+      //    안내다.
+      //
+      // **확인 모드에서는 모양을 추측하지 않는다.** 그 값은 정의상 딥링크가 실은 링크
+      // 토큰이다(`initialToken` dartdoc). v3.0 이전 링크 토큰은 6자리 숫자였고 아직
+      // 살아 있어서(팀 공용 시드 `482913`이 그것이다), 모양으로 가르면 **멀쩡한 링크가
+      // '만료된 코드'로 안내된다.** 저장소는 같은 값을 코드→토큰 폴백으로 조회해 이미
+      // '링크'로 판정하는데, 화면만 배타적으로 갈라 반대 답을 내는 어긋남이었다.
+      //
+      // ⚠️ 입력 모드는 아직 이 오분류가 남아 있다 — 손으로 붙여넣은 6자리 **링크
+      //    토큰**은 화면에 판별 신호가 없다. 항구적 해결은 [InviteExpiredException]이
+      //    저장소가 이미 계산한 판정을 싣는 것인데, 계약(`lib/shared`) 변경이라 별건이다.
       final bool expired = e is InviteExpiredException;
-      final bool expiredCode = expired && isWellFormedInviteCode(token);
+      final bool expiredCode =
+          expired && !_isConfirmMode && isWellFormedInviteCode(token);
       if (mounted) {
         setState(() {
           _sending = false;

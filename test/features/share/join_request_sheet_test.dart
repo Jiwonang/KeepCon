@@ -229,6 +229,36 @@ void main() {
     expect(find.text('참여 요청을 보냈어요'), findsNothing);
   });
 
+  testWidgets('확인 모드는 6자리 링크 토큰도 링크로 안내한다', (WidgetTester tester) async {
+    // v3.0 이전 링크 토큰은 **6자리 숫자**였고 아직 살아 있다 — 팀 공용 시드
+    // `482913`이 그것이고, deep_link_parser_test가 `/invite/482913`을
+    // `InviteDestination('482913')`로 못박고 있다.
+    //
+    // 모양으로 가르면 그 멀쩡한 링크가 '만료된 코드'로 안내되어, 코드를 받아 와도
+    // 링크는 그대로인 틀린 다음 행동을 시킨다. 확인 모드에서는 추측할 이유가 없다 —
+    // 딥링크가 싣는 것은 정의상 링크 토큰이다.
+    final _SpyShareRepository share = _SpyShareRepository(expired: true);
+    final _SpyErrorReporter reporter = _SpyErrorReporter();
+    await pumpSheet(tester, share, reporter, linkToken: '482913');
+
+    await tapCta(tester);
+
+    expect(find.textContaining('만료된 초대 링크'), findsOneWidget);
+    expect(find.textContaining('만료된 초대코드'), findsNothing);
+  });
+
+  testWidgets('입력값의 앞뒤 공백은 잘라서 보낸다', (WidgetTester tester) async {
+    // 붙여넣기는 공백을 달고 온다. 안 자르면 '없는 코드'로 거부된다.
+    final _SpyShareRepository share = _SpyShareRepository();
+    final _SpyErrorReporter reporter = _SpyErrorReporter();
+    await pumpSheet(tester, share, reporter, linkToken: null);
+
+    await tester.enterText(find.byType(TextField), '  482913  ');
+    await tapCta(tester);
+
+    expect(share.requestedTokens, <String>['482913']);
+  });
+
   testWidgets('만료가 아닌 실패는 만료라고 말하지 않는다', (WidgetTester tester) async {
     // 반대 방향도 고정한다 — "없는 코드"를 "만료됐다"고 말하면 존재한 적 없는
     // 그룹을 기다리게 만든다.
