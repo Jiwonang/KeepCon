@@ -21,8 +21,7 @@ import 'package:keepcon/shared/providers/deep_link_providers.dart';
 const String _cta = '그룹 참여 요청하기';
 
 void main() {
-  testWidgets('딥링크 링크 토큰이 있으면 참여 시트가 확인 모드로 열린다',
-      (WidgetTester tester) async {
+  testWidgets('딥링크 링크 토큰이 있으면 참여 시트가 확인 모드로 열린다', (WidgetTester tester) async {
     await tester.pumpWidget(
       ProviderScope(
         overrides: <Override>[

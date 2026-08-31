@@ -126,8 +126,7 @@ void main() {
     // (v3.8). 여기서는 새 경로가 실제로 불리는지만 본다.
   });
 
-  testWidgets('확인 모드는 링크 토큰을 보여주지도 입력란을 두지도 않는다',
-      (WidgetTester tester) async {
+  testWidgets('확인 모드는 링크 토큰을 보여주지도 입력란을 두지도 않는다', (WidgetTester tester) async {
     // 딥링크로 온 사람에게 토큰은 읽을 값도 고칠 값도 아니다. 입력란에 담으면
     // autofocus로 키보드가 뜨고, 전체선택 한 번에 토큰이 날아간다.
     final _SpyShareRepository share = _SpyShareRepository();
@@ -256,8 +255,7 @@ void main() {
     expect(find.text('초대코드로 참여하기'), findsOneWidget);
   });
 
-  testWidgets('전환하면 입력한 코드가 링크 토큰 대신 자격증명이 된다',
-      (WidgetTester tester) async {
+  testWidgets('전환하면 입력한 코드가 링크 토큰 대신 자격증명이 된다', (WidgetTester tester) async {
     final _SpyShareRepository share = _SpyShareRepository(expired: true);
     final _SpyErrorReporter reporter = _SpyErrorReporter();
     await pumpSheet(tester, share, reporter);
