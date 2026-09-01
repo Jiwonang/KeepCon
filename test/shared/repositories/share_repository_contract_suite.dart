@@ -108,7 +108,13 @@ void runCredentialResolutionContract(ShareBackend Function() makeBackend) {
 
   setUp(() async {
     // 생성이 곧 준비다(`ShareBackend.stop` 참조).
-    backend = makeBackend();
+    final ShareBackend created = makeBackend();
+    // ⚠️ **정리는 만들어진 인스턴스에 붙인다.** 상단에 `tearDown(() => backend.stop())`을
+    //    두면, `makeBackend()`가 던졌을 때도 `flutter_test`가 그 정리를 실행하면서
+    //    아직 대입되지 않은 `backend`를 만져 `LateInitializationError`가 나고, **그것이
+    //    원래 예외를 가린다.** `addTearDown`은 생성이 성공한 뒤에만 등록된다.
+    addTearDown(created.stop);
+    backend = created;
     // 방장 세션으로 시작한다 — `createGroup`의 행위자가 곧 방장이다.
     await backend.auth.signUp(
       email: 'contract-owner@keepcon.test',
@@ -116,8 +122,6 @@ void runCredentialResolutionContract(ShareBackend Function() makeBackend) {
       displayName: '방장',
     );
   });
-
-  tearDown(() => backend.stop());
 
   /// 행위자를 **비멤버**로 바꾼다. 요청은 정의상 비멤버가 한다.
   Future<User> asGuest() async {
