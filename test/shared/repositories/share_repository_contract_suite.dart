@@ -15,8 +15,12 @@
 /// fake는 Firestore의 *자료구조*를 흉내 낼 뿐 *서버*가 아니다. 아래는 여기서
 /// 검증되지 않으며, **"이제 firebase가 테스트된다"고 읽으면 안 된다.**
 ///
-/// 1. **보안 규칙.** `fake_cloud_firestore`의 규칙 지원은 문서상 불완전하다
-///    (`DocumentReference` 연산만). 규칙의 정본은 에뮬레이터 검증
+/// 1. **보안 규칙 — "제한적"이 아니라 아예 평가되지 않는다.** 규칙 엔진
+///    `fake_firebase_security_rules 0.5.4`는 `resource`·`request.resource`·**커스텀
+///    함수**·`exists()`·`get()`·timestamps를 전부 미지원으로 명시한다(그 패키지 README의
+///    "Missing" 절). 이 저장소의 `firestore.rules`는 `allow` 34개 중 `if false` 5개를 뺀
+///    **29개 전부**가 그중 하나 이상을 쓴다(`isSignedIn()`만 24개) — 즉 `securityRules:`를
+///    넘겨도 규칙이 한 줄도 평가되지 않는다. 정본은 에뮬레이터 검증
 ///    (`tool/verify_firestore_rules.sh`, CI `Firestore rules` 잡)이고 그대로 남는다.
 ///    여기서 통과한다고 규칙이 그 요청을 허용한다는 뜻이 아니다 — 실제로 PR #100·#104의
 ///    권한 결함은 이 계층이 아니라 에뮬레이터에서만 드러났다.
@@ -24,8 +28,19 @@
 ///    충돌을 만들지 않는다. 멱등성 같은 **로직**은 검증되지만 "두 요청이 겹칠 때"는
 ///    여전히 미검증이다.
 /// 3. **복합 인덱스 요구.** fake는 인덱스를 강제하지 않는다. 인덱스 없는 쿼리를 새로
-///    짜면 **여기서는 통과하고 실서비스에서 죽는다** — `firestore.indexes.json`에
-///    실제 항목이 있다(`usageLogs`·`notifications`). 쿼리를 더할 때는 그 파일을 본다.
+///    짜면 **여기서는 통과하고 실서비스에서 죽는다** — `firestore.indexes.json`에 항목이
+///    넷 있고 **그중 둘이 `joinRequests`**다(`[groupId, status, requestedAt]`·
+///    `[userId, requestedAt]`, 나머지는 `usageLogs`·`notifications`). 이 스위트가 다루는
+///    컬렉션이 바로 그것이므로, 대기 목록·요청자 조회에 정렬이나 필터를 더할 때는 반드시
+///    그 파일을 함께 본다.
+/// 4. **규칙이 없으므로 비멤버가 프로덕션과 다른 분기를 탄다.** 실서비스에서 게스트는
+///    `groups`를 읽지 못하고(`firestore.rules`: `uid() in resource.data.memberIds`),
+///    `requestToJoin`은 그 거부를 `on FirebaseException`으로 흡수해 "비멤버"로 판정한다.
+///    fake에서는 읽기가 **성공**하므로 그 catch가 한 번도 실행되지 않는다 — 실측: 그
+///    catch를 `rethrow`로 바꿔도 이 스위트 18건이 전부 통과한다(프로덕션에서는 모든
+///    게스트의 참여 요청이 `permission-denied`로 죽는 변경인데도). 같은 이유로
+///    `_dropJoinRequest`의 `permission-denied` 흡수도 여기서는 미검증이다.
+///    **게스트 케이스가 초록이라고 프로덕션 경로가 검증된 것이 아니다.**
 ///
 /// ## 지금 덮는 축
 ///
