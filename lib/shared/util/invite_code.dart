@@ -76,7 +76,8 @@ String newInviteCode({Random? random}) {
 /// `ShareRepository.requestToJoin`은 코드 조회 문서를 먼저 보고 없으면 링크 토큰으로
 /// 폴백하며, 그렇게 확정한 판정을 `InviteExpiredException.isCode`로 화면에 넘긴다.
 /// 이 함수의 결과로 만료 안내나 자격증명 종류를 가르면 6자리 링크 토큰에서 틀린다 —
-/// 실제로 그렇게 짜서 정상 링크를 통째로 막았고(v3.9), 화면이 같은 실수를 반복했다(v3.12).
+/// 실제로 그렇게 짜서 정상 링크를 통째로 막았고, 화면이 같은 실수를 반복했다 — 둘 다 v3.9에서
+/// 났고, 저장소 쪽은 그 안에서, 화면 쪽은 v3.12에서 걷어냈다.
 /// 여기서는 **어느 컬렉션을 먼저 볼지**만 정한다.
 bool isWellFormedInviteCode(String value) {
   if (value.length != inviteCodeLength) return false;

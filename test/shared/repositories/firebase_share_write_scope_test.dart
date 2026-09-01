@@ -45,6 +45,44 @@ Map<String, String> _methodBodies(String source) {
   return bodies;
 }
 
+/// `requestToJoin`의 **코드→링크 폴백** 조회를 가리키는 앵커.
+///
+/// 한 곳에 모아 둔 것은 개명 시 고칠 자리를 하나로 만들기 위해서다(소스 검사는 식별자
+/// 이름에 묶인다 — 그 한계는 아래 group 머리말에 적었다).
+const String _fallbackAnchor = 'credDoc = await _inviteTokens';
+
+/// [body]에서 폴백 블록이 닫히는 `}`의 위치. 앵커나 짝이 없으면 `null`.
+///
+/// **첫 `}`를 찾지 않고 깊이를 센다.** 블록 안에 문자열 보간(`${…}`)이나 중첩 블록이
+/// 하나만 생겨도 첫 `}`는 그 자리에서 멈춰 창이 잘리고, **동작이 그대로인데** 단언이
+/// 실패한다. 소스 검사 테스트의 값어치는 리팩터링에 둔감한 것이므로(이 파일 머리말)
+/// 그 취약함을 남겨 둘 이유가 없다.
+///
+/// 여는 `{`를 거꾸로 찾지 않는 것도 같은 이유다 — 앵커 **앞**에 보간이 생기면 그
+/// `${`를 블록 시작으로 오인한다. 앵커가 이미 블록 안이므로 깊이 1에서 시작해 앞으로만
+/// 센다.
+int? _fallbackBlockEnd(String body) {
+  final int at = body.indexOf(_fallbackAnchor);
+  if (at < 0) return null;
+  int depth = 1;
+  for (int i = at; i < body.length; i++) {
+    if (body[i] == '{') {
+      depth++;
+    } else if (body[i] == '}') {
+      depth--;
+      if (depth == 0) return i;
+    }
+  }
+  return null;
+}
+
+/// 폴백 블록에서 앵커 **이후** 블록이 닫힐 때까지의 본문. 못 찾으면 `null`.
+String? _fallbackBlockTail(String body) {
+  final int? end = _fallbackBlockEnd(body);
+  if (end == null) return null;
+  return body.substring(body.indexOf(_fallbackAnchor), end);
+}
+
 void main() {
   final File file = File(
     'lib/shared/repositories/impl/firebase/firebase_share_repository.dart',
@@ -146,34 +184,68 @@ void main() {
     //    `isCode = false`를 지워도 전 테스트가 통과한다(뮤테이션으로 확인했다). 위 매퍼
     //    등급과 똑같이 "호출부가 Firestore 없이 실행되지 않는" 구멍이라 같은 방법으로 막는다.
 
+    // ⚠️ 아래 단언들은 지역변수 이름 `isCode`·`codeShaped`와 폴백 조회 심볼
+    //    `_inviteTokens`에 묶여 있다. 소스 검사의 원리적 한계이므로 **개명하면 여기도
+    //    함께 옮긴다** — 안 옮기면 동작이 멀쩡한데 시끄럽게 실패한다(거짓 통과는 아니다).
+
     test('코드 조회가 빗나가면 링크 토큰으로 폴백한다', () {
       // 폴백 자체가 사라지면 레거시 6자리 링크가 통째로 '없는 코드'가 된다 — 종류 판정
       // 이전에 참여 경로가 막히는 더 큰 사고라, 아래 단언의 전제로 먼저 고정한다.
       final String body = bodies['requestToJoin'] ?? '';
       expect(body, isNotEmpty,
           reason: 'requestToJoin을 못 찾았다 — 이 테스트가 조용히 무력해졌다');
-      expect(body, contains('credDoc = await _inviteTokens'),
+      expect(body, contains(_fallbackAnchor),
           reason: '코드→링크 폴백이 사라지면 레거시 6자리 링크 토큰이 전부 막힌다');
+    });
+
+    test('1차 조회는 코드 컬렉션을 먼저 본다', () {
+      // 이 한 줄이 `isCode`의 **초기값**을 정한다. 뒤집으면 살아 있는 6자리 코드가
+      // 1차·폴백 모두 `_inviteTokens`를 보게 되어 통째로 '없는 코드'가 되고, 그 전에
+      // "코드를 먼저 본다"는 전제가 무너져 5분 창이 24시간 창에 흡수된다(계약 v3.12).
+      // 아래 두 단언은 폴백 이후만 보므로 이 뒤집기를 못 잡는다 — 여기서 막는다.
+      expect(
+          bodies['requestToJoin']!,
+          matches(
+              RegExp(r'codeShaped\s*\?\s*_inviteCodes\s*:\s*_inviteTokens')),
+          reason: '코드 우선이 뒤집히면 모든 초대코드가 없는 코드가 된다');
     });
 
     test('폴백을 타면 isCode를 false로 내린다', () {
       // 폴백 블록 **안에서** 내려야 한다. 밖에 있으면 22자 토큰까지 싸잡거나(무해)
       // 6자리 코드 정상 경로를 링크로 뒤집는다(유해) — 위치가 곧 의미다.
-      final String body = bodies['requestToJoin']!;
-      final int from = body.indexOf('credDoc = await _inviteTokens');
-      final int to = body.indexOf('}', from);
-      expect(to, isNot(-1), reason: '폴백 블록의 끝을 못 찾았다 — 구조가 바뀌었으면 이 검사도 옮겨라');
-      expect(body.substring(from, to), contains('isCode = false'),
+      final String? block = _fallbackBlockTail(bodies['requestToJoin']!);
+      expect(block, isNotNull,
+          reason: '폴백 블록을 못 찾았다 — 조회 심볼이나 구조가 바뀌었으면 이 검사도 함께 옮겨라');
+      expect(block!, matches(RegExp(r'isCode\s*=\s*false')),
           reason: '폴백을 타고도 isCode가 true로 남으면, 만료된 6자리 **링크**가 '
               '"만료된 초대코드"로 안내된다 — 코드를 받아 와도 링크는 그대로다');
     });
 
-    test('만료 예외가 그 판정을 그대로 싣는다 — 모양으로 다시 매기지 않는다', () {
-      // 계약이 구현체에 부과한 의무다. 여기서 `isWellFormedInviteCode(...)`를 다시
-      // 부르면 폴백으로 확정한 답을 모양이 덮어써, 이 PR이 고친 오분류가 되살아난다.
+    test('폴백으로 확정한 isCode가 던지기 전에 덮어써지지 않는다', () {
+      // 위 단언들은 폴백 블록 **안**과 `throw` **한 줄**만 본다. 그 사이 구간은
+      // 무방비여서, 거기에 `isCode = isWellFormedInviteCode(credential);` 한 줄만
+      // 넣으면 셋 다 통과하면서 **이 PR이 고친 오분류가 그대로 되살아난다**
+      // (만료된 레거시 6자리 링크 → "새 코드를 요청하세요"). 그 구간을 여기서 닫는다.
       final String body = bodies['requestToJoin']!;
+      final int? blockEnd = _fallbackBlockEnd(body);
+      expect(blockEnd, isNotNull,
+          reason: '폴백 블록을 못 찾았다 — 조회 심볼이나 구조가 바뀌었으면 이 검사도 함께 옮겨라');
+      final int throwAt = body.indexOf('InviteExpiredException(');
+      expect(throwAt, greaterThan(blockEnd!),
+          reason: '만료 던지기를 폴백 블록 뒤에서 못 찾았다 — 구조가 바뀌었으면 이 검사도 옮겨라');
+      final String between = body.substring(blockEnd, throwAt);
+      expect(between, isNot(matches(RegExp(r'isCode\s*='))),
+          reason: '폴백으로 확정한 판정이 던지기 전에 덮어써진다');
+      expect(between, isNot(contains('isWellFormedInviteCode')),
+          reason: '모양으로 다시 매기면 6자리 링크 토큰 오분류가 되살아난다');
+    });
+
+    test('만료 예외가 그 판정을 그대로 싣는다 — 모양으로 다시 매기지 않는다', () {
+      // 계약이 구현체에 부과한 의무다(`ShareRepository.requestToJoin` dartdoc).
       expect(
-          body, contains('InviteExpiredException(credential, isCode: isCode)'),
+          bodies['requestToJoin']!,
+          matches(RegExp(
+              r'InviteExpiredException\(\s*credential\s*,\s*isCode:\s*isCode\s*,?\s*\)')),
           reason: '만료 예외가 폴백 판정이 아닌 다른 근거를 싣게 됐다');
     });
   });
