@@ -626,8 +626,13 @@ class FirebaseShareRepository implements ShareRepository {
     final bool codeShaped = isWellFormedInviteCode(credential);
     DocumentSnapshot<Map<String, dynamic>> credDoc =
         await (codeShaped ? _inviteCodes : _inviteTokens).doc(credential).get();
+    // "이것이 코드였는가"의 정본은 모양이 아니라 **어느 컬렉션에서 찾았는가**다. 폴백을
+    // 타면 6자리라도 링크 토큰이므로 여기서 `false`로 내린다 — 이 값이 아래 만료 안내의
+    // 근거가 되고, 화면은 이것을 그대로 쓴다(계약: 구현체가 폴백 판정을 싣는다).
+    bool isCode = codeShaped;
     if (!credDoc.exists && codeShaped) {
       credDoc = await _inviteTokens.doc(credential).get();
+      isCode = false;
     }
     final Map<String, dynamic> t = credDoc.data() ?? const <String, dynamic>{};
     final Object? groupId = t['groupId'];
@@ -640,7 +645,8 @@ class FirebaseShareRepository implements ShareRepository {
     final Object? expiresAt = t['expiresAt'];
     if (expiresAt is! Timestamp ||
         !DateTime.now().isBefore(expiresAt.toDate())) {
-      throw InviteExpiredException(credential);
+      // 만료 창을 고른 것이 곧 문서 선택이므로, 같은 판정을 그대로 싣는다.
+      throw InviteExpiredException(credential, isCode: isCode);
     }
 
     // 이미 멤버인지 — 멤버는 그룹을 읽을 수 있고 비멤버는 규칙에 막힌다. 그 차이를

@@ -159,7 +159,10 @@ void main() {
       await asGuest();
       await expectLater(
         repo.requestToJoin(issued.inviteCode!),
-        throwsA(isA<InviteExpiredException>()),
+        // 예외가 **종류까지** 싣는다 — 화면이 모양으로 다시 추측하지 않게 하려는
+        // 것이고, 그 추측이 틀리는 경로를 바로 아래 레거시 절이 고정한다.
+        throwsA(isA<InviteExpiredException>()
+            .having((InviteExpiredException e) => e.isCode, 'isCode', isTrue)),
       );
     });
 
@@ -167,7 +170,7 @@ void main() {
       // 계약의 "가드 위반은 StateError" 규약을 깨지 않으면서 화면만 구별할 수 있게
       // 하위 타입으로 좁힌 설계다. 이 관계가 끊기면 기존 `on StateError` 처리들이
       // 조용히 예외를 흘린다(아무 안내 없이 시트가 멈추는 그 실패 양상).
-      expect(InviteExpiredException('482913'), isA<StateError>());
+      expect(InviteExpiredException('482913', isCode: true), isA<StateError>());
     });
 
     test('없는 코드는 만료가 아니라 평범한 StateError다', () async {
@@ -211,6 +214,37 @@ void main() {
       await asGuest();
       final JoinRequest req = await repo.requestToJoin(legacy.inviteToken);
       expect(req.groupId, legacy.id);
+    });
+
+    test('만료된 6자리 링크 토큰은 예외에 isCode: false를 싣는다', () async {
+      // ⚠️ **이 케이스가 모양 추측과 폴백 판정이 갈리는 유일한 지점이다.**
+      //    `isWellFormedInviteCode('482913')`는 `true`지만 저장소는 이 값을 코드로
+      //    해석하지 않는다 — 그 값을 코드로 쓰는 그룹이 없어 링크 토큰으로 폴백해
+      //    찾았고, 만료도 24시간 창으로 판정했다. 그러니 종류는 **링크**다.
+      //
+      //    화면이 이 값을 모양으로 다시 매기면 '만료된 코드'라고 안내하고, 사용자는
+      //    방장에게 코드를 받아 온다 — 그래도 만료된 링크는 그대로다. 예외가 판정을
+      //    싣게 한 이유가 정확히 이것이라, 여기가 그 계약의 회귀 고정이다.
+      final List<Group> seeded = await repo.getGroups(
+        InMemoryAuthRepository.defaultUser.id,
+      );
+      final Group legacy = seeded.firstWhere(
+        (Group g) => isWellFormedInviteCode(g.inviteToken),
+        orElse: () => throw StateError('시드에 6자리 토큰 그룹이 없다 — 이 테스트의 전제가 사라졌다'),
+      );
+
+      // 링크 24시간을 넘긴다(코드는 애초에 발급된 적이 없어 폴백이 확실히 탄다).
+      clock = clock.add(Group.inviteValidity + const Duration(minutes: 1));
+
+      await asGuest();
+      await expectLater(
+        repo.requestToJoin(legacy.inviteToken),
+        throwsA(isA<InviteExpiredException>()
+            .having((InviteExpiredException e) => e.isCode, 'isCode', isFalse)),
+      );
+      // 대조군 — 같은 값에 대해 **모양**은 반대 답을 낸다. 이 단언이 무너지면
+      // 위 케이스는 두 판정이 우연히 일치하는 무의미한 테스트가 된다.
+      expect(isWellFormedInviteCode(legacy.inviteToken), isTrue);
     });
 
     test('만료된 코드는 링크 폴백으로 흘러가지 않는다(5분 창이 24시간 창에 흡수되지 않게)', () async {
