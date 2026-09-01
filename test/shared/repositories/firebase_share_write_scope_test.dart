@@ -205,8 +205,12 @@ void main() {
       // **글자가 아니라 줄을 본다.** `contains`는 주석 안에 남은 앵커나 `if (false)`
       // 뒤에 매달린 앵커도 통과시킨다(실측: 그 상태로 668건 전부 green). 그러면 이
       // 케이스가 지키겠다고 적은 "레거시 6자리 링크가 통째로 막힌다"가 그대로 일어난다.
-      expect(body,
-          matches(RegExp('(?:^|\\n)[ \\t]*${RegExp.escape(_fallbackAnchor)}')),
+      // 뒤의 식별자 경계도 필요하다 — 없으면 접두 일치라 `_inviteTokensLegacy` 같은
+      // **다른 컬렉션**으로 바뀌어도 통과해, 폴백 대상이 옮겨진 것을 못 잡는다.
+      expect(
+          body,
+          matches(RegExp('(?:^|\\n)[ \\t]*${RegExp.escape(_fallbackAnchor)}'
+              r'(?![A-Za-z0-9_])')),
           reason: '코드→링크 폴백이 사라지면 레거시 6자리 링크 토큰이 전부 막힌다');
     });
 
