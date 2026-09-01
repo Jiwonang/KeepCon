@@ -10,6 +10,8 @@
 //    그룹 정보를 알 수 있으면 승인제의 절반이 무너진다.
 //  - 실패 안내에 **정원을 말하지 않는다**. 계약상 정원 검사는 승인 시점이라 요청 단계의
 //    실패 사유가 아니다(대기자가 자리를 선점하지 못하게 한 설계).
+//  - 딥링크로 열린 **확인 모드는 링크 토큰을 화면에 싣지 않는다**. 22자 base64url은
+//    사용자가 읽을 값도 고칠 값도 아니라, 입력란에 담으면 실수로 지울 여지만 생긴다.
 library;
 
 import 'package:flutter/material.dart';
@@ -69,14 +71,17 @@ class _SpyErrorReporter implements ErrorReporter {
   }
 }
 
+/// 두 모드가 공유하는 CTA. 하는 일이 하나라 문구도 하나다.
+const String _cta = '그룹 참여 요청하기';
+
 void main() {
+  /// 시트를 띄운다. [linkToken]이 있으면 딥링크 진입(확인 모드), `null`이면 공유 탭의
+  /// 참여 버튼으로 연 것(입력 모드)과 같다.
   Future<void> pumpSheet(
     WidgetTester tester,
     _SpyShareRepository share,
     _SpyErrorReporter reporter, {
-    /// 시트에 미리 채울 자격증명. 기본은 **링크 토큰**이다(딥링크가 싣는 값).
-    /// 6자리를 넘기면 초대코드 경로가 된다 — 만료 안내 문구가 갈리는 축이다.
-    String credential = 'TOKEN123',
+    String? linkToken = 'TOKEN123',
   }) async {
     await tester.pumpWidget(
       ProviderScope(
@@ -90,7 +95,7 @@ void main() {
               body: Center(
                 child: ElevatedButton(
                   onPressed: () =>
-                      showJoinGroupSheet(context, initialToken: credential),
+                      showJoinGroupSheet(context, initialToken: linkToken),
                   child: const Text('열기'),
                 ),
               ),
@@ -103,18 +108,48 @@ void main() {
     await tester.pumpAndSettle();
   }
 
+  Future<void> tapCta(WidgetTester tester) async {
+    await tester.tap(find.widgetWithText(ElevatedButton, _cta));
+    await tester.pumpAndSettle();
+  }
+
   testWidgets('링크로 열린 시트는 requestToJoin을 부른다(즉시 합류가 아니다)',
       (WidgetTester tester) async {
     final _SpyShareRepository share = _SpyShareRepository();
     final _SpyErrorReporter reporter = _SpyErrorReporter();
     await pumpSheet(tester, share, reporter);
 
-    await tester.tap(find.widgetWithText(ElevatedButton, '참여 요청 보내기'));
-    await tester.pumpAndSettle();
+    await tapCta(tester);
 
     expect(share.requestedTokens, <String>['TOKEN123']);
     // 옛 `joinGroup` 경로로의 회귀는 계약에서 그 메서드가 사라져 컴파일이 막는다
     // (v3.8). 여기서는 새 경로가 실제로 불리는지만 본다.
+  });
+
+  testWidgets('확인 모드는 링크 토큰을 보여주지도 입력란을 두지도 않는다', (WidgetTester tester) async {
+    // 딥링크로 온 사람에게 토큰은 읽을 값도 고칠 값도 아니다. 입력란에 담으면
+    // autofocus로 키보드가 뜨고, 전체선택 한 번에 토큰이 날아간다.
+    final _SpyShareRepository share = _SpyShareRepository();
+    final _SpyErrorReporter reporter = _SpyErrorReporter();
+    await pumpSheet(tester, share, reporter);
+
+    expect(find.text('TOKEN123'), findsNothing);
+    expect(find.byType(TextField), findsNothing);
+    // 그래도 보내는 값은 그 토큰이다 — 화면에 없을 뿐 state가 들고 있다.
+    await tapCta(tester);
+    expect(share.requestedTokens, <String>['TOKEN123']);
+  });
+
+  testWidgets('입력 모드는 입력한 값을 자격증명으로 보낸다', (WidgetTester tester) async {
+    // 공유 탭에서 연 경로 — 방장이 불러 준 6자리 코드를 손으로 넣는다.
+    final _SpyShareRepository share = _SpyShareRepository();
+    final _SpyErrorReporter reporter = _SpyErrorReporter();
+    await pumpSheet(tester, share, reporter, linkToken: null);
+
+    await tester.enterText(find.byType(TextField), '482913');
+    await tapCta(tester);
+
+    expect(share.requestedTokens, <String>['482913']);
   });
 
   testWidgets('요청 후 화면은 승인 대기만 알리고 그룹을 식별할 정보를 담지 않는다',
@@ -123,8 +158,7 @@ void main() {
     final _SpyErrorReporter reporter = _SpyErrorReporter();
     await pumpSheet(tester, share, reporter);
 
-    await tester.tap(find.widgetWithText(ElevatedButton, '참여 요청 보내기'));
-    await tester.pumpAndSettle();
+    await tapCta(tester);
 
     expect(find.text('참여 요청을 보냈어요'), findsOneWidget);
     expect(
@@ -144,8 +178,7 @@ void main() {
     final _SpyErrorReporter reporter = _SpyErrorReporter();
     await pumpSheet(tester, share, reporter);
 
-    await tester.tap(find.widgetWithText(ElevatedButton, '참여 요청 보내기'));
-    await tester.pumpAndSettle();
+    await tapCta(tester);
 
     expect(find.textContaining('요청을 보낼 수 없어요'), findsOneWidget);
     // 정원 검사는 승인 시점이라 요청 실패의 사유가 아니다(계약).
@@ -160,12 +193,15 @@ void main() {
     // 초대코드는 5분이라 만료가 **정상 경로**다. 다른 실패와 뭉뚱그리면 사용자는
     // 코드를 잘못 들었는지 시간이 지난 것인지 알 수 없어 같은 코드를 계속 다시
     // 입력한다. 만료라고 말해 주면 다음 행동이 하나로 정해진다(재발급 요청).
+    //
+    // 6자리는 **입력 모드**로 넣는다 — 딥링크가 싣는 것은 언제나 링크 토큰이라,
+    // 코드를 initialToken으로 넘기면 현실에 없는 경로를 고정하게 된다.
     final _SpyShareRepository share = _SpyShareRepository(expired: true);
     final _SpyErrorReporter reporter = _SpyErrorReporter();
-    await pumpSheet(tester, share, reporter, credential: '482913');
+    await pumpSheet(tester, share, reporter, linkToken: null);
 
-    await tester.tap(find.widgetWithText(ElevatedButton, '참여 요청 보내기'));
-    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), '482913');
+    await tapCta(tester);
 
     expect(find.textContaining('만료된 초대코드'), findsOneWidget);
     // 뭉뚱그린 문구로 되돌아가면 이 단언이 잡는다.
@@ -177,21 +213,50 @@ void main() {
   testWidgets('만료된 **링크**는 링크 재발급을 안내한다', (WidgetTester tester) async {
     // ⚠️ `InviteExpiredException`은 초대코드 전용이 아니다 — 계약이 `credential`을
     //    "링크 토큰 또는 6자리 코드"로 정의하므로 만료된 링크도 같은 예외를 던진다.
-    //    이 시트는 딥링크로 열릴 때 **링크 토큰**을 미리 채우므로, 하나로 뭉뚱그리면
-    //    링크가 만료된 사람에게 "새 **코드**를 요청하세요"라고 말하게 된다. 코드를
-    //    받아 와도 만료된 링크는 그대로라 다음 행동이 틀린 안내다.
+    //    확인 모드가 보내는 것은 **링크 토큰**이므로, 하나로 뭉뚱그리면 링크가 만료된
+    //    사람에게 "새 **코드**를 요청하세요"라고 말하게 된다. 코드를 받아 와도 만료된
+    //    링크는 그대로라 다음 행동이 틀린 안내다.
     final _SpyShareRepository share = _SpyShareRepository(expired: true);
     final _SpyErrorReporter reporter = _SpyErrorReporter();
     await pumpSheet(tester, share, reporter); // 기본값 = 링크 토큰
 
-    await tester.tap(find.widgetWithText(ElevatedButton, '참여 요청 보내기'));
-    await tester.pumpAndSettle();
+    await tapCta(tester);
 
     expect(find.textContaining('만료된 초대 링크'), findsOneWidget);
     expect(find.textContaining('링크 재발급'), findsOneWidget);
     // 코드 재발급을 안내하면 안 된다 — 코드를 받아도 링크는 그대로다.
     expect(find.textContaining('새 코드를 요청'), findsNothing);
     expect(find.text('참여 요청을 보냈어요'), findsNothing);
+  });
+
+  testWidgets('확인 모드는 6자리 링크 토큰도 링크로 안내한다', (WidgetTester tester) async {
+    // v3.0 이전 링크 토큰은 **6자리 숫자**였고 아직 살아 있다 — 팀 공용 시드
+    // `482913`이 그것이고, deep_link_parser_test가 `/invite/482913`을
+    // `InviteDestination('482913')`로 못박고 있다.
+    //
+    // 모양으로 가르면 그 멀쩡한 링크가 '만료된 코드'로 안내되어, 코드를 받아 와도
+    // 링크는 그대로인 틀린 다음 행동을 시킨다. 확인 모드에서는 추측할 이유가 없다 —
+    // 딥링크가 싣는 것은 정의상 링크 토큰이다.
+    final _SpyShareRepository share = _SpyShareRepository(expired: true);
+    final _SpyErrorReporter reporter = _SpyErrorReporter();
+    await pumpSheet(tester, share, reporter, linkToken: '482913');
+
+    await tapCta(tester);
+
+    expect(find.textContaining('만료된 초대 링크'), findsOneWidget);
+    expect(find.textContaining('만료된 초대코드'), findsNothing);
+  });
+
+  testWidgets('입력값의 앞뒤 공백은 잘라서 보낸다', (WidgetTester tester) async {
+    // 붙여넣기는 공백을 달고 온다. 안 자르면 '없는 코드'로 거부된다.
+    final _SpyShareRepository share = _SpyShareRepository();
+    final _SpyErrorReporter reporter = _SpyErrorReporter();
+    await pumpSheet(tester, share, reporter, linkToken: null);
+
+    await tester.enterText(find.byType(TextField), '  482913  ');
+    await tapCta(tester);
+
+    expect(share.requestedTokens, <String>['482913']);
   });
 
   testWidgets('만료가 아닌 실패는 만료라고 말하지 않는다', (WidgetTester tester) async {
@@ -201,9 +266,43 @@ void main() {
     final _SpyErrorReporter reporter = _SpyErrorReporter();
     await pumpSheet(tester, share, reporter);
 
-    await tester.tap(find.widgetWithText(ElevatedButton, '참여 요청 보내기'));
-    await tester.pumpAndSettle();
+    await tapCta(tester);
 
     expect(find.textContaining('만료'), findsNothing);
+  });
+
+  testWidgets('코드 입력 전환은 실패한 뒤에만 나타난다', (WidgetTester tester) async {
+    // 성공 경로는 버튼 하나로 둔다. 만료된 링크로 거절당한 사람이 방장에게 6자리
+    // 코드를 불러 받는 것이 정상 경로라, 갈아탈 길은 **실패한 뒤에** 필요해진다.
+    final _SpyShareRepository share = _SpyShareRepository(expired: true);
+    final _SpyErrorReporter reporter = _SpyErrorReporter();
+    await pumpSheet(tester, share, reporter);
+
+    expect(find.text('초대코드로 참여하기'), findsNothing);
+
+    await tapCta(tester);
+
+    expect(find.text('초대코드로 참여하기'), findsOneWidget);
+  });
+
+  testWidgets('전환하면 입력한 코드가 링크 토큰 대신 자격증명이 된다', (WidgetTester tester) async {
+    final _SpyShareRepository share = _SpyShareRepository(expired: true);
+    final _SpyErrorReporter reporter = _SpyErrorReporter();
+    await pumpSheet(tester, share, reporter);
+
+    await tapCta(tester); // 링크 토큰으로 실패 → 전환 버튼 노출.
+    await tester.tap(find.text('초대코드로 참여하기'));
+    await tester.pumpAndSettle();
+
+    // 입력란은 비어 있다 — 코드를 넣으려고 갈아탄 사람에게 토큰을 다시 내밀지 않는다.
+    expect(find.byType(TextField), findsOneWidget);
+    expect(find.text('TOKEN123'), findsNothing);
+
+    await tester.enterText(find.byType(TextField), '482913');
+    await tapCta(tester);
+
+    // 두 번째 요청은 **입력값**으로 나간다(토큰이 아니다).
+    expect(share.requestedTokens, <String>['TOKEN123', '482913']);
+    expect(find.textContaining('만료된 초대코드'), findsOneWidget);
   });
 }

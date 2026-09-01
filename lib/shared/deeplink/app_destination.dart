@@ -25,7 +25,8 @@ sealed class AppDestination {
 
 /// 초대 토큰으로 그룹 참여 흐름을 연다.
 ///
-/// 공유 탭으로 전환하고 참여 시트를 코드가 채워진 상태로 띄운다.
+/// 공유 탭으로 전환하고 참여 시트를 **확인 모드**로 띄운다 — 토큰은 시트가 들고만
+/// 있고 화면에는 싣지 않는다(사용자가 읽을 값도 고칠 값도 아니다).
 final class InviteDestination extends AppDestination {
   /// InviteDestination 인스턴스를 생성한다.
   const InviteDestination(this.inviteToken);

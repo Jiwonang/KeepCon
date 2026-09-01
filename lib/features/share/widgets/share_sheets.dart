@@ -203,11 +203,12 @@ class _CreateGroupSheetState extends ConsumerState<_CreateGroupSheet> {
   }
 }
 
-/// 그룹 참여 **요청** 바텀시트 — 자격증명 입력(6자리 초대코드 또는 링크 토큰).
-/// [ShareRepository.requestToJoin]으로
+/// 그룹 참여 **요청** 바텀시트. [ShareRepository.requestToJoin]으로
 /// **요청만** 보낸다 — 방장이 승인하기 전까지 멤버가 아니다(v3.8에서 즉시 합류 경로 삭제).
 ///
-/// [initialToken]가 있으면(초대 딥링크 진입) 코드 입력란을 미리 채운다.
+/// 진입 경로에 따라 두 모습을 갖는다:
+///  - [initialToken]가 있으면(초대 딥링크) **확인 모드** — 버튼 하나만 보여준다.
+///  - 없으면(공유 탭의 참여 버튼) **입력 모드** — 자격증명 입력란을 보여준다.
 Future<void> showJoinGroupSheet(BuildContext context, {String? initialToken}) {
   return showModalBottomSheet<void>(
     context: context,
@@ -219,7 +220,7 @@ Future<void> showJoinGroupSheet(BuildContext context, {String? initialToken}) {
 class _JoinGroupSheet extends ConsumerStatefulWidget {
   const _JoinGroupSheet({this.initialToken});
 
-  /// 딥링크로 전달된 **링크 토큰**(있으면 입력란을 미리 채운다).
+  /// 딥링크로 전달된 **링크 토큰**. 있으면 확인 모드로 연다.
   ///
   /// 6자리 초대코드가 아니다 — 딥링크가 싣는 것은 항상 링크 쪽 자격증명이다.
   final String? initialToken;
@@ -229,14 +230,39 @@ class _JoinGroupSheet extends ConsumerStatefulWidget {
 }
 
 class _JoinGroupSheetState extends ConsumerState<_JoinGroupSheet> {
-  late final TextEditingController _codeCtrl =
-      TextEditingController(text: widget.initialToken ?? '');
+  late final TextEditingController _codeCtrl = TextEditingController();
 
   /// 요청을 보내는 중(버튼 중복 탭 차단).
   bool _sending = false;
 
   /// 요청이 접수됐다 — 시트 내용을 대기 안내로 바꾼다.
   bool _requested = false;
+
+  /// 확인 모드에서 코드 입력으로 갈아탔는지. **단방향이다**(돌아가는 버튼은 없다) —
+  /// 전환은 링크가 실패한 뒤에만 뜨므로, 되돌아가 봐야 방금 거부당한 링크를 다시
+  /// 보내는 길뿐이다.
+  ///
+  /// 모드를 [widget.initialToken]을 비우는 것으로 표현할 수 없어 플래그를 둔다
+  /// (위젯 필드는 `final`이다).
+  bool _manualEntry = false;
+
+  /// 요청이 한 번이라도 실패했는지 — 확인 모드의 코드 입력 전환을 이때만 보여준다.
+  ///
+  /// 성공 경로를 버튼 하나로 유지하려는 것이다. 만료된 링크로 거절당한 사람에게
+  /// 방장이 6자리 코드를 불러 주는 것이 정상 경로라(코드는 5분이라 만료가 잦다),
+  /// 갈아탈 길은 **실패한 뒤에** 실제로 필요해진다.
+  bool _failed = false;
+
+  /// 딥링크로 받은 토큰을 그대로 보내는 모드인지.
+  bool get _isConfirmMode => widget.initialToken != null && !_manualEntry;
+
+  /// 요청에 쓸 자격증명 — 확인 모드면 딥링크 토큰, 입력 모드면 입력값.
+  ///
+  /// **두 갈래 모두 `trim`한다.** 딥링크 토큰은 지금은 파서가 이미 다듬어 주지만,
+  /// 그건 호출부 한 곳의 구현 세부라 여기서 기대면 호출부가 늘 때 조용히 깨진다
+  /// (공백이 섞인 토큰은 '없는 토큰'으로 거부된다).
+  String get _credential =>
+      (_isConfirmMode ? widget.initialToken! : _codeCtrl.text).trim();
 
   @override
   void dispose() {
@@ -245,7 +271,7 @@ class _JoinGroupSheetState extends ConsumerState<_JoinGroupSheet> {
   }
 
   Future<void> _submit() async {
-    final String token = _codeCtrl.text.trim();
+    final String token = _credential;
     if (token.isEmpty || _sending) return;
     final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
     setState(() => _sending = true);
@@ -273,13 +299,29 @@ class _JoinGroupSheetState extends ConsumerState<_JoinGroupSheet> {
       //
       // ⚠️ 그런데 그 예외는 **초대코드 전용이 아니다** — 계약이 `credential`을 "링크
       //    토큰 또는 6자리 코드"로 정의하므로 만료된 **링크**도 같은 예외를 던진다.
-      //    이 시트는 딥링크로 열릴 때 링크 토큰을 미리 채우므로, 하나로 뭉뚱그리면
-      //    링크가 만료된 사람에게 "새 **코드**를 요청하세요"라고 말하게 된다 —
-      //    코드를 받아 와도 만료된 링크는 그대로라 다음 행동이 틀린 안내다.
-      //    어느 쪽이 만료됐는지는 입력값 모양으로 가른다.
+      //    하나로 뭉뚱그리면 링크가 만료된 사람에게 "새 **코드**를 요청하세요"라고
+      //    말하게 된다 — 코드를 받아 와도 만료된 링크는 그대로라 다음 행동이 틀린
+      //    안내다.
+      //
+      // **확인 모드에서는 모양을 추측하지 않는다.** 그 값은 정의상 딥링크가 실은 링크
+      // 토큰이다(`initialToken` dartdoc). v3.0 이전 링크 토큰은 6자리 숫자였고 아직
+      // 살아 있어서(팀 공용 시드 `482913`이 그것이다), 모양으로 가르면 **멀쩡한 링크가
+      // '만료된 코드'로 안내된다.** 저장소는 같은 값을 코드→토큰 폴백으로 조회해 이미
+      // '링크'로 판정하는데, 화면만 배타적으로 갈라 반대 답을 내는 어긋남이었다.
+      //
+      // ⚠️ 입력 모드는 아직 이 오분류가 남아 있다 — 손으로 붙여넣은 6자리 **링크
+      //    토큰**은 화면에 판별 신호가 없다. 항구적 해결은 [InviteExpiredException]이
+      //    저장소가 이미 계산한 판정을 싣는 것인데, 계약(`lib/shared`) 변경이라 별건이다.
       final bool expired = e is InviteExpiredException;
-      final bool expiredCode = expired && isWellFormedInviteCode(token);
-      if (mounted) setState(() => _sending = false);
+      final bool expiredCode =
+          expired && !_isConfirmMode && isWellFormedInviteCode(token);
+      if (mounted) {
+        setState(() {
+          _sending = false;
+          // 확인 모드에 코드 입력 전환을 띄우는 조건이다(성공 경로는 버튼 하나로 둔다).
+          _failed = true;
+        });
+      }
       messenger
         ..hideCurrentSnackBar()
         ..showSnackBar(SnackBar(
@@ -329,6 +371,8 @@ class _JoinGroupSheetState extends ConsumerState<_JoinGroupSheet> {
       );
     }
 
+    if (_isConfirmMode) return _buildConfirm(theme);
+
     return _SheetScaffold(
       title: '그룹 참여 요청',
       child: Column(
@@ -349,8 +393,53 @@ class _JoinGroupSheetState extends ConsumerState<_JoinGroupSheet> {
           const SizedBox(height: 20),
           ElevatedButton(
             onPressed: _sending ? null : _submit,
-            child: Text(_sending ? '보내는 중…' : '참여 요청 보내기'),
+            // 두 모드가 **같은 라벨**을 쓴다 — 하는 일이 하나(요청 보내기)인데 문구가
+            // 갈리면 같은 동작을 다른 것으로 읽게 된다. 공유 탭의 진입 버튼
+            // ('참여 요청하기')과는 문자열이 달라 테스트 finder도 섞이지 않는다.
+            child: Text(_sending ? '보내는 중…' : '그룹 참여 요청하기'),
           ),
+        ],
+      ),
+    );
+  }
+
+  /// 확인 모드 — 딥링크로 들어온 사람에게 버튼 하나만 보여준다.
+  ///
+  /// **링크 토큰을 화면에 싣지 않는다.** 22자 base64url은 사용자가 읽을 값도 고칠 값도
+  /// 아니라서, 입력란에 담으면 ①의미 없는 문자열을 검토 대상으로 내밀고 ②`autofocus`로
+  /// 키보드까지 띄운 채 ③전체선택 한 번에 토큰이 날아갈 여지를 준다. 대조할 원본이 없어
+  /// 보여줘 봐야 판단 근거가 되지도 않는다.
+  Widget _buildConfirm(ThemeData theme) {
+    return _SheetScaffold(
+      title: '그룹 초대를 받았어요',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          // ⚠️ 그룹 이름·이모지·멤버 수를 **여기에 넣지 마세요.** 요청자는 아직 멤버가
+          //    아니고, 링크는 유출될 수 있다(요청 완료 화면과 같은 규약).
+          Icon(Icons.mail_outline, size: 40, color: theme.colorScheme.primary),
+          const SizedBox(height: 16),
+          Text(
+            '방장이 승인하면 그룹에 참여돼요.',
+            textAlign: TextAlign.center,
+            style: theme.textTheme.bodyLarge,
+          ),
+          const SizedBox(height: 24),
+          ElevatedButton(
+            onPressed: _sending ? null : _submit,
+            child: Text(_sending ? '보내는 중…' : '그룹 참여 요청하기'),
+          ),
+          // 실패한 뒤에만 보여준다 — 만료된 링크로 거절당한 사람이 방장에게 6자리
+          // 코드를 불러 받는 것이 정상 경로인데, 이 전환이 없으면 시트를 닫고 공유
+          // 탭에서 다시 열어야 한다.
+          if (_failed) ...<Widget>[
+            const SizedBox(height: 8),
+            TextButton(
+              onPressed:
+                  _sending ? null : () => setState(() => _manualEntry = true),
+              child: const Text('초대코드로 참여하기'),
+            ),
+          ],
         ],
       ),
     );
