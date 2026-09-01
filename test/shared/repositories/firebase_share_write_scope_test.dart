@@ -135,4 +135,46 @@ void main() {
       );
     }
   });
+
+  group('requestToJoin — 자격증명 종류(isCode) 판정', () {
+    // `isCode`는 만료 안내를 가르는 근거다(계약 참조) — 코드는 "새 코드를 요청", 링크는
+    // "링크 재발급을 요청"으로 다음 행동이 다르다. 판정이 틀리면 만료된 6자리 **링크**가
+    // "만료된 코드"로 안내되고, 사용자가 코드를 받아 와도 링크는 그대로다.
+    //
+    // ⚠️ 이 계층에만 커버리지가 없다. in-memory 구현은 `share_repository_invite_code_test`
+    //    두 케이스가 양방향으로 고정하지만, `flutter test`는 in-memory만 돌리므로 여기서
+    //    `isCode = false`를 지워도 전 테스트가 통과한다(뮤테이션으로 확인했다). 위 매퍼
+    //    등급과 똑같이 "호출부가 Firestore 없이 실행되지 않는" 구멍이라 같은 방법으로 막는다.
+
+    test('코드 조회가 빗나가면 링크 토큰으로 폴백한다', () {
+      // 폴백 자체가 사라지면 레거시 6자리 링크가 통째로 '없는 코드'가 된다 — 종류 판정
+      // 이전에 참여 경로가 막히는 더 큰 사고라, 아래 단언의 전제로 먼저 고정한다.
+      final String body = bodies['requestToJoin'] ?? '';
+      expect(body, isNotEmpty,
+          reason: 'requestToJoin을 못 찾았다 — 이 테스트가 조용히 무력해졌다');
+      expect(body, contains('credDoc = await _inviteTokens'),
+          reason: '코드→링크 폴백이 사라지면 레거시 6자리 링크 토큰이 전부 막힌다');
+    });
+
+    test('폴백을 타면 isCode를 false로 내린다', () {
+      // 폴백 블록 **안에서** 내려야 한다. 밖에 있으면 22자 토큰까지 싸잡거나(무해)
+      // 6자리 코드 정상 경로를 링크로 뒤집는다(유해) — 위치가 곧 의미다.
+      final String body = bodies['requestToJoin']!;
+      final int from = body.indexOf('credDoc = await _inviteTokens');
+      final int to = body.indexOf('}', from);
+      expect(to, isNot(-1), reason: '폴백 블록의 끝을 못 찾았다 — 구조가 바뀌었으면 이 검사도 옮겨라');
+      expect(body.substring(from, to), contains('isCode = false'),
+          reason: '폴백을 타고도 isCode가 true로 남으면, 만료된 6자리 **링크**가 '
+              '"만료된 초대코드"로 안내된다 — 코드를 받아 와도 링크는 그대로다');
+    });
+
+    test('만료 예외가 그 판정을 그대로 싣는다 — 모양으로 다시 매기지 않는다', () {
+      // 계약이 구현체에 부과한 의무다. 여기서 `isWellFormedInviteCode(...)`를 다시
+      // 부르면 폴백으로 확정한 답을 모양이 덮어써, 이 PR이 고친 오분류가 되살아난다.
+      final String body = bodies['requestToJoin']!;
+      expect(
+          body, contains('InviteExpiredException(credential, isCode: isCode)'),
+          reason: '만료 예외가 폴백 판정이 아닌 다른 근거를 싣게 됐다');
+    });
+  });
 }
