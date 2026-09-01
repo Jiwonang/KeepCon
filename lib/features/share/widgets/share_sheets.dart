@@ -14,7 +14,6 @@ import '../../../shared/models/group.dart';
 import '../../../shared/diagnostics/report_handled_failure.dart';
 import '../../../shared/providers/repositories.dart';
 import '../../../shared/repositories/share_repository.dart';
-import '../../../shared/util/invite_code.dart';
 import '../../../shared/util/korean_particle.dart';
 import '../../../shared/widgets/inline_error_banner.dart';
 import '../state/share_providers.dart';
@@ -303,18 +302,14 @@ class _JoinGroupSheetState extends ConsumerState<_JoinGroupSheet> {
       //    말하게 된다 — 코드를 받아 와도 만료된 링크는 그대로라 다음 행동이 틀린
       //    안내다.
       //
-      // **확인 모드에서는 모양을 추측하지 않는다.** 그 값은 정의상 딥링크가 실은 링크
-      // 토큰이다(`initialToken` dartdoc). v3.0 이전 링크 토큰은 6자리 숫자였고 아직
-      // 살아 있어서(팀 공용 시드 `482913`이 그것이다), 모양으로 가르면 **멀쩡한 링크가
-      // '만료된 코드'로 안내된다.** 저장소는 같은 값을 코드→토큰 폴백으로 조회해 이미
-      // '링크'로 판정하는데, 화면만 배타적으로 갈라 반대 답을 내는 어긋남이었다.
-      //
-      // ⚠️ 입력 모드는 아직 이 오분류가 남아 있다 — 손으로 붙여넣은 6자리 **링크
-      //    토큰**은 화면에 판별 신호가 없다. 항구적 해결은 [InviteExpiredException]이
-      //    저장소가 이미 계산한 판정을 싣는 것인데, 계약(`lib/shared`) 변경이라 별건이다.
-      final bool expired = e is InviteExpiredException;
-      final bool expiredCode =
-          expired && !_isConfirmMode && isWellFormedInviteCode(token);
+      // **어느 쪽인지는 화면이 판단하지 않는다** — 예외가 싣고 온 `isCode`를 그대로
+      // 쓴다. 저장소는 코드 조회 문서를 먼저 보고 없으면 링크 토큰으로 폴백하므로 이미
+      // 답을 확정해 두었고, 화면이 `isWellFormedInviteCode(token)`으로 **모양**을 다시
+      // 보면 v3.0 이전의 6자리 **링크 토큰**에서 답이 갈린다(팀 공용 시드 `482913`이
+      // 그것이다) — 멀쩡한 링크가 '만료된 코드'로 안내된다. 같은 입력에 저장소는
+      // '링크', 화면은 '코드'라고 답하던 어긋남이라, 판정을 한 곳으로 모은 것이다.
+      final InviteExpiredException? expired =
+          e is InviteExpiredException ? e : null;
       if (mounted) {
         setState(() {
           _sending = false;
@@ -325,10 +320,14 @@ class _JoinGroupSheetState extends ConsumerState<_JoinGroupSheet> {
       messenger
         ..hideCurrentSnackBar()
         ..showSnackBar(SnackBar(
-          content: Text(switch ((expired, expiredCode)) {
-            (true, true) => '만료된 초대코드예요. 방장에게 새 코드를 요청하세요.',
-            (true, false) => '만료된 초대 링크예요. 방장에게 링크 재발급을 요청하세요.',
-            _ => '요청을 보낼 수 없어요. 링크나 코드가 잘못됐을 수 있어요.',
+          // 세 갈래가 정확히 세 상태다 — 만료 아님 / 만료된 코드 / 만료된 링크.
+          // 튜플로 풀면 `(false, true)`(만료가 아닌데 코드)라는 있을 수 없는 조합이
+          // 언어상 표현 가능해져, 뒤에 오는 사람이 도달하지 않는 분기를 더할 수 있다.
+          content: Text(switch (expired) {
+            null => '요청을 보낼 수 없어요. 링크나 코드가 잘못됐을 수 있어요.',
+            InviteExpiredException(isCode: true) =>
+              '만료된 초대코드예요. 방장에게 새 코드를 요청하세요.',
+            InviteExpiredException() => '만료된 초대 링크예요. 방장에게 링크 재발급을 요청하세요.',
           }),
         ));
       return;
@@ -378,9 +377,11 @@ class _JoinGroupSheetState extends ConsumerState<_JoinGroupSheet> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
-          // 입력란은 하나다 — 링크 토큰과 6자리 코드는 모양으로 구분되므로
-          // (`isWellFormedInviteCode`) 사용자에게 "지금 넣는 것이 무엇인지" 고르게
-          // 하지 않는다. 계약의 `requestToJoin(credential)`이 같은 이유로 하나다.
+          // 입력란은 하나다 — 사용자에게 "지금 넣는 것이 링크인지 코드인지" 고르게
+          // 하는 것은 전달 수단의 차이를 사용자 몫으로 떠넘기는 것이다. 계약의
+          // `requestToJoin(credential)`이 같은 이유로 하나이고, 어느 쪽인지는 저장소가
+          // 조회로 확정해 `InviteExpiredException.isCode`로 알려준다(모양이 아니다 —
+          // 6자리 링크 토큰에서 모양과 실제가 갈린다).
           Text('초대코드 또는 초대 링크', style: theme.textTheme.bodySmall),
           const SizedBox(height: 8),
           TextField(

@@ -395,7 +395,9 @@ class InMemoryShareRepository implements ShareRepository {
     final bool expired =
         isCode ? !g.hasActiveInviteCode(_now()) : g.isInviteExpired(_now());
     if (expired) {
-      throw InviteExpiredException(credential);
+      // 판정을 예외에 실어 보낸다 — 화면이 모양으로 다시 추측하면 6자리 링크 토큰에서
+      // 답이 갈린다(계약 참조). 만료 창을 고른 것과 **같은** `isCode`다.
+      throw InviteExpiredException(credential, isCode: isCode);
     }
     if (g.isMember(me.id)) {
       throw StateError('Already a member of group: ${g.id}');
