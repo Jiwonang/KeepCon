@@ -187,7 +187,10 @@ void main() {
     // ⚠️ 아래 단언들은 지역변수 이름 `isCode`·`codeShaped`와 폴백 조회 심볼
     //    `_inviteTokens`에 묶여 있다. 소스 검사의 원리적 한계이므로 **개명하면 여기도
     //    함께 옮긴다** — 안 옮기면 동작이 멀쩡한데 시끄럽게 실패한다(거짓 통과는 아니다).
-    //    타입 표기(`bool` → `var`)와 `if` 피연산자 순서 뒤집기도 같은 증상이다(실측).
+    //    타입 표기(`bool`↔`var`·`final` 유무)와 `if` 피연산자 순서 뒤집기도 같은
+    //    증상이다(실측). 의미가 같은 조건부화(`if (credDoc.exists) isCode = false;`)도
+    //    이제 시끄럽게 실패한다 — 줄 단위 단언이 그것을 구별하지 못하기 때문이고,
+    //    거짓 통과를 남기는 것보다 낫다고 판단한 쪽이다.
     //    폴백 블록 안 **문자열·주석에 짝 없는 중괄호**를 두어도 같은 증상이 난다
     //    (`_fallbackBlockEnd`는 렉서가 아니라 깊이 세기다). 방향은 둘 다 안전한 쪽이다 —
     //    창이 커지면 '던지기 전 덮어쓰기' 단언이, 작아지면 '폴백에서 false' 단언이
@@ -199,7 +202,11 @@ void main() {
       final String body = bodies['requestToJoin'] ?? '';
       expect(body, isNotEmpty,
           reason: 'requestToJoin을 못 찾았다 — 이 테스트가 조용히 무력해졌다');
-      expect(body, contains(_fallbackAnchor),
+      // **글자가 아니라 줄을 본다.** `contains`는 주석 안에 남은 앵커나 `if (false)`
+      // 뒤에 매달린 앵커도 통과시킨다(실측: 그 상태로 668건 전부 green). 그러면 이
+      // 케이스가 지키겠다고 적은 "레거시 6자리 링크가 통째로 막힌다"가 그대로 일어난다.
+      expect(body,
+          matches(RegExp('(?:^|\\n)[ \\t]*${RegExp.escape(_fallbackAnchor)}')),
           reason: '코드→링크 폴백이 사라지면 레거시 6자리 링크 토큰이 전부 막힌다');
     });
 
@@ -244,8 +251,11 @@ void main() {
       expect(
           body,
           matches(RegExp(
-              r'bool\s+codeShaped\s*=\s*isWellFormedInviteCode\(\s*credential\s*\)\s*;')),
-          reason: '모양 판정을 뒤집거나 상수로 굳히면 모든 초대코드가 없는 코드가 된다');
+              r'final\s+bool\s+codeShaped\s*=\s*isWellFormedInviteCode\(\s*credential\s*\)\s*;')),
+          // `final`을 함께 요구한다 — 초기화식만 보면 그것을 그대로 두고 **뒤에서
+          // 재대입**해 굳히는 우회로가 남는다(실측: 668건 전부 green). `final`이면
+          // 그 우회로가 컴파일러 쪽으로 넘어간다.
+          reason: '모양 판정을 뒤집거나(재대입 포함) 상수로 굳히면 모든 초대코드가 없는 코드가 된다');
       // 케이스 '던지기 전에 덮어써지지 않는다'의 **앞쪽 대칭**. 그것은 폴백 블록 뒤만
       // 보므로, 선언과 폴백 사이에 `isCode = false;` 한 줄을 끼우면 통과한다 — 그러면
       // 폴백을 **안 타는** 경로(살아 있는 6자리 코드)의 만료가 전부 링크로 안내된다.
@@ -260,7 +270,10 @@ void main() {
       final String? block = _fallbackBlockTail(bodies['requestToJoin']!);
       expect(block, isNotNull,
           reason: '폴백 블록을 못 찾았다 — 조회 심볼이나 구조가 바뀌었으면 이 검사도 함께 옮겨라');
-      expect(block!, matches(RegExp(r'isCode\s*=\s*false')),
+      // 여기도 글자가 아니라 **줄**을 본다. 조건에 매달리거나(`if (!credDoc.exists)`)
+      // 주석 처리되면 폴백을 타고도 `isCode`가 true로 남는데, 부분 문자열 검사는
+      // 통과한다(실측). 줄 머리에서 시작하는 무조건 대입이어야 한다.
+      expect(block!, matches(RegExp(r'(?:^|\n)[ \t]*isCode\s*=\s*false\s*;')),
           reason: '폴백을 타고도 isCode가 true로 남으면, 만료된 6자리 **링크**가 '
               '"만료된 초대코드"로 안내된다 — 코드를 받아 와도 링크는 그대로다');
     });
