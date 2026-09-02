@@ -635,7 +635,8 @@ void main() {
     return container;
   }
 
-  const String barcodeUnreadNotice = '이미지에서 바코드를 읽지 못했어요. 직접 입력해 주세요.';
+  const String barcodeUnreadNotice =
+      '이미지에서 바코드를 읽지 못했어요. 직접 입력하거나, 바코드가 없으면 비워 두어도 돼요.';
 
   testWidgets('갤러리에서 바코드를 못 읽고 오면 필드에 안내가 뜨고, 직접 입력하면 사라진다',
       (WidgetTester tester) async {
@@ -654,6 +655,20 @@ void main() {
     await tester.enterText(fieldByLabel('바코드 번호'), '');
     await tester.pumpAndSettle();
     expect(find.text(barcodeUnreadNotice), findsOneWidget);
+  });
+
+  testWidgets('미인식 안내는 지난 날짜 안내와 같은 danger 색으로 칠해진다',
+      (WidgetTester tester) async {
+    // 이 안내의 존재 이유가 '눈에 띄는 것'이다(기본 회색은 실기 확인에서 눈에
+    // 띄지 않았다 — 소유자 확인). helperStyle 한 줄을 지워도 나머지 테스트가
+    // 전부 통과하는 것이 뮤테이션으로 확인됐으므로, 색은 여기서만 지켜진다.
+    await openGalleryForm(tester, ocrBarcode: null);
+
+    final Text notice = tester.widget<Text>(find.text(barcodeUnreadNotice));
+    expect(notice.style?.color, AppTheme.light.colorScheme.error);
+    // 색만 덮고 크기는 테마(bodySmall)를 그대로 쓴다 — helperStyle은 기본값에
+    // merge되므로, 통째로 교체하는 회귀가 들어오면 여기서 걸린다.
+    expect(notice.style?.fontSize, 12.0);
   });
 
   testWidgets('갤러리라도 바코드가 프리필됐으면 안내가 없다', (WidgetTester tester) async {

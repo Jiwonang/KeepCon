@@ -570,10 +570,15 @@ class _GifticonFormScreenState extends ConsumerState<GifticonFormScreen> {
                     // 갤러리에서 바코드를 못 읽고 왔을 때만. 사용자가 채우기
                     // 시작하면 숨긴다 — "직접 입력해 주세요"는 입력 전에만 맞는
                     // 안내다.
-                    helperText:
-                        _barcodeUnreadFromImage && value.text.trim().isEmpty
-                            ? '이미지에서 바코드를 읽지 못했어요. 직접 입력해 주세요.'
-                            : null,
+                    // 색은 유효기간 안내와 같은 danger지만, 바코드는 계약상
+                    // nullable이다([Gifticon.barcode]) — 명령형만 두면 바코드가
+                    // 아예 없는 쿠폰에서 지울 수 없는 빨간 지시가 된다. 유효기간
+                    // 쪽 '맞는지 확인해 주세요'처럼 해소 경로를 문구가 함께
+                    // 말한다(소유자 확정 문구).
+                    helperText: _barcodeUnreadFromImage &&
+                            value.text.trim().isEmpty
+                        ? '이미지에서 바코드를 읽지 못했어요. 직접 입력하거나, 바코드가 없으면 비워 두어도 돼요.'
+                        : null,
                     helperMaxLines: 2,
                     // 지난 날짜 안내(아래 유효기간 필드)와 같은 규약 — 테두리는
                     // 정상으로 두고 글자만 danger로 칠해 "막힌 것이 아니라

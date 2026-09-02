@@ -72,6 +72,21 @@ void main() {
     expect(find.text(pastNotice), findsOneWidget);
   });
 
+  testWidgets('지난 날짜 안내는 danger 색으로 칠해진다', (WidgetTester tester) async {
+    // 색이 이 안내의 가시성 규약이다(테두리는 정상, 글자만 danger — "막힌 것이
+    // 아니라 확인하라"). helperStyle 한 줄을 지워도 나머지 테스트가 전부
+    // 통과하는 것이 뮤테이션으로 확인됐으므로(형제인 바코드 미인식 안내와
+    // 동일), 색은 여기서만 지켜진다.
+    final ProviderContainer container = await openForm(tester);
+
+    prefillExpiry(container, DateTime(2016, 2, 12));
+    await tester.pumpAndSettle();
+
+    final Text notice = tester.widget<Text>(find.text(pastNotice));
+    expect(notice.style?.color, AppTheme.light.colorScheme.error);
+    expect(notice.style?.fontSize, 12.0);
+  });
+
   testWidgets('안내가 떠도 저장은 막히지 않는다 — 만료 기록도 정당한 사용이다',
       (WidgetTester tester) async {
     final ProviderContainer container = await openForm(tester);
