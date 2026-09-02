@@ -636,7 +636,7 @@ void main() {
     return container;
   }
 
-  const String barcodeUnreadNotice = '이미지에서 바코드를 읽지 못했어요. 직접 입력하거나 비워 두어도 돼요.';
+  const String barcodeUnreadNotice = '이미지에서 바코드를 읽지 못했어요. 직접 입력해 주세요.';
 
   testWidgets('갤러리에서 바코드를 못 읽고 오면 필드에 안내가 뜨고, 직접 입력하면 사라진다',
       (WidgetTester tester) async {
