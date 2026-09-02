@@ -707,11 +707,10 @@ class _GifticonFormScreenState extends ConsumerState<GifticonFormScreen> {
                   // auth 3곳(22×22)과 share 1곳(16×16)뿐이고 크기도 갈려 있어
                   // '스피너 관례'라 부를 만한 것이 없다 — 여기는 이탈이 아니라
                   // 합류다(문구는 소유자 확정).
+                  // 스타일을 주지 않는다 — 테마의 elevatedButtonTheme(w700)가
+                  // 공급한다. 형제 CTA(로그인·가입하기)도 같은 방식이고, 여기만
+                  // 인라인 16/bold로 테마를 우회하고 있었다(CodeRabbit 지적).
                   formState.submit is ScanSubmitInProgress ? '저장 중…' : '저장하기',
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                  ),
                 ),
               ),
             ],
