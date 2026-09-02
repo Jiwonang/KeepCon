@@ -38,6 +38,7 @@ library;
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:keepcon/features/scan/pages/gifticon_form_page.dart';
@@ -654,6 +655,41 @@ void main() {
     await tester.enterText(fieldByLabel('바코드 번호'), '');
     await tester.pumpAndSettle();
     expect(find.text(barcodeUnreadNotice), findsOneWidget);
+  });
+
+  // 폭 회귀 가드 — 안내(helperMaxLines: 2)가 좁은 기기에서 말줄임으로 잘리면
+  // 해소 경로('비워 두어도 돼요')가 사라져 끊긴 명령문만 남는다. 실제로 문구를
+  // 49자로 늘렸다가 320~375px 전부에서 잘리는 회귀가 리뷰 실측으로 잡혔다.
+  // 폭 목록은 scan_dialog_layout_test의 narrowWidths와 같은 기기 근거를 쓴다.
+  // ⚠️ physicalSize는 openGalleryForm **뒤에** 바꾼다 — 하네스가 1200으로 덮어쓴다.
+  for (final double w in <double>[320, 360, 375]) {
+    testWidgets('${w.toInt()}px에서 미인식 안내가 잘리지 않는다',
+        (WidgetTester tester) async {
+      await openGalleryForm(tester, ocrBarcode: null);
+      tester.view.physicalSize = Size(w, 2600);
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .renderObject<RenderParagraph>(find.text(barcodeUnreadNotice))
+            .didExceedMaxLines,
+        isFalse,
+        reason: '${w.toInt()}px에서 안내 꼬리가 말줄임으로 잘렸다',
+      );
+    });
+  }
+
+  testWidgets('미인식 안내는 지난 날짜 안내와 같은 danger 색으로 칠해진다',
+      (WidgetTester tester) async {
+    // 이 안내의 존재 이유가 '눈에 띄는 것'이다(기본 회색은 실기 확인에서 눈에
+    // 띄지 않았다 — 소유자 확인). helperStyle 한 줄을 지워도 나머지 테스트가
+    // 전부 통과하는 것이 뮤테이션으로 확인됐으므로, 색은 여기서만 지켜진다.
+    await openGalleryForm(tester, ocrBarcode: null);
+
+    final Text notice = tester.widget<Text>(find.text(barcodeUnreadNotice));
+    expect(notice.style?.color, AppTheme.light.colorScheme.error);
+    // 색만 덮고 크기는 테마(bodySmall)를 그대로 쓴다 — helperStyle은 기본값에
+    // merge되므로, 통째로 교체하는 회귀가 들어오면 여기서 걸린다.
+    expect(notice.style?.fontSize, 12.0);
   });
 
   testWidgets('갤러리라도 바코드가 프리필됐으면 안내가 없다', (WidgetTester tester) async {

@@ -569,14 +569,28 @@ class _GifticonFormScreenState extends ConsumerState<GifticonFormScreen> {
                     border: const OutlineInputBorder(),
                     // 갤러리에서 바코드를 못 읽고 왔을 때만. 사용자가 채우기
                     // 시작하면 숨긴다 — "직접 입력해 주세요"는 입력 전에만 맞는
-                    // 안내다. 지난 날짜 안내(아래 유효기간 필드)와 달리 기본색으로
-                    // 둔다 — 바코드는 계약상 선택 항목이라 경고가 아니라 상황
-                    // 설명이다.
+                    // 안내다.
+                    // 명령형으로 둔다 — 한때 "바코드가 아예 없는 기프티콘"을
+                    // 배려해 '비워 두어도 돼요'를 붙였다가 되돌렸다. 기프티콘은
+                    // 정의상 바코드나 그 아래 번호를 제시해 쓰는 물건이라 그런
+                    // 유형이 존재하지 않는다(소유자 확정, 실물 4장 실측도 전부
+                    // 번호 보유). 비워 둬도 된다는 허락은 흔한 경우(번호가 있는데
+                    // OCR만 실패)에 바코드 없는 저장을 부추긴다 — 이 안내가
+                    // 막으려는 바로 그 결과다.
+                    // ⚠️ 39자를 넘기면 320px에서 helperMaxLines: 2를 넘겨 꼬리가
+                    // 말줄임으로 잘린다(실측). 폭 가드 테스트가 지킨다.
                     helperText:
                         _barcodeUnreadFromImage && value.text.trim().isEmpty
                             ? '이미지에서 바코드를 읽지 못했어요. 직접 입력해 주세요.'
                             : null,
                     helperMaxLines: 2,
+                    // 지난 날짜 안내(아래 유효기간 필드)와 같은 규약 — 테두리는
+                    // 정상으로 두고 글자만 danger로 칠해 "막힌 것이 아니라
+                    // 확인하라"는 뜻이 되게 한다. 처음에는 "계약상 선택 항목이니
+                    // 상황 설명"이라 기본색으로 뒀는데, 기본 회색은 AVD 실기
+                    // 확인에서 눈에 띄지 않았다(소유자 확인) — 못 보고 지나치면
+                    // 바코드 없이 저장돼 이 안내가 막으려는 결과가 그대로 난다.
+                    helperStyle: TextStyle(color: theme.colorScheme.error),
                   ),
                   validator: (String? input) {
                     final String trimmed = input?.trim() ?? '';
