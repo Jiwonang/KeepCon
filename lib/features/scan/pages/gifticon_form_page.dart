@@ -694,6 +694,21 @@ class _GifticonFormScreenState extends ConsumerState<GifticonFormScreen> {
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12),
                   ),
+                  // 테마의 elevatedButtonTheme.textStyle은 fontWeight만 담고
+                  // fontSize가 없다. ButtonStyleButton은 textStyle을 머지가 아니라
+                  // `widget ?? theme ?? default`로 고르므로(button_style_button.dart:386),
+                  // 크기를 여기서 주지 않으면 테마 값이 M3 기본 labelLarge(14)를
+                  // 통째로 밀어내 주 CTA가 그 화면에서 가장 작은 글자가 된다
+                  // (본문 bodyLarge 15 · 섹션 제목 titleMedium 16 — 실측).
+                  // 형제 CTA(로그인·가입하기·재설정 18, 사용 완료·어플로 공유하기 17)도
+                  // 전부 이 자리(styleFrom)에서 크기를 준다 — 같은 자리에 둔다.
+                  //
+                  // 미고침: lib/shared/theme/app_theme.dart:216 — 테마가 labelLarge를
+                  // 통째로 치환해 크기·자간·행높이를 잃는 구조는 그대로 남는다.
+                  // 근본 해결은 elevatedButtonTheme에 크기를 넣고 이 줄을 지우는
+                  // 것이며, 계약 파일이라 contract-architect 요청이 필요하다.
+                  textStyle: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w700),
                 ),
                 child: Text(
                   // 진행 중에는 문구로 알린다. 저장은 목록 조회 + (한도 상황이면)
@@ -707,9 +722,6 @@ class _GifticonFormScreenState extends ConsumerState<GifticonFormScreen> {
                   // auth 3곳(22×22)과 share 1곳(16×16)뿐이고 크기도 갈려 있어
                   // '스피너 관례'라 부를 만한 것이 없다 — 여기는 이탈이 아니라
                   // 합류다(문구는 소유자 확정).
-                  // 스타일을 주지 않는다 — 테마의 elevatedButtonTheme(w700)가
-                  // 공급한다. 형제 CTA(로그인·가입하기)도 같은 방식이고, 여기만
-                  // 인라인 16/bold로 테마를 우회하고 있었다(CodeRabbit 지적).
                   formState.submit is ScanSubmitInProgress ? '저장 중…' : '저장하기',
                 ),
               ),
