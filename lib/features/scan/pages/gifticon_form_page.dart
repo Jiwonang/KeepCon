@@ -3,9 +3,15 @@
 /// `scan_page.dart`에서 떼어냈다(그 파일이 1,455줄이라 화면 둘이 한곳에 있었다).
 ///
 /// ℹ️ 옮기면서 `_GifticonFormScreen` → [GifticonFormScreen]으로 공개됐다. 그래도
-/// 테스트는 **여전히 `ScanPage`에서 내비게이션을 타고 도달**한다 — 이 폼은 폼 상태
+/// 테스트는 **원칙적으로 `ScanPage`에서 내비게이션을 타고 도달**한다 — 이 폼은 폼 상태
 /// 컨트롤러의 세션(`startWith`)을 전제하므로, 직접 pump하면 실제 경로가 만들지 않는
 /// 상태에서 검증하게 된다.
+///
+/// 예외는 **갤러리 도착 상태** 하나다 — `ScanPage._openForm`이 `ImagePicker()`를
+/// 안에서 직접 만들어 주입점이 없으므로, 갤러리 경로 테스트는 그 경로가 컨트롤러에
+/// 하는 일(`startWith` → `prefillFromRecognition`)을 그대로 재현한 뒤 직접 pump한다
+/// (`scan_form_screen_test.dart`의 `openGalleryForm` 참조 — 세션 재현 없는 직접
+/// pump의 근거가 아니다).
 library;
 
 import 'dart:io';
@@ -47,10 +53,30 @@ class _GifticonFormScreenState extends ConsumerState<GifticonFormScreen> {
   /// 사용자가 번호를 고치면 필드의 재검증에서 자동으로 문구가 사라진다.
   String? _duplicateBarcode;
 
+  /// 갤러리 이미지에서 바코드를 읽지 못한 채 폼이 열렸는지.
+  ///
+  /// 이 상태로 도착할 수 있는 경로는 갤러리뿐이다 — 카메라는 바코드를 인식해야만
+  /// 폼이 열리고, 직접 입력은 애초에 이미지가 없다. 그런데 바코드는 계약상
+  /// nullable이라 빈 채로도 검증을 통과해 그대로 저장되고, 사용자는 매장에서
+  /// 제시할 것이 없다는 사실을 그때야 안다. 그래서 이 경우만 필드에 안내를 단다.
+  ///
+  /// 판정은 열리는 시점에 한 번 고정한다 — "이미지에서 못 읽었다"는 과거의
+  /// 사실이라 이후 입력으로 변하지 않는다. 표시 여부만 입력에 따라 갈린다
+  /// (직접 채우면 안내가 할 일을 다한 것이므로 숨긴다 — 바코드 필드를 감싼
+  /// [ValueListenableBuilder]가 그 전환을 필드 범위에서만 다시 그린다).
+  late final bool _barcodeUnreadFromImage;
+
   @override
   void initState() {
     super.initState();
     final initialState = ref.read(gifticonFormControllerProvider);
+
+    // trim으로 판정한다 — 표시 조건(바코드 필드의 helperText)과 같은 기준이어야
+    // 한다. 판정만 trim 없이 보면, 공백뿐인 값이 프리필됐을 때(현재 갤러리
+    // 프리필은 trim된 값이지만 그 계약은 이 파일 밖의 구현 사정이다) 안내 없이
+    // 저장 단계에서 null로 접혀 침묵 저장된다 — 이 안내가 막으려는 바로 그 결과다.
+    _barcodeUnreadFromImage = initialState.source == ScanSource.gallery &&
+        initialState.barcode.trim().isEmpty;
 
     // 불필요한 null-aware 연산자(?? '') 제거로 dead_null_aware_expression 경고 수정
     _brandController = TextEditingController(text: initialState.brand);
@@ -305,9 +331,12 @@ class _GifticonFormScreenState extends ConsumerState<GifticonFormScreen> {
         );
 
       case ScanSubmitDuplicate(:final Gifticon existing):
-        // 직접 입력은 사용자가 그 자리에서 번호를 고칠 수 있으므로 화면에 머무르며
-        // 바코드 필드 아래에 빨간 문구로 알린다.
-        if (formState.source == ScanSource.manual) {
+        // 사용자가 그 자리에서 번호를 고칠 수 있는 도착이면 화면에 머무르며
+        // 바코드 필드 아래에 빨간 문구로 알린다. 직접 입력만이 아니라
+        // **갤러리-미인식 도착도 여기다** — 그 바코드는 위 안내를 보고 사용자가
+        // 손으로 친 값이라, 홈으로 내쫓으면 함께 채운 입력이 통째로 사라지고
+        // 정작 고칠 수 있는 번호는 고칠 기회를 잃는다.
+        if (formState.source == ScanSource.manual || _barcodeUnreadFromImage) {
           setState(() {
             _duplicateBarcode = _barcodeController.text.trim();
           });
@@ -315,8 +344,8 @@ class _GifticonFormScreenState extends ConsumerState<GifticonFormScreen> {
           return;
         }
 
-        // 카메라/갤러리는 인식된 이미지·바코드가 이미 화면에 떠 있어 필드 문구로
-        // 고칠 것이 없다. 홈으로 돌려보낸 뒤 팝업으로 알린다.
+        // 카메라/갤러리-인식은 인식된 이미지·바코드가 이미 화면에 떠 있어 필드
+        // 문구로 고칠 것이 없다. 홈으로 돌려보낸 뒤 팝업으로 알린다.
         //
         // 다이얼로그는 이 화면의 context가 아니라 Navigator 자신의 context로 띄운다 —
         // 이 화면은 popUntil 직후 사라지므로 그 context로는 열 수 없다.
@@ -502,33 +531,54 @@ class _GifticonFormScreenState extends ConsumerState<GifticonFormScreen> {
                 },
               ),
               const SizedBox(height: 16),
-              TextFormField(
-                controller: _barcodeController,
-                keyboardType: TextInputType.number,
-                // 번호를 고치는 즉시 재검증돼 중복 안내가 사라진다.
-                autovalidateMode: AutovalidateMode.onUserInteraction,
-                decoration: const InputDecoration(
-                  labelText: '바코드 번호',
-                  hintText: '숫자만 입력',
-                  border: OutlineInputBorder(),
-                ),
-                validator: (value) {
-                  final String trimmed = value?.trim() ?? '';
+              // [ValueListenableBuilder]로 감싸는 이유: helperText가 컨트롤러의
+              // 현재 입력에 달려 있는데, 필드 내부의 재검증 rebuild는 부모가
+              // 만들어 둔 decoration 인스턴스를 다시 쓰므로 부모 쪽 rebuild가
+              // 없으면 안내가 영영 안 지워진다. setState 리스너 대신 이 빌더인
+              // 이유는 범위다 — 컨트롤러는 글자 변경만이 아니라 커서 이동·한글
+              // 조합에도 notify하므로, setState로 받으면 가장 긴 필드를 손으로
+              // 치는 바로 그 흐름에서 키 입력마다 폼 전체가 다시 그려진다.
+              ValueListenableBuilder<TextEditingValue>(
+                valueListenable: _barcodeController,
+                builder: (BuildContext context, TextEditingValue value, _) =>
+                    TextFormField(
+                  controller: _barcodeController,
+                  keyboardType: TextInputType.number,
+                  // 번호를 고치는 즉시 재검증돼 중복 안내가 사라진다.
+                  autovalidateMode: AutovalidateMode.onUserInteraction,
+                  decoration: InputDecoration(
+                    labelText: '바코드 번호',
+                    hintText: '숫자만 입력',
+                    border: const OutlineInputBorder(),
+                    // 갤러리에서 바코드를 못 읽고 왔을 때만. 사용자가 채우기
+                    // 시작하면 숨긴다 — "직접 입력해 주세요"는 입력 전에만 맞는
+                    // 안내다. 지난 날짜 안내(아래 유효기간 필드)와 달리 기본색으로
+                    // 둔다 — 바코드는 계약상 선택 항목이라 경고가 아니라 상황
+                    // 설명이다.
+                    helperText:
+                        _barcodeUnreadFromImage && value.text.trim().isEmpty
+                            ? '이미지에서 바코드를 읽지 못했어요. 직접 입력해 주세요.'
+                            : null,
+                    helperMaxLines: 2,
+                  ),
+                  validator: (String? input) {
+                    final String trimmed = input?.trim() ?? '';
 
-                  // 바코드는 계약상 nullable이다 — [Gifticon.barcode] 문서가
-                  // "수동 입력 미기재 시 없을 수 있다"고 명시하고
-                  // [GifticonFormState.validate]도 요구하지 않는다. 화면만 필수로
-                  // 강제하면 바코드 없는 기프티콘을 아예 등록할 수 없다.
-                  //
-                  // 값이 없으면 중복 검사 대상도 아니다(컨트롤러가 건너뛴다).
-                  if (trimmed.isEmpty) {
+                    // 바코드는 계약상 nullable이다 — [Gifticon.barcode] 문서가
+                    // "수동 입력 미기재 시 없을 수 있다"고 명시하고
+                    // [GifticonFormState.validate]도 요구하지 않는다. 화면만 필수로
+                    // 강제하면 바코드 없는 기프티콘을 아예 등록할 수 없다.
+                    //
+                    // 값이 없으면 중복 검사 대상도 아니다(컨트롤러가 건너뛴다).
+                    if (trimmed.isEmpty) {
+                      return null;
+                    }
+                    if (trimmed == _duplicateBarcode) {
+                      return '이미 등록된 바코드 번호입니다.';
+                    }
                     return null;
-                  }
-                  if (trimmed == _duplicateBarcode) {
-                    return '이미 등록된 바코드 번호입니다.';
-                  }
-                  return null;
-                },
+                  },
+                ),
               ),
               const SizedBox(height: 16),
               TextFormField(
@@ -628,9 +678,24 @@ class _GifticonFormScreenState extends ConsumerState<GifticonFormScreen> {
                     borderRadius: BorderRadius.circular(12),
                   ),
                 ),
-                child: const Text(
-                  '저장하기',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                child: Text(
+                  // 진행 중에는 문구로 알린다. 저장은 목록 조회 + (한도 상황이면)
+                  // 플랜 서버 확인 + (그룹 공유면) 이름 조회까지 물려 수십 초가
+                  // 걸릴 수 있는데, 버튼 비활성만으로는 죽은 화면과 구분되지
+                  // 않아 사용자가 뒤로가기로 이탈한다.
+                  //
+                  // ⚠️ 앱의 다른 제출 버튼들(auth 3곳·share 1곳)은 버튼 안
+                  // 스피너(22×22)를 쓴다 — 여기가 문구인 것은 **의도된 이탈**이다.
+                  // 이 버튼의 대기는 저쪽(1~2초 왕복)과 달리 수십 초까지 갈 수
+                  // 있어, 회전만 보여주는 것보다 무엇을 하는 중인지 말로 알리는
+                  // 쪽을 골랐다(문구는 소유자 확정). 스피너로 통일하려면 형제들의
+                  // 22×22 리터럴 관례를 그대로 따르면 된다 — 크기 토큰 부재가
+                  // 장벽인 것은 아니다.
+                  formState.submit is ScanSubmitInProgress ? '저장 중…' : '저장하기',
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
               ),
             ],
