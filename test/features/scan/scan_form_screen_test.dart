@@ -38,6 +38,7 @@ library;
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:keepcon/features/scan/pages/gifticon_form_page.dart';
@@ -635,8 +636,7 @@ void main() {
     return container;
   }
 
-  const String barcodeUnreadNotice =
-      '이미지에서 바코드를 읽지 못했어요. 직접 입력하거나, 바코드가 없으면 비워 두어도 돼요.';
+  const String barcodeUnreadNotice = '이미지에서 바코드를 읽지 못했어요. 직접 입력하거나 비워 두어도 돼요.';
 
   testWidgets('갤러리에서 바코드를 못 읽고 오면 필드에 안내가 뜨고, 직접 입력하면 사라진다',
       (WidgetTester tester) async {
@@ -656,6 +656,27 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text(barcodeUnreadNotice), findsOneWidget);
   });
+
+  // 폭 회귀 가드 — 안내(helperMaxLines: 2)가 좁은 기기에서 말줄임으로 잘리면
+  // 해소 경로('비워 두어도 돼요')가 사라져 끊긴 명령문만 남는다. 실제로 문구를
+  // 49자로 늘렸다가 320~375px 전부에서 잘리는 회귀가 리뷰 실측으로 잡혔다.
+  // 폭 목록은 scan_dialog_layout_test의 narrowWidths와 같은 기기 근거를 쓴다.
+  // ⚠️ physicalSize는 openGalleryForm **뒤에** 바꾼다 — 하네스가 1200으로 덮어쓴다.
+  for (final double w in <double>[320, 360, 375]) {
+    testWidgets('${w.toInt()}px에서 미인식 안내가 잘리지 않는다',
+        (WidgetTester tester) async {
+      await openGalleryForm(tester, ocrBarcode: null);
+      tester.view.physicalSize = Size(w, 2600);
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .renderObject<RenderParagraph>(find.text(barcodeUnreadNotice))
+            .didExceedMaxLines,
+        isFalse,
+        reason: '${w.toInt()}px에서 안내 꼬리가 말줄임으로 잘렸다',
+      );
+    });
+  }
 
   testWidgets('미인식 안내는 지난 날짜 안내와 같은 danger 색으로 칠해진다',
       (WidgetTester tester) async {

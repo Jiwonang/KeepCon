@@ -575,10 +575,13 @@ class _GifticonFormScreenState extends ConsumerState<GifticonFormScreen> {
                     // 아예 없는 쿠폰에서 지울 수 없는 빨간 지시가 된다. 유효기간
                     // 쪽 '맞는지 확인해 주세요'처럼 해소 경로를 문구가 함께
                     // 말한다(소유자 확정 문구).
-                    helperText: _barcodeUnreadFromImage &&
-                            value.text.trim().isEmpty
-                        ? '이미지에서 바코드를 읽지 못했어요. 직접 입력하거나, 바코드가 없으면 비워 두어도 돼요.'
-                        : null,
+                    // ⚠️ 39자를 넘기면 320px에서 helperMaxLines: 2를 넘겨
+                    // 꼬리('비워 두어도 돼요')가 말줄임으로 잘린다 — 이 문구가
+                    // 존재하는 이유가 그 꼬리다. 폭 가드 테스트가 지킨다.
+                    helperText:
+                        _barcodeUnreadFromImage && value.text.trim().isEmpty
+                            ? '이미지에서 바코드를 읽지 못했어요. 직접 입력하거나 비워 두어도 돼요.'
+                            : null,
                     helperMaxLines: 2,
                     // 지난 날짜 안내(아래 유효기간 필드)와 같은 규약 — 테두리는
                     // 정상으로 두고 글자만 danger로 칠해 "막힌 것이 아니라
