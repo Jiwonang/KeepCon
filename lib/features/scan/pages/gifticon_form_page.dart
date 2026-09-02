@@ -569,14 +569,19 @@ class _GifticonFormScreenState extends ConsumerState<GifticonFormScreen> {
                     border: const OutlineInputBorder(),
                     // 갤러리에서 바코드를 못 읽고 왔을 때만. 사용자가 채우기
                     // 시작하면 숨긴다 — "직접 입력해 주세요"는 입력 전에만 맞는
-                    // 안내다. 지난 날짜 안내(아래 유효기간 필드)와 달리 기본색으로
-                    // 둔다 — 바코드는 계약상 선택 항목이라 경고가 아니라 상황
-                    // 설명이다.
+                    // 안내다.
                     helperText:
                         _barcodeUnreadFromImage && value.text.trim().isEmpty
                             ? '이미지에서 바코드를 읽지 못했어요. 직접 입력해 주세요.'
                             : null,
                     helperMaxLines: 2,
+                    // 지난 날짜 안내(아래 유효기간 필드)와 같은 규약 — 테두리는
+                    // 정상으로 두고 글자만 danger로 칠해 "막힌 것이 아니라
+                    // 확인하라"는 뜻이 되게 한다. 처음에는 "계약상 선택 항목이니
+                    // 상황 설명"이라 기본색으로 뒀는데, 기본 회색은 AVD 실기
+                    // 확인에서 눈에 띄지 않았다(소유자 확인) — 못 보고 지나치면
+                    // 바코드 없이 저장돼 이 안내가 막으려는 결과가 그대로 난다.
+                    helperStyle: TextStyle(color: theme.colorScheme.error),
                   ),
                   validator: (String? input) {
                     final String trimmed = input?.trim() ?? '';
