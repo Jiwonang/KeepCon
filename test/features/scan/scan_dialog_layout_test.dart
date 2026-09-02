@@ -15,9 +15,12 @@
 /// 어절 경계에서 일어나는지는 `keep_all_ko_test.dart`가 따로 고정한다.
 library;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:keepcon/features/scan/pages/gifticon_form_page.dart';
 import 'package:keepcon/features/scan/scan_page.dart';
 import 'package:keepcon/features/scan/state/gifticon_form_state.dart';
 import 'package:keepcon/shared/models/gifticon.dart';
@@ -191,12 +194,33 @@ void main() {
           ],
         );
 
-        // 카메라 경로로 바꾼다 — 이 소스일 때만 다이얼로그가 뜬다.
-        container
-            .read(gifticonFormControllerProvider.notifier)
-            .startWith(ScanSource.camera);
+        // 실제 카메라 도착을 재현한다 — 세션을 만들고(startWith → setBarcode)
+        // 폼을 **다시 연다.** 폼은 "이 바코드를 사용자가 넣었는가"를 열리는
+        // 시점의 프리필 기준으로 판정하므로, 폼을 연 채 소스만 바꾸고 바코드를
+        // 타이핑하면 사용자 입력으로 판정돼 다이얼로그가 아니라 필드 안내로
+        // 빠진다(그 잔류가 의도된 동작이다 — `scan_form_screen_test.dart`의
+        // '사용자가 고친 바코드' 테스트 참조). 여기의 관심사는 다이얼로그
+        // 레이아웃이므로 다이얼로그가 뜨는 도착(프리필 그대로 저장)을 만든다.
+        final NavigatorState navigator =
+            tester.state<NavigatorState>(find.byType(Navigator));
+        navigator.pop();
         await tester.pumpAndSettle();
 
+        final GifticonFormController controller =
+            container.read(gifticonFormControllerProvider.notifier);
+        controller.startWith(ScanSource.camera);
+        controller.setBarcode(duplicated);
+        unawaited(
+          navigator.push<void>(
+            MaterialPageRoute<void>(
+              builder: (_) => const GifticonFormScreen(),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        // 바코드는 프리필돼 있고 같은 값을 다시 넣으므로 "사용자가 바꾼 값"이
+        // 아니다 — 다이얼로그 경로가 유지된다.
         await fillAndSave(tester, barcode: duplicated);
 
         expect(find.text('이미 등록된 기프티콘'), findsOneWidget);

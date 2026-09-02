@@ -7,11 +7,12 @@
 /// 컨트롤러의 세션(`startWith`)을 전제하므로, 직접 pump하면 실제 경로가 만들지 않는
 /// 상태에서 검증하게 된다.
 ///
-/// 예외는 **갤러리 도착 상태** 하나다 — `ScanPage._openForm`이 `ImagePicker()`를
-/// 안에서 직접 만들어 주입점이 없으므로, 갤러리 경로 테스트는 그 경로가 컨트롤러에
-/// 하는 일(`startWith` → `prefillFromRecognition`)을 그대로 재현한 뒤 직접 pump한다
-/// (`scan_form_screen_test.dart`의 `openGalleryForm` 참조 — 세션 재현 없는 직접
-/// pump의 근거가 아니다).
+/// 예외는 **카메라·갤러리 도착 상태**다 — `ScanPage._openForm`이 스캐너 화면과
+/// `ImagePicker()`를 안에서 직접 만들어 주입점이 없으므로, 그 경로들의 테스트는
+/// 실제 경로가 컨트롤러에 하는 일(`startWith` → `setBarcode`/`prefillFromRecognition`)
+/// 을 그대로 재현한 뒤 직접 pump한다(`scan_form_screen_test.dart`의
+/// `openGalleryForm`·`scan_dialog_layout_test.dart`의 카메라 재현 참조 — 세션 재현
+/// 없는 직접 pump의 근거가 아니다).
 library;
 
 import 'dart:io';
@@ -66,10 +67,24 @@ class _GifticonFormScreenState extends ConsumerState<GifticonFormScreen> {
   /// [ValueListenableBuilder]가 그 전환을 필드 범위에서만 다시 그린다).
   late final bool _barcodeUnreadFromImage;
 
+  /// 폼이 열릴 때 프리필돼 있던 바코드(trim).
+  ///
+  /// 중복 판정에서 "이 번호를 사용자가 직접 넣었는가"를 가른다 — 사용자가 넣은
+  /// 번호는 그 자리에서 고칠 수 있으므로, 중복이라고 홈으로 내쫓으면 고칠 기회와
+  /// 함께 나머지 입력까지 잃는다. OCR이 잘못 읽어 사용자가 **고친** 경우까지
+  /// 덮으려고 미인식 여부([_barcodeUnreadFromImage])가 아니라 값 변화로 본다
+  /// (미인식 도착은 프리필이 빈 값이라 무엇을 치든 자동으로 포함된다).
+  late final String _prefilledBarcode;
+
+  bool get _barcodeIsUserEntered =>
+      _barcodeController.text.trim() != _prefilledBarcode;
+
   @override
   void initState() {
     super.initState();
     final initialState = ref.read(gifticonFormControllerProvider);
+
+    _prefilledBarcode = initialState.barcode.trim();
 
     // trim으로 판정한다 — 표시 조건(바코드 필드의 helperText)과 같은 기준이어야
     // 한다. 판정만 trim 없이 보면, 공백뿐인 값이 프리필됐을 때(현재 갤러리
@@ -332,11 +347,12 @@ class _GifticonFormScreenState extends ConsumerState<GifticonFormScreen> {
 
       case ScanSubmitDuplicate(:final Gifticon existing):
         // 사용자가 그 자리에서 번호를 고칠 수 있는 도착이면 화면에 머무르며
-        // 바코드 필드 아래에 빨간 문구로 알린다. 직접 입력만이 아니라
-        // **갤러리-미인식 도착도 여기다** — 그 바코드는 위 안내를 보고 사용자가
-        // 손으로 친 값이라, 홈으로 내쫓으면 함께 채운 입력이 통째로 사라지고
-        // 정작 고칠 수 있는 번호는 고칠 기회를 잃는다.
-        if (formState.source == ScanSource.manual || _barcodeUnreadFromImage) {
+        // 바코드 필드 아래에 빨간 문구로 알린다. 직접 입력만이 아니라 **이
+        // 바코드를 사용자가 넣은 모든 경우**가 여기다 — 갤러리-미인식에서 안내를
+        // 보고 친 값도, OCR이 잘못 읽어 사용자가 고친 값도. 홈으로 내쫓으면
+        // 함께 채운 입력이 통째로 사라지고 정작 고칠 수 있는 번호는 고칠 기회를
+        // 잃는다.
+        if (formState.source == ScanSource.manual || _barcodeIsUserEntered) {
           setState(() {
             _duplicateBarcode = _barcodeController.text.trim();
           });
@@ -344,8 +360,9 @@ class _GifticonFormScreenState extends ConsumerState<GifticonFormScreen> {
           return;
         }
 
-        // 카메라/갤러리-인식은 인식된 이미지·바코드가 이미 화면에 떠 있어 필드
-        // 문구로 고칠 것이 없다. 홈으로 돌려보낸 뒤 팝업으로 알린다.
+        // 카메라/갤러리-인식에서 **사용자가 손대지 않은** 바코드는 인식된
+        // 이미지·바코드가 이미 화면에 떠 있어 필드 문구로 고칠 것이 없다.
+        // 홈으로 돌려보낸 뒤 팝업으로 알린다.
         //
         // 다이얼로그는 이 화면의 context가 아니라 Navigator 자신의 context로 띄운다 —
         // 이 화면은 popUntil 직후 사라지므로 그 context로는 열 수 없다.
@@ -684,13 +701,12 @@ class _GifticonFormScreenState extends ConsumerState<GifticonFormScreen> {
                   // 걸릴 수 있는데, 버튼 비활성만으로는 죽은 화면과 구분되지
                   // 않아 사용자가 뒤로가기로 이탈한다.
                   //
-                  // ⚠️ 앱의 다른 제출 버튼들(auth 3곳·share 1곳)은 버튼 안
-                  // 스피너(22×22)를 쓴다 — 여기가 문구인 것은 **의도된 이탈**이다.
-                  // 이 버튼의 대기는 저쪽(1~2초 왕복)과 달리 수십 초까지 갈 수
-                  // 있어, 회전만 보여주는 것보다 무엇을 하는 중인지 말로 알리는
-                  // 쪽을 골랐다(문구는 소유자 확정). 스피너로 통일하려면 형제들의
-                  // 22×22 리터럴 관례를 그대로 따르면 된다 — 크기 토큰 부재가
-                  // 장벽인 것은 아니다.
+                  // 진행 중 문구는 앱의 **다수 관례**다 — `확인 중…`(app·mypage),
+                  // `요청 중…`(mypage), `취소 중…`·`만드는 중…`·`보내는 중…`(share)
+                  // 7곳이 같은 꼴이고 말줄임표도 U+2026으로 같다. 버튼 안 스피너는
+                  // auth 3곳(22×22)과 share 1곳(16×16)뿐이고 크기도 갈려 있어
+                  // '스피너 관례'라 부를 만한 것이 없다 — 여기는 이탈이 아니라
+                  // 합류다(문구는 소유자 확정).
                   formState.submit is ScanSubmitInProgress ? '저장 중…' : '저장하기',
                   style: const TextStyle(
                     fontSize: 16,

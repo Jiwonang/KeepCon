@@ -18,8 +18,9 @@
 /// 그러지 않는다 — 이 폼은 `GifticonFormController`의 세션(`startWith`)을 전제하므로
 /// 직접 pump하면 실제 경로가 만들지 않는 상태에서 검증하게 된다. 예전에는 private이
 /// 그것을 막아 줬고, 지금은 이 규약이 막는다. 경로를 통째로 지나야 이 파일이 막으려는
-/// 회귀를 잡을 수 있다. **예외는 갤러리 도착 하나다** — `ScanPage._openForm`이
-/// `ImagePicker()`를 안에서 직접 만들어 주입점이 없으므로, `openGalleryForm`이
+/// 회귀를 잡을 수 있다. **예외는 카메라·갤러리 도착이다** — `ScanPage._openForm`이
+/// 스캐너 화면과 `ImagePicker()`를 안에서 직접 만들어 주입점이 없으므로,
+/// `openGalleryForm`(이 파일)과 카메라 재현(`scan_dialog_layout_test.dart`)이
 /// 그 경로의 컨트롤러 호출을 재현한 뒤 직접 pump한다. 세션 재현 없는 직접 pump의
 /// 근거로 읽지 말 것.)
 ///
@@ -612,8 +613,21 @@ void main() {
         container: container,
         child: MaterialApp(
           theme: AppTheme.light,
-          home: const GifticonFormScreen(),
+          // ⚠️ 폼을 첫 라우트에 두면 `popUntil(isFirst)`가 no-op이 되어 "홈이
+          // 아니라 폼에 머문다" 단언이 원리상 실패할 수 없다(리뷰 실측 — 홈
+          // 팝업 경로를 타도 폼 잔류 단언이 통과했다). 실제 경로(ScanPage → 폼)
+          // 처럼 아래에 라우트를 깔아 popUntil이 실동작하게 한다.
+          home: const Scaffold(body: Center(child: Text('테스트 홈'))),
         ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final NavigatorState navigator =
+        tester.state<NavigatorState>(find.byType(Navigator));
+    unawaited(
+      navigator.push<void>(
+        MaterialPageRoute<void>(builder: (_) => const GifticonFormScreen()),
       ),
     );
     await tester.pumpAndSettle();
@@ -680,6 +694,39 @@ void main() {
     expect(find.text('이미 등록된 기프티콘'), findsNothing);
   });
 
+  testWidgets('갤러리-인식이라도 사용자가 고친 바코드가 중복이면 폼에 머문다',
+      (WidgetTester tester) async {
+    // OCR이 바코드를 잘못 읽으면 사용자가 화면에서 보고 고친다. 그 고친 값이
+    // 중복일 때 "인식된 바코드라 고칠 게 없다"며 홈으로 내쫓으면, 손으로 고친
+    // 번호를 포함한 입력 전체가 사라진다 — 판정은 미인식 여부가 아니라
+    // "사용자가 넣은 값인가"다.
+    const String duplicated = '8801234567890';
+
+    await openGalleryForm(
+      tester,
+      ocrBarcode: '7770000000000', // OCR이 잘못 읽은 값
+      seed: <Gifticon>[existing(barcode: duplicated)],
+    );
+
+    // fillRequired가 바코드 필드를 duplicated로 덮어쓴다 = 사용자의 수정.
+    await fillRequired(tester, barcode: duplicated);
+    await pickExpiryDate(tester);
+    await tapSave(tester);
+
+    expect(find.text('기프티콘 정보 확인'), findsOneWidget);
+    expect(find.text('이미 등록된 바코드 번호입니다.'), findsOneWidget);
+    expect(find.text('이미 등록된 기프티콘'), findsNothing);
+  });
+
+  testWidgets('공백뿐인 바코드가 프리필돼도 미인식 안내가 뜬다', (WidgetTester tester) async {
+    // 판정이 trim 없이 isEmpty만 보면 공백 프리필이 안내를 우회하고, 저장
+    // 단계에서 null로 접혀 침묵 저장된다 — 표시 조건과 같은 기준(trim)임을
+    // 고정한다.
+    await openGalleryForm(tester, ocrBarcode: '   ');
+
+    expect(find.text(barcodeUnreadNotice), findsOneWidget);
+  });
+
   testWidgets('직접 입력 경로에는 바코드 안내가 없다', (WidgetTester tester) async {
     // 직접 입력은 이미지 자체가 없으므로 "읽지 못했다"는 안내가 성립하지 않는다.
     await openManualForm(tester);
@@ -692,6 +739,8 @@ void main() {
     // 저장은 목록 조회 + (한도 상황이면) 플랜 서버 확인까지 물려 수십 초가 걸릴
     // 수 있다. 진행 표시가 없으면 죽은 화면과 구분되지 않아 사용자가 이탈한다.
     final _GatedGifticonRepository gated = _GatedGifticonRepository();
+    // 중간 단언이 깨져도 게이트를 남기지 않는다(release는 멱등).
+    addTearDown(gated.release);
 
     await openManualForm(tester, gifticonRepository: gated);
     await fillRequired(tester, barcode: '8801234567890');
