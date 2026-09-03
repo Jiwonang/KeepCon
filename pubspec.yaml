@@ -47,6 +47,11 @@ dev_dependencies:
   # 트랜잭션 경합, 복합 인덱스 요구(`firestore.indexes.json`).
   # 자세한 경계는 `test/shared/repositories/share_repository_contract_suite.dart` 참조.
   fake_cloud_firestore: ^3.1.0
+  # fake 문서 참조에 예외를 주입한다(`whenCalling…thenThrow`) — 보안 규칙이 내는
+  # permission-denied를 fake 위에서 재현하는 유일한 수단이다. fake_cloud_firestore의
+  # 전이 의존성을 직접 import하려고 승격한 것 — 명시 핀이므로 fake_cloud_firestore를
+  # 올릴 때 이 핀도 함께 본다(그쪽이 다른 major를 요구하면 pub solve가 여기서 막힌다).
+  mock_exceptions: ^0.8.2
 
 flutter:
   uses-material-design: true

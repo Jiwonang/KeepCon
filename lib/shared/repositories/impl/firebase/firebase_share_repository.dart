@@ -656,50 +656,92 @@ class FirebaseShareRepository implements ShareRepository {
       if (g != null && g.isMember(me.id)) {
         throw StateError('Already a member of group: $groupId');
       }
-    } on FirebaseException {
-      // 읽기 거부 = 비멤버. 요청을 계속 진행한다.
+    } on FirebaseException catch (e) {
+      // 읽기 **거부** = 비멤버. 요청을 계속 진행한다. 거부만 그렇다 — 일시적 실패
+      // (unavailable 등)까지 삼키면 이미 멤버인 사람이 비멤버로 오판되어 자기
+      // 그룹에 참여 요청을 만들러 내려간다(아래 요청 문서 읽기와 같은 규약).
+      if (e.code != 'permission-denied') rethrow;
     }
 
     final DocumentReference<Map<String, dynamic>> ref =
         _joinRequests.doc(_joinRequestId(groupId, me.id));
 
-    return _db.runTransaction<JoinRequest>((Transaction tx) async {
-      final DocumentSnapshot<Map<String, dynamic>> prev = await tx.get(ref);
-      final JoinRequest? existing =
-          prev.exists ? _joinRequestFromDocOrNull(prev) : null;
-      if (existing != null && existing.isPending) {
-        return existing; // 멱등 — 같은 링크를 두 번 눌러도 요청이 쌓이지 않는다.
-      }
-      // 결정이 끝난 요청(거절, 또는 승인 후 강퇴)은 다시 대기로 되돌린다.
-      final JoinRequest req = JoinRequest(
-        id: ref.id,
-        groupId: groupId,
-        userId: me.id,
-        displayName: me.displayName,
-        avatarEmoji: _defaultAvatar,
-        requestedAt: DateTime.now(),
+    // 존재 확인(멱등성 판정)은 일반 읽기로 하되 **서버를 강제**하고, 권한 거부를
+    // "아직 없음"으로 해석한다.
+    //
+    // 예전에는 이 확인이 트랜잭션 안의 읽기였다. 그런데 `joinRequests` 읽기 규칙은
+    // `resource.data`를 참조하므로 **없는 문서에서는 평가가 오류(=거부)로 죽고**
+    // (존재 오라클을 막으려고 의도적으로 남긴 403 — `tool/verify_firestore_rules.sh`의
+    // "없는 요청 문서 조회 → 403"이 그 규약을 못박는다), 트랜잭션은 읽기 하나가
+    // 거부되면 통째로 죽는다 — 규칙이 있는 백엔드에서 **첫 요청이 항상 실패**했다
+    // (2026-09-03 dev 실측). 그래서 트랜잭션을 걷어냈다.
+    //
+    // `Source.server`는 트랜잭션 읽기가 갖던 서버-신선 보장을 승계한다. 기본
+    // `serverAndCache`로 두면 오프라인에서 예외 대신 **캐시**가 답해 판정이 뒤집힌다
+    // — 캐시가 비면 살아 있는 대기 요청을 '없음'으로 읽어 덮어쓰고(`requestedAt`
+    // 초기화), 캐시에 낡은 pending이 남았으면 거절 뒤 재요청이 아무것도 쓰지 않은 채
+    // "대기 중"으로 끝난다. 서버 강제면 오프라인은 예외로 떨어져 아래 rethrow를
+    // 타고, 화면이 곧바로 실패를 안내한다(트랜잭션 시절의 빠른 실패와 같은 모양).
+    // 판정용 일회성 읽기에 서버를 강제하는 것은 이 저장소의 기존 규약이다
+    // (`firebase_bootstrap.dart`의 도달성 검사 — "캐시로 성공한 척하는 것을 막는다").
+    //
+    // 거부를 "없음"으로 읽어도 안전한 이유: 생성·변경 규칙이 문서 id 규약
+    // (`{groupId}_{uid}`)과 `userId` 불변을 강제하므로, 규칙을 거쳐 만들어진 문서는
+    // 언제나 내 것이고 내 문서의 읽기는 허용된다. (규칙을 우회해 심긴 손상 문서는
+    // 이 대칭 밖이지만, 그때는 뒤이은 쓰기도 같은 이유로 거부되므로 조용히
+    // 잘못되지는 않는다.) [_dropJoinRequest]가 같은 규약으로 거부를 정상 종료로
+    // 삼는다.
+    JoinRequest? existing;
+    try {
+      // 없는 문서는 매퍼가 null로 접는다(`data()`가 null → 필수 필드 결측).
+      existing = _joinRequestFromDocOrNull(
+        await ref.get(const GetOptions(source: Source.server)),
       );
-      tx.set(ref, <String, dynamic>{
-        'groupId': req.groupId,
-        'userId': req.userId,
-        'displayName': req.displayName,
-        'avatarEmoji': req.avatarEmoji,
-        'requestedAt': Timestamp.fromDate(req.requestedAt),
-        'status': req.status.name,
-        // 사용한 자격증명을 함께 싣는다 — **보안 규칙이 만료를 검사할 근거**다.
-        //
-        // 규칙은 요청이 어떤 경로로 왔는지 알 수 없으므로, 이 값이 없으면 그룹의
-        // 24시간 `inviteExpiresAt`으로 판정할 수밖에 없다. 그러면 5분짜리 코드로 얻은
-        // `groupId`가 남은 24시간 동안 계속 먹혀서 "5분 만료"가 화면에만 있는 문구가
-        // 된다(계약: 만료는 사용한 자격증명 기준).
-        //
-        // [JoinRequest] 모델에는 넣지 않는다 — 승인 목록도 요청자 화면도 이 값을 쓰지
-        // 않는 저장·검증 계층의 세부이고, 계약에 올리면 모든 구현이 지고 갈 짐이 된다
-        // (in-memory에는 보안 규칙이 없다). `memberIds`가 문서에만 있는 것과 같은 결이다.
-        'credential': credential,
-      });
-      return req;
+    } on FirebaseException catch (e) {
+      // 다른 실패(네트워크 등)를 "없음"으로 읽으면 살아 있는 대기 요청을 덮어써
+      // `requestedAt`이 초기화된다 — 권한 거부만 흡수한다.
+      if (e.code != 'permission-denied') rethrow;
+    }
+    if (existing != null && existing.isPending) {
+      return existing; // 멱등 — 같은 링크를 두 번 눌러도 요청이 쌓이지 않는다.
+    }
+    // 결정이 끝난 요청(거절, 또는 승인 후 강퇴)은 다시 대기로 되돌린다.
+    //
+    // 확인-후-쓰기는 원자적이지 않다. 이 쓰기를 다투는 상대는 사실상 **다른 기기의
+    // 나 자신**뿐이고(방장의 승인·거절과의 경합은 규칙이 닫는다 — 승인 뒤에는
+    // `canRequestJoin`의 멤버십 검사가, 거절 직후에는 방장 조항의
+    // `status == 'pending'` 전제가 서로의 쓰기를 거부한다), 겹치면 내 대기 요청을
+    // 내가 덮어써 `requestedAt`이 뒤로 가고(방장 목록은 오래된 순 — 손해 보는 쪽도
+    // 나다) `credential`이 마지막 것으로 바뀐다(규칙의 만료 판정도 그 마지막
+    // 자격증명 기준이 되므로 "만료는 사용한 자격증명 기준" 계약과는 정합).
+    final JoinRequest req = JoinRequest(
+      id: ref.id,
+      groupId: groupId,
+      userId: me.id,
+      displayName: me.displayName,
+      avatarEmoji: _defaultAvatar,
+      requestedAt: DateTime.now(),
+    );
+    await ref.set(<String, dynamic>{
+      'groupId': req.groupId,
+      'userId': req.userId,
+      'displayName': req.displayName,
+      'avatarEmoji': req.avatarEmoji,
+      'requestedAt': Timestamp.fromDate(req.requestedAt),
+      'status': req.status.name,
+      // 사용한 자격증명을 함께 싣는다 — **보안 규칙이 만료를 검사할 근거**다.
+      //
+      // 규칙은 요청이 어떤 경로로 왔는지 알 수 없으므로, 이 값이 없으면 그룹의
+      // 24시간 `inviteExpiresAt`으로 판정할 수밖에 없다. 그러면 5분짜리 코드로 얻은
+      // `groupId`가 남은 24시간 동안 계속 먹혀서 "5분 만료"가 화면에만 있는 문구가
+      // 된다(계약: 만료는 사용한 자격증명 기준).
+      //
+      // [JoinRequest] 모델에는 넣지 않는다 — 승인 목록도 요청자 화면도 이 값을 쓰지
+      // 않는 저장·검증 계층의 세부이고, 계약에 올리면 모든 구현이 지고 갈 짐이 된다
+      // (in-memory에는 보안 규칙이 없다). `memberIds`가 문서에만 있는 것과 같은 결이다.
+      'credential': credential,
     });
+    return req;
   }
 
   @override
