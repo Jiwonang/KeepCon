@@ -730,11 +730,78 @@ class FirebaseShareRepository implements ShareRepository {
       .where('status', isEqualTo: JoinRequestStatus.pending.name)
       .orderBy('requestedAt');
 
+  /// 승인·거절·취소가 본론(트랜잭션·삭제)에 들어가기 **전에** 요청 문서를 서버에서
+  /// 읽고, 없으면 계약의 [StateError]("Join request not found")로 던진다.
+  ///
+  /// ## 왜 본론의 읽기만으로는 안 되는가 (경합 경로)
+  ///
+  /// `joinRequests` 읽기 규칙은 `resource.data`를 참조하므로 **없는 문서에서는 평가가
+  /// 오류(=거부)로 죽는다** — 존재 오라클을 막으려고 의도적으로 남긴 403이고,
+  /// `tool/verify_firestore_rules.sh`의 "없는 요청 문서 조회 → 403"이 그 규약을
+  /// 못박는다. 그래서 요청자가 취소한 직후 방장이 승인/거절하거나 그룹 삭제
+  /// 캐스케이드 직후 취소하는 **경합**에서, 규칙 있는 백엔드는 계약이 약속한
+  /// [StateError] 대신 `FirebaseException(permission-denied)`을 UI까지 올려보냈다
+  /// ([requestToJoin]의 "첫 요청" 결함과 같은 뿌리 — 거기는 문서 없음이 정상 경로,
+  /// 여기는 경합 한정이라는 점만 다르다).
+  ///
+  /// 트랜잭션 **안**의 거부를 번역하는 것으로는 풀 수 없다 — 트랜잭션은 읽기 하나가
+  /// 거부되면 통째로 죽고, 그 시점의 permission-denied는 요청 문서 읽기가 아니라
+  /// 그룹 읽기·쓰기의 거부일 수도 있어, 뭉뚱그려 "없음"으로 번역하면 다른 원인을
+  /// 오진한다. 존재 확인을 트랜잭션 밖 **단일 읽기**로 분리하면 거부의 주어가 요청
+  /// 문서 하나로 좁혀진다.
+  ///
+  /// ## 거부를 "없음"으로 읽어도 안전한 이유
+  ///
+  /// 읽기 규칙은 요청자 본인과 그 그룹의 방장에게만 열려 있으므로, 정당한 행위자
+  /// (자기 요청을 거두는 요청자, 자기 그룹의 요청을 결정하는 방장)의 읽기가 거부되는
+  /// 경우는 문서가 없을 때뿐이다. 제3자의 읽기도 같은 403으로 떨어져 "없음"으로
+  /// 안내되지만, 그쪽에 존재 여부를 구별해 주는 것이야말로 규칙이 지키는 반(反)오라클
+  /// 규약을 저장소가 되뚫는 일이다 — 행위 가드는 어차피 규칙과 본론이 막는다.
+  /// (한 가지 더 접히는 상태: 그룹이 먼저 소멸해 방장 판정(`isGroupOwner`)이 죽은
+  /// **고아 요청**도 방장에게는 같은 403이다. 그 상태에서 승인·거절이 해 줄 수 있는
+  /// 것도 없으므로 "없음"으로 안내해도 다음 행동은 같다.)
+  ///
+  /// ## `Source.server`
+  ///
+  /// 판정용 일회성 읽기는 서버를 강제한다(`firebase_bootstrap.dart`의 도달성 검사·
+  /// `firebase_auth_repository.dart`의 플랜 조회와 같은 규약 — "캐시로 성공한 척하는
+  /// 것을 막는다"). 기본 `serverAndCache`는 오프라인에서 캐시가 답해, 이미 지워진
+  /// 문서를 "있음"으로 읽고 본론에 들어갔다가 더 낮은 곳에서 죽는다. 오프라인
+  /// 트레이드오프는 의도된 것이다 — 취소의 옛 코드(기본 소스 get)는 오프라인에서
+  /// 캐시로 존재 확인을 통과한 뒤 `delete`가 서버 확인을 영원히 기다려 **버튼이 잠긴
+  /// 채 아무 안내가 없었다.** 서버 강제면 즉시 unavailable로 떨어져 화면이 "다시
+  /// 시도해 주세요"를 안내한다(빠른 실패).
+  ///
+  /// 잔여 창: 이 확인과 본론 사이에 문서가 지워지는 극히 짧은 경합은 남는다 — 그때는
+  /// 본론의 거부가 [FirebaseException]으로 올라간다(위의 이유로 거기서는 번역하지
+  /// 않는다).
+  Future<DocumentSnapshot<Map<String, dynamic>>> _requireJoinRequestDoc(
+      DocumentReference<Map<String, dynamic>> ref) async {
+    final DocumentSnapshot<Map<String, dynamic>> doc;
+    try {
+      doc = await ref.get(const GetOptions(source: Source.server));
+    } on FirebaseException catch (e) {
+      // 다른 실패(unavailable 등)까지 "없음"으로 읽으면 일시적 네트워크 문제가
+      // "요청이 사라졌다"는 오진이 된다 — 권한 거부만 없음의 신호다.
+      if (e.code != 'permission-denied') rethrow;
+      throw StateError('Join request not found: ${ref.id}');
+    }
+    // 규칙 없는 백엔드(fake·에뮬레이터의 열린 규칙)는 없는 문서를 거부 대신
+    // 빈 스냅샷으로 준다 — 같은 계약 위반이므로 같은 문장으로 접는다.
+    if (!doc.exists) {
+      throw StateError('Join request not found: ${ref.id}');
+    }
+    return doc;
+  }
+
   @override
   Future<Group> approveJoinRequest(String joinRequestId) async {
     final User me = _requireUser();
     final DocumentReference<Map<String, dynamic>> reqRef =
         _joinRequests.doc(joinRequestId);
+    // 존재 확인은 트랜잭션 밖에서 — 경합으로 이미 지워진 요청이 계약의 [StateError]
+    // 대신 permission-denied로 새지 않게 한다([_requireJoinRequestDoc]).
+    await _requireJoinRequestDoc(reqRef);
 
     return _db.runTransaction<Group>((Transaction tx) async {
       final DocumentSnapshot<Map<String, dynamic>> reqDoc =
@@ -797,6 +864,9 @@ class FirebaseShareRepository implements ShareRepository {
     final User me = _requireUser();
     final DocumentReference<Map<String, dynamic>> reqRef =
         _joinRequests.doc(joinRequestId);
+    // 존재 확인은 트랜잭션 밖에서([approveJoinRequest]와 같은 이유 —
+    // [_requireJoinRequestDoc]).
+    await _requireJoinRequestDoc(reqRef);
 
     return _db.runTransaction<JoinRequest>((Transaction tx) async {
       final DocumentSnapshot<Map<String, dynamic>> reqDoc =
@@ -831,10 +901,11 @@ class FirebaseShareRepository implements ShareRepository {
     final User me = _requireUser();
     final DocumentReference<Map<String, dynamic>> ref =
         _joinRequests.doc(joinRequestId);
-    final DocumentSnapshot<Map<String, dynamic>> doc = await ref.get();
-    if (!doc.exists) {
-      throw StateError('Join request not found: $joinRequestId');
-    }
+    // 그룹 소멸 캐스케이드가 요청을 먼저 지웠을 수 있다 — 그때의 읽기 거부를 계약의
+    // [StateError]로 번역하고, 존재 판정은 캐시가 아니라 서버가 한다
+    // ([_requireJoinRequestDoc]).
+    final DocumentSnapshot<Map<String, dynamic>> doc =
+        await _requireJoinRequestDoc(ref);
     if (doc.data()?['userId'] != me.id) {
       throw StateError('Only the requester can cancel: $joinRequestId');
     }
