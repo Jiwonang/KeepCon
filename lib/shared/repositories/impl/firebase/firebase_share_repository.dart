@@ -828,6 +828,12 @@ class FirebaseShareRepository implements ShareRepository {
   /// 잔여 창: 이 확인과 본론 사이에 문서가 지워지는 극히 짧은 경합은 남는다 — 그때는
   /// 본론의 거부가 [FirebaseException]으로 올라간다(위의 이유로 거기서는 번역하지
   /// 않는다).
+  ///
+  /// ⚠️ "흡수한 거부를 [JoinRequestUnreadableException]으로 흔적 남기기"는 이 파일의
+  /// `permission-denied` 흡수 4곳 중 **여기 한 곳에만** 적용돼 있다 — [_dropJoinRequest]
+  /// 는 예외 없이 정상 종료라 완전 무음이고, [requestToJoin]의 두 흡수는 후속 쓰기가
+  /// 부분적 신호를 남길 뿐 타입 흔적이 없다. 전면 적용은 별도 작업(저장소→진단 방향
+  /// import 순환을 피하는 구조가 필요하다).
   Future<DocumentSnapshot<Map<String, dynamic>>> _requireJoinRequestDoc(
       DocumentReference<Map<String, dynamic>> ref) async {
     final DocumentSnapshot<Map<String, dynamic>> doc;
@@ -967,8 +973,12 @@ class FirebaseShareRepository implements ShareRepository {
     // 존재 확인이 성공한 **뒤** 끊기면 이 삭제는 로컬 큐에 들어가고 Future는 서버
     // ack까지 끝나지 않는다(flutterfire #17643). 화면의 `_busy`는 catch에서만
     // 풀리므로 그대로 두면 버튼이 영구히 잠긴다 — [requestToJoin]의 쓰기와 같은
-    // 상한을 건다. 타임아웃 뒤 큐의 삭제가 늦게 도착해도 해롭지 않다(취소는
-    // 멱등이고 없는 문서의 삭제는 규칙상 no-op이다).
+    // 상한을 건다. 타임아웃 뒤 큐의 삭제가 늦게 도착해도 해롭지 않다 —
+    // `Future.timeout`은 상한이 발화한 뒤 원본 future의 결과를 전달하지 않고
+    // (`timer.isActive`가 거짓 — dart-sdk `future_impl.dart`), 핸들러가 달려
+    // 있으므로 미처리 비동기 에러도 아니다. ⚠️ "없는 문서의 삭제는 no-op"이라서가
+    // 아니다 — `joinRequests`의 delete 규칙은 `resource.data`를 만지므로 문서가
+    // 없으면 **403**이다([_dropJoinRequest] 머리말이 같은 사실을 설계 근거로 삼는다).
     await ref.delete().timeout(const Duration(seconds: 15));
   }
 

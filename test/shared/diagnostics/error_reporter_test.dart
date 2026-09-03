@@ -7,6 +7,8 @@
 /// 2. **절대 던지지 않는다.** 리포터가 터지면 원래 실패를 가린다 — 사용자 안내조차 못 띄운다.
 library;
 
+import 'dart:async' show TimeoutException;
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:keepcon/shared/diagnostics/error_reporter.dart';
@@ -99,11 +101,18 @@ void main() {
         (ArgumentError('x'), 'ArgumentError'),
         (UnsupportedError('x'), 'UnsupportedError'),
         (const FormatException('x'), 'FormatException'),
+        // 저장소 쓰기 상한(requestToJoin·cancelJoinRequest의 15초)이 발화한 흔적 —
+        // Exception으로 뭉개면 "끊긴 채 15초를 기다렸다"가 다른 모든 Exception과
+        // release 로그에서 같은 글자가 된다.
+        (TimeoutException('x'), 'TimeoutException'),
         (Exception('x'), 'Exception'),
       ]) {
         printed.clear();
         reportOf(error);
-        expect(printed.first, contains(kind), reason: kind);
+        // `contains`는 못 쓴다 — 'StateError'가 'StateError(join-request-unreadable)'의
+        // 접두라, 모든 StateError에 서브클래스 라벨을 붙이는 회귀가 두 행 모두를
+        // 통과시킨다(뮤테이션으로 확인). 라벨은 줄의 맨 끝이므로 끝을 물어 고정한다.
+        expect(printed.first, endsWith('— $kind'), reason: kind);
       }
     });
 

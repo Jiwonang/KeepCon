@@ -38,6 +38,8 @@
 /// 인증(`features/auth`)·마이 페이지는 `on AuthException`으로 좁혀 잡으므로 이 부류가 아니다.
 library;
 
+import 'dart:async' show TimeoutException;
+
 import 'package:firebase_core/firebase_core.dart' show FirebaseException;
 import 'package:flutter/foundation.dart';
 
@@ -96,6 +98,10 @@ class DebugPrintErrorReporter implements ErrorReporter {
     if (error is TypeError) return 'TypeError';
     if (error is UnsupportedError) return 'UnsupportedError';
     if (error is FormatException) return 'FormatException';
+    // 저장소가 건 쓰기 상한이 발화한 흔적(`requestToJoin`·`cancelJoinRequest`의 15초).
+    // `Exception`으로 뭉개면 "끊긴 채 15초를 기다렸다"와 그 밖의 모든 Exception이
+    // release 로그에서 같은 글자가 된다.
+    if (error is TimeoutException) return 'TimeoutException';
     if (error is Error) return 'Error';
     return 'Exception';
   }
