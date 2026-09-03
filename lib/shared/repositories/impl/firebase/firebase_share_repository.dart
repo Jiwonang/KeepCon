@@ -682,6 +682,9 @@ class FirebaseShareRepository implements ShareRepository {
     // 초기화), 캐시에 낡은 pending이 남았으면 거절 뒤 재요청이 아무것도 쓰지 않은 채
     // "대기 중"으로 끝난다. 서버 강제면 오프라인은 예외로 떨어져 아래 rethrow를
     // 타고, 화면이 곧바로 실패를 안내한다(트랜잭션 시절의 빠른 실패와 같은 모양).
+    // ⚠️ 다만 그 빠른 실패는 **읽기 시점의 오프라인**만 닫는다 — 이 읽기가 성공한
+    //    뒤 연결이 끊기면 아래 `set`은 로컬 큐에 들어가고 Future는 서버 ack까지
+    //    끝나지 않는다(flutterfire #17643). 그 창은 쓰기 쪽 타임아웃이 닫는다.
     // 판정용 일회성 읽기에 서버를 강제하는 것은 이 저장소의 기존 규약이다
     // (`firebase_bootstrap.dart`의 도달성 검사 — "캐시로 성공한 척하는 것을 막는다").
     //
@@ -722,6 +725,9 @@ class FirebaseShareRepository implements ShareRepository {
       avatarEmoji: _defaultAvatar,
       requestedAt: DateTime.now(),
     );
+    // 큐에 걸린 채 침묵하지 않도록 시간을 끊는다(위 ⚠️ — 쓰기 도중 단절 창). 타임아웃
+    // 뒤 큐의 쓰기가 나중에 도착해도 해롭지 않다 — 다음 요청에서 위 멱등 분기가 그
+    // 대기 요청을 그대로 돌려준다. 매달린 스피너보다 시끄러운 실패가 낫다.
     await ref.set(<String, dynamic>{
       'groupId': req.groupId,
       'userId': req.userId,
@@ -740,7 +746,7 @@ class FirebaseShareRepository implements ShareRepository {
       // 않는 저장·검증 계층의 세부이고, 계약에 올리면 모든 구현이 지고 갈 짐이 된다
       // (in-memory에는 보안 규칙이 없다). `memberIds`가 문서에만 있는 것과 같은 결이다.
       'credential': credential,
-    });
+    }).timeout(const Duration(seconds: 15));
     return req;
   }
 

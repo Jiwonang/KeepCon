@@ -115,4 +115,29 @@ void main() {
     );
     expect(db.hasSavedDocument(requestPath()), isFalse);
   });
+
+  test('멤버십 판정 읽기의 일시적 실패는 "비멤버"로 오판하지 않는다', () async {
+    // 이미 멤버(방장)가 자기 그룹 링크를 눌렀는데 그룹 문서 읽기가 일시적으로
+    // 실패하면, 그 실패를 흡수하는 순간 "비멤버"로 오판돼 자기 그룹에 참여 요청을
+    // 만들러 내려간다 — 멤버십 catch를 권한 거부로만 좁힌 경계가 지키는 것이
+    // 이것이다(위 두 테스트는 요청 문서 쪽 stub만 걸어 이 분기를 밟지 않는다).
+    await auth.signIn(email: 'owner@keepcon.test', password: 'keepcon');
+    whenCalling(Invocation.method(#get, null))
+        .on(db.doc('${FirebaseShareRepository.groupsCollection}/${group.id}'))
+        .thenThrow(
+          FirebaseException(plugin: 'cloud_firestore', code: 'unavailable'),
+        );
+
+    await expectLater(
+      repo.requestToJoin(group.inviteToken),
+      throwsA(isA<FirebaseException>()),
+    );
+    expect(
+      db.hasSavedDocument(
+        '${FirebaseShareRepository.joinRequestsCollection}/'
+        '${group.id}_${group.owner.userId}',
+      ),
+      isFalse,
+    );
+  });
 }
