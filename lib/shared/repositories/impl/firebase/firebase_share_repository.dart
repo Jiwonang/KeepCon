@@ -820,6 +820,11 @@ class FirebaseShareRepository implements ShareRepository {
   /// 채 아무 안내가 없었다.** 서버 강제면 즉시 unavailable로 떨어져 화면이 "다시
   /// 시도해 주세요"를 안내한다(빠른 실패).
   ///
+  /// ⚠️ 이것이 닫는 것은 **읽기 시점의** 단절뿐이다. 읽기가 성공한 **뒤** 끊기는
+  /// 창은 각 본론의 쓰기가 따로 닫는다 — 승인·거절은 `runTransaction`의 기본 30초
+  /// 상한이, 취소의 `delete`는 [cancelJoinRequest]의 명시적 타임아웃이
+  /// ([requestToJoin]의 쓰기와 같은 규약).
+  ///
   /// 잔여 창: 이 확인과 본론 사이에 문서가 지워지는 극히 짧은 경합은 남는다 — 그때는
   /// 본론의 거부가 [FirebaseException]으로 올라간다(위의 이유로 거기서는 번역하지
   /// 않는다).
@@ -832,7 +837,9 @@ class FirebaseShareRepository implements ShareRepository {
       // 다른 실패(unavailable 등)까지 "없음"으로 읽으면 일시적 네트워크 문제가
       // "요청이 사라졌다"는 오진이 된다 — 권한 거부만 없음의 신호다.
       if (e.code != 'permission-denied') rethrow;
-      throw StateError('Join request not found: ${ref.id}');
+      // 거부를 접되 **접었다는 사실**은 타입으로 남긴다 — 경합(정상)과 규칙 회귀·
+      // 배포 스큐(장애)를 리포터가 구별할 유일한 흔적이다([JoinRequestUnreadableException]).
+      throw JoinRequestUnreadableException(ref.id);
     }
     // 규칙 없는 백엔드(fake·에뮬레이터의 열린 규칙)는 없는 문서를 거부 대신
     // 빈 스냅샷으로 준다 — 같은 계약 위반이므로 같은 문장으로 접는다.
@@ -957,7 +964,12 @@ class FirebaseShareRepository implements ShareRepository {
     if (doc.data()?['userId'] != me.id) {
       throw StateError('Only the requester can cancel: $joinRequestId');
     }
-    await ref.delete();
+    // 존재 확인이 성공한 **뒤** 끊기면 이 삭제는 로컬 큐에 들어가고 Future는 서버
+    // ack까지 끝나지 않는다(flutterfire #17643). 화면의 `_busy`는 catch에서만
+    // 풀리므로 그대로 두면 버튼이 영구히 잠긴다 — [requestToJoin]의 쓰기와 같은
+    // 상한을 건다. 타임아웃 뒤 큐의 삭제가 늦게 도착해도 해롭지 않다(취소는
+    // 멱등이고 없는 문서의 삭제는 규칙상 no-op이다).
+    await ref.delete().timeout(const Duration(seconds: 15));
   }
 
   // ── 공유 기프티콘 ─────────────────────────────────────────────────────

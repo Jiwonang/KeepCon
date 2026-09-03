@@ -41,6 +41,9 @@ library;
 import 'package:firebase_core/firebase_core.dart' show FirebaseException;
 import 'package:flutter/foundation.dart';
 
+import '../repositories/share_repository.dart'
+    show JoinRequestUnreadableException;
+
 /// 처리된 실패를 개발자에게 남기는 계약.
 ///
 /// "처리된(handled)"은 **사용자에게 이미 안내가 나갔다**는 뜻이다. 앱을 죽이지 않으므로
@@ -82,6 +85,12 @@ class DebugPrintErrorReporter implements ErrorReporter {
   /// 사용자 데이터가 아니라 가릴 이유도 없다.
   static String _kindOf(Object error) {
     if (error is FirebaseException) return 'FirebaseException(${error.code})';
+    // 저장소가 흡수한 `permission-denied`의 흔적 — 이 라벨이 몰려 찍히면 경합이
+    // 아니라 규칙 회귀·배포 스큐를 의심한다([JoinRequestUnreadableException]).
+    // 식별자는 싣지 않는다(메시지는 `includeMessage`가 따로 다룬다).
+    if (error is JoinRequestUnreadableException) {
+      return 'StateError(join-request-unreadable)';
+    }
     if (error is StateError) return 'StateError';
     if (error is ArgumentError) return 'ArgumentError';
     if (error is TypeError) return 'TypeError';

@@ -10,6 +10,8 @@ library;
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:keepcon/shared/diagnostics/error_reporter.dart';
+import 'package:keepcon/shared/repositories/share_repository.dart'
+    show JoinRequestUnreadableException;
 
 void main() {
   group('DebugPrintErrorReporter', () {
@@ -88,6 +90,12 @@ void main() {
 
       for (final (Object error, String kind) in <(Object, String)>[
         (StateError('x'), 'StateError'),
+        // 저장소가 permission-denied를 "없음"으로 접은 흔적 — 평범한 StateError와
+        // 구별돼야 규칙 회귀·배포 스큐가 경합으로 위장하지 못한다.
+        (
+          JoinRequestUnreadableException('g_u'),
+          'StateError(join-request-unreadable)',
+        ),
         (ArgumentError('x'), 'ArgumentError'),
         (UnsupportedError('x'), 'UnsupportedError'),
         (const FormatException('x'), 'FormatException'),

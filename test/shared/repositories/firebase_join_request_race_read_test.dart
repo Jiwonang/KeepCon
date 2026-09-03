@@ -17,8 +17,9 @@
 /// 일어나지 않으므로, 번역 분기를 지워도 스위트는 초록이다. 여기서는
 /// `mock_exceptions`로 **거부를 주입해** 그 분기를 실제로 밟게 한다. in-memory 구현에는
 /// 규칙도 거부도 없으니 계약이 아니라 firebase 고유 행위이고, 그래서 전용 파일이다.
-/// (`requestToJoin`의 같은 결함은 형제 수정이 같은 구도의 전용 테스트로 덮는다 —
-/// 그 수정이 머지되기 전까지 이 저장소의 `requestToJoin`에는 결함이 남아 있다.)
+/// (`requestToJoin`의 같은 뿌리 결함은 같은 구도의 전용 테스트가 이미 덮는다 —
+/// `firebase_join_request_first_read_test.dart`. 거기는 문서 없음이 **정상 경로**라
+/// 거부를 "없음"으로 접고, 여기는 **경합 한정**이라 계약의 [StateError]로 번역한다.)
 library;
 
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -28,6 +29,8 @@ import 'package:mock_exceptions/mock_exceptions.dart';
 
 import 'package:keepcon/shared/models/group.dart';
 import 'package:keepcon/shared/models/user.dart';
+import 'package:keepcon/shared/repositories/share_repository.dart'
+    show JoinRequestUnreadableException;
 import 'package:keepcon/shared/repositories/impl/firebase/firebase_share_repository.dart';
 import 'package:keepcon/shared/repositories/impl/in_memory_auth_repository.dart';
 import 'package:keepcon/shared/repositories/impl/in_memory_gifticon_repository.dart';
@@ -97,9 +100,13 @@ void main() {
     await auth.signIn(email: ownerEmail, password: password);
   }
 
-  /// 계약의 "요청 없음" — 세 메서드가 같은 문장으로 던진다.
-  Matcher throwsNotFound() => throwsA(isA<StateError>().having(
-        (StateError e) => e.message,
+  /// 계약의 "요청 없음" — 세 메서드가 같은 문장으로 던진다. 여기서는 전부
+  /// **읽기 거부를 접은** 경로이므로 진단용 서브타입까지 물는다
+  /// ([JoinRequestUnreadableException] — 평범한 `!exists`의 [StateError]와
+  /// 리포터가 구별할 수 있어야 규칙 회귀가 경합으로 위장하지 못한다).
+  Matcher throwsNotFound() =>
+      throwsA(isA<JoinRequestUnreadableException>().having(
+        (JoinRequestUnreadableException e) => e.message,
         'message',
         contains('Join request not found'),
       ));
