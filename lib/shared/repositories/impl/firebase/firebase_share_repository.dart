@@ -812,11 +812,12 @@ class FirebaseShareRepository implements ShareRepository {
   /// ⚠️ 이것이 닫는 것은 **읽기 시점의** 단절뿐이다 — 읽기 성공 뒤의 쓰기 단절 창을
   /// 실제로 끊는 것은 `Future.timeout`(15초, [_writeTimeout])이 걸린 셋뿐이다:
   /// [requestToJoin]의 `set`·[cancelJoinRequest]의 `delete`·[_dropJoinRequest]의
-  /// `delete`(정리는 best-effort — 발화 시 삼킨다). **아직 열려 있는 창**도 셋이다:
-  /// 승인·거절의 `runTransaction`(기본 30초의 `timeout` 인자가 트랜잭션을 실제로
-  /// 끊지 못한다는 보고 — flutterfire #653·#9118)과 그룹 소멸 캐스케이드의
-  /// `batch.commit()` 두 곳(오프라인에서 resolve하지 않는다 — firebase-js-sdk
-  /// #6515). 이 목록을 고칠 때는 실제 `.timeout` 지점과 함께 세라.
+  /// `delete`(정리는 best-effort — 발화 시 삼킨다). **아직 열려 있는 창은 넷**이다:
+  /// 승인의 `runTransaction`·거절의 `runTransaction`(기본 30초의 `timeout` 인자가
+  /// 트랜잭션을 실제로 끊지 못한다는 보고 — flutterfire #653·#9118), 그리고 그룹
+  /// 소멸 캐스케이드의 `batch.commit()` 두 곳(오프라인에서 resolve하지 않는다 —
+  /// firebase-js-sdk #6515). 닫힌 쪽과 같은 단위(호출 지점)로 센다 — 이 목록을
+  /// 고칠 때는 실제 `.timeout` 지점과 함께 세라.
   Future<DocumentSnapshot<Map<String, dynamic>>?> _readJoinRequestDocOrNull(
       DocumentReference<Map<String, dynamic>> ref) async {
     try {

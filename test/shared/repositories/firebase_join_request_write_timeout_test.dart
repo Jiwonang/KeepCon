@@ -17,6 +17,13 @@
 /// 미완료 Future를 돌려주는 Firestore 래퍼와 ②생성자 주입 상한
 /// (`FirebaseShareRepository.writeTimeout`)을 짝으로 쓴다.
 ///
+/// `fakeAsync`(가짜 Timer로 실서비스 15초를 elapse) 대안은 **시도하지 않고**
+/// seam을 택했다 — scan 선례에서 가짜 시계가 저장소 계층에 닿지 않아 테스트가
+/// 멈춘 실측 기록이 있고("가짜 시계를 넘기는 방법을 먼저 시도했는데 테스트가
+/// 그대로 멈췄다" — 그 파일 머리말), seam은 red의 형태가 단순하다(경과 단언).
+/// fakeAsync가 이 구성(fake_cloud_firestore의 microtask 완료)에서 동작할 가능성은
+/// 있으나, seam이 이미 실증된 뒤라 검증 비용을 더 쓰지 않았다.
+///
 /// ## 뮤테이션 의미론
 ///
 /// - `.timeout(_writeTimeout)`을 지우면 → 쓰기가 영영 미완료라 이 테스트는
@@ -52,6 +59,17 @@ class _HangingWriteFirestore implements FirebaseFirestore {
   @override
   CollectionReference<Map<String, dynamic>> collection(String collectionPath) =>
       _HangingWriteCollection(_inner.collection(collectionPath), this);
+
+  // removeMember 등 정리 경로가 그룹 트랜잭션 뒤에 _dropJoinRequest를 부른다 —
+  // 트랜잭션 자체는 실제 fake에 위임한다(매달리는 것은 요청 문서 쓰기뿐).
+  @override
+  Future<T> runTransaction<T>(
+    TransactionHandler<T> transactionHandler, {
+    Duration timeout = const Duration(seconds: 30),
+    int maxAttempts = 5,
+  }) =>
+      _inner.runTransaction(transactionHandler,
+          timeout: timeout, maxAttempts: maxAttempts);
 
   @override
   dynamic noSuchMethod(Invocation invocation) => throw UnimplementedError(
@@ -89,8 +107,8 @@ class _HangingWriteDoc implements DocumentReference<Map<String, dynamic>> {
   @override
   String get id => _inner.id;
 
-  @override
-  String get path => _inner.path;
+  // `path`는 일부러 구현하지 않는다 — 프로덕션 경로가 읽지 않고(래핑 판정은
+  // 감싸기 **전** 진짜 ref의 path로 한다), 두면 매달림에 배선된 것처럼 보인다.
 
   @override
   Future<DocumentSnapshot<Map<String, dynamic>>> get([GetOptions? options]) =>
@@ -184,5 +202,24 @@ void main() {
 
     await expectTimesOutQuickly(
         () => hangingRepo().cancelJoinRequest('${targetGroup.id}_${guest.id}'));
+  });
+
+  test('_dropJoinRequest — 정리 delete가 매달려도 강퇴는 정상 반환한다(삼킴 고정)', () async {
+    // 정리는 best-effort다: 그룹 변경이 이미 커밋된 뒤라, 여기서 상한 발화가
+    // 던지면 성공한 강퇴가 실패로 안내된다. 이 테스트는 그 삼킴을 고정한다 —
+    // `on TimeoutException` 분기를 rethrow로 바꾸면 red다.
+    await plainRepo.requestToJoin(targetGroup.inviteToken);
+    await auth.signIn(email: ownerEmail, password: password);
+    await plainRepo.approveJoinRequest('${targetGroup.id}_${guest.id}');
+
+    final Stopwatch watch = Stopwatch()..start();
+    final Group after = await hangingRepo()
+        .removeMember(groupId: targetGroup.id, userId: guest.id);
+    watch.stop();
+
+    expect(after.isMember(guest.id), isFalse,
+        reason: '본론(강퇴)은 정리와 무관하게 완료돼야 한다');
+    expect(watch.elapsed, lessThan(const Duration(seconds: 5)),
+        reason: '삼킨 상한이 주입값이 아니라 하드코딩으로 발화했다');
   });
 }
