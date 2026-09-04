@@ -201,6 +201,23 @@ void main() {
     expect(find.text('보낸 참여 요청을 불러오지 못했어요.'), findsOneWidget);
   });
 
+  testWidgets("요청자 카드의 '다시 시도'가 원천을 재구독한다", (WidgetTester tester) async {
+    // 배너를 띄우는 것만으로는 배선의 절반만 고정된다 — 버튼이 아무 일도 하지 않아도
+    // 문구 단언은 통과한다(뮤테이션으로 확인). 탭 → 복구까지 눌러 본다.
+    final _StubShareRepository share =
+        _StubShareRepository(mine: <JoinRequest>[_req('a')])
+          ..failStreams = true;
+    await pump(tester, share, child: const MyJoinRequestsCard());
+    expect(find.text('보낸 참여 요청을 불러오지 못했어요.'), findsOneWidget);
+
+    share.failStreams = false;
+    await tester.tap(find.text('다시 시도'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('보낸 참여 요청을 불러오지 못했어요.'), findsNothing);
+    expect(find.text('보낸 참여 요청'), findsOneWidget);
+  });
+
   testWidgets('취소 중에는 취소 버튼이 잠긴다 — 두 번 누르면 두 번 호출된다',
       (WidgetTester tester) async {
     final _StubShareRepository share =
@@ -377,6 +394,23 @@ void main() {
           child: const PendingJoinRequestsSection(groupId: 'g-secret'));
 
       expect(find.text('참여 요청을 불러오지 못했어요.'), findsOneWidget);
+    });
+
+    testWidgets("'다시 시도'가 원천을 재구독한다", (WidgetTester tester) async {
+      // 형제(요청자 카드)와 같은 이유 — 문구만 보면 죽은 버튼도 통과한다.
+      final _StubShareRepository share =
+          _StubShareRepository(pending: <JoinRequest>[_req('a')])
+            ..failStreams = true;
+      await pump(tester, share,
+          child: const PendingJoinRequestsSection(groupId: 'g-secret'));
+      expect(find.text('참여 요청을 불러오지 못했어요.'), findsOneWidget);
+
+      share.failStreams = false;
+      await tester.tap(find.text('다시 시도'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('참여 요청을 불러오지 못했어요.'), findsNothing);
+      expect(find.text('참여 요청'), findsOneWidget);
     });
 
     testWidgets('요청이 없으면 아무것도 그리지 않는다', (WidgetTester tester) async {

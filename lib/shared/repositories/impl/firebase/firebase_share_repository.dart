@@ -46,14 +46,30 @@ const int _whereInLimit = 30;
 /// [ShareRepository]의 Cloud Firestore 구현.
 class FirebaseShareRepository implements ShareRepository {
   /// 세션([AuthRepository])·원본 기프티콘([GifticonRepository])·Firestore를 주입한다.
-  /// [firestore] 미지정 시 [FirebaseFirestore.instance].
+  /// [firestore] 미지정 시 [FirebaseFirestore.instance]. [writeTimeout]은 참여 요청
+  /// 쓰기의 상한이자 테스트 seam이다(기본 15초 — [_writeTimeout] 참조).
   FirebaseShareRepository({
     required AuthRepository authRepository,
     required GifticonRepository gifticonRepository,
     FirebaseFirestore? firestore,
+    Duration writeTimeout = const Duration(seconds: 15),
   })  : _auth = authRepository,
         _gifticons = gifticonRepository,
-        _db = firestore ?? FirebaseFirestore.instance;
+        _db = firestore ?? FirebaseFirestore.instance,
+        _writeTimeout = writeTimeout;
+
+  /// 참여 요청 쓰기([requestToJoin]의 `set`·[cancelJoinRequest]의 `delete`)의 단절
+  /// 창을 끊는 상한. 기본 15초.
+  ///
+  /// 생성자 파라미터로 빼 둔 것은 **테스트 seam**이다 — fake 위에서는 지연을 주입할
+  /// 수 없어(mock_exceptions는 예외만), 영영 미완료 Future를 돌려주는 래퍼와 짧은
+  /// 상한으로만 이 상한 자체를 회귀 테스트에 물릴 수 있다
+  /// (`firebase_join_request_write_timeout_test.dart`). **실서비스 조립부는 기본값을
+  /// 쓴다** — 값을 바꾸려면 `rg '15초|seconds: 15'`로 산문을 함께 고쳐라. 지금 이
+  /// 값을 사실로 단언하는 곳은 두 쓰기 지점의 트레이드오프 주석이 **아니라**
+  /// [_readJoinRequestDocOrNull] 머리말(상한 인벤토리)·[_requireJoinRequestDoc]
+  /// 머리말·`error_reporter.dart`의 `TimeoutException` 분기 주석(+그 테스트)이다.
+  final Duration _writeTimeout;
 
   final AuthRepository _auth;
   final GifticonRepository _gifticons;
@@ -724,7 +740,7 @@ class FirebaseShareRepository implements ShareRepository {
       // 않는 저장·검증 계층의 세부이고, 계약에 올리면 모든 구현이 지고 갈 짐이 된다
       // (in-memory에는 보안 규칙이 없다). `memberIds`가 문서에만 있는 것과 같은 결이다.
       'credential': credential,
-    }).timeout(const Duration(seconds: 15));
+    }).timeout(_writeTimeout);
     return req;
   }
 
@@ -794,10 +810,14 @@ class FirebaseShareRepository implements ShareRepository {
   /// "없음"으로 읽어 덮어쓴다(`requestedAt` 초기화). 서버 강제면 오프라인은 즉시
   /// unavailable로 떨어져(rethrow) 화면이 실패를 안내한다.
   /// ⚠️ 이것이 닫는 것은 **읽기 시점의** 단절뿐이다 — 읽기 성공 뒤의 쓰기 단절 창을
-  /// 실제로 끊는 것은 [requestToJoin]의 `set`·[cancelJoinRequest]의 `delete`에 걸린
-  /// `Future.timeout` 15초 둘뿐이다. 승인·거절의 `runTransaction` 기본 30초는 상한으로
-  /// 세지 않는다 — 그 `timeout` 인자가 트랜잭션을 실제로 끊지 못한다는 보고가 있다
-  /// (flutterfire #653·#9118). 그쪽 창은 아직 열려 있다.
+  /// 실제로 끊는 것은 `Future.timeout`(15초, [_writeTimeout])이 걸린 셋뿐이다:
+  /// [requestToJoin]의 `set`·[cancelJoinRequest]의 `delete`·[_dropJoinRequest]의
+  /// `delete`(정리는 best-effort — 발화 시 삼킨다). **아직 열려 있는 창은 넷**이다:
+  /// 승인의 `runTransaction`·거절의 `runTransaction`(기본 30초의 `timeout` 인자가
+  /// 트랜잭션을 실제로 끊지 못한다는 보고 — flutterfire #653·#9118), 그리고 그룹
+  /// 소멸 캐스케이드의 `batch.commit()` 두 곳(오프라인에서 resolve하지 않는다 —
+  /// firebase-js-sdk #6515). 닫힌 쪽과 같은 단위(호출 지점)로 센다 — 이 목록을
+  /// 고칠 때는 실제 `.timeout` 지점과 함께 세라.
   Future<DocumentSnapshot<Map<String, dynamic>>?> _readJoinRequestDocOrNull(
       DocumentReference<Map<String, dynamic>> ref) async {
     try {
@@ -859,7 +879,21 @@ class FirebaseShareRepository implements ShareRepository {
   /// 타입 흔적이 남는 **종착은 셋**이다 — 이 함수(공용 읽기의 `null`을 예외로 올림)·
   /// [_txGetJoinRequest]·취소의 delete. 같은 공용 읽기의 `null`이라도 [requestToJoin]
   /// 쪽 종착은 "아직 없음"이라 흔적이 없다(후속 쓰기가 부분적 신호일 뿐이다).
-  /// 전면 적용은 별도 작업(저장소→진단 방향 import 순환을 피하는 구조가 필요하다).
+  ///
+  /// **무흔적 3곳은 결정이다(전면 적용 안 함).** 그 세 흡수는 **정상 경로가 흡수를
+  /// 매번 밟는다** — 첫 요청의 비멤버 판정·아직 없는 요청 문서, 요청 없이 들어온
+  /// 멤버의 나가기·강퇴 정리. 흔적을 남기면 정상 동작마다 "처리된 실패"가 찍혀
+  /// 신호가 소음에 묻힌다(흔적 셋은 반대로 **경합·회귀에서만** 밟는 자리라 값이
+  /// 있다). 그쪽 규칙 회귀의 방어선은 리포터가 아니라 규칙 검증기의 양성
+  /// 케이스들이고, **셋이 각각 다른 케이스에 걸린다**
+  /// (`tool/verify_firestore_rules.sh`, CI `Firestore rules` 잡):
+  /// - 비멤버 판정 → "A가 그룹 조회 → 200"(멤버의 그룹 읽기가 거부되면 멤버가
+  ///   비멤버로 오판되어 자기 그룹에 요청을 만들러 내려간다).
+  /// - 아직 없는 요청 문서 → "요청자 본인이 자기 요청 조회 → 200"(살아 있는
+  ///   대기 요청이 "없음"으로 접히면 덮어써 `requestedAt`이 초기화된다 —
+  ///   검증기 그 케이스의 주석이 같은 논거를 이미 적어 두었다).
+  /// - [_dropJoinRequest] → "요청자 본인이 취소 → 200"(나가기: 본인 삭제)·
+  ///   "방장이 남의 요청 삭제 → 200"(강퇴·소유권 이전).
   Future<DocumentSnapshot<Map<String, dynamic>>> _requireJoinRequestDoc(
       DocumentReference<Map<String, dynamic>> ref) async {
     final DocumentSnapshot<Map<String, dynamic>>? doc =
@@ -1019,7 +1053,7 @@ class FirebaseShareRepository implements ShareRepository {
     // 아니다 — `joinRequests`의 delete 규칙은 `resource.data`를 만지므로 문서가
     // 없으면 **403**이다([_dropJoinRequest] 머리말이 같은 사실을 설계 근거로 삼는다).
     try {
-      await ref.delete().timeout(const Duration(seconds: 15));
+      await ref.delete().timeout(_writeTimeout);
     } on FirebaseException catch (e) {
       // 존재 확인과 이 삭제 사이에 문서가 지워진 잔여 경합 — 규칙은 없는 문서의
       // 삭제를 403으로 닫으므로, 이 한 곳의 거부만 계약의 "요청 없음"으로 번역한다
@@ -1505,7 +1539,13 @@ class FirebaseShareRepository implements ShareRepository {
   /// 문서" 또는 "지울 권한 없음" 둘 중 하나인데, 어느 쪽이든 정리로서는 할 일이 없다.
   Future<void> _dropJoinRequest(String groupId, String userId) async {
     try {
-      await _joinRequests.doc(_joinRequestId(groupId, userId)).delete();
+      await _joinRequests
+          .doc(_joinRequestId(groupId, userId))
+          .delete()
+          .timeout(_writeTimeout);
+    } on TimeoutException {
+      // 정리는 best-effort다 — 큐의 삭제는 재연결 시 도착한다. 여기서 던지면
+      // **이미 커밋된** 나가기·강퇴가 "지금은 나갈 수 없어요"로 안내된다.
     } on FirebaseException catch (e) {
       if (e.code != 'permission-denied') rethrow;
     }
