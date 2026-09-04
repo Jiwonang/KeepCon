@@ -16,6 +16,7 @@ import '../../../shared/diagnostics/report_handled_failure.dart';
 import '../../../shared/models/join_request.dart';
 import '../../../shared/providers/repositories.dart';
 import '../../../shared/theme/theme_tokens.dart';
+import '../../../shared/widgets/inline_error_banner.dart';
 import '../state/share_providers.dart';
 
 /// 내가 보낸 참여 요청 목록. 요청이 없으면 아무것도 그리지 않는다.
@@ -30,12 +31,14 @@ class MyJoinRequestsCard extends ConsumerWidget {
     // (비멤버는 그룹 알림을 못 읽는다), 조용히 사라지면 요청자는 결과를 영영 모른다.
     // 형제인 PendingJoinRequestsSection과 같은 규약이다.
     if (async.hasError) {
-      final ThemeData t = Theme.of(context);
+      // 재시도는 원천 family를 되살리는 계약 훅으로 — 이 축의 family는 keepAlive
+      // 래퍼(joinRequestsProvider)가 붙잡고 있어 로그아웃 전에는 스스로 해제되지
+      // 않으므로, 로그아웃 없이 죽은 스트림은 이 버튼이 유일한 제자리 복구 경로다.
       return Padding(
         padding: const EdgeInsets.only(bottom: 16),
-        child: Text(
-          '보낸 참여 요청을 불러오지 못했어요.',
-          style: t.textTheme.bodyMedium?.copyWith(color: t.colorScheme.error),
+        child: InlineErrorBanner(
+          message: '보낸 참여 요청을 불러오지 못했어요.',
+          onRetry: () => retryJoinRequests(ref),
         ),
       );
     }

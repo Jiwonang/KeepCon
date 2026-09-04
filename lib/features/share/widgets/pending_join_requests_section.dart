@@ -17,6 +17,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../shared/diagnostics/report_handled_failure.dart';
 import '../../../shared/models/join_request.dart';
 import '../../../shared/providers/repositories.dart';
+import '../../../shared/widgets/inline_error_banner.dart';
 import '../state/share_providers.dart';
 
 /// [groupId] 그룹의 대기 중 참여 요청 목록(방장 전용).
@@ -37,12 +38,15 @@ class PendingJoinRequestsSection extends ConsumerWidget {
             padding: EdgeInsets.symmetric(vertical: 12),
             child: Center(child: CircularProgressIndicator()),
           ),
+          // 이 스트림이 요청 도착의 유일한 신호다 — 재진입(autoDispose 해제) 말고도
+          // 그 자리에서 되살릴 수단을 준다. 이 화면은 이 그룹 인스턴스만 보므로
+          // family 전체가 아니라 그 인스턴스만 invalidate한다(형제 축과 같은 규약).
           error: (Object e, StackTrace _) => Padding(
             padding: const EdgeInsets.symmetric(vertical: 12),
-            child: Text(
-              '참여 요청을 불러오지 못했어요.',
-              style: theme.textTheme.bodyMedium
-                  ?.copyWith(color: theme.colorScheme.error),
+            child: InlineErrorBanner(
+              message: '참여 요청을 불러오지 못했어요.',
+              onRetry: () =>
+                  ref.invalidate(pendingJoinRequestsProvider(groupId)),
             ),
           ),
           data: (List<JoinRequest> requests) {

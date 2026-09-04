@@ -228,6 +228,9 @@ void main() {
       );
       await settle();
       expect(repo.myCalls, 2, reason: '재로그인은 백엔드를 새로 구독해야 한다');
+      // "같은 계정"이 이 테스트의 전제다 — 키가 달라지면 재구독은 autoDispose가
+      // 아니라 새 family 인스턴스 생성으로도 일어나므로 아무것도 증명하지 못한다.
+      expect(repo.requestedUserIds, <String>[myId, myId]);
       final AsyncValue<List<JoinRequest>> revived =
           container.read(joinRequestsProvider);
       expect(revived.hasError, isFalse, reason: '이전 세션의 죽은 에러가 남으면 안 된다');

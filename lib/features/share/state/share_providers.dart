@@ -38,6 +38,13 @@ import '../../../shared/providers/shared_gifticons_provider.dart';
 // 정본은 autoDispose지만 이 파일의 keepAlive 파생들이 그것을 watch하므로, share 탭을
 // 한 번 연 뒤로는 별칭이 하던 것과 동일하게 컨테이너 수명 동안 구독이 유지된다.
 //
+// **스트림 family의 수명은 축마다 다르다.** 상시 소비 축(사용 이력·공유 후보)은 keepAlive
+// family지만, 참여 요청 두 축은 **autoDispose family**다 — keepAlive는 로그아웃 순간
+// 죽은 permission-denied 에러를 앱 수명 동안 박제해 재로그인해도 재구독이 없다(실측
+// 재현 — 해당 provider의 doc 참조). 새 스트림 파생을 더할 때는 **세션·권한에 묶인
+// 스트림이면 autoDispose를 기본**으로 하고, keepAlive로 두려면 에러를 되살릴 `retry*`
+// 훅을 반드시 함께 낸다.
+//
 // **id만 쓰는 소비 지점은 `select`로 좁힌다.** 정본은 [StreamProvider]라 같은 값이 다시
 // 방출돼도(Firebase `userChanges()`의 토큰 갱신 등) 리스너에게 통지한다 — 삭제된 별칭이
 // [Provider]의 `!=` 비교로 흡수하던 몫이다. 세션 [AsyncValue] 전체가 필요한 폴딩 3곳만
@@ -254,6 +261,22 @@ final shareCandidatesHaveErrorProvider = Provider<bool>((ref) {
 // 그 파일의 private provider라, 훅만 여기 남으면 원천에 닿지 못한다. 계약 정본
 // `retryMyGroups`·`retryFailedSharedGifticonStreams`와 같은 배치다.
 
+/// 내 참여 요청 스트림 수동 재시도(에러일 때만 재구독 — `retryUsageLogs`와 같은 형태).
+///
+/// 필요한 이유: [_myJoinRequestsByUserProvider]는 autoDispose지만 keepAlive 래퍼
+/// [joinRequestsProvider]가 붙잡고 있어 **로그아웃 전에는 스스로 해제되지 않는다.**
+/// 로그아웃 없이 스트림이 죽으면(네트워크 등) 이 훅이 유일한 제자리 복구 경로다.
+/// 폴딩된 래퍼를 invalidate해도 dependency 방향으로는 전파되지 않으므로(#13 규약)
+/// **원천 family 인스턴스**를 invalidate한다.
+void retryJoinRequests(WidgetRef ref) {
+  retrySessionIfFailed(ref);
+  final User? user = ref.read(sessionUserProvider).valueOrNull;
+  if (user == null) return;
+  if (ref.read(_myJoinRequestsByUserProvider(user.id)).hasError) {
+    ref.invalidate(_myJoinRequestsByUserProvider(user.id));
+  }
+}
+
 /// 사용 이력 스트림 수동 재시도(에러일 때만 재구독 — `retryNotifications`와 같은 원칙).
 void retryUsageLogs(WidgetRef ref) {
   retrySessionIfFailed(ref);
@@ -377,10 +400,17 @@ final scanTargetGroupsProvider = Provider<List<Group>>((ref) {
 /// **autoDispose다** — keepAlive면 로그아웃이 이 provider를 죽인 채 박제한다.
 /// 로그아웃 순간 살아 있는 Firestore 리스너는 인증 없는 재평가에서 permission-denied로
 /// 종료되는데, keepAlive는 그 에러를 앱 수명 동안 캐시하므로 **같은 계정으로 재로그인해도
-/// 재구독이 없다**(요청자의 '내 참여 요청' 카드가 영구히 에러로 남는다 — 실측 재현).
+/// 재구독이 없다**(요청자의 '내 참여 요청' 카드가 영구히 에러로 남는다 — 실측된 것은
+/// 방장 대기 목록 쪽이고, 이 축은 family 키가 userId라 같은 메커니즘으로 추론한 것이다.
+/// `join_request_provider_lifetime_test.dart`의 뮤테이션이 그 추론을 기계로 고정한다).
 /// autoDispose면 로그아웃 시 [joinRequestsProvider]의 폴딩이 세션 null로 재계산되며
 /// 이 family를 놓아 구독이 해제되고, 재로그인은 새 인스턴스로 새로 구독한다.
-/// `_groupsByUserProvider`(my_groups_provider.dart)와 같은 수명 규약이다.
+///
+/// family 계층의 수명은 `_groupsByUserProvider`(my_groups_provider.dart)와 같지만
+/// **래퍼가 다르다** — 그쪽 래퍼 `myGroupsProvider`는 autoDispose라 화면 이탈로도
+/// 체인이 풀리는 반면, 여기 래퍼 [joinRequestsProvider]는 keepAlive라 공유 탭을
+/// 나갔다 와도 이 family는 살아 있다. 해제 계기는 **세션이 null이 되는 순간 하나**뿐이고,
+/// 로그아웃 없이 에러가 나면(네트워크 등) 화면의 재시도([retryJoinRequests])가 복구 경로다.
 final AutoDisposeStreamProviderFamily<List<JoinRequest>, String>
     _myJoinRequestsByUserProvider =
     StreamProvider.autoDispose.family<List<JoinRequest>, String>((ref, userId) {
@@ -410,8 +440,12 @@ final joinRequestsProvider = Provider<AsyncValue<List<JoinRequest>>>((ref) {
 /// 참여 요청이 **영영 보이지 않는다**(같은 기기에서 방장→요청자→방장 순으로 계정을
 /// 바꾸는 시연이 정확히 이 경로다 — 실측 재현). 이 스트림이 유일한 도착 신호이므로
 /// 박제는 곧 승인 불능이다. autoDispose면 화면 이탈·로그아웃(AuthGate 트리 교체)으로
-/// 위젯이 내려갈 때 구독이 해제되고, 다음 진입은 새로 구독한다(위 내부용 family와
-/// 같은 수명 규약).
+/// 위젯이 내려갈 때 구독이 해제되고, 다음 진입은 새로 구독한다.
+///
+/// family 수명은 위 내부용 family와 같되 **복구 경로가 다르다** — 이쪽은 래퍼 없이
+/// 위젯이 직접 watch하므로 **화면 이탈만으로도** 해제된다(위 family는 keepAlive 래퍼
+/// [joinRequestsProvider]가 붙잡아 로그아웃에서만 해제된다). 화면에 남은 에러는
+/// 섹션의 재시도 버튼이 이 인스턴스를 invalidate해 되살린다.
 final AutoDisposeStreamProviderFamily<List<JoinRequest>, String>
     pendingJoinRequestsProvider = StreamProvider.autoDispose
         .family<List<JoinRequest>, String>((ref, groupId) {

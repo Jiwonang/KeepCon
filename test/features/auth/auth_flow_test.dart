@@ -62,6 +62,29 @@ void main() {
     expect(find.text('우리집 기프티콘'), findsOneWidget);
   });
 
+  testWidgets('로그인 상태에서 로그아웃하면 앱 셸이 트리에서 내려간다', (WidgetTester tester) async {
+    // 이 단언이 `join_request_provider_lifetime_test`의 전제다 — 그쪽은 로그아웃의
+    // 위젯 언마운트를 `sub.close()`로 대체하므로, 트리가 실제로 교체된다는 사실은
+    // 여기서만 고정된다. 셸이 보존되는 구조(IndexedStack/Offstage 유지 등)로 바뀌면
+    // 그 아래 autoDispose provider가 해제되지 않아 참여 요청 박제가 재발한다.
+    final InMemoryAuthRepository auth = InMemoryAuthRepository();
+    await tester.binding.setSurfaceSize(const Size(430, 932));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(ProviderScope(
+      overrides: <Override>[authRepositoryProvider.overrideWithValue(auth)],
+      child: const MaterialApp(home: AuthGate()),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.text('우리집 기프티콘'), findsOneWidget);
+
+    await auth.signOut();
+    await tester.pumpAndSettle();
+
+    expect(find.text('우리집 기프티콘'), findsNothing,
+        reason: '셸이 남아 있으면 그 아래 autoDispose provider가 해제되지 않는다');
+    expect(find.widgetWithText(ElevatedButton, '로그인'), findsOneWidget);
+  });
+
   testWidgets('잘못된 비밀번호면 로그인 화면에 머문다', (WidgetTester tester) async {
     await _pumpApp(tester);
 
