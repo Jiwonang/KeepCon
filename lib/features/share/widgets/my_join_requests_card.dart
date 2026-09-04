@@ -38,7 +38,7 @@ class MyJoinRequestsCard extends ConsumerWidget {
         padding: const EdgeInsets.only(bottom: 16),
         child: InlineErrorBanner(
           message: '보낸 참여 요청을 불러오지 못했어요.',
-          onRetry: () => retryJoinRequests(ref),
+          onRetry: () => retryMyJoinRequests(ref),
         ),
       );
     }

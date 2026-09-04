@@ -39,14 +39,14 @@ class PendingJoinRequestsSection extends ConsumerWidget {
             child: Center(child: CircularProgressIndicator()),
           ),
           // 이 스트림이 요청 도착의 유일한 신호다 — 재진입(autoDispose 해제) 말고도
-          // 그 자리에서 되살릴 수단을 준다. 이 화면은 이 그룹 인스턴스만 보므로
-          // family 전체가 아니라 그 인스턴스만 invalidate한다(형제 축과 같은 규약).
+          // 그 자리에서 되살릴 수단을 준다. 되살리는 범위(이 그룹 인스턴스만)와 세션
+          // 계층 처리는 훅이 소유한다 — 같은 화면의 공유 기프티콘 배너가 쓰는
+          // `retrySharedGifticons(groupId:)`와 같은 형태다.
           error: (Object e, StackTrace _) => Padding(
             padding: const EdgeInsets.symmetric(vertical: 12),
             child: InlineErrorBanner(
               message: '참여 요청을 불러오지 못했어요.',
-              onRetry: () =>
-                  ref.invalidate(pendingJoinRequestsProvider(groupId)),
+              onRetry: () => retryPendingJoinRequests(ref, groupId),
             ),
           ),
           data: (List<JoinRequest> requests) {

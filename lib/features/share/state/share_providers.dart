@@ -261,19 +261,38 @@ final shareCandidatesHaveErrorProvider = Provider<bool>((ref) {
 // 그 파일의 private provider라, 훅만 여기 남으면 원천에 닿지 못한다. 계약 정본
 // `retryMyGroups`·`retryFailedSharedGifticonStreams`와 같은 배치다.
 
-/// 내 참여 요청 스트림 수동 재시도(에러일 때만 재구독 — `retryUsageLogs`와 같은 형태).
+/// 방장 대기 목록 스트림 수동 재시도 — **그 그룹 인스턴스만**
+/// ([retrySharedGifticons]에 `groupId`를 준 것과 같은 형태).
+///
+/// 화면(그룹 상세)이 그 그룹 하나만 보므로 family 전체를 건드리지 않는다. 인라인
+/// `ref.invalidate` 대신 훅을 두는 이유는 세션 계층 처리를 형제 축과 같게 맞추기
+/// 위해서다 — 같은 화면의 두 배너가 서로 다른 복구 경로를 갖지 않게 한다.
+void retryPendingJoinRequests(WidgetRef ref, String groupId) {
+  retrySessionIfFailed(ref);
+  ref.invalidate(pendingJoinRequestsProvider(groupId));
+}
+
+/// **내가 보낸** 참여 요청 스트림 수동 재시도(에러일 때만 재구독 — `retryUsageLogs`와
+/// 같은 형태). 방장의 대기 목록은 [retryPendingJoinRequests]가 맡는다 — 참여 요청은
+/// 축이 둘이고 되살릴 원천이 서로 다르다.
 ///
 /// 필요한 이유: [_myJoinRequestsByUserProvider]는 autoDispose지만 keepAlive 래퍼
 /// [joinRequestsProvider]가 붙잡고 있어 **로그아웃 전에는 스스로 해제되지 않는다.**
 /// 로그아웃 없이 스트림이 죽으면(네트워크 등) 이 훅이 유일한 제자리 복구 경로다.
 /// 폴딩된 래퍼를 invalidate해도 dependency 방향으로는 전파되지 않으므로(#13 규약)
 /// **원천 family 인스턴스**를 invalidate한다.
-void retryJoinRequests(WidgetRef ref) {
+void retryMyJoinRequests(WidgetRef ref) {
   retrySessionIfFailed(ref);
   final User? user = ref.read(sessionUserProvider).valueOrNull;
   if (user == null) return;
-  if (ref.read(_myJoinRequestsByUserProvider(user.id)).hasError) {
-    ref.invalidate(_myJoinRequestsByUserProvider(user.id));
+  // autoDispose family는 `exists`로 가드한다 — `read`는 살아 있지 않은 인스턴스를
+  // 새로 만들어 **실제 스트림을 구독**한다(Firestore 초기 읽기·과금). 검사가 곧 낭비
+  // 구독이 되는 것을 막는 `MyGroupsRetry.retry`·`retrySessionIfFailed`와 같은 규약이며,
+  // keepAlive 형제(`retryUsageLogs` 등)에는 없는 이 축만의 요구다.
+  final AutoDisposeStreamProvider<List<JoinRequest>> mine =
+      _myJoinRequestsByUserProvider(user.id);
+  if (ref.exists(mine) && ref.read(mine).hasError) {
+    ref.invalidate(mine);
   }
 }
 
@@ -410,7 +429,7 @@ final scanTargetGroupsProvider = Provider<List<Group>>((ref) {
 /// **래퍼가 다르다** — 그쪽 래퍼 `myGroupsProvider`는 autoDispose라 화면 이탈로도
 /// 체인이 풀리는 반면, 여기 래퍼 [joinRequestsProvider]는 keepAlive라 공유 탭을
 /// 나갔다 와도 이 family는 살아 있다. 해제 계기는 **세션이 null이 되는 순간 하나**뿐이고,
-/// 로그아웃 없이 에러가 나면(네트워크 등) 화면의 재시도([retryJoinRequests])가 복구 경로다.
+/// 로그아웃 없이 에러가 나면(네트워크 등) 화면의 재시도([retryMyJoinRequests])가 복구 경로다.
 final AutoDisposeStreamProviderFamily<List<JoinRequest>, String>
     _myJoinRequestsByUserProvider =
     StreamProvider.autoDispose.family<List<JoinRequest>, String>((ref, userId) {

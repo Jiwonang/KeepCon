@@ -63,10 +63,15 @@ void main() {
   });
 
   testWidgets('로그인 상태에서 로그아웃하면 앱 셸이 트리에서 내려간다', (WidgetTester tester) async {
-    // 이 단언이 `join_request_provider_lifetime_test`의 전제다 — 그쪽은 로그아웃의
-    // 위젯 언마운트를 `sub.close()`로 대체하므로, 트리가 실제로 교체된다는 사실은
-    // 여기서만 고정된다. 셸이 보존되는 구조(IndexedStack/Offstage 유지 등)로 바뀌면
-    // 그 아래 autoDispose provider가 해제되지 않아 참여 요청 박제가 재발한다.
+    // 이 단언은 `join_request_provider_lifetime_test`의 **mine 축** 전제다 — 그쪽은
+    // 로그아웃의 위젯 언마운트를 `sub.close()`로 대체하므로, AuthGate가 셸을 통째로
+    // 내린다는 사실은 여기서만 고정된다. `MyJoinRequestsCard`는 셸 안(share 탭)에 있고
+    // 셸의 탭은 IndexedStack이라(`keepcon_shell.dart`) 탭 전환으로는 해제되지 않는다 —
+    // 해제 계기는 이 AuthGate 층의 교체 하나뿐이다. AuthGate가 셸을 Offstage로 보존하는
+    // 구조로 바뀌면 그 아래 autoDispose provider가 해제되지 않아 박제가 재발한다.
+    // ⚠️ pending 축은 이 단언이 덮지 않는다 — `PendingJoinRequestsSection`은 루트
+    // Navigator에 push된 `GroupDetailPage` 안이라, 언마운트 계기는 셸 교체가 아니라
+    // 로그아웃 시 `mypage_page.dart`의 `popUntil(isFirst)`이고 그 경로에는 테스트가 없다.
     final InMemoryAuthRepository auth = InMemoryAuthRepository();
     await tester.binding.setSurfaceSize(const Size(430, 932));
     addTearDown(() => tester.binding.setSurfaceSize(null));

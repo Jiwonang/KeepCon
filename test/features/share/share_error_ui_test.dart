@@ -107,7 +107,8 @@ class _FlakyShareRepository implements ShareRepository {
   /// 참여 요청 축은 이 파일의 관심 밖이지만 share 메인이 **항상** 이 스트림을
   /// watch한다 — noSuchMethod에 맡기면 모든 테스트에서 이 축이 에러가 되어, 참여
   /// 요청 배너의 '다시 시도'가 다른 축의 배너 단언(개수·유무)에 끼어든다. 건강한
-  /// 빈 스트림으로 고정한다(에러 배선 자체는 join_request_ui_test가 고정한다).
+  /// 빈 스트림으로 고정한다(참여 요청 축의 에러 표시와 재시도 배선은
+  /// `join_request_ui_test`가 고정한다 — 이 파일이 그 축을 꺼 두는 대가다).
   @override
   Stream<List<JoinRequest>> watchMyJoinRequests(String userId) =>
       Stream<List<JoinRequest>>.value(const <JoinRequest>[]);
