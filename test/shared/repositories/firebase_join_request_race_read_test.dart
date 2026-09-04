@@ -86,14 +86,37 @@ void main() {
   String requestPath() =>
       '${FirebaseShareRepository.joinRequestsCollection}/${requestId()}';
 
-  /// 그 참조의 `get`에 보안 규칙의 거부를 주입한다. id 조립은 [requestId] 한 곳에만
-  /// 둔다 — 두 벌이면 규약이 바뀔 때 stub이 실제 코드가 읽는 문서와 다른 참조에 걸린다.
+  FirebaseException fb(String code) =>
+      FirebaseException(plugin: 'cloud_firestore', code: code);
+
+  /// 그 참조의 **모든** `get`에 보안 규칙의 거부를 주입한다(사전 확인 포함).
+  /// id 조립은 [requestId] 한 곳에만 둔다 — 두 벌이면 규약이 바뀔 때 stub이 실제
+  /// 코드가 읽는 문서와 다른 참조에 걸린다.
   void denyReadWith(String code) {
     whenCalling(Invocation.method(#get, null))
         .on(db.doc(requestPath()))
-        .thenThrow(
-          FirebaseException(plugin: 'cloud_firestore', code: code),
-        );
+        .thenThrow(fb(code));
+  }
+
+  /// **트랜잭션의 읽기만** 거부한다 — 사전 확인은 실제 문서로 통과시킨다.
+  ///
+  /// fake의 `tx.get(ref)`는 인자를 전달받지 못한 `ref.get()`(options=null)이고
+  /// 사전 확인은 `ref.get(GetOptions(server))`라 Invocation이 갈린다.
+  /// `mock_exceptions`의 매칭은 매처 쪽 인자 목록이 **짧을 때만** anything으로
+  /// 패딩하므로, `[null]` 매처는 options 없는 호출에만 붙는다(패키지 소스
+  /// `_matches`로 확인). "사전 확인 성공 → 본론에서 지워짐"의 잔여 경합이 이
+  /// 모양이다.
+  void denyTxReadWith(String code) {
+    whenCalling(Invocation.method(#get, [null]))
+        .on(db.doc(requestPath()))
+        .thenThrow(fb(code));
+  }
+
+  /// `delete`만 거부한다 — 취소의 잔여 경합(존재 확인 성공 → 삭제 시점엔 없음).
+  void denyDeleteWith(String code) {
+    whenCalling(Invocation.method(#delete, null))
+        .on(db.doc(requestPath()))
+        .thenThrow(fb(code));
   }
 
   Future<void> signInOwner() async {
@@ -113,11 +136,11 @@ void main() {
 
   /// 권한 거부가 아닌 실패(unavailable)는 "없음"으로 접지 않고 그대로 던진다 —
   /// 흡수하면 일시적 네트워크 문제가 "요청이 사라졌다"는 오진이 된다.
-  /// 세 메서드가 같은 규약이므로 단언도 한 벌만 둔다(따로 두면 한쪽만 고쳐져
-  /// 나머지 경로의 커버리지가 조용히 약해진다).
+  /// 사전 확인·본론 모든 경로가 같은 규약이므로 단언도 한 벌만 둔다(따로 두면
+  /// 한쪽만 고쳐져 나머지 경로의 커버리지가 조용히 약해진다). 거부 주입은 각
+  /// 테스트가 자기 지점의 deny 헬퍼로 먼저 건다.
   Future<void> expectUnavailablePassesThrough(
       Future<Object?> Function() action) async {
-    denyReadWith('unavailable');
     await expectLater(
       action(),
       throwsA(isA<FirebaseException>()
@@ -143,6 +166,7 @@ void main() {
 
     test('다른 실패(unavailable)는 "없음"으로 읽지 않고 그대로 던진다', () async {
       await signInOwner();
+      denyReadWith('unavailable');
       await expectUnavailablePassesThrough(
           () => repo.approveJoinRequest(requestId()));
     });
@@ -162,6 +186,7 @@ void main() {
 
     test('다른 실패(unavailable)는 "없음"으로 읽지 않고 그대로 던진다', () async {
       await signInOwner();
+      denyReadWith('unavailable');
       await expectUnavailablePassesThrough(
           () => repo.rejectJoinRequest(requestId()));
     });
@@ -180,6 +205,70 @@ void main() {
     });
 
     test('다른 실패(unavailable)는 "없음"으로 읽지 않고 그대로 던진다', () async {
+      denyReadWith('unavailable');
+      await expectUnavailablePassesThrough(
+          () => repo.cancelJoinRequest(requestId()));
+    });
+  });
+
+  group('잔여 경합 — 사전 확인은 성공했는데 본론에서 문서가 없다', () {
+    // 사전 확인과 본론 사이의 극히 짧은 창에서 문서가 지워지면, 규칙 있는
+    // 백엔드는 본론의 요청 문서 접근(트랜잭션 읽기·delete)을 403으로 닫는다.
+    // 그 한 곳의 거부만 계약의 "요청 없음"으로 번역되는지를 고정한다 — 사전
+    // 확인은 **실제 문서**로 통과시키므로 요청을 진짜로 만들어 둔다.
+    setUp(() async {
+      await repo.requestToJoin(targetGroup.inviteToken); // 게스트가 현재 사용자
+    });
+
+    test('승인 — 트랜잭션 읽기의 permission-denied가 StateError로 번역된다', () async {
+      await signInOwner();
+      denyTxReadWith('permission-denied');
+
+      await expectLater(
+        repo.approveJoinRequest(requestId()),
+        throwsNotFound(),
+      );
+      // 트랜잭션이 중단됐다 — 멤버 추가 흔적이 없다.
+      final DocumentSnapshot<Map<String, dynamic>> groupDoc =
+          await db.doc('groups/${targetGroup.id}').get();
+      expect(groupDoc.data()?['memberIds'], isNot(contains(guest.id)));
+    });
+
+    test('거절 — 트랜잭션 읽기의 permission-denied가 StateError로 번역된다', () async {
+      await signInOwner();
+      denyTxReadWith('permission-denied');
+
+      await expectLater(
+        repo.rejectJoinRequest(requestId()),
+        throwsNotFound(),
+      );
+    });
+
+    test('취소 — delete의 permission-denied가 StateError로 번역된다', () async {
+      denyDeleteWith('permission-denied');
+
+      await expectLater(
+        repo.cancelJoinRequest(requestId()),
+        throwsNotFound(),
+      );
+    });
+
+    test('승인 — 트랜잭션 읽기의 다른 실패(unavailable)는 그대로 던진다', () async {
+      await signInOwner();
+      denyTxReadWith('unavailable');
+      await expectUnavailablePassesThrough(
+          () => repo.approveJoinRequest(requestId()));
+    });
+
+    test('거절 — 트랜잭션 읽기의 다른 실패(unavailable)는 그대로 던진다', () async {
+      await signInOwner();
+      denyTxReadWith('unavailable');
+      await expectUnavailablePassesThrough(
+          () => repo.rejectJoinRequest(requestId()));
+    });
+
+    test('취소 — delete의 다른 실패(unavailable)는 그대로 던진다', () async {
+      denyDeleteWith('unavailable');
       await expectUnavailablePassesThrough(
           () => repo.cancelJoinRequest(requestId()));
     });

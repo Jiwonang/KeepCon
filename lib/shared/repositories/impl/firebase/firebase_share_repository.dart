@@ -825,9 +825,12 @@ class FirebaseShareRepository implements ShareRepository {
   /// 상한이, 취소의 `delete`는 [cancelJoinRequest]의 명시적 타임아웃이
   /// ([requestToJoin]의 쓰기와 같은 규약).
   ///
-  /// 잔여 창: 이 확인과 본론 사이에 문서가 지워지는 극히 짧은 경합은 남는다 — 그때는
-  /// 본론의 거부가 [FirebaseException]으로 올라간다(위의 이유로 거기서는 번역하지
-  /// 않는다).
+  /// 잔여 창: 이 확인과 본론 사이에 문서가 지워지는 극히 짧은 경합은 남는다 — 그쪽은
+  /// 본론의 **요청 문서 접근 한 곳에만** 붙인 같은 번역이 받는다(승인·거절은
+  /// [_txGetJoinRequest], 취소는 delete를 감싼 catch). 호출 지점 하나에 붙은 catch라
+  /// 거부의 주어가 요청 문서로 좁혀져 있어, 트랜잭션 **전체**의 거부를 뭉뚱그려
+  /// 번역할 때의 오진(그룹 읽기·쓰기 거부를 "요청 없음"으로 읽는 것)이 없다. 그룹
+  /// 접근의 거부는 그대로 [FirebaseException]으로 올라간다.
   ///
   /// ⚠️ "흡수한 거부를 [JoinRequestUnreadableException]으로 흔적 남기기"는 이 파일의
   /// `permission-denied` 흡수 4곳 중 **여기 한 곳에만** 적용돼 있다 — [_dropJoinRequest]
@@ -855,6 +858,22 @@ class FirebaseShareRepository implements ShareRepository {
     return doc;
   }
 
+  /// 트랜잭션 안에서 요청 문서를 읽되, **이 읽기 한 곳의** 권한 거부만 계약의
+  /// "요청 없음"으로 번역한다 — [_requireJoinRequestDoc]이 성공한 뒤 트랜잭션이
+  /// 읽기 전에 문서가 지워지는 잔여 경합이 이 모양이다(규칙은 없는 문서의 읽기를
+  /// 403으로 닫는다). catch가 호출 지점 하나에 붙어 있으므로 거부의 주어가 요청
+  /// 문서로 좁혀져 있다 — 트랜잭션 전체의 거부를 뭉뚱그려 번역할 때의 오진(그룹
+  /// 읽기·쓰기 거부를 "요청 없음"으로 읽는 것)과 다르다.
+  Future<DocumentSnapshot<Map<String, dynamic>>> _txGetJoinRequest(
+      Transaction tx, DocumentReference<Map<String, dynamic>> ref) async {
+    try {
+      return await tx.get(ref);
+    } on FirebaseException catch (e) {
+      if (e.code != 'permission-denied') rethrow;
+      throw JoinRequestUnreadableException(ref.id);
+    }
+  }
+
   @override
   Future<Group> approveJoinRequest(String joinRequestId) async {
     final User me = _requireUser();
@@ -866,7 +885,7 @@ class FirebaseShareRepository implements ShareRepository {
 
     return _db.runTransaction<Group>((Transaction tx) async {
       final DocumentSnapshot<Map<String, dynamic>> reqDoc =
-          await tx.get(reqRef);
+          await _txGetJoinRequest(tx, reqRef);
       if (!reqDoc.exists) {
         throw StateError('Join request not found: $joinRequestId');
       }
@@ -931,7 +950,7 @@ class FirebaseShareRepository implements ShareRepository {
 
     return _db.runTransaction<JoinRequest>((Transaction tx) async {
       final DocumentSnapshot<Map<String, dynamic>> reqDoc =
-          await tx.get(reqRef);
+          await _txGetJoinRequest(tx, reqRef);
       if (!reqDoc.exists) {
         throw StateError('Join request not found: $joinRequestId');
       }
@@ -979,7 +998,16 @@ class FirebaseShareRepository implements ShareRepository {
     // 있으므로 미처리 비동기 에러도 아니다. ⚠️ "없는 문서의 삭제는 no-op"이라서가
     // 아니다 — `joinRequests`의 delete 규칙은 `resource.data`를 만지므로 문서가
     // 없으면 **403**이다([_dropJoinRequest] 머리말이 같은 사실을 설계 근거로 삼는다).
-    await ref.delete().timeout(const Duration(seconds: 15));
+    try {
+      await ref.delete().timeout(const Duration(seconds: 15));
+    } on FirebaseException catch (e) {
+      // 존재 확인과 이 삭제 사이에 문서가 지워진 잔여 경합 — 규칙은 없는 문서의
+      // 삭제를 403으로 닫으므로, 이 한 곳의 거부만 계약의 "요청 없음"으로 번역한다
+      // ([_txGetJoinRequest]와 같은 규약 — 이 delete는 요청 문서만 만지므로 거부의
+      // 주어가 이미 좁혀져 있다).
+      if (e.code != 'permission-denied') rethrow;
+      throw JoinRequestUnreadableException(joinRequestId);
+    }
   }
 
   // ── 공유 기프티콘 ─────────────────────────────────────────────────────
