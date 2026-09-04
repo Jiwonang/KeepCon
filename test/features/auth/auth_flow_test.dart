@@ -80,8 +80,11 @@ void main() {
     await auth.signOut();
     await tester.pumpAndSettle();
 
-    expect(find.text('우리집 기프티콘'), findsNothing,
-        reason: '셸이 남아 있으면 그 아래 autoDispose provider가 해제되지 않는다');
+    // skipOffstage 기본값(true)은 Offstage 하위·비활성 Route를 검색에서 제외한다 —
+    // 이 테스트가 잡으려는 회귀가 정확히 "셸을 Offstage로 보존"이므로, 기본값이면
+    // 그 회귀 상황에서도 findsNothing이 통과해 버린다. 오프스테이지까지 뒤져 없음을 단언한다.
+    expect(find.text('우리집 기프티콘', skipOffstage: false), findsNothing,
+        reason: '셸이 (Offstage로라도) 남아 있으면 그 아래 autoDispose provider가 해제되지 않는다');
     expect(find.widgetWithText(ElevatedButton, '로그인'), findsOneWidget);
   });
 
