@@ -88,6 +88,25 @@ class InviteExpiredException extends StateError {
   final bool isCode;
 }
 
+/// 참여 요청 문서를 **읽지 못해** "없음"으로 접었을 때의 [StateError].
+///
+/// 계약상으로는 평범한 "요청 없음"이라 호출부는 [StateError]로 잡으면 된다. 따로
+/// 두는 이유는 **진단**이다 — Firebase 구현은 보안 규칙의 `permission-denied`를
+/// "없음"으로 흡수하는데(없는 문서의 읽기 = 403, 존재 오라클 방지 규약), 그 원인이
+/// 경합(정상)일 수도 규칙 회귀·배포 스큐(장애)일 수도 있다. 흡수하고 나면
+/// `DebugPrintErrorReporter._kindOf`가 그 둘을 구별할 근거를 잃으므로, 접었다는
+/// 사실만 타입으로 남긴다. ([InviteExpiredException]과 같은 규약 — `on StateError`·
+/// `catch (e)`가 그대로 잡으므로 non-breaking이고, in-memory 구현은 규칙이 없어
+/// 이 타입을 던질 일이 없다.)
+class JoinRequestUnreadableException extends StateError {
+  /// 읽기 거부를 "없음"으로 접은 요청 [joinRequestId]에 대한 예외를 만든다.
+  ///
+  /// 메시지는 평범한 "요청 없음"과 동일하게 유지한다 — 구별은 문자열이 아니라
+  /// 타입으로 한다([InviteExpiredException]의 "문자열로 구별하지 않는 이유" 참조).
+  JoinRequestUnreadableException(String joinRequestId)
+      : super('Join request not found: $joinRequestId');
+}
+
 /// 그룹/공유 데이터 계약.
 ///
 /// 페이지는 이 abstract 인터페이스에만 의존한다. 구현체(mock/실제 백엔드)는 교체 가능.

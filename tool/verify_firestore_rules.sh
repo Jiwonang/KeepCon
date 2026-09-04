@@ -377,6 +377,11 @@ check "방장이 대기 목록 질의" 200 -X POST "${DOCS}:runQuery" \
 check "일반 멤버(B)가 대기 목록 질의 → 차단" 403 -X POST "${DOCS}:runQuery" \
   "${AUTH_B[@]}" "${JSON[@]}" -d "$(jr_pending_query "${G_JR}")"
 check "요청자 본인이 자기 요청 조회" 200 -X GET "${DOCS}/joinRequests/${G_JR}_${UID_C}" "${AUTH_C[@]}"
+# 방장의 단건 조회는 승인·거절의 **존재 확인 읽기**(`_requireJoinRequestDoc`)가 매번
+# 밟는 경로다. 이 200이 깨지면 앱은 그 거부를 "요청 없음"으로 접으므로(경합 번역 규약)
+# 모든 승인·거절이 조용히 "Join request not found"로 죽는다 — 대기 목록 질의(위)만으로는
+# 단건 get 규칙의 회귀를 못 잡는다.
+check "방장(A)이 대기 중 요청 단건 조회" 200 -X GET "${DOCS}/joinRequests/${G_JR}_${UID_C}" "${AUTH_A[@]}"
 check "일반 멤버(B)가 남의 요청 조회 → 차단" 403 -X GET "${DOCS}/joinRequests/${G_JR}_${UID_C}" "${AUTH_B[@]}"
 
 # ── joinRequests 결정 — 방장만, 대기 중인 것만, status 한 필드만 ─────

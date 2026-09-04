@@ -45,7 +45,7 @@ scan() {
 # ⚠️ 한계(provider 항목과 같다): 이름 기반이라 **다른 이름의 사본**(`_MainErrorBanner`)은
 # 못 잡는다. 그리고 `lib/shared/widgets/`의 나머지 위젯(`NotificationBell` 등)은 아직
 # 등록돼 있지 않다 — 그것들은 행위 계약이 아니라 표시 조각이라 우선순위가 낮다.
-SHARED_TYPES="AppNotification|GroupNotificationItem|ExpiryNotificationItem|ScheduledExpiryNotification|Group|GroupMember|SharedGifticon|UsageLog|GroupNotification|MyGifticon|Gifticon|User|JoinRequest|ShareStatus|MemberRole|JoinRequestStatus|GroupNotificationType|GifticonStatus|SortOption|FilterOption|ShareStatusTransition|GifticonStatusTransition|ShareRepository|GifticonRepository|AuthRepository|MyGroupsRetry|ErrorReporter|InviteExpiredException|InlineErrorBanner"
+SHARED_TYPES="AppNotification|GroupNotificationItem|ExpiryNotificationItem|ScheduledExpiryNotification|Group|GroupMember|SharedGifticon|UsageLog|GroupNotification|MyGifticon|Gifticon|User|JoinRequest|ShareStatus|MemberRole|JoinRequestStatus|GroupNotificationType|GifticonStatus|SortOption|FilterOption|ShareStatusTransition|GifticonStatusTransition|ShareRepository|GifticonRepository|AuthRepository|MyGroupsRetry|ErrorReporter|InviteExpiredException|JoinRequestUnreadableException|InlineErrorBanner"
 
 # 선행 수식어 `([a-z]+ )*`로 Dart 3 클래스 수식어를 모두 포괄한다:
 # abstract/base/interface/final/sealed/mixin(및 조합, 예: `abstract interface class`,

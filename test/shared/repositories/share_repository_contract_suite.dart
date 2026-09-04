@@ -41,9 +41,10 @@
 ///    게스트의 참여 요청이 `permission-denied`로 죽는 변경인데도). 같은 이유로
 ///    `_dropJoinRequest`의 `permission-denied` 흡수도 여기서는 미검증이다.
 ///    **게스트 케이스가 초록이라고 프로덕션 경로가 검증된 것이 아니다.**
-///    (같은 부류 중 **자기 요청 문서 읽기**의 흡수 하나는 예외 주입으로 따로 덮었다 —
-///    `firebase_join_request_first_read_test.dart`. 이 스위트가 아니라 거기가 정본인
-///    이유도 그 파일 머리말에 있다.)
+///    (같은 부류 중 요청 문서 읽기 둘은 예외 주입으로 따로 덮었다 — 첫 요청의 흡수는
+///    `firebase_join_request_first_read_test.dart`, 승인·거절·취소의 경합 번역은
+///    `firebase_join_request_race_read_test.dart`. 이 스위트가 아니라 거기가 정본인
+///    이유도 각 파일 머리말에 있다.)
 ///
 /// ## 지금 덮는 축
 ///

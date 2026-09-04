@@ -38,8 +38,13 @@
 /// 인증(`features/auth`)·마이 페이지는 `on AuthException`으로 좁혀 잡으므로 이 부류가 아니다.
 library;
 
+import 'dart:async' show TimeoutException;
+
 import 'package:firebase_core/firebase_core.dart' show FirebaseException;
 import 'package:flutter/foundation.dart';
+
+import '../repositories/share_repository.dart'
+    show JoinRequestUnreadableException;
 
 /// 처리된 실패를 개발자에게 남기는 계약.
 ///
@@ -82,11 +87,21 @@ class DebugPrintErrorReporter implements ErrorReporter {
   /// 사용자 데이터가 아니라 가릴 이유도 없다.
   static String _kindOf(Object error) {
     if (error is FirebaseException) return 'FirebaseException(${error.code})';
+    // 저장소가 흡수한 `permission-denied`의 흔적 — 이 라벨이 몰려 찍히면 경합이
+    // 아니라 규칙 회귀·배포 스큐를 의심한다([JoinRequestUnreadableException]).
+    // 식별자는 싣지 않는다(메시지는 `includeMessage`가 따로 다룬다).
+    if (error is JoinRequestUnreadableException) {
+      return 'StateError(join-request-unreadable)';
+    }
     if (error is StateError) return 'StateError';
     if (error is ArgumentError) return 'ArgumentError';
     if (error is TypeError) return 'TypeError';
     if (error is UnsupportedError) return 'UnsupportedError';
     if (error is FormatException) return 'FormatException';
+    // 저장소가 건 쓰기 상한이 발화한 흔적(`requestToJoin`·`cancelJoinRequest`의 15초).
+    // `Exception`으로 뭉개면 "끊긴 채 15초를 기다렸다"와 그 밖의 모든 Exception이
+    // release 로그에서 같은 글자가 된다.
+    if (error is TimeoutException) return 'TimeoutException';
     if (error is Error) return 'Error';
     return 'Exception';
   }
