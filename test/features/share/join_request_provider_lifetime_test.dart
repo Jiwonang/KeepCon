@@ -157,7 +157,8 @@ void main() {
       // 로그아웃 — 인증을 잃은 리스너가 permission-denied로 죽는다.
       repo.lastPendingController!.addError(StateError('permission-denied'));
       await settle();
-      expect(container.read(pendingJoinRequestsProvider('g1')).hasError, isTrue);
+      expect(
+          container.read(pendingJoinRequestsProvider('g1')).hasError, isTrue);
 
       // AuthGate가 트리를 교체하며 마지막 소비자가 사라진다(화면 이탈과 같은 모양).
       sub.close();

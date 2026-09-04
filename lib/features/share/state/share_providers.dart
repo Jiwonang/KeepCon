@@ -413,7 +413,7 @@ final joinRequestsProvider = Provider<AsyncValue<List<JoinRequest>>>((ref) {
 /// 위젯이 내려갈 때 구독이 해제되고, 다음 진입은 새로 구독한다(위 내부용 family와
 /// 같은 수명 규약).
 final AutoDisposeStreamProviderFamily<List<JoinRequest>, String>
-    pendingJoinRequestsProvider =
-    StreamProvider.autoDispose.family<List<JoinRequest>, String>((ref, groupId) {
+    pendingJoinRequestsProvider = StreamProvider.autoDispose
+        .family<List<JoinRequest>, String>((ref, groupId) {
   return ref.watch(shareRepositoryProvider).watchPendingJoinRequests(groupId);
 });
