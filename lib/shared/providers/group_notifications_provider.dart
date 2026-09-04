@@ -90,7 +90,8 @@ final notificationsReadAtProvider = Provider<DateTime?>((ref) {
 void retryNotifications(WidgetRef ref) {
   retrySessionIfFailed(ref);
   // 파생 축의 원천도 배너를 띄우므로 여기서 빠지면 그 배너가 막다른 길이 된다.
-  // 세션과 무관한 최상위 provider라 uid 가드보다 앞에 둔다.
+  // 되살릴 대상이 **사용자별 인스턴스가 아니라** 최상위 provider 하나이므로 uid 가드보다
+  // 앞에 둔다(세션을 `select`로 watch하기는 한다 — "세션과 무관"은 아니다).
   if (ref.exists(rawGifticonsProvider) &&
       ref.read(rawGifticonsProvider).hasError) {
     ref.invalidate(rawGifticonsProvider);

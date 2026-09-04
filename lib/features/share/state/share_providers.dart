@@ -128,6 +128,13 @@ final usageLogsProvider = Provider<AsyncValue<List<UsageLog>>>((ref) {
 /// 로그아웃의 죽은 permission-denied 에러가 박제되어 재로그인 후에도 공유 시트가
 /// 영구히 배너에 머문다). 로그아웃 시 [shareableGifticonsProvider]의 폴딩이 이
 /// family를 놓아 구독이 해제되고, 재로그인은 새 인스턴스로 새로 구독한다.
+///
+/// ⚠️ 이 family는 계약 정본 `rawGifticonsProvider`와 **같은 `watchGifticons(uid)`
+/// 쿼리를 따로 구독한다**(같은 사용자에 리스너 2개 = 문서 읽기·과금 2배). 합치지 않은
+/// 이유는 폴딩 규약이 달라서다 — 정본은 uid가 없으면 빈 목록이고 이쪽은
+/// [foldSessionUser]로 세션 순단에도 후보 계산을 유지한다(순단만으로 시트에 배너가
+/// 뜨는 것을 막는다 — QA [medium 1] ③). 통합은 그 규약을 먼저 정해야 하는 별도
+/// 작업이며, 정본 `raw_gifticons_provider.dart`의 dartdoc이 같은 내용을 기록해 뒀다.
 final AutoDisposeStreamProviderFamily<List<Gifticon>, String>
     _gifticonsByUserProvider =
     StreamProvider.autoDispose.family<List<Gifticon>, String>((ref, userId) {

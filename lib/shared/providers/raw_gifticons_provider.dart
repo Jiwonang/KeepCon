@@ -52,10 +52,11 @@ import 'session_provider.dart';
 /// **keepAlive는 의도다** — 사용자별 스트림 family들이 로그아웃 박제 결함으로
 /// `autoDispose`로 전환됐지만(`shared_gifticons_provider.dart` 등), 이 provider는
 /// family가 아니라 **uid를 select로 watch하는 단일 provider**라 로그아웃이 create를
-/// 재실행해 죽은 에러를 스스로 버린다(같은 결함이 성립하지 않는다). 게다가 위젯 밖
-/// 소비자(`expiry_notification_sync` — 만료 알림 예약 재계산)가 warm 상태를 전제하므로,
-/// "일관성"을 이유로 autoDispose로 바꾸면 그 예약 갱신이 끊긴다. 같은 세션 안의 순단
-/// 에러는 `retryNotifications`가 되살린다.
+/// 재실행해 죽은 에러를 스스로 버린다(같은 결함이 성립하지 않는다). 전환할 이유가
+/// 없어 그대로 둔다는 뜻이며, **`expiry_notification_sync`를 근거로 삼지 말 것** —
+/// 그것은 `ConsumerStatefulWidget`이고 `build`에서 이 provider를 `ref.listen`하므로
+/// autoDispose였더라도 마운트 동안 살아 있다(수명 근거가 되지 못한다). 같은 세션 안의
+/// 순단 에러는 `retryNotifications`가 되살린다.
 final rawGifticonsProvider = StreamProvider<List<Gifticon>>((ref) {
   final String? uid = ref.watch(
     sessionUserProvider.select((AsyncValue<User?> s) => s.valueOrNull?.id),
