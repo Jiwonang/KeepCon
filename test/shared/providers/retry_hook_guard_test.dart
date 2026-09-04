@@ -392,12 +392,36 @@ void main() {
       );
       expectNoSubscription();
     });
+
+    // 참여 요청 축 2개(PR #164에서 도착). 형제 훅 전부를 같은 축으로 재는 것이 이 파일의
+    // 규약이다 — 빠뜨리면 그 훅만 가드 없이 자라도 아무도 모른다.
+    testWidgets('retryMyJoinRequests — 세션', (WidgetTester tester) async {
+      await tapRetry(tester, retryMyJoinRequests);
+      expectNoSubscription();
+    });
+
+    testWidgets('retryPendingJoinRequests — invalidate만(구독 없음)', (
+      WidgetTester tester,
+    ) async {
+      await tapRetry(
+        tester,
+        (WidgetRef ref) => retryPendingJoinRequests(ref, 'g1'),
+      );
+      expectNoSubscription();
+    });
   });
 
   group('세션만 마운트된 컨텍스트 — 안쪽 가드가 사용자별 인스턴스를 열지 않는다', () {
     testWidgets('retryUsageLogs — exists(logs)', (WidgetTester tester) async {
       await tapRetryWithSession(tester, retryUsageLogs);
       expect(share.usageCalls, 0, reason: '미마운트 사용 이력 인스턴스를 만들면 안 된다');
+      expectNoUnexpectedCalls();
+    });
+
+    testWidgets('retryMyJoinRequests — exists(mine)',
+        (WidgetTester tester) async {
+      await tapRetryWithSession(tester, retryMyJoinRequests);
+      expect(share.myJoinCalls, 0, reason: '미마운트 내 참여 요청 인스턴스를 만들면 안 된다');
       expectNoUnexpectedCalls();
     });
 

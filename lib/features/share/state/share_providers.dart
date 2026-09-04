@@ -38,12 +38,12 @@ import '../../../shared/providers/shared_gifticons_provider.dart';
 // 정본은 autoDispose지만 이 파일의 keepAlive 파생들이 그것을 watch하므로, share 탭을
 // 한 번 연 뒤로는 별칭이 하던 것과 동일하게 컨테이너 수명 동안 구독이 유지된다.
 //
-// **스트림 family의 수명은 축마다 다르다.** 상시 소비 축(사용 이력·공유 후보)은 keepAlive
-// family지만, 참여 요청 두 축은 **autoDispose family**다 — keepAlive는 로그아웃 순간
-// 죽은 permission-denied 에러를 앱 수명 동안 박제해 재로그인해도 재구독이 없다(실측
-// 재현 — 해당 provider의 doc 참조). 새 스트림 파생을 더할 때는 **세션·권한에 묶인
-// 스트림이면 autoDispose를 기본**으로 하고, keepAlive로 두려면 에러를 되살릴 `retry*`
-// 훅을 반드시 함께 낸다.
+// **스트림 family는 전부 autoDispose다**(사용 이력·공유 후보·참여 요청 두 축). keepAlive는
+// 로그아웃 순간 죽은 permission-denied 에러를 앱 수명 동안 박제해 재로그인해도 재구독이
+// 없다(실측 재현 — 해당 provider의 doc 참조). 새 스트림 파생을 더할 때는 **세션·권한에
+// 묶인 스트림이면 autoDispose가 기본**이다. 폴딩 래퍼(`usageLogsProvider` 등)는 keepAlive라
+// 로그인 중에는 family를 계속 붙잡으므로, 로그아웃 없이 스트림이 죽는 경우(네트워크 등)의
+// 제자리 복구를 위해 `retry*` 훅은 여전히 필요하다.
 //
 // **id만 쓰는 소비 지점은 `select`로 좁힌다.** 정본은 [StreamProvider]라 같은 값이 다시
 // 방출돼도(Firebase `userChanges()`의 토큰 갱신 등) 리스너에게 통지한다 — 삭제된 별칭이
@@ -305,12 +305,15 @@ void retryPendingJoinRequests(WidgetRef ref, String groupId) {
 /// **원천 family 인스턴스**를 invalidate한다.
 void retryMyJoinRequests(WidgetRef ref) {
   retrySessionIfFailed(ref);
+  // 검사용 read는 세션 계층부터 `exists`로 가드한다 — `read`는 살아 있지 않은 인스턴스를
+  // 새로 만들어 **실제 스트림을 구독**한다(Firestore 초기 읽기·과금). 근거는 계약 훅
+  // `MyGroupsRetry.retry`의 dartdoc(`my_groups_provider.dart`)이 정본이며, 형제 훅
+  // (`retryUsageLogs`·`retryShareCandidates`·`retryNotifications`·
+  // `retryFailedSharedGifticonStreams`)이 모두 같은 규약을 따른다 — 이 축만의 요구가
+  // 아니다([retrySessionIfFailed]의 내부 가드는 자기 자신만 빠져나올 뿐이다).
+  if (!ref.exists(sessionUserProvider)) return;
   final User? user = ref.read(sessionUserProvider).valueOrNull;
   if (user == null) return;
-  // autoDispose family는 `exists`로 가드한다 — `read`는 살아 있지 않은 인스턴스를
-  // 새로 만들어 **실제 스트림을 구독**한다(Firestore 초기 읽기·과금). 검사가 곧 낭비
-  // 구독이 되는 것을 막는 `MyGroupsRetry.retry`·`retrySessionIfFailed`와 같은 규약이며,
-  // keepAlive 형제(`retryUsageLogs` 등)에는 없는 이 축만의 요구다.
   final AutoDisposeStreamProvider<List<JoinRequest>> mine =
       _myJoinRequestsByUserProvider(user.id);
   if (ref.exists(mine) && ref.read(mine).hasError) {
