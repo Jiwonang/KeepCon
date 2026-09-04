@@ -13,13 +13,21 @@
 /// (실측: 가드를 `(true)`로 치환하면 720/720 통과). 즉 "가드가 과하게 막지 않는가"만
 /// 검증되고 "가드가 실제로 막아야 할 때 막는가"는 아무도 보지 않았다.
 ///
-/// 이 파일은 그 반대 방향을 계측한다: **아무것도 watch하지 않는 위젯**에서 훅을 부르고
-/// (체인이 마운트된 적 없는 컨텍스트 — `exists`가 false인 상태), 어떤 백엔드 스트림도
-/// 구독되지 않았음을 단언한다. 가드를 지우면 read가 인스턴스를 만들며 실제 구독이
-/// 열리므로 카운터가 0이 아니게 되어 실패한다(뮤테이션으로 확인).
+/// ## 호스트가 셋인 이유 — 가드는 **중첩**돼 있다
+/// 훅은 바깥에서 상위 축(세션·그룹 목록)을, 안쪽에서 사용자별 family 인스턴스를
+/// 가드한다. 바깥이 먼저 `return`하므로 **아무것도 마운트하지 않은 호스트 하나로는
+/// 안쪽 가드에 도달조차 못 한다** — 그 상태로는 안쪽 6개를 지워도 전부 통과한다
+/// (에이전트 리뷰가 안쪽만 뮤테이션해 실측). 그래서 도달 깊이가 다른 호스트를 셋 둔다:
 ///
-/// 훅이 `WidgetRef` 전용 자유 함수라 [ProviderContainer]만으로는 부를 수 없어 위젯
-/// 테스트 형태를 쓴다 — 위젯은 버튼 하나뿐이고 provider를 하나도 watch하지 않는다.
+/// | 호스트 | watch하는 것 | 도달하는 가드 |
+/// |---|---|---|
+/// | [_RetryHost] | 없음 | 바깥 — `exists(session)`·`exists(rawGifticons)`·`exists(myGroups)` |
+/// | [_SessionOnlyHost] | 세션 | 안쪽 — `exists(logs)`·`exists(mine)`·`exists(notifs)`·`exists(readAt)`·`exists(groups)` |
+/// | [_GroupsHost] | 세션 + 내 그룹 목록 | 안쪽 — `exists(perGroup)` |
+///
+/// 각 호스트는 자기가 마운트한 축이 **실제로 세어지는지**를 먼저 단언한다(계측 생존
+/// 증거). 그 단언이 없으면 오버라이드가 끊겨 계측기가 아예 연결되지 않아도 "구독 0"이
+/// 나와 전 케이스가 공허하게 통과한다.
 library;
 
 import 'package:flutter/material.dart';
@@ -28,10 +36,13 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:keepcon/features/share/state/share_providers.dart';
 import 'package:keepcon/shared/models/gifticon.dart';
 import 'package:keepcon/shared/models/group.dart';
+import 'package:keepcon/shared/models/join_request.dart';
 import 'package:keepcon/shared/models/share.dart';
 import 'package:keepcon/shared/models/user.dart';
 import 'package:keepcon/shared/providers/group_notifications_provider.dart';
+import 'package:keepcon/shared/providers/my_groups_provider.dart';
 import 'package:keepcon/shared/providers/repositories.dart';
+import 'package:keepcon/shared/providers/session_provider.dart';
 import 'package:keepcon/shared/providers/shared_gifticons_provider.dart';
 import 'package:keepcon/shared/repositories/auth_repository.dart';
 import 'package:keepcon/shared/repositories/gifticon_repository.dart';
@@ -41,6 +52,9 @@ import 'package:keepcon/shared/repositories/share_repository.dart';
 /// 세션 스트림 **구독 횟수**를 세는 [AuthRepository](가드가 풀리면 여기가 먼저 늘어난다).
 class _CountingAuthRepository implements AuthRepository {
   int watchCalls = 0;
+
+  /// `noSuchMethod`로 흘러간 예상 밖 호출 — 아래 [_CountingShareRepository] 참조.
+  final List<Symbol> unexpected = <Symbol>[];
 
   @override
   Stream<User?> watchCurrentUser() {
@@ -52,27 +66,51 @@ class _CountingAuthRepository implements AuthRepository {
   User? get currentUser => InMemoryAuthRepository.defaultUser;
 
   @override
-  dynamic noSuchMethod(Invocation invocation) => throw UnimplementedError(
-        '이 테스트는 watchCurrentUser만 사용한다 (호출됨: ${invocation.memberName})',
-      );
+  dynamic noSuchMethod(Invocation invocation) {
+    unexpected.add(invocation.memberName);
+    throw UnimplementedError(
+      '이 테스트는 watchCurrentUser만 사용한다 (호출됨: ${invocation.memberName})',
+    );
+  }
 }
 
 /// share 계약의 watch 스트림 **구독 횟수**를 축별로 세는 [ShareRepository].
 class _CountingShareRepository implements ShareRepository {
+  /// `watchGroups`가 방출할 목록(그룹 축까지 마운트하는 [_GroupsHost]용).
+  List<Group> groups = const <Group>[];
+
   int groupCalls = 0;
   int usageCalls = 0;
   int notifCalls = 0;
   int readAtCalls = 0;
   int sharedCalls = 0;
+  int myJoinCalls = 0;
+  int pendingJoinCalls = 0;
 
-  /// 어느 축이든 한 번이라도 구독됐는지(가드가 풀렸다는 신호).
+  /// `noSuchMethod`로 흘러간 예상 밖 호출.
+  ///
+  /// **던지는 것만으로는 트립와이어가 되지 않는다** — 예외가 [StreamProvider]의 create
+  /// 안에서 나면 Riverpod이 [AsyncError]로 삼켜 테스트는 초록으로 통과한다(실측). 그래서
+  /// 호출을 기록해 두고 단언한다.
+  final List<Symbol> unexpected = <Symbol>[];
+
+  /// 계약의 watch 스트림 **7축 중 하나라도** 구독됐는지(가드가 풀렸다는 신호).
+  ///
+  /// 참여 요청 2축은 이 훅들이 건드리지 않지만 **세지 않으면 미래의 훅이 그 축을 가드
+  /// 없이 구독해도 카운터가 0으로 남는다** — 이 파일이 막으려는 false green이다.
   int get totalCalls =>
-      groupCalls + usageCalls + notifCalls + readAtCalls + sharedCalls;
+      groupCalls +
+      usageCalls +
+      notifCalls +
+      readAtCalls +
+      sharedCalls +
+      myJoinCalls +
+      pendingJoinCalls;
 
   @override
   Stream<List<Group>> watchGroups(String userId) {
     groupCalls++;
-    return Stream<List<Group>>.value(const <Group>[]);
+    return Stream<List<Group>>.value(groups);
   }
 
   @override
@@ -100,14 +138,32 @@ class _CountingShareRepository implements ShareRepository {
   }
 
   @override
-  dynamic noSuchMethod(Invocation invocation) => throw UnimplementedError(
-        '이 테스트는 watch 스트림만 사용한다 (호출됨: ${invocation.memberName})',
-      );
+  Stream<List<JoinRequest>> watchMyJoinRequests(String userId) {
+    myJoinCalls++;
+    return Stream<List<JoinRequest>>.value(const <JoinRequest>[]);
+  }
+
+  @override
+  Stream<List<JoinRequest>> watchPendingJoinRequests(String groupId) {
+    pendingJoinCalls++;
+    return Stream<List<JoinRequest>>.value(const <JoinRequest>[]);
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) {
+    unexpected.add(invocation.memberName);
+    throw UnimplementedError(
+      '이 테스트는 watch 스트림만 사용한다 (호출됨: ${invocation.memberName})',
+    );
+  }
 }
 
 /// 기프티콘 목록 스트림 **구독 횟수**를 세는 [GifticonRepository].
 class _CountingGifticonRepository implements GifticonRepository {
   int watchCalls = 0;
+
+  /// `noSuchMethod`로 흘러간 예상 밖 호출 — [_CountingShareRepository] 참조.
+  final List<Symbol> unexpected = <Symbol>[];
 
   @override
   Stream<List<Gifticon>> watchGifticons(String ownerId) {
@@ -116,15 +172,15 @@ class _CountingGifticonRepository implements GifticonRepository {
   }
 
   @override
-  dynamic noSuchMethod(Invocation invocation) => throw UnimplementedError(
-        '이 테스트는 watchGifticons만 사용한다 (호출됨: ${invocation.memberName})',
-      );
+  dynamic noSuchMethod(Invocation invocation) {
+    unexpected.add(invocation.memberName);
+    throw UnimplementedError(
+      '이 테스트는 watchGifticons만 사용한다 (호출됨: ${invocation.memberName})',
+    );
+  }
 }
 
-/// provider를 **하나도 watch하지 않는** 호스트 — 버튼 콜백에서 훅만 부른다.
-///
-/// 이것이 이 파일의 계측 장치다: 체인이 마운트된 적 없으므로 훅 안의 `exists`가 전부
-/// false여야 하고, 따라서 어떤 백엔드 스트림도 구독되지 않아야 한다.
+/// provider를 **하나도 watch하지 않는** 호스트 — 바깥 가드에 도달한다.
 class _RetryHost extends ConsumerWidget {
   const _RetryHost(this.onRetry);
 
@@ -132,6 +188,48 @@ class _RetryHost extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    return Scaffold(
+      body: Center(
+        child: ElevatedButton(
+          onPressed: () => onRetry(ref),
+          child: const Text('재시도'),
+        ),
+      ),
+    );
+  }
+}
+
+/// 세션 축**만** watch하는 호스트 — 사용자별 하위 family는 만들어진 적이 없다.
+///
+/// [_RetryHost]는 바깥 가드에서 전부 멈춰 **안쪽 인스턴스 가드에 도달하지 못한다.**
+class _SessionOnlyHost extends ConsumerWidget {
+  const _SessionOnlyHost(this.onRetry);
+
+  final void Function(WidgetRef ref) onRetry;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    ref.watch(sessionUserProvider);
+    return Scaffold(
+      body: Center(
+        child: ElevatedButton(
+          onPressed: () => onRetry(ref),
+          child: const Text('재시도'),
+        ),
+      ),
+    );
+  }
+}
+
+/// 세션 + 내 그룹 목록까지 watch하는 호스트 — `exists(perGroup)`에 도달하는 유일한 형태.
+class _GroupsHost extends ConsumerWidget {
+  const _GroupsHost(this.onRetry);
+
+  final void Function(WidgetRef ref) onRetry;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    ref.watch(myGroupsProvider);
     return Scaffold(
       body: Center(
         child: ElevatedButton(
@@ -154,26 +252,64 @@ void main() {
     gifticons = _CountingGifticonRepository();
   });
 
-  /// 훅을 마운트되지 않은 컨텍스트에서 한 번 호출한다.
+  List<Override> overrides() => <Override>[
+        authRepositoryProvider.overrideWithValue(auth),
+        shareRepositoryProvider.overrideWithValue(share),
+        gifticonRepositoryProvider.overrideWithValue(gifticons),
+      ];
+
+  /// 예상 밖 계약 호출이 없었는지 — create 안에서 던진 예외는 삼켜지므로 직접 단언한다.
+  void expectNoUnexpectedCalls() {
+    expect(auth.unexpected, isEmpty);
+    expect(share.unexpected, isEmpty);
+    expect(gifticons.unexpected, isEmpty);
+  }
+
+  /// 훅을 **아무것도 마운트되지 않은** 컨텍스트에서 한 번 호출한다(바깥 가드 축).
   Future<void> tapRetry(
+    WidgetTester tester,
+    void Function(WidgetRef ref) hook,
+  ) async {
+    bool invoked = false;
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: overrides(),
+        child: MaterialApp(
+          home: _RetryHost((WidgetRef ref) {
+            invoked = true;
+            hook(ref);
+          }),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // 사전 조건(양성 대조가 아니다 — 계측 생존은 아래 `tapRetryWithSession`이 증명한다):
+    // 호스트가 정말 아무것도 구독하지 않은 상태에서 출발했는지 확인한다.
+    expect(auth.watchCalls, 0, reason: '호스트는 세션조차 watch하지 않는다');
+    expect(share.totalCalls, 0);
+    expect(gifticons.watchCalls, 0);
+
+    await tester.tap(find.text('재시도'));
+    await tester.pumpAndSettle();
+    expect(invoked, isTrue, reason: '탭이 훅을 실제로 불렀는지 — 안 불렀으면 0은 공허하다');
+  }
+
+  /// 훅을 **세션만 마운트된** 컨텍스트에서 호출한다(안쪽 인스턴스 가드 축).
+  Future<void> tapRetryWithSession(
     WidgetTester tester,
     void Function(WidgetRef ref) hook,
   ) async {
     await tester.pumpWidget(
       ProviderScope(
-        overrides: <Override>[
-          authRepositoryProvider.overrideWithValue(auth),
-          shareRepositoryProvider.overrideWithValue(share),
-          gifticonRepositoryProvider.overrideWithValue(gifticons),
-        ],
-        child: MaterialApp(home: _RetryHost(hook)),
+        overrides: overrides(),
+        child: MaterialApp(home: _SessionOnlyHost(hook)),
       ),
     );
     await tester.pumpAndSettle();
 
-    // 양성 대조: 호스트가 정말 아무것도 구독하지 않은 상태여야 한다 — 이 단언이 없으면
-    // 아래 "0" 단언이 '가드가 막았다'가 아니라 '원래 구독이 있었다'와 구분되지 않는다.
-    expect(auth.watchCalls, 0, reason: '호스트는 세션조차 watch하지 않는다');
+    // 진짜 양성 대조 — 계측기가 살아 있으면 마운트한 축은 반드시 세어진다.
+    expect(auth.watchCalls, 1, reason: '세션은 마운트됐다 — 계측 생존 증거');
     expect(share.totalCalls, 0);
     expect(gifticons.watchCalls, 0);
 
@@ -198,47 +334,136 @@ void main() {
       0,
       reason: 'keepAlive인 rawGifticons는 낭비 구독이 컨테이너 수명 동안 잔존한다',
     );
+    expectNoUnexpectedCalls();
   }
 
-  group('마운트되지 않은 컨텍스트의 재시도는 아무것도 구독하지 않는다', () {
-    testWidgets('retryNotifications — 세션·rawGifticons·알림 2축 모두', (
+  group('마운트되지 않은 컨텍스트 — 바깥 가드가 상위 축을 열지 않는다', () {
+    testWidgets('retryNotifications — 세션·rawGifticons', (
       WidgetTester tester,
     ) async {
       await tapRetry(tester, retryNotifications);
       expectNoSubscription();
     });
 
-    testWidgets('retryUsageLogs — 세션·사용 이력', (WidgetTester tester) async {
+    testWidgets('retryUsageLogs — 세션', (WidgetTester tester) async {
       await tapRetry(tester, retryUsageLogs);
       expectNoSubscription();
     });
 
-    testWidgets('retryShareCandidates — 세션·그룹·그룹별 공유·내 기프티콘', (
-      WidgetTester tester,
-    ) async {
+    testWidgets('retryShareCandidates — 세션·그룹 목록', (WidgetTester tester) async {
       await tapRetry(tester, retryShareCandidates);
       expectNoSubscription();
     });
 
-    testWidgets('retryFailedSharedGifticonStreams — 그룹 목록 축', (
+    testWidgets('retryFailedSharedGifticonStreams — 그룹 목록', (
       WidgetTester tester,
     ) async {
       await tapRetry(tester, retryFailedSharedGifticonStreams);
       expectNoSubscription();
     });
 
-    testWidgets('retrySharedGifticonIds — 그룹 + 그룹별 공유 합성 경로', (
+    testWidgets('retrySharedGifticonIds — 그룹 목록(합성 경로)', (
       WidgetTester tester,
     ) async {
       await tapRetry(tester, retrySharedGifticonIds);
       expectNoSubscription();
     });
 
-    testWidgets('retrySharedItemLookup — 그룹 + 그룹별 공유 합성 경로', (
+    testWidgets('retrySharedItemLookup — 그룹 목록(합성 경로)', (
       WidgetTester tester,
     ) async {
       await tapRetry(tester, retrySharedItemLookup);
       expectNoSubscription();
+    });
+
+    // 인자 없는 경로(share 메인)와 groupId 경로(그룹 상세) 둘 다. groupId 경로의
+    // `invalidate`는 없는 인스턴스에 no-op이라 구독을 열지 않는다(계약 dartdoc 참조).
+    testWidgets('retrySharedGifticons — 인자 없음', (WidgetTester tester) async {
+      await tapRetry(tester, retrySharedGifticons);
+      expectNoSubscription();
+    });
+
+    testWidgets('retrySharedGifticons(groupId:) — invalidate는 인스턴스를 만들지 않는다', (
+      WidgetTester tester,
+    ) async {
+      await tapRetry(
+        tester,
+        (WidgetRef ref) => retrySharedGifticons(ref, groupId: 'g1'),
+      );
+      expectNoSubscription();
+    });
+  });
+
+  group('세션만 마운트된 컨텍스트 — 안쪽 가드가 사용자별 인스턴스를 열지 않는다', () {
+    testWidgets('retryUsageLogs — exists(logs)', (WidgetTester tester) async {
+      await tapRetryWithSession(tester, retryUsageLogs);
+      expect(share.usageCalls, 0, reason: '미마운트 사용 이력 인스턴스를 만들면 안 된다');
+      expectNoUnexpectedCalls();
+    });
+
+    testWidgets('retryNotifications — exists(notifs)·exists(readAt)', (
+      WidgetTester tester,
+    ) async {
+      await tapRetryWithSession(tester, retryNotifications);
+      expect(share.notifCalls, 0, reason: '미마운트 알림 인스턴스');
+      expect(share.readAtCalls, 0, reason: '미마운트 읽음 시각 인스턴스');
+      expect(gifticons.watchCalls, 0, reason: '미마운트 rawGifticons');
+      expectNoUnexpectedCalls();
+    });
+
+    testWidgets('retryShareCandidates — exists(mine)·exists(groups)', (
+      WidgetTester tester,
+    ) async {
+      await tapRetryWithSession(tester, retryShareCandidates);
+      expect(gifticons.watchCalls, 0, reason: '미마운트 내 기프티콘 인스턴스');
+      expect(
+        share.groupCalls,
+        0,
+        reason: '미마운트 그룹 인스턴스(MyGroupsRetry.retry)',
+      );
+      expectNoUnexpectedCalls();
+    });
+  });
+
+  group('그룹 목록까지 마운트된 컨텍스트 — 그룹별 공유 인스턴스 가드', () {
+    testWidgets('retryFailedSharedGifticonStreams — exists(perGroup)', (
+      WidgetTester tester,
+    ) async {
+      share.groups = <Group>[
+        Group(
+          id: 'g1',
+          name: '테스트 그룹',
+          emoji: '🎁',
+          inviteToken: 'tok',
+          members: <GroupMember>[
+            GroupMember(
+              userId: InMemoryAuthRepository.defaultUser.id,
+              displayName: InMemoryAuthRepository.defaultUser.displayName,
+              avatarEmoji: '🙂',
+              role: MemberRole.owner,
+            ),
+          ],
+        ),
+      ];
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: overrides(),
+          child: const MaterialApp(
+            home: _GroupsHost(retryFailedSharedGifticonStreams),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // 양성 대조 — 그룹 축이 실제로 마운트·계측된 상태에서의 단언이어야 한다.
+      expect(share.groupCalls, 1, reason: '그룹 축은 마운트됐다 — 계측 생존 증거');
+      expect(share.sharedCalls, 0);
+
+      await tester.tap(find.text('재시도'));
+      await tester.pumpAndSettle();
+
+      expect(share.sharedCalls, 0, reason: '미마운트 그룹별 공유 인스턴스를 열면 안 된다');
+      expectNoUnexpectedCalls();
     });
   });
 }
