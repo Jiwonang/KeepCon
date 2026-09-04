@@ -89,6 +89,29 @@ void main() {
         );
   }
 
+  /// **옵션 없는** `get()`에만 걸리는 주입 — `GetOptions(source: Source.server)`를 준
+  /// 호출에는 붙지 않는다(`mock_exceptions`의 매칭은 매처 쪽 인자 목록이 짧을 때만
+  /// anything으로 패딩한다 — 경합 테스트 `denyTxReadWith`와 같은 원리).
+  void denyPlainGetWith(String code) {
+    whenCalling(Invocation.method(#get, [null])).on(requestRef()).thenThrow(
+          FirebaseException(plugin: 'cloud_firestore', code: code),
+        );
+  }
+
+  test('멱등성 판정 읽기는 서버를 강제한다 — 옵션 없는 get으로 되돌리면 잡힌다', () async {
+    // `_readJoinRequestDocOrNull`의 `Source.server`가 빠지면 이 stub에 걸려
+    // unavailable이 올라온다. 그 한 줄은 첫 요청과 승인·거절·취소가 **함께** 쓰는
+    // 공용 읽기의 옵션이라, 빠지면 캐시가 두 판정을 동시에 뒤집는다(살아 있는 대기
+    // 요청을 '없음'으로 읽어 덮어쓰거나, 지워진 문서를 '있음'으로 읽고 본론에서
+    // 죽는다).
+    denyPlainGetWith('unavailable');
+
+    final JoinRequest req = await repo.requestToJoin(group.inviteToken);
+
+    expect(req.isPending, isTrue);
+    expect(db.hasSavedDocument(requestPath()), isTrue);
+  });
+
   test('요청 문서 읽기가 permission-denied여도 첫 요청은 생성된다', () async {
     denyReadWith('permission-denied');
 

@@ -793,9 +793,11 @@ class FirebaseShareRepository implements ShareRepository {
   /// — 지워진 문서를 "있음"으로 읽고 본론에서 죽거나, 살아 있는 대기 요청을
   /// "없음"으로 읽어 덮어쓴다(`requestedAt` 초기화). 서버 강제면 오프라인은 즉시
   /// unavailable로 떨어져(rethrow) 화면이 실패를 안내한다.
-  /// ⚠️ 이것이 닫는 것은 **읽기 시점의** 단절뿐이다 — 읽기 성공 뒤의 쓰기 단절 창은
-  /// 각 호출자의 쓰기 상한이 닫는다([requestToJoin]의 `set`·[cancelJoinRequest]의
-  /// `delete` 15초, 승인·거절은 `runTransaction` 기본 30초).
+  /// ⚠️ 이것이 닫는 것은 **읽기 시점의** 단절뿐이다 — 읽기 성공 뒤의 쓰기 단절 창을
+  /// 실제로 끊는 것은 [requestToJoin]의 `set`·[cancelJoinRequest]의 `delete`에 걸린
+  /// `Future.timeout` 15초 둘뿐이다. 승인·거절의 `runTransaction` 기본 30초는 상한으로
+  /// 세지 않는다 — 그 `timeout` 인자가 트랜잭션을 실제로 끊지 못한다는 보고가 있다
+  /// (flutterfire #653·#9118). 그쪽 창은 아직 열려 있다.
   Future<DocumentSnapshot<Map<String, dynamic>>?> _readJoinRequestDocOrNull(
       DocumentReference<Map<String, dynamic>> ref) async {
     try {
@@ -828,10 +830,13 @@ class FirebaseShareRepository implements ShareRepository {
   /// 다 쓴다 — 존재 확인을 트랜잭션 밖 **단일 읽기**로 빼는 것(이 함수)과, 트랜잭션
   /// **안의 호출 지점 하나**에만 catch를 붙이는 것([_txGetJoinRequest]).
   /// ⚠️ 그래서 이 함수가 승인·거절에 남는 이유는 좁힘이 **아니다**(그쪽은
-  /// [_txGetJoinRequest]가 이미 덮는다) — **오프라인 빠른 실패**다. 서버 강제 읽기가
-  /// 없으면 오프라인의 승인·거절이 `runTransaction`의 30초 상한까지 매달리고, 취소의
-  /// 옛 코드(기본 소스 get)는 캐시로 존재 확인을 통과한 뒤 `delete`가 서버 확인을
-  /// 영원히 기다려 **버튼이 잠긴 채 아무 안내가 없었다.** 취소에는 좁힘·빠른 실패에
+  /// [_txGetJoinRequest]가 이미 덮는다) — **오프라인 빠른 실패**다. 서버 강제가 아니면
+  /// 캐시가 존재 확인을 통과시켜 본론으로 들여보내는데, 그 뒤의 실패 지연은 SDK가
+  /// 정한다 — 벤더 문서는 "Transactions will fail when the client is offline"이지만
+  /// 실측 보고는 처음 수십 ms에서 반복하면 10~30초로 늘고 `timeout` 인자가 그것을 끊지
+  /// 못한다(flutterfire #6736·#9118). 취소의 **옛 코드**(기본 소스 get)는 같은 이유로
+  /// `delete`가 서버 확인을 하염없이 기다려 **버튼이 잠긴 채 아무 안내가 없었다**
+  /// (지금은 delete의 15초 상한이 그 창을 닫는다). 취소에는 좁힘·빠른 실패에
   /// 더해 `userId` 소유권 판정까지 여기서 한다. (거부="없음"의 안전 근거와
   /// `Source.server` 규약은 [_readJoinRequestDocOrNull]에 있다.)
   ///
@@ -842,14 +847,18 @@ class FirebaseShareRepository implements ShareRepository {
   /// 번역할 때의 오진(그룹 읽기·쓰기 거부를 "요청 없음"으로 읽는 것)이 없다. 그룹
   /// 접근의 거부는 그대로 [FirebaseException]으로 올라간다.
   ///
-  /// ⚠️ "흡수한 거부를 [JoinRequestUnreadableException]으로 흔적 남기기" 현황 —
-  /// `permission-denied`를 접는 catch는 이 파일에 5곳이다: 공용 읽기
+  /// ⚠️ "흡수한 거부를 [JoinRequestUnreadableException]으로 흔적 남기기" 현황.
+  /// 통합 뒤로 **catch 지점과 종착이 1:1이 아니므로** 둘을 나눠 센다.
+  ///
+  /// `permission-denied`를 접는 catch는 **5곳**: 공용 읽기
   /// ([_readJoinRequestDocOrNull])·[_txGetJoinRequest]·[cancelJoinRequest]의 delete·
-  /// [requestToJoin]의 멤버십 판정·[_dropJoinRequest]. **타입 흔적이 남는 것은 요청
-  /// 문서를 만지는 세 경로다** — 이 함수(공용 읽기의 `null`을 예외로 올림)·
-  /// [_txGetJoinRequest]·취소의 delete. 나머지는 흔적이 없다: [requestToJoin]은 같은
-  /// 공용 읽기의 `null`을 "아직 없음"으로 소비하고(후속 쓰기가 부분적 신호), 멤버십
-  /// 판정은 분기만 바꾸며, [_dropJoinRequest]는 예외 없이 정상 종료라 완전 무음이다.
+  /// [requestToJoin]의 멤버십 판정·[_dropJoinRequest]. 이 중 **자기 자리에서 무음인
+  /// 것은 둘**이다 — 멤버십 판정(그룹 문서를 만지며 분기만 바꾼다)과
+  /// [_dropJoinRequest](예외 없이 정상 종료). 공용 읽기는 스스로 판정하지 않는다.
+  ///
+  /// 타입 흔적이 남는 **종착은 셋**이다 — 이 함수(공용 읽기의 `null`을 예외로 올림)·
+  /// [_txGetJoinRequest]·취소의 delete. 같은 공용 읽기의 `null`이라도 [requestToJoin]
+  /// 쪽 종착은 "아직 없음"이라 흔적이 없다(후속 쓰기가 부분적 신호일 뿐이다).
   /// 전면 적용은 별도 작업(저장소→진단 방향 import 순환을 피하는 구조가 필요하다).
   Future<DocumentSnapshot<Map<String, dynamic>>> _requireJoinRequestDoc(
       DocumentReference<Map<String, dynamic>> ref) async {
