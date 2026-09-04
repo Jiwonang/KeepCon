@@ -51,9 +51,21 @@ class FirebaseShareRepository implements ShareRepository {
     required AuthRepository authRepository,
     required GifticonRepository gifticonRepository,
     FirebaseFirestore? firestore,
+    Duration writeTimeout = const Duration(seconds: 15),
   })  : _auth = authRepository,
         _gifticons = gifticonRepository,
-        _db = firestore ?? FirebaseFirestore.instance;
+        _db = firestore ?? FirebaseFirestore.instance,
+        _writeTimeout = writeTimeout;
+
+  /// 참여 요청 쓰기([requestToJoin]의 `set`·[cancelJoinRequest]의 `delete`)의 단절
+  /// 창을 끊는 상한. 기본 15초.
+  ///
+  /// 생성자 파라미터로 빼 둔 것은 **테스트 seam**이다 — fake 위에서는 지연을 주입할
+  /// 수 없어(mock_exceptions는 예외만), 영영 미완료 Future를 돌려주는 래퍼와 짧은
+  /// 상한으로만 이 상한 자체를 회귀 테스트에 물릴 수 있다
+  /// (`firebase_join_request_write_timeout_test.dart`). **실서비스 조립부는 기본값을
+  /// 쓴다** — 값을 바꾸려면 두 쓰기 지점의 트레이드오프 주석을 함께 보라.
+  final Duration _writeTimeout;
 
   final AuthRepository _auth;
   final GifticonRepository _gifticons;
@@ -724,7 +736,7 @@ class FirebaseShareRepository implements ShareRepository {
       // 않는 저장·검증 계층의 세부이고, 계약에 올리면 모든 구현이 지고 갈 짐이 된다
       // (in-memory에는 보안 규칙이 없다). `memberIds`가 문서에만 있는 것과 같은 결이다.
       'credential': credential,
-    }).timeout(const Duration(seconds: 15));
+    }).timeout(_writeTimeout);
     return req;
   }
 
@@ -859,7 +871,14 @@ class FirebaseShareRepository implements ShareRepository {
   /// 타입 흔적이 남는 **종착은 셋**이다 — 이 함수(공용 읽기의 `null`을 예외로 올림)·
   /// [_txGetJoinRequest]·취소의 delete. 같은 공용 읽기의 `null`이라도 [requestToJoin]
   /// 쪽 종착은 "아직 없음"이라 흔적이 없다(후속 쓰기가 부분적 신호일 뿐이다).
-  /// 전면 적용은 별도 작업(저장소→진단 방향 import 순환을 피하는 구조가 필요하다).
+  ///
+  /// **무흔적 3곳은 결정이다(전면 적용 안 함).** 그 세 흡수는 **정상 경로가 흡수를
+  /// 매번 밟는다** — 첫 요청의 비멤버 판정·아직 없는 요청 문서, 요청 없이 들어온
+  /// 멤버의 나가기·강퇴 정리. 흔적을 남기면 정상 동작마다 "처리된 실패"가 찍혀
+  /// 신호가 소음에 묻힌다(흔적 셋은 반대로 **경합·회귀에서만** 밟는 자리라 값이
+  /// 있다). 그쪽 규칙 회귀의 방어선은 리포터가 아니라 규칙 검증기의 양성
+  /// 케이스들이다 — "요청자 본인이 취소 → 200"·"방장이 남의 요청 삭제 → 200"
+  /// (`tool/verify_firestore_rules.sh`, CI `Firestore rules` 잡).
   Future<DocumentSnapshot<Map<String, dynamic>>> _requireJoinRequestDoc(
       DocumentReference<Map<String, dynamic>> ref) async {
     final DocumentSnapshot<Map<String, dynamic>>? doc =
@@ -1019,7 +1038,7 @@ class FirebaseShareRepository implements ShareRepository {
     // 아니다 — `joinRequests`의 delete 규칙은 `resource.data`를 만지므로 문서가
     // 없으면 **403**이다([_dropJoinRequest] 머리말이 같은 사실을 설계 근거로 삼는다).
     try {
-      await ref.delete().timeout(const Duration(seconds: 15));
+      await ref.delete().timeout(_writeTimeout);
     } on FirebaseException catch (e) {
       // 존재 확인과 이 삭제 사이에 문서가 지워진 잔여 경합 — 규칙은 없는 문서의
       // 삭제를 403으로 닫으므로, 이 한 곳의 거부만 계약의 "요청 없음"으로 번역한다
