@@ -25,8 +25,17 @@ import 'repositories.dart';
 import 'session_provider.dart';
 
 /// 특정 사용자의 알림 스트림(내부용).
-final _notificationsByUserProvider =
-    StreamProvider.family<List<GroupNotification>, String>((ref, userId) {
+///
+/// **autoDispose다** — keepAlive면 로그아웃이 이 provider를 죽인 채 박제한다.
+/// 로그아웃 순간 살아 있는 백엔드 리스너는 인증 없는 재평가에서 permission-denied로
+/// 종료되는데, keepAlive는 그 에러를 앱 수명 동안 캐시하므로 같은 계정으로 재로그인해도
+/// 재구독이 없다(세 화면의 알림 벨·알림 센터가 에러에 영구히 머문다). autoDispose면
+/// 로그아웃 시 [notificationsProvider]의 폴딩이 세션 null로 재계산되며 이 family를 놓아
+/// 구독이 해제되고, 재로그인은 새 인스턴스로 새로 구독한다.
+/// `_groupsByUserProvider`(my_groups_provider.dart)와 같은 수명 규약이다.
+final AutoDisposeStreamProviderFamily<List<GroupNotification>, String>
+    _notificationsByUserProvider = StreamProvider.autoDispose
+        .family<List<GroupNotification>, String>((ref, userId) {
   return ref.watch(shareRepositoryProvider).watchNotifications(userId);
 });
 
@@ -42,8 +51,14 @@ final notificationsProvider =
 });
 
 /// 특정 사용자의 알림 마지막 읽음 시각 스트림(내부용).
-final _notifReadAtByUserProvider =
-    StreamProvider.family<DateTime?, String>((ref, userId) {
+///
+/// **autoDispose다** — 근거는 [_notificationsByUserProvider]와 동일하다. 로그아웃 시
+/// [notificationsReadAtProvider]가 uid null로 재계산되며 이 family를 놓아 구독이
+/// 해제되고, 재로그인은 새 인스턴스로 새로 구독한다(keepAlive면 죽은 에러가 박제되어
+/// `valueOrNull` 폴딩이 영구히 null — 전부 안읽음 과대 표시가 앱 수명 동안 남는다).
+final AutoDisposeStreamProviderFamily<DateTime?, String>
+    _notifReadAtByUserProvider =
+    StreamProvider.autoDispose.family<DateTime?, String>((ref, userId) {
   return ref.watch(shareRepositoryProvider).watchNotificationsReadAt(userId);
 });
 
@@ -66,14 +81,21 @@ final notificationsReadAtProvider = Provider<DateTime?>((ref) {
 ///
 /// **기프티콘 원천도 대상이다.** [allNotificationsProvider]가 그 스트림의 에러로도 배너를
 /// 띄우므로 여기서 빼면 그 배너의 '다시 시도'가 아무것도 되살리지 못하는 막다른 길이 된다
-/// (`rawGifticonsProvider`는 autoDispose가 아니라 에러 상태가 앱 재시작 전까지 남는다).
+/// (`rawGifticonsProvider`는 keepAlive라 **같은 세션 안에서** 실패한 에러가 재시도 전까지
+/// 남는다 — 로그아웃은 uid select가 create를 재실행해 스스로 버린다. 그 파일 doc 참조).
+///
+/// 검사용 read는 [WidgetRef.exists]로 가드한다 — 근거(read가 살아 있지 않은 인스턴스를
+/// 만들어 실제 스트림을 구독; keepAlive인 rawGifticons는 그 낭비 구독이 영구 잔존)는
+/// 계약 훅 `MyGroupsRetry.retry`의 dartdoc(`my_groups_provider.dart`)이 정본이다.
 void retryNotifications(WidgetRef ref) {
   retrySessionIfFailed(ref);
   // 파생 축의 원천도 배너를 띄우므로 여기서 빠지면 그 배너가 막다른 길이 된다.
   // 세션과 무관한 최상위 provider라 uid 가드보다 앞에 둔다.
-  if (ref.read(rawGifticonsProvider).hasError) {
+  if (ref.exists(rawGifticonsProvider) &&
+      ref.read(rawGifticonsProvider).hasError) {
     ref.invalidate(rawGifticonsProvider);
   }
+  if (!ref.exists(sessionUserProvider)) return;
   final User? user = ref.read(sessionUserProvider).valueOrNull;
   // 세션이 null인 경우는 "알려진 user가 한 번도 없던" 상태뿐이다: 세션이 값을 가진 적이
   // 있으면 에러 전이도, 위 invalidate 직후의 로딩 전이도 copyWithPrevious로 값을
@@ -81,11 +103,15 @@ void retryNotifications(WidgetRef ref) {
   // 없었다면 하위 family 인스턴스도 만들어진 적이 없어 되살릴 대상 자체가 없다 —
   // 세션이 회복되면 하위가 함께 재구성된다.
   if (user == null) return;
-  if (ref.read(_notificationsByUserProvider(user.id)).hasError) {
-    ref.invalidate(_notificationsByUserProvider(user.id));
+  final AutoDisposeStreamProvider<List<GroupNotification>> notifs =
+      _notificationsByUserProvider(user.id);
+  if (ref.exists(notifs) && ref.read(notifs).hasError) {
+    ref.invalidate(notifs);
   }
-  if (ref.read(_notifReadAtByUserProvider(user.id)).hasError) {
-    ref.invalidate(_notifReadAtByUserProvider(user.id));
+  final AutoDisposeStreamProvider<DateTime?> readAt =
+      _notifReadAtByUserProvider(user.id);
+  if (ref.exists(readAt) && ref.read(readAt).hasError) {
+    ref.invalidate(readAt);
   }
 }
 

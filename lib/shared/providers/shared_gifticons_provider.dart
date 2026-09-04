@@ -38,8 +38,24 @@ import 'my_groups_provider.dart';
 import 'repositories.dart';
 
 /// 특정 그룹의 공유 기프티콘 스트림.
-final sharedGifticonsProvider =
-    StreamProvider.family<List<SharedGifticon>, String>((ref, groupId) {
+///
+/// **autoDispose다** — keepAlive면 로그아웃이 이 family를 죽인 채 박제한다. 로그아웃
+/// 순간 살아 있는 백엔드 리스너는 인증 없는 재평가에서 permission-denied로 종료되는데,
+/// keepAlive는 그 에러를 앱 수명 동안 캐시하므로 같은 계정으로 재로그인해도 재구독이
+/// 없다(공유 목록·상세·시트가 배너에 영구히 머문다 —
+/// `_groupsByUserProvider`(my_groups_provider.dart)와 같은 수명 규약으로 전환).
+/// autoDispose면 로그아웃 시 [myGroupsProvider]가 빈 목록으로 재계산되며 keepAlive
+/// 파생들([allSharedProvider] 등)이 그룹별 인스턴스를 놓아 구독이 해제되고, 재로그인은
+/// 새 인스턴스로 새로 구독한다. **탈퇴한 그룹의 스테일 인스턴스**도 같은 기전으로
+/// 정리된다 — 그룹 목록에서 빠지는 순간 파생들이 놓아 비멤버 구독(permission-denied)이
+/// 잔존하지 않는다(keepAlive 시절에는 앱 수명 동안 남았다).
+///
+/// 살아 있는 동안의 에러 캐시는 그대로다 — 소비자(화면·keepAlive 파생)가 인스턴스를
+/// 붙잡고 있는 한 [StreamProvider]는 스스로 재구독하지 않으므로, 수동 재시도 훅
+/// ([retryFailedSharedGifticonStreams] 등)은 여전히 필요하다.
+final AutoDisposeStreamProviderFamily<List<SharedGifticon>, String>
+    sharedGifticonsProvider = StreamProvider.autoDispose
+        .family<List<SharedGifticon>, String>((ref, groupId) {
   return ref.watch(shareRepositoryProvider).watchSharedGifticons(groupId);
 });
 
@@ -68,27 +84,21 @@ final allSharedProvider = Provider<List<SharedGifticon>>((ref) {
 /// 그룹 목록과 그룹별 공유 스트림이 **모두** 값을 낸 뒤에만 [AsyncData]가 된다. 하나라도
 /// 로딩이면 [AsyncLoading], 에러면 그 에러를 전파한다(파일 상단 fail-closed 절 참조).
 ///
-/// ## 수명 = autoDispose (의도) — **다만 절반만 놓아준다**
+/// ## 수명 = autoDispose (의도)
 /// 주 소비자인 기프티콘 상세는 **일회성 플로우**다 — 카드를 눌러 바코드를 보고 닫는다.
 /// keepAlive로 두면 이 provider가 [myGroupsProvider]를 붙잡아 `watchGroups` 구독이 앱
 /// 수명 동안 잔존한다. 그것이 정확히 [myGroupsProvider]가 `autoDispose`인 이유이고
 /// (그 파일의 "수명 설계 근거" 1항 — scan을 예로 든 같은 함정), 상세는 scan보다 훨씬 자주
 /// 열린다. 그래서 이쪽도 `autoDispose`로 둔다.
 ///
-/// ⚠️ **놓아주는 것은 [myGroupsProvider] 축뿐이다.** 이 provider가 그룹마다 `watch`하는
-/// [sharedGifticonsProvider]는 `autoDispose`가 아닌 family라, 한 번 만들어진 인스턴스는
-/// 리스너가 모두 떨어져도 스스로 dispose되지 않는다 — 즉 **상세를 한 번 열면 그룹 수만큼의
-/// `watchSharedGifticons` 리스너는 앱이 끝날 때까지 남는다.** 여기서 `autoDispose`가 그것까지
-/// 막아 준다고 읽지 말 것(주석이 실제보다 앞서가면 다음 사람이 다시 확인하지 않는다).
-///
-/// 그 축을 정말 닫으려면 [sharedGifticonsProvider] 자체를 `autoDispose`로 바꿔야 하는데,
-/// share 도메인이 **non-autoDispose임을 전제로** 짜여 있어(예:
-/// [retryFailedSharedGifticonStreams]의 "탈퇴한 그룹의 스테일 인스턴스" 주석,
-/// `test/features/share/share_error_ui_test.dart`의 재시도 고정) 이 파일만 고쳐서 될 일이
-/// 아니다. share 재검증을 포함한 별건으로 다룬다.
-///
-/// share 탭 자체의 체감 수명은 승격 전과 같다 — 그 페이지의 keepAlive 파생들이 정본을
-/// 계속 붙잡는다.
+/// 그룹별 축도 이제 소비자가 놓으면 해제된다 — [sharedGifticonsProvider]가 `autoDispose`로
+/// 전환되어(그 dartdoc 참조 — 로그아웃 박제 결함 수정) 한때 이 절이 "절반만 놓아준다"고
+/// 경고했던 잔존 축의 기전이 닫혔다. ⚠️ 다만 **실제 앱에서 해제 시점은 상세 닫기가
+/// 아니라 로그아웃·멤버십 변화다**: 앱 셸의 `IndexedStack`이 첫 프레임에 SharePage를
+/// 빌드하고 그 화면이 [allSharedProvider] 등 keepAlive 파생을 watch하므로, 로그인 중에는
+/// 그룹별 인스턴스가 계속 붙잡혀 있다(그래서 상세를 여닫아도 재구독 churn이 없고, 리스너
+/// 수 예산도 로그인 세션 기준으로 잡아야 한다). 이 전환이 실질적으로 바꾼 것은
+/// "앱 수명 잔존 → 로그아웃 시 해제"다.
 final sharedGifticonIdsProvider =
     Provider.autoDispose<AsyncValue<Set<String>>>((ref) {
   final AsyncValue<List<Group>> groupsAsync = ref.watch(myGroupsProvider);
@@ -126,16 +136,24 @@ final sharedGifticonIdsProvider =
 
 /// 에러인 그룹별 공유 스트림 인스턴스만 재구독한다(내 **현재** 그룹 범위).
 ///
-/// family 전체 invalidate를 쓰지 않는 이유 둘: ① 실패하지 않은 그룹의 Firestore 리스너까지
-/// 재시작돼 문서 읽기·과금이 그룹 수만큼 늘고(재시도가 필요한 건 에러 인스턴스뿐이다),
-/// ② non-autoDispose family라 탈퇴한 그룹의 스테일 인스턴스도 재실행돼 비멤버 구독
-/// (permission-denied)을 되살린다.
+/// family 전체 invalidate를 쓰지 않는 이유: 실패하지 않은 그룹의 Firestore 리스너까지
+/// 재시작돼 문서 읽기·과금이 그룹 수만큼 늘어난다(재시도가 필요한 건 에러 인스턴스뿐이다).
+/// 한때는 "탈퇴한 그룹의 스테일 인스턴스 재실행"도 근거였지만, family가 `autoDispose`로
+/// 전환되며 스테일 인스턴스는 소비자가 놓는 순간 스스로 정리된다.
+///
+/// 검사용 read는 [WidgetRef.exists]로 가드한다 — 근거(read가 살아 있지 않은
+/// autoDispose 인스턴스를 만들어 실제 스트림을 구독)는 계약 훅 `MyGroupsRetry.retry`의
+/// dartdoc(`my_groups_provider.dart`)이 정본이다. 그룹 목록 read도 같은 이유로
+/// 가드한다([myGroupsProvider]도 autoDispose — 미마운트면 되살릴 하위 인스턴스도 없다).
 void retryFailedSharedGifticonStreams(WidgetRef ref) {
+  if (!ref.exists(myGroupsProvider)) return;
   final List<Group> groups =
       ref.read(myGroupsProvider).valueOrNull ?? const <Group>[];
   for (final Group g in groups) {
-    if (ref.read(sharedGifticonsProvider(g.id)).hasError) {
-      ref.invalidate(sharedGifticonsProvider(g.id));
+    final AutoDisposeStreamProvider<List<SharedGifticon>> perGroup =
+        sharedGifticonsProvider(g.id);
+    if (ref.exists(perGroup) && ref.read(perGroup).hasError) {
+      ref.invalidate(perGroup);
     }
   }
 }
@@ -148,9 +166,10 @@ void retryFailedSharedGifticonStreams(WidgetRef ref) {
 ///
 /// ## 왜 이 훅이 반드시 있어야 하는가
 /// [sharedGifticonIdsProvider]는 fail-closed다 — 확정 전에는 소비자가 액션을 막는다. 그런데
-/// [StreamProvider]는 스스로 재구독하지 않고 [sharedGifticonsProvider]는 non-autoDispose라,
-/// **콜드 스타트에서 한 번 실패하면 그 에러가 캐시된 채 남는다.** 재시도 경로가 없으면
-/// 통신이 회복돼도 앱을 껐다 켜기 전까지 액션이 영구히 막힌다.
+/// [StreamProvider]는 스스로 재구독하지 않으므로, **화면이 보고 있는 동안 실패한 에러는
+/// 캐시된 채 남는다**(autoDispose는 소비자가 모두 떠난 뒤에야 정리한다 — 화면 위에서의
+/// 회복 경로는 아니다). 재시도 경로가 없으면 통신이 회복돼도 화면을 완전히 벗어났다
+/// 돌아오기 전까지 액션이 막힌다.
 ///
 /// ## ⚠️ 사용자 액션에서만 호출할 것 (자동 재시도 금지 — #13)
 /// `build`/`listen`에서 에러를 감지해 자동으로 부르면 장애 중 모든 화면이 동시에

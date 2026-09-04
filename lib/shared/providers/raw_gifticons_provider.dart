@@ -48,6 +48,14 @@ import 'session_provider.dart';
 /// 인 것도 그대로다(#13 규약): `.value`는 이전 값이 없는 [AsyncError]에서 rethrow하고,
 /// `valueOrNull`은 순단 에러가 `copyWithPrevious`로 보존한 이전 사용자를 돌려주므로
 /// **세션이 잠깐 끊겨도 목록이 사라지지 않는다**.
+///
+/// **keepAlive는 의도다** — 사용자별 스트림 family들이 로그아웃 박제 결함으로
+/// `autoDispose`로 전환됐지만(`shared_gifticons_provider.dart` 등), 이 provider는
+/// family가 아니라 **uid를 select로 watch하는 단일 provider**라 로그아웃이 create를
+/// 재실행해 죽은 에러를 스스로 버린다(같은 결함이 성립하지 않는다). 게다가 위젯 밖
+/// 소비자(`expiry_notification_sync` — 만료 알림 예약 재계산)가 warm 상태를 전제하므로,
+/// "일관성"을 이유로 autoDispose로 바꾸면 그 예약 갱신이 끊긴다. 같은 세션 안의 순단
+/// 에러는 `retryNotifications`가 되살린다.
 final rawGifticonsProvider = StreamProvider<List<Gifticon>>((ref) {
   final String? uid = ref.watch(
     sessionUserProvider.select((AsyncValue<User?> s) => s.valueOrNull?.id),

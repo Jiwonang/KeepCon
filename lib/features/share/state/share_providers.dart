@@ -91,8 +91,17 @@ final sharedItemByIdProvider =
 });
 
 /// 특정 사용자의 사용 이력 스트림(내부용).
-final _usageLogsByUserProvider =
-    StreamProvider.family<List<UsageLog>, String>((ref, userId) {
+///
+/// **autoDispose다** — keepAlive면 로그아웃이 이 provider를 죽인 채 박제한다.
+/// 로그아웃 순간 살아 있는 백엔드 리스너는 인증 없는 재평가에서 permission-denied로
+/// 종료되는데, keepAlive는 그 에러를 앱 수명 동안 캐시하므로 같은 계정으로 재로그인해도
+/// 재구독이 없다(사용 이력 화면이 "불러오지 못했어요"에 영구히 머문다). autoDispose면
+/// 로그아웃 시 [usageLogsProvider]의 폴딩이 세션 null로 재계산되며 이 family를 놓아
+/// 구독이 해제되고, 재로그인은 새 인스턴스로 새로 구독한다.
+/// `_groupsByUserProvider`(my_groups_provider.dart)와 같은 수명 규약이다.
+final AutoDisposeStreamProviderFamily<List<UsageLog>, String>
+    _usageLogsByUserProvider =
+    StreamProvider.autoDispose.family<List<UsageLog>, String>((ref, userId) {
   return ref.watch(shareRepositoryProvider).watchUsageLogs(userId);
 });
 
@@ -114,8 +123,14 @@ final usageLogsProvider = Provider<AsyncValue<List<UsageLog>>>((ref) {
 // 뒤 소비처가 정본을 직수입한다(#13 규약).
 
 /// 특정 사용자의 원본 기프티콘 스트림(내부용).
-final _gifticonsByUserProvider =
-    StreamProvider.family<List<Gifticon>, String>((ref, userId) {
+///
+/// **autoDispose다** — 근거는 [_usageLogsByUserProvider]와 동일하다(keepAlive면
+/// 로그아웃의 죽은 permission-denied 에러가 박제되어 재로그인 후에도 공유 시트가
+/// 영구히 배너에 머문다). 로그아웃 시 [shareableGifticonsProvider]의 폴딩이 이
+/// family를 놓아 구독이 해제되고, 재로그인은 새 인스턴스로 새로 구독한다.
+final AutoDisposeStreamProviderFamily<List<Gifticon>, String>
+    _gifticonsByUserProvider =
+    StreamProvider.autoDispose.family<List<Gifticon>, String>((ref, userId) {
   return ref.watch(gifticonRepositoryProvider).watchGifticons(userId);
 });
 
@@ -255,12 +270,20 @@ final shareCandidatesHaveErrorProvider = Provider<bool>((ref) {
 // `retryMyGroups`·`retryFailedSharedGifticonStreams`와 같은 배치다.
 
 /// 사용 이력 스트림 수동 재시도(에러일 때만 재구독 — `retryNotifications`와 같은 원칙).
+///
+/// 검사용 read는 [WidgetRef.exists]로 가드한다 — 근거(read가 살아 있지 않은
+/// autoDispose 인스턴스를 만들어 실제 스트림을 구독)는 계약 훅 `MyGroupsRetry.retry`의
+/// dartdoc(`my_groups_provider.dart`)이 정본이다. 세션 read도 같은 이유로 가드한다
+/// ([retrySessionIfFailed]의 내부 가드는 자기 자신만 빠져나올 뿐이다).
 void retryUsageLogs(WidgetRef ref) {
   retrySessionIfFailed(ref);
+  if (!ref.exists(sessionUserProvider)) return;
   final User? user = ref.read(sessionUserProvider).valueOrNull;
   if (user == null) return;
-  if (ref.read(_usageLogsByUserProvider(user.id)).hasError) {
-    ref.invalidate(_usageLogsByUserProvider(user.id));
+  final AutoDisposeStreamProvider<List<UsageLog>> logs =
+      _usageLogsByUserProvider(user.id);
+  if (ref.exists(logs) && ref.read(logs).hasError) {
+    ref.invalidate(logs);
   }
 }
 
@@ -271,6 +294,12 @@ void retryUsageLogs(WidgetRef ref) {
 /// 없으면(share 메인·공유 상세처럼 전 그룹을 합쳐 보는 화면) **에러인 인스턴스만**
 /// 골라 재구독한다 — 합쳐 보는 화면이라도 재시도가 필요한 건 실패한 스트림뿐이다
 /// ([retryFailedSharedGifticonStreams]의 근거 참조).
+///
+/// groupId 경로의 invalidate는 인스턴스가 **살아 있을 때만** 실제로 재구독한다 —
+/// riverpod의 invalidate는 없는 인스턴스에 no-op이고, autoDispose 전환 후 미마운트
+/// 인스턴스에는 캐시된 에러 자체가 없으므로(다음 watch가 새로 구독) 이 no-op은
+/// 의미상 무해하다. 다만 "항상 재구독"으로 읽지 말 것 — 그 그룹을 watch 중인
+/// 화면(현재 유일 호출처인 그룹 상세)에서 부르는 것이 전제다.
 void retrySharedGifticons(WidgetRef ref, {String? groupId}) {
   retrySessionIfFailed(ref);
   if (groupId != null) {
@@ -306,9 +335,14 @@ void retryShareCandidates(WidgetRef ref) {
   // 재시도도 lookup 재시도를 **합성**한다 — 감지와 재시도가 1:1로 대응해, lookup
   // 축에 계층이 추가될 때 한쪽만 갱신되는 비대칭이 생기지 않는다.
   retrySharedItemLookup(ref);
+  // 검사용 read의 exists 가드 근거(세션 포함)는 [retryUsageLogs] 참조.
+  if (!ref.exists(sessionUserProvider)) return;
   final User? user = ref.read(sessionUserProvider).valueOrNull;
-  if (user != null && ref.read(_gifticonsByUserProvider(user.id)).hasError) {
-    ref.invalidate(_gifticonsByUserProvider(user.id));
+  if (user == null) return;
+  final AutoDisposeStreamProvider<List<Gifticon>> mine =
+      _gifticonsByUserProvider(user.id);
+  if (ref.exists(mine) && ref.read(mine).hasError) {
+    ref.invalidate(mine);
   }
 }
 
