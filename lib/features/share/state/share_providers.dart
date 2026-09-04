@@ -373,8 +373,17 @@ final scanTargetGroupsProvider = Provider<List<Group>>((ref) {
 //    일반 멤버에게도 열지 않는다(아직 멤버가 아닌 사람들의 이름이다 — 계약 참조).
 
 /// 특정 사용자가 보낸 참여 요청 스트림(내부용).
-final _myJoinRequestsByUserProvider =
-    StreamProvider.family<List<JoinRequest>, String>((ref, userId) {
+///
+/// **autoDispose다** — keepAlive면 로그아웃이 이 provider를 죽인 채 박제한다.
+/// 로그아웃 순간 살아 있는 Firestore 리스너는 인증 없는 재평가에서 permission-denied로
+/// 종료되는데, keepAlive는 그 에러를 앱 수명 동안 캐시하므로 **같은 계정으로 재로그인해도
+/// 재구독이 없다**(요청자의 '내 참여 요청' 카드가 영구히 에러로 남는다 — 실측 재현).
+/// autoDispose면 로그아웃 시 [joinRequestsProvider]의 폴딩이 세션 null로 재계산되며
+/// 이 family를 놓아 구독이 해제되고, 재로그인은 새 인스턴스로 새로 구독한다.
+/// `_groupsByUserProvider`(my_groups_provider.dart)와 같은 수명 규약이다.
+final AutoDisposeStreamProviderFamily<List<JoinRequest>, String>
+    _myJoinRequestsByUserProvider =
+    StreamProvider.autoDispose.family<List<JoinRequest>, String>((ref, userId) {
   return ref.watch(shareRepositoryProvider).watchMyJoinRequests(userId);
 });
 
@@ -395,7 +404,16 @@ final joinRequestsProvider = Provider<AsyncValue<List<JoinRequest>>>((ref) {
 /// 방장에게 "요청이 도착했다"를 알리는 신호는 **이 스트림 하나**다 — 알림 문서로 알리려면
 /// 비멤버가 `notifications`에 써야 하는데 규칙이 막는다(계약 참조). 화면은 이 스트림의
 /// 길이로 배지를 그린다.
-final pendingJoinRequestsProvider =
-    StreamProvider.family<List<JoinRequest>, String>((ref, groupId) {
+///
+/// **autoDispose다** — keepAlive면 방장이 그룹 상세를 한 번 연 뒤 로그아웃하는 순간
+/// 리스너가 permission-denied로 죽고 그 에러가 박제되어, 재로그인한 방장에게 이후의
+/// 참여 요청이 **영영 보이지 않는다**(같은 기기에서 방장→요청자→방장 순으로 계정을
+/// 바꾸는 시연이 정확히 이 경로다 — 실측 재현). 이 스트림이 유일한 도착 신호이므로
+/// 박제는 곧 승인 불능이다. autoDispose면 화면 이탈·로그아웃(AuthGate 트리 교체)으로
+/// 위젯이 내려갈 때 구독이 해제되고, 다음 진입은 새로 구독한다(위 내부용 family와
+/// 같은 수명 규약).
+final AutoDisposeStreamProviderFamily<List<JoinRequest>, String>
+    pendingJoinRequestsProvider =
+    StreamProvider.autoDispose.family<List<JoinRequest>, String>((ref, groupId) {
   return ref.watch(shareRepositoryProvider).watchPendingJoinRequests(groupId);
 });
