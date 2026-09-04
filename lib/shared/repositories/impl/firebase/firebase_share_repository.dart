@@ -666,45 +666,23 @@ class FirebaseShareRepository implements ShareRepository {
     final DocumentReference<Map<String, dynamic>> ref =
         _joinRequests.doc(_joinRequestId(groupId, me.id));
 
-    // 존재 확인(멱등성 판정)은 일반 읽기로 하되 **서버를 강제**하고, 권한 거부를
-    // "아직 없음"으로 해석한다.
+    // 존재 확인(멱등성 판정) — 읽기 규약은 [_readJoinRequestDocOrNull] 한 벌이고,
+    // 여기서는 그 `null`(권한 거부)을 "아직 없음"으로 소비한다.
     //
-    // 예전에는 이 확인이 트랜잭션 안의 읽기였다. 그런데 `joinRequests` 읽기 규칙은
-    // `resource.data`를 참조하므로 **없는 문서에서는 평가가 오류(=거부)로 죽고**
-    // (존재 오라클을 막으려고 의도적으로 남긴 403 — `tool/verify_firestore_rules.sh`의
-    // "없는 요청 문서 조회 → 403"이 그 규약을 못박는다), 트랜잭션은 읽기 하나가
-    // 거부되면 통째로 죽는다 — 규칙이 있는 백엔드에서 **첫 요청이 항상 실패**했다
-    // (2026-09-03 dev 실측). 그래서 트랜잭션을 걷어냈다.
-    //
-    // `Source.server`는 트랜잭션 읽기가 갖던 서버-신선 보장을 승계한다. 기본
-    // `serverAndCache`로 두면 오프라인에서 예외 대신 **캐시**가 답해 판정이 뒤집힌다
-    // — 캐시가 비면 살아 있는 대기 요청을 '없음'으로 읽어 덮어쓰고(`requestedAt`
-    // 초기화), 캐시에 낡은 pending이 남았으면 거절 뒤 재요청이 아무것도 쓰지 않은 채
-    // "대기 중"으로 끝난다. 서버 강제면 오프라인은 예외로 떨어져 아래 rethrow를
-    // 타고, 화면이 곧바로 실패를 안내한다(트랜잭션 시절의 빠른 실패와 같은 모양).
-    // ⚠️ 다만 그 빠른 실패는 **읽기 시점의 오프라인**만 닫는다 — 이 읽기가 성공한
-    //    뒤 연결이 끊기면 아래 `set`은 로컬 큐에 들어가고 Future는 서버 ack까지
-    //    끝나지 않는다(flutterfire #17643). 그 창은 쓰기 쪽 타임아웃이 닫는다.
-    // 판정용 일회성 읽기에 서버를 강제하는 것은 이 저장소의 기존 규약이다
-    // (`firebase_bootstrap.dart`의 도달성 검사 — "캐시로 성공한 척하는 것을 막는다").
-    //
-    // 거부를 "없음"으로 읽어도 안전한 이유: 생성·변경 규칙이 문서 id 규약
-    // (`{groupId}_{uid}`)과 `userId` 불변을 강제하므로, 규칙을 거쳐 만들어진 문서는
-    // 언제나 내 것이고 내 문서의 읽기는 허용된다. (규칙을 우회해 심긴 손상 문서는
-    // 이 대칭 밖이지만, 그때는 뒤이은 쓰기도 같은 이유로 거부되므로 조용히
-    // 잘못되지는 않는다.) [_dropJoinRequest]가 같은 규약으로 거부를 정상 종료로
-    // 삼는다.
-    JoinRequest? existing;
-    try {
-      // 없는 문서는 매퍼가 null로 접는다(`data()`가 null → 필수 필드 결측).
-      existing = _joinRequestFromDocOrNull(
-        await ref.get(const GetOptions(source: Source.server)),
-      );
-    } on FirebaseException catch (e) {
-      // 다른 실패(네트워크 등)를 "없음"으로 읽으면 살아 있는 대기 요청을 덮어써
-      // `requestedAt`이 초기화된다 — 권한 거부만 흡수한다.
-      if (e.code != 'permission-denied') rethrow;
-    }
+    // 예전에는 이 확인이 트랜잭션 안의 읽기였고, 없는 문서의 반오라클 403(공용 읽기
+    // 머리말 참조)에 걸려 규칙 있는 백엔드에서 **첫 요청이 항상 실패**했다
+    // (2026-09-03 dev 실측 — 여기는 문서 없음이 **정상 경로**다). 그래서 트랜잭션을
+    // 걷어냈다. 서버 강제가 아니면 캐시가 판정을 뒤집는다 — 캐시가 비면 살아 있는
+    // 대기 요청을 덮어써 `requestedAt`이 초기화되고, 낡은 pending이 남았으면 거절 뒤
+    // 재요청이 아무것도 쓰지 않은 채 "대기 중"으로 끝난다.
+    // ⚠️ 읽기 성공 뒤 연결이 끊기면 아래 `set`은 로컬 큐에 들어가고 Future는 서버
+    //    ack까지 끝나지 않는다(flutterfire #17643) — 그 창은 아래 쓰기 타임아웃이
+    //    닫는다.
+    final DocumentSnapshot<Map<String, dynamic>>? snap =
+        await _readJoinRequestDocOrNull(ref);
+    // 없는 문서는 매퍼가 null로 접는다(`data()`가 null → 필수 필드 결측).
+    final JoinRequest? existing =
+        snap == null ? null : _joinRequestFromDocOrNull(snap);
     if (existing != null && existing.isPending) {
       return existing; // 멱등 — 같은 링크를 두 번 눌러도 요청이 쌓이지 않는다.
     }
@@ -778,16 +756,67 @@ class FirebaseShareRepository implements ShareRepository {
       .where('status', isEqualTo: JoinRequestStatus.pending.name)
       .orderBy('requestedAt');
 
-  /// 승인·거절·취소가 본론(트랜잭션·삭제)에 들어가기 **전에** 요청 문서를 서버에서
-  /// 읽고, 없으면 계약의 [StateError]("Join request not found")로 던진다.
+  /// 요청 문서를 서버에서 읽되, **권한 거부만** `null`로 접는다(그 외는 rethrow).
   ///
-  /// ## 왜 본론의 읽기만으로는 안 되는가 (경합 경로)
+  /// 첫 요청([requestToJoin]의 멱등성 판정)과 승인·거절·취소의 사전 확인
+  /// ([_requireJoinRequestDoc])이 이 읽기 한 벌을 쓴다 — #161과 #162가 같은 규약을
+  /// 각자 구현했던 것을 여기로 모았다(두 벌이면 한쪽만 고쳐져 조용히 갈라진다).
+  /// **종착만 다르다**: requestToJoin은 `null`을 "아직 없음"으로 소비하고,
+  /// _requireJoinRequestDoc은 [JoinRequestUnreadableException]으로 올린다.
+  ///
+  /// ## 왜 거부가 "없음"인가 (반오라클 403)
   ///
   /// `joinRequests` 읽기 규칙은 `resource.data`를 참조하므로 **없는 문서에서는 평가가
   /// 오류(=거부)로 죽는다** — 존재 오라클을 막으려고 의도적으로 남긴 403이고,
   /// `tool/verify_firestore_rules.sh`의 "없는 요청 문서 조회 → 403"이 그 규약을
-  /// 못박는다. 그래서 요청자가 취소한 직후 방장이 승인/거절하거나 그룹 삭제
-  /// 캐스케이드 직후 취소하는 **경합**에서, 규칙 있는 백엔드는 계약이 약속한
+  /// 못박는다.
+  ///
+  /// ## 거부를 "없음"으로 읽어도 안전한 이유
+  ///
+  /// 읽기 규칙은 요청자 본인과 그 그룹의 방장에게만 열려 있다. 요청자 쪽 대칭은
+  /// 생성·변경 규칙이 담보한다 — 문서 id 규약(`{groupId}_{uid}`)과 `userId` 불변을
+  /// 강제하므로 이 id에 존재하는 문서는 언제나 내 것이고, 내 문서의 읽기는 허용된다.
+  /// 그래서 정당한 행위자(첫 요청·취소하는 요청자, 결정하는 방장)의 읽기가 거부되는
+  /// 경우는 문서가 없을 때뿐이다. 제3자의 읽기도 같은 403으로 "없음"이 되지만, 그쪽에
+  /// 존재 여부를 구별해 주는 것이야말로 규칙의 반(反)오라클 규약을 저장소가 되뚫는
+  /// 일이다 — 행위 가드는 어차피 규칙과 각 본론이 막는다. (그룹이 먼저 소멸해
+  /// `isGroupOwner`가 죽은 **고아 요청**도 방장에게 같은 403인데, 그 상태에서 해 줄 수
+  /// 있는 것이 없어 다음 행동은 같다. 규칙을 **우회해** 심긴 손상 문서는 이 대칭
+  /// 밖이지만, 그때는 뒤이은 쓰기도 같은 이유로 거부되므로 조용히 잘못되지는 않는다
+  /// — 이 읽기 쪽 안전 논거는 쓰기 규칙의 그 별도 보증에 기대고 있다.)
+  ///
+  /// ## `Source.server`
+  ///
+  /// 판정용 일회성 읽기는 서버를 강제한다(`firebase_bootstrap.dart`의 도달성 검사·
+  /// `firebase_auth_repository.dart`의 플랜 조회와 같은 규약 — "캐시로 성공한 척하는
+  /// 것을 막는다"). 기본 `serverAndCache`는 오프라인에서 캐시가 답해 판정이 뒤집힌다
+  /// — 지워진 문서를 "있음"으로 읽고 본론에서 죽거나, 살아 있는 대기 요청을
+  /// "없음"으로 읽어 덮어쓴다(`requestedAt` 초기화). 서버 강제면 오프라인은 즉시
+  /// unavailable로 떨어져(rethrow) 화면이 실패를 안내한다.
+  /// ⚠️ 이것이 닫는 것은 **읽기 시점의** 단절뿐이다 — 읽기 성공 뒤의 쓰기 단절 창은
+  /// 각 호출자의 쓰기 상한이 닫는다([requestToJoin]의 `set`·[cancelJoinRequest]의
+  /// `delete` 15초, 승인·거절은 `runTransaction` 기본 30초).
+  Future<DocumentSnapshot<Map<String, dynamic>>?> _readJoinRequestDocOrNull(
+      DocumentReference<Map<String, dynamic>> ref) async {
+    try {
+      return await ref.get(const GetOptions(source: Source.server));
+    } on FirebaseException catch (e) {
+      // 다른 실패(unavailable 등)까지 "없음"으로 읽으면 일시적 네트워크 문제가
+      // "요청이 사라졌다/아직 없다"는 오진이 된다 — 권한 거부만 없음의 신호다.
+      if (e.code != 'permission-denied') rethrow;
+      return null;
+    }
+  }
+
+  /// 승인·거절·취소가 본론(트랜잭션·삭제)에 들어가기 **전에** 요청 문서를 서버에서
+  /// 읽고([_readJoinRequestDocOrNull]), 없으면 계약의 [StateError]("Join request not
+  /// found")로 던진다.
+  ///
+  /// ## 왜 본론의 읽기만으로는 안 되는가 (경합 경로)
+  ///
+  /// 없는 문서의 읽기는 반오라클 403으로 죽는다([_readJoinRequestDocOrNull] 머리말이
+  /// 정본 — 여기 다시 적지 않는다). 그래서 요청자가 취소한 직후 방장이 승인/거절하거나
+  /// 그룹 삭제 캐스케이드 직후 취소하는 **경합**에서, 규칙 있는 백엔드는 계약이 약속한
   /// [StateError] 대신 `FirebaseException(permission-denied)`을 UI까지 올려보냈다
   /// ([requestToJoin]의 "첫 요청" 결함과 같은 뿌리 — 거기는 문서 없음이 정상 경로,
   /// 여기는 경합 한정이라는 점만 다르다).
@@ -799,35 +828,12 @@ class FirebaseShareRepository implements ShareRepository {
   /// 다 쓴다 — 존재 확인을 트랜잭션 밖 **단일 읽기**로 빼는 것(이 함수)과, 트랜잭션
   /// **안의 호출 지점 하나**에만 catch를 붙이는 것([_txGetJoinRequest]).
   /// ⚠️ 그래서 이 함수가 승인·거절에 남는 이유는 좁힘이 **아니다**(그쪽은
-  /// [_txGetJoinRequest]가 이미 덮는다) — 아래 `Source.server` 절의 **오프라인 빠른
-  /// 실패**다. 취소에는 좁힘·빠른 실패에 더해 `userId` 소유권 판정까지 여기서 한다.
-  ///
-  /// ## 거부를 "없음"으로 읽어도 안전한 이유
-  ///
-  /// 읽기 규칙은 요청자 본인과 그 그룹의 방장에게만 열려 있으므로, 정당한 행위자
-  /// (자기 요청을 거두는 요청자, 자기 그룹의 요청을 결정하는 방장)의 읽기가 거부되는
-  /// 경우는 문서가 없을 때뿐이다. 제3자의 읽기도 같은 403으로 떨어져 "없음"으로
-  /// 안내되지만, 그쪽에 존재 여부를 구별해 주는 것이야말로 규칙이 지키는 반(反)오라클
-  /// 규약을 저장소가 되뚫는 일이다 — 행위 가드는 어차피 규칙과 본론이 막는다.
-  /// (한 가지 더 접히는 상태: 그룹이 먼저 소멸해 방장 판정(`isGroupOwner`)이 죽은
-  /// **고아 요청**도 방장에게는 같은 403이다. 그 상태에서 승인·거절이 해 줄 수 있는
-  /// 것도 없으므로 "없음"으로 안내해도 다음 행동은 같다.)
-  ///
-  /// ## `Source.server`
-  ///
-  /// 판정용 일회성 읽기는 서버를 강제한다(`firebase_bootstrap.dart`의 도달성 검사·
-  /// `firebase_auth_repository.dart`의 플랜 조회와 같은 규약 — "캐시로 성공한 척하는
-  /// 것을 막는다"). 기본 `serverAndCache`는 오프라인에서 캐시가 답해, 이미 지워진
-  /// 문서를 "있음"으로 읽고 본론에 들어갔다가 더 낮은 곳에서 죽는다. 오프라인
-  /// 트레이드오프는 의도된 것이다 — 취소의 옛 코드(기본 소스 get)는 오프라인에서
-  /// 캐시로 존재 확인을 통과한 뒤 `delete`가 서버 확인을 영원히 기다려 **버튼이 잠긴
-  /// 채 아무 안내가 없었다.** 서버 강제면 즉시 unavailable로 떨어져 화면이 "다시
-  /// 시도해 주세요"를 안내한다(빠른 실패).
-  ///
-  /// ⚠️ 이것이 닫는 것은 **읽기 시점의** 단절뿐이다. 읽기가 성공한 **뒤** 끊기는
-  /// 창은 각 본론의 쓰기가 따로 닫는다 — 승인·거절은 `runTransaction`의 기본 30초
-  /// 상한이, 취소의 `delete`는 [cancelJoinRequest]의 명시적 타임아웃이
-  /// ([requestToJoin]의 쓰기와 같은 규약).
+  /// [_txGetJoinRequest]가 이미 덮는다) — **오프라인 빠른 실패**다. 서버 강제 읽기가
+  /// 없으면 오프라인의 승인·거절이 `runTransaction`의 30초 상한까지 매달리고, 취소의
+  /// 옛 코드(기본 소스 get)는 캐시로 존재 확인을 통과한 뒤 `delete`가 서버 확인을
+  /// 영원히 기다려 **버튼이 잠긴 채 아무 안내가 없었다.** 취소에는 좁힘·빠른 실패에
+  /// 더해 `userId` 소유권 판정까지 여기서 한다. (거부="없음"의 안전 근거와
+  /// `Source.server` 규약은 [_readJoinRequestDocOrNull]에 있다.)
   ///
   /// 잔여 창: 이 확인과 본론 사이에 문서가 지워지는 극히 짧은 경합은 남는다 — 그쪽은
   /// 본론의 **요청 문서 접근 한 곳에만** 붙인 같은 번역이 받는다(승인·거절은
@@ -836,27 +842,27 @@ class FirebaseShareRepository implements ShareRepository {
   /// 번역할 때의 오진(그룹 읽기·쓰기 거부를 "요청 없음"으로 읽는 것)이 없다. 그룹
   /// 접근의 거부는 그대로 [FirebaseException]으로 올라간다.
   ///
-  /// ⚠️ "흡수한 거부를 [JoinRequestUnreadableException]으로 흔적 남기기"는 이 파일의
-  /// `permission-denied` 흡수 6곳 중 **3곳**에 적용돼 있다 — 여기, [_txGetJoinRequest],
-  /// [cancelJoinRequest]의 delete(요청 문서를 만지는 세 곳). 나머지 3곳은 흔적이 없다:
-  /// [_dropJoinRequest]는 예외 없이 정상 종료라 완전 무음이고, [requestToJoin]의 두
-  /// 흡수는 후속 쓰기가 부분적 신호를 남길 뿐 타입 흔적이 없다. 전면 적용은 별도
-  /// 작업(저장소→진단 방향 import 순환을 피하는 구조가 필요하다).
+  /// ⚠️ "흡수한 거부를 [JoinRequestUnreadableException]으로 흔적 남기기" 현황 —
+  /// `permission-denied`를 접는 catch는 이 파일에 5곳이다: 공용 읽기
+  /// ([_readJoinRequestDocOrNull])·[_txGetJoinRequest]·[cancelJoinRequest]의 delete·
+  /// [requestToJoin]의 멤버십 판정·[_dropJoinRequest]. **타입 흔적이 남는 것은 요청
+  /// 문서를 만지는 세 경로다** — 이 함수(공용 읽기의 `null`을 예외로 올림)·
+  /// [_txGetJoinRequest]·취소의 delete. 나머지는 흔적이 없다: [requestToJoin]은 같은
+  /// 공용 읽기의 `null`을 "아직 없음"으로 소비하고(후속 쓰기가 부분적 신호), 멤버십
+  /// 판정은 분기만 바꾸며, [_dropJoinRequest]는 예외 없이 정상 종료라 완전 무음이다.
+  /// 전면 적용은 별도 작업(저장소→진단 방향 import 순환을 피하는 구조가 필요하다).
   Future<DocumentSnapshot<Map<String, dynamic>>> _requireJoinRequestDoc(
       DocumentReference<Map<String, dynamic>> ref) async {
-    final DocumentSnapshot<Map<String, dynamic>> doc;
-    try {
-      doc = await ref.get(const GetOptions(source: Source.server));
-    } on FirebaseException catch (e) {
-      // 다른 실패(unavailable 등)까지 "없음"으로 읽으면 일시적 네트워크 문제가
-      // "요청이 사라졌다"는 오진이 된다 — 권한 거부만 없음의 신호다.
-      if (e.code != 'permission-denied') rethrow;
+    final DocumentSnapshot<Map<String, dynamic>>? doc =
+        await _readJoinRequestDocOrNull(ref);
+    if (doc == null) {
       // 거부를 접되 **접었다는 사실**은 타입으로 남긴다 — 경합(정상)과 규칙 회귀·
       // 배포 스큐(장애)를 리포터가 구별할 유일한 흔적이다([JoinRequestUnreadableException]).
       throw JoinRequestUnreadableException(ref.id);
     }
     // 규칙 없는 백엔드(fake·에뮬레이터의 열린 규칙)는 없는 문서를 거부 대신
-    // 빈 스냅샷으로 준다 — 같은 계약 위반이므로 같은 문장으로 접는다.
+    // 빈 스냅샷으로 준다 — 같은 계약 위반이지만 **흡수가 아니라 진짜 없음**이라
+    // 신호가 다르므로 평범한 [StateError]로 남긴다.
     if (!doc.exists) {
       throw StateError('Join request not found: ${ref.id}');
     }
