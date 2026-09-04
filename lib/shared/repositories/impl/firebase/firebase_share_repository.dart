@@ -792,11 +792,15 @@ class FirebaseShareRepository implements ShareRepository {
   /// ([requestToJoin]의 "첫 요청" 결함과 같은 뿌리 — 거기는 문서 없음이 정상 경로,
   /// 여기는 경합 한정이라는 점만 다르다).
   ///
-  /// 트랜잭션 **안**의 거부를 번역하는 것으로는 풀 수 없다 — 트랜잭션은 읽기 하나가
-  /// 거부되면 통째로 죽고, 그 시점의 permission-denied는 요청 문서 읽기가 아니라
-  /// 그룹 읽기·쓰기의 거부일 수도 있어, 뭉뚱그려 "없음"으로 번역하면 다른 원인을
-  /// 오진한다. 존재 확인을 트랜잭션 밖 **단일 읽기**로 분리하면 거부의 주어가 요청
-  /// 문서 하나로 좁혀진다.
+  /// 트랜잭션 **전체**의 거부를 뭉뚱그려 번역하는 것으로는 풀 수 없다 — 트랜잭션은
+  /// 읽기 하나가 거부되면 통째로 죽고, 그 시점의 permission-denied는 요청 문서 읽기가
+  /// 아니라 그룹 읽기·쓰기의 거부일 수도 있어, 뭉뚱그려 "없음"으로 번역하면 다른
+  /// 원인을 오진한다. 거부의 주어를 요청 문서 하나로 좁히는 길은 둘이고 이 파일은 둘
+  /// 다 쓴다 — 존재 확인을 트랜잭션 밖 **단일 읽기**로 빼는 것(이 함수)과, 트랜잭션
+  /// **안의 호출 지점 하나**에만 catch를 붙이는 것([_txGetJoinRequest]).
+  /// ⚠️ 그래서 이 함수가 승인·거절에 남는 이유는 좁힘이 **아니다**(그쪽은
+  /// [_txGetJoinRequest]가 이미 덮는다) — 아래 `Source.server` 절의 **오프라인 빠른
+  /// 실패**다. 취소에는 좁힘·빠른 실패에 더해 `userId` 소유권 판정까지 여기서 한다.
   ///
   /// ## 거부를 "없음"으로 읽어도 안전한 이유
   ///
@@ -833,10 +837,11 @@ class FirebaseShareRepository implements ShareRepository {
   /// 접근의 거부는 그대로 [FirebaseException]으로 올라간다.
   ///
   /// ⚠️ "흡수한 거부를 [JoinRequestUnreadableException]으로 흔적 남기기"는 이 파일의
-  /// `permission-denied` 흡수 4곳 중 **여기 한 곳에만** 적용돼 있다 — [_dropJoinRequest]
-  /// 는 예외 없이 정상 종료라 완전 무음이고, [requestToJoin]의 두 흡수는 후속 쓰기가
-  /// 부분적 신호를 남길 뿐 타입 흔적이 없다. 전면 적용은 별도 작업(저장소→진단 방향
-  /// import 순환을 피하는 구조가 필요하다).
+  /// `permission-denied` 흡수 6곳 중 **3곳**에 적용돼 있다 — 여기, [_txGetJoinRequest],
+  /// [cancelJoinRequest]의 delete(요청 문서를 만지는 세 곳). 나머지 3곳은 흔적이 없다:
+  /// [_dropJoinRequest]는 예외 없이 정상 종료라 완전 무음이고, [requestToJoin]의 두
+  /// 흡수는 후속 쓰기가 부분적 신호를 남길 뿐 타입 흔적이 없다. 전면 적용은 별도
+  /// 작업(저장소→진단 방향 import 순환을 피하는 구조가 필요하다).
   Future<DocumentSnapshot<Map<String, dynamic>>> _requireJoinRequestDoc(
       DocumentReference<Map<String, dynamic>> ref) async {
     final DocumentSnapshot<Map<String, dynamic>> doc;

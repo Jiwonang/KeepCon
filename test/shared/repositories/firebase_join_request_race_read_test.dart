@@ -119,6 +119,15 @@ void main() {
         .thenThrow(fb(code));
   }
 
+  /// **그룹 문서 읽기만** 거부한다 — 번역의 *좁힘*을 고정하는 반대 방향 주입.
+  /// 요청 문서의 거부는 계약의 "요청 없음"이 되지만, 그룹 접근의 거부는 그대로
+  /// 올라가야 한다(뭉뚱그려 번역하면 "권한 없음"이 "요청 없음"으로 둔갑한다).
+  void denyGroupReadWith(String code) {
+    whenCalling(Invocation.method(#get, null))
+        .on(db.doc('groups/${targetGroup.id}'))
+        .thenThrow(fb(code));
+  }
+
   Future<void> signInOwner() async {
     await auth.signIn(email: ownerEmail, password: password);
   }
@@ -271,6 +280,32 @@ void main() {
       denyDeleteWith('unavailable');
       await expectUnavailablePassesThrough(
           () => repo.cancelJoinRequest(requestId()));
+    });
+
+    // 번역의 **좁힘** 고정 — 그룹 접근의 거부까지 "요청 없음"으로 넓히는 회귀를
+    // 막는다(요청자가 자기 요청 id로 승인을 부르면 그룹 읽기가 비멤버 403인데
+    // "요청이 없습니다"가 뜨는 오진). 두 단언은 JoinRequestUnreadableException이
+    // **아니어야** 한다.
+    test('승인 — 그룹 읽기의 permission-denied는 번역하지 않고 그대로 올린다', () async {
+      await signInOwner();
+      denyGroupReadWith('permission-denied');
+
+      await expectLater(
+        repo.approveJoinRequest(requestId()),
+        throwsA(isA<FirebaseException>().having(
+            (FirebaseException e) => e.code, 'code', 'permission-denied')),
+      );
+    });
+
+    test('거절 — 그룹 읽기의 permission-denied는 번역하지 않고 그대로 올린다', () async {
+      await signInOwner();
+      denyGroupReadWith('permission-denied');
+
+      await expectLater(
+        repo.rejectJoinRequest(requestId()),
+        throwsA(isA<FirebaseException>().having(
+            (FirebaseException e) => e.code, 'code', 'permission-denied')),
+      );
     });
   });
 }
