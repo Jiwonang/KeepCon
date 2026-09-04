@@ -34,6 +34,7 @@ import 'package:keepcon/features/share/pages/usage_log_page.dart';
 import 'package:keepcon/features/share/share_page.dart';
 import 'package:keepcon/features/share/widgets/share_sheets.dart';
 import 'package:keepcon/shared/models/group.dart';
+import 'package:keepcon/shared/models/join_request.dart';
 import 'package:keepcon/shared/models/share.dart';
 import 'package:keepcon/shared/models/user.dart';
 import 'package:keepcon/shared/providers/repositories.dart';
@@ -102,6 +103,14 @@ class _FlakyShareRepository implements ShareRepository {
     yield data;
     throw StateError('boom');
   }
+
+  /// 참여 요청 축은 이 파일의 관심 밖이지만 share 메인이 **항상** 이 스트림을
+  /// watch한다 — noSuchMethod에 맡기면 모든 테스트에서 이 축이 에러가 되어, 참여
+  /// 요청 배너의 '다시 시도'가 다른 축의 배너 단언(개수·유무)에 끼어든다. 건강한
+  /// 빈 스트림으로 고정한다(에러 배선 자체는 join_request_ui_test가 고정한다).
+  @override
+  Stream<List<JoinRequest>> watchMyJoinRequests(String userId) =>
+      Stream<List<JoinRequest>>.value(const <JoinRequest>[]);
 
   @override
   Stream<List<Group>> watchGroups(String userId) {
