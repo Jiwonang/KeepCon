@@ -58,6 +58,9 @@ class _HangingWriteFirestore implements FirebaseFirestore {
       '이 테스트 더블이 지원하지 않는 멤버: ${invocation.memberName}');
 }
 
+// sealed 플러그인 타입의 구현은 이 더블의 존재 이유다 — fake_cloud_firestore
+// 자체가 같은 방식으로 전체를 구현하고, 여기는 그 fake를 감싸 두 멤버만 바꾼다.
+// ignore: subtype_of_sealed_class
 class _HangingWriteCollection
     implements CollectionReference<Map<String, dynamic>> {
   _HangingWriteCollection(this._inner, this._db);
@@ -76,6 +79,8 @@ class _HangingWriteCollection
       '이 테스트 더블이 지원하지 않는 멤버: ${invocation.memberName}');
 }
 
+// 위와 같은 사유(sealed 구현이 더블의 존재 이유).
+// ignore: subtype_of_sealed_class
 class _HangingWriteDoc implements DocumentReference<Map<String, dynamic>> {
   _HangingWriteDoc(this._inner);
 
