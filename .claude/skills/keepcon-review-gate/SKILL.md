@@ -290,7 +290,7 @@ fi
     #    20분 뒤 01:07:08Z의 #119 트리거가 `Review rate limited`로 튕겼다.
     #    ⚠️ 그렇다고 **전부** 세지도 마라 — 슬롯을 안 쓰는 코멘트가 둘 있다.
     #    ①`Review rate limited` 회신만 뺀다 — 그것이 **할당량 거부**라 슬롯을 안 쓴다는 것이
-    #      확인된 유일한 경우다. 같은 실패 헤더(`Action not completed`·`Action failed`)로 오는 다른 사유
+    #      확인된 유일한 경우다. 같은 실패 헤더(`Action not completed`·`Action failed`·`Review failed`)로 오는 다른 사유
     #      (`Pull request is closed.` — #106 05:44:33Z·#113 19:10:26Z 실측)는 슬롯을 썼는지
     #      알 수 없으므로 **빼지 않는다**(늦게 잡는 손해가 슬롯을 버리는 것보다 작다).
     #      할당량 거부를 세면 실패한 트리거가 창을 자기 시각 +1시간으로 **뒤로 민다** —
