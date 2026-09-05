@@ -89,13 +89,14 @@ CI에서 처음 빨개진다.
 
 | 술어(본문에 있으면 참) | 뜻 | 쓰이는 곳 |
 |---|---|---|
-| `Actionable comments posted` \| `No actionable comments` | **판정 문구.** 리뷰가 실제로 끝났다는 유일한 증거 | §3 판정식 · 창 계산(comments) · 3b 마커 · 3b 진단 |
+| `Actionable comments posted` \| `No actionable comments` | **판정 문구.** 리뷰가 끝났다는 증거 — 다만 **유일하지 않다**(문구 없이 끝나는 리뷰가 있다 — 이 표의 마지막 행). **마커 소스에서는 필수**이고 리뷰 객체에는 요구하지 않는다 | §3 판정식 · 창 계산(comments) · 3b 마커 · 3b 진단 |
 | `CodeRabbit review command invocation` | **명령 접수 회신.** 리뷰 명령으로 받아들여졌다 — 성공·거부 **둘 다**에 붙는다 | §3 판정식(`ACK_ONLY`) · 창 계산(comments) · 3b 진단(`ack=`) |
 | `auto-generated reply by CodeRabbit` | 봇의 회신 일반. **접수 회신에도 붙어 판별력이 없다** — 반드시 위 접수 마커와 함께 본다 | §3 판정식(`CHAT_ONLY`) · 창 계산(comments) · 3b 진단(`chat=`) |
 | `Review rate limited` | **할당량 거부.** 슬롯을 쓰지 않는다 | §3 판정식(`RATE_LIMITED`) · 창 계산에서 **제외** · 3b 진단(`RL=`) |
-| `Action not completed` | 봇의 **범용 실패 헤더**. 할당량 거부에도 붙지만 그것만이 아니다 — `Pull request is closed.`도 이 헤더로 온다(#106 `05:44:33Z`·#113 `19:10:26Z` 실측). ⚠️ **이 헤더가 붙은 회신은 접수가 아니라 실패다** — `invocation` 마커도 함께 달고 오므로(실측 `ack=Y`) 걸러내지 않으면 `ACK_ONLY`("기다려라")로 떨어져 오지 않을 리뷰를 기다린다. 위 행과 묶어서도 안 된다(닫힌 PR을 할당량 초과로 오판한다). 창 계산에서도 **제외하지 않는다** — 슬롯을 썼는지 확인되지 않았다 | §3 판정식·3b 진단에서 **`ACK_ONLY`/`ack=`의 제외 조건**으로만 |
+| `Action not completed` \| `Action failed` \| `Review failed` | 봇의 **범용 실패 헤더** — 문자열이 하나가 아니다(2026-09-05 #168에서 `❌ Action failed` / `Review failed.` 형태를 처음 관측했다. 그때까지 관측된 것은 `Action not completed`뿐이었다 — #162·#165·#167). 새 변형이 나오면 아래 두 필터에 함께 넣는다. 할당량 거부에도 붙지만 그것만이 아니다 — `Pull request is closed.`도 이 헤더로 온다(#106 `05:44:33Z`·#113 `19:10:26Z` 실측). ⚠️ **이 헤더가 붙은 회신은 접수가 아니라 실패다** — `invocation` 마커도 함께 달고 오므로(실측 `ack=Y`) 걸러내지 않으면 `ACK_ONLY`("기다려라")로 떨어져 오지 않을 리뷰를 기다린다. 위 행과 묶어서도 안 된다(닫힌 PR을 할당량 초과로 오판한다). 창 계산에서도 **제외하지 않는다** — 슬롯을 썼는지 확인되지 않았다 | §3 판정식·3b 진단에서 **`ACK_ONLY`/`ack=`의 제외 조건**으로만 |
 | `Review available on request` | **미트리거 안내.** 스타 10개 미만이라 자동 리뷰가 안 도는 상태 | §3 판정식(`NOT_TRIGGERED`) |
-| `recent_review_start` … `recent_review_end` | 요약 코멘트의 **마커 블록**. 판정 문구와 `between … and <sha>`가 여기 들어온다 | 3b 1) |
+| `recent_review_start` … `recent_review_end` | 요약 코멘트의 **마커 블록**. 판정 문구와 `between … and <sha>`가 여기 들어온다. ⚠️ **휘발성이다** — 봇이 다음 리뷰에서 같은 코멘트를 다시 쓰며 이 블록을 **소급해 지웠다가 되살린다**(#166 실측: `00:20Z` 존재 → `00:28:57Z` 삭제 → `01:33:21Z` 복원). 앞선 조회 결과를 증거로 캐시하지 말고 **판정하는 그 시점에 다시 읽어라** | 3b 1) |
+| (술어 아님) **제출된 리뷰 객체** | `pulls/<N>/reviews`의 `coderabbitai[bot]` 항목 중 `submitted_at != null`이고 **본문이 비어 있지 않은** 것. 그 존재 자체가 완료 증거이며 **판정 문구가 없을 수 있다** — actionable 0 + nitpick 1 조합의 리뷰가 그렇다(#166 `5fd347f`, 본문 3434자, `🧹 Nitpick comments (1)`로 시작, 문구 0건). 그래서 이 소스에는 문구를 요구하지 않는다 | 3b 2) |
 
 ⚠️ 계정 이름이 API마다 다르다 — REST(`issues`·`pulls`)는 `coderabbitai[bot]`, GraphQL
    (`gh pr view --json comments,reviews`)은 `coderabbitai`다. 섞으면 항상 빈 결과가 나온다.
@@ -223,7 +224,11 @@ CI 잡이 하나라도 red면 **여기서 멈춘다.** ⚠️ **`Firestore rules
 ```bash
 # ⚠️ 조회가 실패하면 stdout이 비고, 그 빈 출력은 아래 표의 `NONE`과 구분되지 않는다 —
 #    `NONE`의 처방은 "한 줄 트리거"라 실패 한 번이 슬롯 하나다. 3b와 같은 이유로 가드한다.
-if verdict=$(gh pr view <번호> --json comments,reviews --jq '[.comments[], .reviews[]] | map(select(.author.login=="coderabbitai").body) | if any(test("Actionable comments posted|No actionable comments")) then "REVIEWED" elif any(test("Review rate limited")) then "RATE_LIMITED" elif any(test("Review available on request")) then "NOT_TRIGGERED" elif any(test("auto-generated reply by CodeRabbit") and (test("CodeRabbit review command invocation")|not)) then "CHAT_ONLY" elif any(test("CodeRabbit review command invocation") and (test("Action not completed")|not)) then "ACK_ONLY" else "NONE" end')
+# ⚠️ **두 소스를 갈라 평가한다.** 판정 문구가 없는 리뷰가 있으므로(술어 표 마지막 행),
+#    `.reviews`에 본문 있는 리뷰 객체가 하나라도 있으면 그것만으로 `REVIEWED`다. 그 분기를
+#    `CHAT_ONLY`보다 **위**에 둔다 — 아래에 두면 대화 응답이 먼저 걸려 완료된 리뷰를 가린다.
+#    합친 배열($b)에 `length > 0`을 거는 방식은 **쓰지 마라** — 대화 응답까지 REVIEWED가 된다.
+if verdict=$(gh pr view <번호> --json comments,reviews --jq '([.comments[], .reviews[]] | map(select(.author.login=="coderabbitai").body)) as $b | ([.reviews[] | select(.author.login=="coderabbitai") | select((.body|length) > 0)] | length) as $rv | if ($b | any(test("Actionable comments posted|No actionable comments"))) then "REVIEWED" elif ($rv > 0) then "REVIEWED" elif ($b | any(test("Review rate limited"))) then "RATE_LIMITED" elif ($b | any(test("Review available on request"))) then "NOT_TRIGGERED" elif ($b | any(test("auto-generated reply by CodeRabbit") and (test("CodeRabbit review command invocation")|not))) then "CHAT_ONLY" elif ($b | any(test("CodeRabbit review command invocation") and (test("Action not completed|Action failed|Review failed")|not))) then "ACK_ONLY" else "NONE" end')
 then echo "${verdict:-NONE}"
 else echo "§3 조회 실패 — 판정 불가(빈 출력을 NONE으로 읽지 마라. 트리거하면 슬롯을 버린다)"
 fi
@@ -285,7 +290,7 @@ fi
     #    20분 뒤 01:07:08Z의 #119 트리거가 `Review rate limited`로 튕겼다.
     #    ⚠️ 그렇다고 **전부** 세지도 마라 — 슬롯을 안 쓰는 코멘트가 둘 있다.
     #    ①`Review rate limited` 회신만 뺀다 — 그것이 **할당량 거부**라 슬롯을 안 쓴다는 것이
-    #      확인된 유일한 경우다. 같은 `Action not completed` 헤더로 오는 다른 사유
+    #      확인된 유일한 경우다. 같은 실패 헤더(`Action not completed`·`Action failed`·`Review failed`)로 오는 다른 사유
     #      (`Pull request is closed.` — #106 05:44:33Z·#113 19:10:26Z 실측)는 슬롯을 썼는지
     #      알 수 없으므로 **빼지 않는다**(늦게 잡는 손해가 슬롯을 버리는 것보다 작다).
     #      할당량 거부를 세면 실패한 트리거가 창을 자기 시각 +1시간으로 **뒤로 민다** —
@@ -366,9 +371,18 @@ fi
 (리뷰가 진행 중이었거나 — #106, 한 번도 안 됐거나 — #113), 그때는 **마커의 sha 단독이
 증거가 아니라는 것**이다.
 
-**어느 한쪽만 보면 반드시 반대쪽 절반에서 진다.** 그러니 **둘 다 조회하고, 판정 문구를
-동반한 증거가 head를 가리키는 쪽이 하나라도 있으면 `CURRENT`로 판정한다**(sha만 같은 것은
-증거가 아니다 — 아래 #113·#106이 실증):
+**어느 한쪽만 보면 반드시 반대쪽 절반에서 진다.** 그러니 **둘 다 조회하고, head를 가리키는
+완료 증거가 하나라도 있으면 `CURRENT`로 판정한다.** 무엇이 완료 증거인지는 **소스마다 다르다**:
+
+- **마커(comments)** — 판정 문구가 **있어야** 한다. 범위(`between … and <sha>`)는 리뷰가
+  끝나기 전에 먼저 채워지므로 sha만으로는 증거가 아니다(#113·#106이 실증).
+- **리뷰 객체(reviews)** — 본문이 비어 있지 않으면 **판정 문구가 없어도** 증거다. 문구는
+  조합에 따라 아예 실리지 않는다(#166 실측 — 위 술어 표의 마지막 행).
+
+⚠️ 이 구분을 뭉뚱그려 "문구를 동반한 증거"로만 적어 두면 **정상 완료된 리뷰가
+`NO_REVIEW`로 떨어지고**, 그 처방인 재트리거가 시간당 1건짜리 슬롯을 버린다(2026-09-05
+#166에서 이 문서가 자기모순이었다 — 아래 판정식은 리뷰 객체에 문구를 요구하지 않는데
+이 문단과 「하지 말 것」은 요구하고 있었다):
 
 ```bash
 # --- 1) comments의 요약 코멘트(recent_review 마커) ---
@@ -469,7 +483,8 @@ fi
 
 **`CURRENT`는 두 소스 중 어느 한쪽이라도 head를 가리킬 때다 — ①`comments-marker verdict`가
 `NONE`이 아니고 그 `sha`가 `headRefOid`와 같거나, ②본문이 빈 것을 거른 `reviews commit_id`가
-`headRefOid`와 같을 때.** **판정 문구 없이 SHA만 같은 것은 증거가 아니다** — 리뷰가 아직
+`headRefOid`와 같을 때.** **①에서 판정 문구 없이 SHA만 같은 것은 증거가 아니다**(이 요구는
+**마커 소스에만** 적용된다 — ②는 본문이 비어 있지 않으면 문구 없이도 증거다) — 리뷰가 아직
 진행 중일 때도 `between <base> and <head>` 범위가 먼저 채워지고 판정 문구는 나중에 채워진다
 (2026-08-20 #106에서 이 순서 때문에 "진행 중"을 "완료"로 오판했다). **#113이 이 규칙의
 실증이다** — 마커 sha가 head(`77ac5668`)와 정확히 같은데 판정 문구는 본문 어디에도 없고
@@ -477,9 +492,10 @@ fi
 PR도 마커 sha는 head를 가리킬 수 있다** — sha 일치만으로 판정하면 미리뷰 PR이 그대로
 통과한다.
 
-`CURRENT`가 아닌 나머지는 **판정 문구를 동반한 증거가 하나라도 있었는가**로 가른다 —
-`comments-marker verdict`가 `NONE`이 아니거나 본문 있는 `reviews`가 하나라도 있으면
-`STALE`(리뷰는 됐고 head가 아닐 뿐), **둘 다 verdict가 없으면**(마커 sha만 있어도, #113처럼)
+`CURRENT`가 아닌 나머지는 **완료 증거가 하나라도 있었는가**로 가른다(무엇이 완료 증거인지는
+위와 같이 **소스마다 다르다** — 마커는 판정 문구 필수, 리뷰 객체는 본문만 비어 있지 않으면
+된다) — `comments-marker verdict`가 `NONE`이 아니거나 본문 있는 `reviews`가 하나라도 있으면
+`STALE`(리뷰는 됐고 head가 아닐 뿐), **둘 다 없으면**(마커 sha만 있어도, #113처럼)
 `NO_REVIEW`다. 마커 sha가 있다는 것 자체는 증거로 세지 않는다. `STALE`이면 **그 뒤 커밋은
 리뷰되지 않았다** — `@coderabbitai review` **한 줄만** 담아 재트리거한다. ⚠️ **다만 트리거
 직전에 아래 두 번째 ⚠️("`STALE`이어도…")를 먼저 읽어라** — 리뷰가 이미 도는 중이면 슬롯만
@@ -528,7 +544,7 @@ PR도 마커 sha는 head를 가리킬 수 있다** — sha 일치만으로 판�
 > ```bash
 > if out=$(gh api --paginate repos/Jiwonang/KeepCon/issues/<번호>/comments \
 >   --jq '.[] | select(.user.login=="coderabbitai[bot]")
->         | "\(.created_at) upd=\(.updated_at) verdict=\(if (.body|test("Actionable comments posted|No actionable comments")) then "Y" else "N" end) chat=\(if ((.body|test("auto-generated reply by CodeRabbit")) and (.body|test("CodeRabbit review command invocation")|not)) then "Y" else "N" end) ack=\(if ((.body|test("CodeRabbit review command invocation")) and (.body|test("Action not completed")|not)) then "Y" else "N" end) RL=\(if (.body|test("Review rate limited")) then "Y" else "N" end)"')
+>         | "\(.created_at) upd=\(.updated_at) verdict=\(if (.body|test("Actionable comments posted|No actionable comments")) then "Y" else "N" end) chat=\(if ((.body|test("auto-generated reply by CodeRabbit")) and (.body|test("CodeRabbit review command invocation")|not)) then "Y" else "N" end) ack=\(if ((.body|test("CodeRabbit review command invocation")) and (.body|test("Action not completed|Action failed|Review failed")|not)) then "Y" else "N" end) RL=\(if (.body|test("Review rate limited")) then "Y" else "N" end)"')
 > then
 >   if [ -n "${out}" ]; then printf '%s\n' "${out}"; else echo "봇 코멘트 0건 — 조회는 성공"; fi
 > else
@@ -553,8 +569,9 @@ PR도 마커 sha는 head를 가리킬 수 있다** — sha 일치만으로 판�
 **여기서 처음에 "그러니 comments를 1차로 쓴다"로 순서만 뒤집었다가, `keepcon-code-reviewer`
 에이전트가 `#93·#95·#98·#101·#104·#110·#111` 일곱 건(마커 코멘트가 없고 `reviews`에만
 결과가 있는 PR)이 그 뒤집힌 순서에서 전부 `STALE`로 오판된다는 것을 실행 재현으로 잡아냈다**
-— 처방이 실패의 방향만 바꾼 것이었다. 위 union(둘 다 조회하고, 판정 문구를 동반한 증거가
-head와 일치하면 `CURRENT`)이 그 반례들과 #114·#115를 모두 잡는다 — 반례 일곱 건(#98·#104·#111 →
+— 처방이 실패의 방향만 바꾼 것이었다. 위 union(둘 다 조회하고, **소스별 완료 증거** — 마커는
+판정 문구, 리뷰 객체는 비어 있지 않은 본문 — 이 head와 일치하면 `CURRENT`)이 그 반례들과
+#114·#115를 모두 잡는다 — 반례 일곱 건(#98·#104·#111 →
 `CURRENT`, #93·#95·#101·#110 → `STALE`)과 #114·#115를 합친 **아홉 건**을 재현했고,
 #92·#105·#106·#112·#113까지 더한 **14건 전수**로도 판정이 일치한다.
 
@@ -616,14 +633,18 @@ EOF
    ⚠️ **CodeRabbit 지적을 고쳐 푸시한 커밋이 정확히 여기 해당한다.** 옛 순서에서는 2번의 "수정 → 푸시 → 1번으로"
    루프가 그것을 다시 태웠는데, 에이전트를 앞으로 옮기면서 그 효과가 사라졌다 — 실제로 #95의 `a1b60a5`,
    #101의 `592d28f`·`d0ec216`이 어느 리뷰어도 안 본 채 머지됐다.
-3. 3번이 `REVIEWED` **이고** 3b가 `CURRENT` — 또는 4번의 폴백 기록이 PR에 남아 있음
+3. 3번이 `REVIEWED` **이고** 3b가 `CURRENT` — 또는 4번의 폴백 기록이 PR에 남아 있음.
+   ⚠️ 두 판정은 **같은 완료 증거 정의**를 써야 한다(마커=문구 필수 / 리뷰 객체=본문만).
+   한쪽만 문구를 요구하면 문구 없는 리뷰에서 3b는 `CURRENT`인데 §3이 `REVIEWED`가 아니라
+   **이 조건이 원리상 충족되지 않는다**(2026-09-05 #166에서 실제로 그랬다). staleness의
+   정본은 3b다 — §3은 처방(재트리거·대기·폴백)을 고르는 데 쓴다.
 
 ## 하지 말 것
 
 - `CodeRabbit` 체크가 pass인 것을 근거로 "리뷰 통과"라고 말하지 않는다.
 - `Review triggered` 응답만 보고 머지하지 않는다.
 - `REVIEWED`만 보고 머지하지 않는다 — **3b가 `CURRENT`인지 확인한다.** 리뷰 뒤 푸시한 커밋은 리뷰되지 않았다.
-- **3b에서 `comments`·`reviews` 어느 한쪽만 보고 결론짓지 않는다** — 형식이 둘로 갈린다. `reviews`는 0건인데 `comments` 마커는 있는 PR(#114·#115)도, 마커는 없는데 `reviews`는 있는 PR(#93·#95·#98·#101·#104·#110·#111)도 실측으로 확인됐다. 둘 다 조회해서 **판정 문구(verdict)를 동반한 증거**가 head를 가리키는 쪽이 하나라도 있으면 `CURRENT`다 — **마커 sha만 head와 같은 것은 증거가 아니다**(#113: 미리뷰, #106: 진행 중이었을 때의 범위).
+- **3b에서 `comments`·`reviews` 어느 한쪽만 보고 결론짓지 않는다** — 형식이 둘로 갈린다. `reviews`는 0건인데 `comments` 마커는 있는 PR(#114·#115)도, 마커는 없는데 `reviews`는 있는 PR(#93·#95·#98·#101·#104·#110·#111)도 실측으로 확인됐다. 둘 다 조회해서 head를 가리키는 완료 증거가 하나라도 있으면 `CURRENT`다 — **마커는 판정 문구를 요구하고**(sha만 같은 것은 증거가 아니다 — #113: 미리뷰, #106: 진행 중이었을 때의 범위), **리뷰 객체는 본문이 비어 있지 않으면 문구가 없어도 인정한다**(#166: actionable 0 + nitpick 1 리뷰에 문구가 없었다). 마커 블록은 다음 리뷰가 소급해 지울 수 있으므로 앞선 조회 결과를 캐시하지 말고 판정 시점에 다시 읽는다.
 - **`created_at` 기준으로 "새 코멘트가 있는가"를 즉흥으로 확인하지 않는다** — CodeRabbit은 요약 코멘트를 계속 수정한다. 현재 본문을 읽어라(위 3b 명령을 그대로 실행).
 - **트리거 코멘트에 설명을 붙이지 않는다** — `@coderabbitai review` 한 줄만 보낸다. 붙이면 대화 응답이 오고, 슬롯을 쓴 채 기계 판정이 안 나온다 — 그 코멘트는 **리뷰 명령으로 접수되지조차 않는다**(§3 🚨).
 - **`gh pr checks` 결과를 head 대조 없이 믿지 않는다** — 푸시 직후에는 옛 커밋의 초록/빨강이 보인다(§1 ⚠️).
