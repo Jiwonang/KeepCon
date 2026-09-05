@@ -57,6 +57,21 @@
 /// 확인 — share 파생이 그 형태다). 수명 규약과 이 조합은
 /// `test/shared/providers/my_groups_provider_test.dart`가 고정한다.
 ///
+/// ### 새 스트림 provider의 수명 정책 (앱 전역 규약 — 여기가 정본)
+/// 페이지 폴더에 복제하지 말고 이 절을 참조한다(CLAUDE.md: `lib/features/*`에 전역 규칙
+/// 복제 금지 — 복제본은 갈라진다).
+/// 1. **세션·권한에 묶인 스트림이면 `autoDispose`가 기본이다.** keepAlive는 로그아웃 순간
+///    죽은 `permission-denied` 에러를 앱 수명 동안 박제해, 같은 계정으로 재로그인해도
+///    재구독이 없다(실측 재현 — PR #166·#164).
+/// 2. **keepAlive로 둘 거면 에러를 되살릴 `retry*` 훅을 반드시 함께 낸다.** 현재 유일한
+///    keepAlive 스트림 `rawGifticonsProvider`가 그 형태다(`retryNotifications`가 되살린다).
+/// 3. **`autoDispose`여도 `retry*` 훅은 필요하다.** 해제는 마지막 소비자가 떠난 뒤에나
+///    일어나므로 **화면 위에서의 회복 경로가 아니다**(정본 서술은
+///    `shared_gifticons_provider.dart`의 `retrySharedGifticonIds` dartdoc).
+/// 4. 훅의 검사용 `read`는 [WidgetRef.exists]로 가드한다 — 근거는 아래
+///    [MyGroupsRetry.retry]의 dartdoc이 정본이고, 회귀는
+///    `test/shared/providers/retry_hook_guard_test.dart`가 고정한다.
+///
 /// ---
 /// ## 세션 스트림 = 계약 정본 소비 (v2.6)
 /// 이 파일은 세션을 더 이상 자기 안에서 조립하지 않고

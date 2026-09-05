@@ -121,9 +121,9 @@ class DetailInfoBanner extends StatelessWidget {
   /// 재시도 콜백. null이면 버튼을 그리지 않는다.
   ///
   /// **실패를 알리는 배너에는 반드시 넘길 것.** 이 앱의 스트림 provider들은 스스로
-  /// 재구독하지 않고 상당수가 non-autoDispose라, 한 번 캐시된 에러는 화면을 나갔다
-  /// 들어와도 그대로다 — 되살릴 버튼이 없으면 통신이 회복돼도 앱을 껐다 켜기 전까지
-  /// 막힌 상태가 유지된다. 자동 재시도는 금지(#13 — 장애 중 retry storm).
+  /// 재구독하지 않으므로, 소비자(화면·keepAlive 파생)가 붙잡고 있는 동안 캐시된 에러는
+  /// 그대로다 — 되살릴 버튼이 없으면 통신이 회복돼도 그 화면에서는 막힌 상태가
+  /// 유지된다. 자동 재시도는 금지(#13 — 장애 중 retry storm).
   final VoidCallback? onRetry;
 
   @override
