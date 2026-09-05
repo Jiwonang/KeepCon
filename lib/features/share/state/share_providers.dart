@@ -38,18 +38,14 @@ import '../../../shared/providers/shared_gifticons_provider.dart';
 // 정본은 autoDispose지만 이 파일의 keepAlive 파생들이 그것을 watch하므로, share 탭을
 // 한 번 연 뒤로는 별칭이 하던 것과 동일하게 컨테이너 수명 동안 구독이 유지된다.
 //
-// **스트림 family는 전부 autoDispose다**(사용 이력·공유 후보·참여 요청 두 축). keepAlive는
-// 로그아웃 순간 죽은 permission-denied 에러를 앱 수명 동안 박제해 재로그인해도 재구독이
-// 없다(실측 재현 — 해당 provider의 doc 참조). 새 스트림 파생을 더할 때는 **세션·권한에
-// 묶인 스트림이면 autoDispose가 기본**이고, keepAlive로 두려면 에러를 되살릴 `retry*` 훅을
-// 반드시 함께 낸다(현재 유일한 keepAlive 스트림 `rawGifticonsProvider`가 그 형태다 —
-// `retryNotifications`가 되살린다).
+// **이 파일의 스트림 family는 넷 다 autoDispose다**(사용 이력·공유 후보·참여 요청 두 축).
+// 전역 수명 정책(무엇을 autoDispose로 둘지, keepAlive면 무엇을 함께 내야 하는지)은
+// 계약 정본 `my_groups_provider.dart`의 "새 스트림 provider의 수명 정책" 절이다 — 여기
+// 복제하지 않는다(CLAUDE.md 규약).
 //
-// **autoDispose여도 `retry*` 훅은 필요하다** — 해제는 마지막 소비자가 떠난 뒤에나 일어나
-// 화면 위에서의 회복 경로가 아니기 때문이다(정본은 `retrySharedGifticonIds`의 dartdoc).
-// 폴딩 래퍼가 keepAlive인 축(`usageLogsProvider`·`joinRequestsProvider`)은 로그아웃 전까지
-// 아예 해제되지 않아 그 필요가 더 크고, 래퍼 없는 축(`pendingJoinRequestsProvider`)도
-// 화면에 머무는 동안의 복구는 훅뿐이다.
+// 이 파일에만 해당하는 사실: 네 축의 폴딩 래퍼는 `pendingJoinRequestsProvider`만 없다
+// (위젯이 직접 watch한다). 그래서 나머지 셋은 keepAlive 래퍼가 로그아웃 전까지 family를
+// 붙잡아 제자리 복구가 `retry*` 훅뿐이고, 그 축은 화면 이탈만으로도 해제된다.
 //
 // **id만 쓰는 소비 지점은 `select`로 좁힌다.** 정본은 [StreamProvider]라 같은 값이 다시
 // 방출돼도(Firebase `userChanges()`의 토큰 갱신 등) 리스너에게 통지한다 — 삭제된 별칭이
