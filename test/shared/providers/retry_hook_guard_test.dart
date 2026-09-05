@@ -16,13 +16,14 @@
 /// ## 호스트가 셋인 이유 — 가드는 **중첩**돼 있다
 /// 훅은 바깥에서 상위 축(세션·그룹 목록)을, 안쪽에서 사용자별 family 인스턴스를
 /// 가드한다. 바깥이 먼저 `return`하므로 **아무것도 마운트하지 않은 호스트 하나로는
-/// 안쪽 가드에 도달조차 못 한다** — 그 상태로는 안쪽 6개를 지워도 전부 통과한다
-/// (에이전트 리뷰가 안쪽만 뮤테이션해 실측). 그래서 도달 깊이가 다른 호스트를 셋 둔다:
+/// 안쪽 가드에 도달조차 못 한다** — 그 상태로는 안쪽 가드(현재 7개)를 지워도 전부
+/// 통과한다(에이전트 리뷰가 안쪽만 뮤테이션해 실측). 그래서 도달 깊이가 다른 호스트를
+/// 셋 둔다:
 ///
 /// | 호스트 | watch하는 것 | 도달하는 가드 |
 /// |---|---|---|
 /// | [_RetryHost] | 없음 | 바깥 — `exists(session)`·`exists(rawGifticons)`·`exists(myGroups)` |
-/// | [_SessionOnlyHost] | 세션 | 안쪽 — `exists(logs)`·`exists(mine)`·`exists(notifs)`·`exists(readAt)`·`exists(groups)` |
+/// | [_SessionOnlyHost] | 세션 | 안쪽 — `exists(logs)`·`exists(mine)`(기프티콘)·`exists(mine)`(참여 요청)·`exists(notifs)`·`exists(readAt)`·`exists(groups)` |
 /// | [_GroupsHost] | 세션 + 내 그룹 목록 | 안쪽 — `exists(perGroup)` |
 ///
 /// 각 호스트는 자기가 마운트한 축이 **실제로 세어지는지**를 먼저 단언한다(계측 생존
@@ -96,8 +97,9 @@ class _CountingShareRepository implements ShareRepository {
 
   /// 계약의 watch 스트림 **7축 중 하나라도** 구독됐는지(가드가 풀렸다는 신호).
   ///
-  /// 참여 요청 2축은 이 훅들이 건드리지 않지만 **세지 않으면 미래의 훅이 그 축을 가드
-  /// 없이 구독해도 카운터가 0으로 남는다** — 이 파일이 막으려는 false green이다.
+  /// 참여 요청 2축도 훅이 건드린다(`retryMyJoinRequests`·`retryPendingJoinRequests` —
+  /// PR #164에서 도착). 세지 않으면 그 축을 가드 없이 구독해도 카운터가 0으로 남는다 —
+  /// 이 파일이 막으려는 false green이다.
   int get totalCalls =>
       groupCalls +
       usageCalls +
