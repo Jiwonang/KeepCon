@@ -208,10 +208,10 @@ void main() {
   });
 
   testWidgets('공유 상태 조회가 실패하면 되살릴 버튼을 준다', (WidgetTester tester) async {
-    // 회귀 방어: fail-closed로 막아 놓고 재시도 경로를 주지 않으면, 콜드 스타트에서 한 번
-    // 실패한 에러가 캐시된 채 남아(StreamProvider는 스스로 재구독하지 않고
-    // sharedGifticonsProvider는 non-autoDispose) **앱을 껐다 켜기 전까지** 모든 기프티콘의
-    // 사용 완료가 영구히 막힌다. 상세를 나갔다 들어와도 풀리지 않는다.
+    // 회귀 방어: fail-closed로 막아 놓고 재시도 경로를 주지 않으면, 실패한 에러가
+    // 캐시된 채 남아(StreamProvider는 스스로 재구독하지 않는다) 화면이 보고 있는 동안
+    // 사용 완료가 계속 막힌다 — share 탭의 keepAlive 파생이 같은 인스턴스를 붙잡고
+    // 있으면 상세를 나갔다 들어와도 풀리지 않는다.
     final Gifticon g = _gifticon();
     boot(<Gifticon>[g], sharedIdsFailed: true);
     await mountDetail(tester, g);
