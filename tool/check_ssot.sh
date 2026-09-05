@@ -61,7 +61,7 @@ if [ -n "$defs" ]; then
 fi
 
 # 2) SSOT provider 재선언 금지 (소비 ref.watch(...)는 허용, 선언은 금지)
-SSOT_PROVIDERS="nowProvider|allNotificationsProvider|rawGifticonsProvider|notificationsProvider|notificationsReadAtProvider|unreadNotificationCountProvider|authRepositoryProvider|gifticonRepositoryProvider|shareRepositoryProvider|themeModeProvider|myGroupsProvider|myGroupsRetryProvider|sharedGifticonsProvider|allSharedProvider|sharedGifticonIdsProvider|sessionUserProvider|errorReporterProvider|inviteOriginProvider|pendingDestinationProvider"
+SSOT_PROVIDERS="nowProvider|allNotificationsProvider|rawGifticonsProvider|notificationsProvider|notificationsReadAtProvider|unreadNotificationCountProvider|authRepositoryProvider|gifticonRepositoryProvider|shareRepositoryProvider|themeModeProvider|myGroupsProvider|myGroupsRetryProvider|sharedGifticonsProvider|allSharedProvider|sharedGifticonIdsProvider|sessionUserProvider|errorReporterProvider|inviteOriginProvider|pendingDestinationProvider|expiryNotificationSchedulerProvider"
 
 # 선택적 `late`, 선택적 타입(`Provider<T> ` 등)을 포괄해 `final NAME =`,
 # `late final NAME =`, `final Provider<T> NAME =` 형태를 모두 잡는다.
@@ -79,9 +79,13 @@ prov=$(scan "^[[:space:]]*(late[[:space:]]+)?final[[:space:]]+([A-Za-z0-9_<>,.? 
 # 강제하므로 **긴 타입의 재선언은 예외가 아니라 기본형**이다 — 즉 이 구멍은 드물게
 # 밟는 것이 아니라 타입을 길게 쓰기만 하면 항상 열린다(등록된 이름으로 실측 확인).
 # 그래서 "줄의 첫 토큰이 SSOT 이름이고 곧바로 `=`"인 이어지는 줄도 함께 잡는다.
-#  - 들여쓰기를 제한하지 않는 이유: dart 3.12 실측에서 이어지는 줄이 최상위 0칸·4칸,
-#    클래스 멤버 2칸으로 갈렸다. 고정값이 아니라 불변식으로 쓸 수 없다(3b의 0~2칸
-#    제한과 다른 판단인 것은, 저쪽은 뒤따르는 `(...) {`가 오탐을 걸러 주기 때문이다).
+#  - 들여쓰기를 제한하지 않는 이유: 이어지는 줄의 들여쓰기는 **포매터 스타일에 따라
+#    달라지고, 그 스타일은 언어 버전이 고른다.** 이 저장소는 `pubspec.yaml`의
+#    `sdk: ">=3.6.0"`이라 구 스타일이고 실측하면 최상위 4칸·클래스 멤버 6칸인데,
+#    제약을 3.7 이상으로 올리면 신(tall) 스타일이 되어 같은 코드가 0칸·2칸이 된다
+#    (같은 파일을 패키지 안·밖에서 포맷해 두 결과를 모두 확인했다 — 패키지 밖에서
+#    잰 값을 저장소 값으로 착각하기 쉽다). 즉 들여쓰기는 불변식이 아니고, 숫자를
+#    박으면 SDK 제약을 올리는 날 조용히 뚫린다.
 #  - 소비는 매칭되지 않는다 — `ref.watch(notificationsProvider)`는 이름 앞에 다른
 #    토큰이 있고, 인자가 줄바꿈된 경우도 이름 뒤가 `=`가 아니라 `)`/`,`다.
 #  - `([^=>]|$)`는 `==` 비교와 `=>`를 걸러낸다. `=>`를 빼는 이유는 Dart 3 switch 식의
@@ -131,8 +135,32 @@ SSOT_FUNCTIONS="planExpiryNotifications|firedExpiryNotifications|retryNotificati
 # 줄 단위 정규식 밖이다 — 완전 강제가 아니라 흔한 실수 형태의 백스톱이다.
 fns_typed=$(scan "^[[:space:]]*(static[[:space:]]+)?(void|dynamic|bool|int|double|num|String|Object|Future<[^>]*>|Stream<[^>]*>|[A-Z][A-Za-z0-9_<>,.? ]*)\??[[:space:]]+_?(${SSOT_FUNCTIONS})(<[^>]*>)?[[:space:]]*\(") || exit 1
 fns_untyped=$(scan "^[[:space:]]{0,2}(static[[:space:]]+)?_?(${SSOT_FUNCTIONS})(<[^>]*>)?[[:space:]]*\([^;]*\)[[:space:]]*(async[[:space:]]*)?(\{|=>)") || exit 1
-fns="${fns_typed}${fns_untyped:+
-$fns_untyped}"
+
+# 3c) 가드 #2·#4와 **같은 줄바꿈 우회**가 여기에도 있다. 반환 타입이 줄 폭을 넘으면
+#     `dart format`이 타입 뒤에서 끊어 이름을 다음 줄로 내리는데(이 저장소 스타일에서
+#     최상위 4칸·클래스 멤버 6칸), 그 줄에는 타입이 없어 3a가, 들여쓰기가 3칸 이상이라
+#     3b가 각각 통과시킨다(실측 — `retrySharedGifticonIds` 재정의가 exit 0이었다).
+#     3b의 0~2칸 제한은 그대로 둔다(한 줄짜리 참 양성이 거기 걸려 있다). 대신 3칸 이상
+#     전용 규칙을 더하고, 3b가 들여쓰기를 조여서 막던 "여러 줄 호출 오인"은 여기서
+#     꼬리를 앵커해 대신 막는다:
+#      - `[^;()]*`가 괄호 중첩을 배제한다 → 아래 둘째 줄은 닫는 괄호가 하나 더 있어
+#        걸리지 않는다:
+#            if (g.status == GifticonStatus.available &&
+#                isExpiringSoon(g.expiryDate, now: now)) {
+#      - `(\{|=>)[[:space:]]*$`가 줄 끝을 요구한다 → `list.where((g) =>` 같은 람다
+#        인자도 걸리지 않는다.
+#     신(tall) 스타일에서는 같은 줄바꿈이 0~2칸으로 나오고 그쪽은 3b가 잡으므로,
+#     두 규칙이 두 스타일을 나눠 덮는다(들여쓰기가 겹치지 않아 중복 보고도 없다).
+fns_wrapped=$(scan "^[[:space:]]{3,}(static[[:space:]]+)?_?(${SSOT_FUNCTIONS})(<[^>]*>)?[[:space:]]*\([^;()]*\)[[:space:]]*(async[[:space:]]*)?(\{|=>)[[:space:]]*\$") || exit 1
+
+# 셋을 합친다. 앞이 비었을 때 선행 빈 줄이 생기지 않도록 `:+` 이어붙이기 대신
+# 조건으로 잇는다 — 기존 형태는 fns_typed가 비면 CI 출력 첫 줄이 빈 줄이었다.
+fns="$fns_typed"
+for part in "$fns_untyped" "$fns_wrapped"; do
+  [ -n "$part" ] || continue
+  fns="${fns:+$fns
+}$part"
+done
 if [ -n "$fns" ]; then
   echo "::error::[SSOT] 계약 함수를 lib/features에서 재정의했습니다. lib/shared 정본을 import해 호출만 하세요:"
   echo "$fns"
@@ -153,8 +181,9 @@ consts=$(scan "^[[:space:]]*(static[[:space:]]+)?const[[:space:]]+([A-Za-z0-9_<>
 # 상수도 같은 줄바꿈 우회가 성립한다(실측: `static const Map<...>` 다음 줄에
 # `  expiryNotificationHistory = ...`). 근거·한계는 위 provider의 이어지는 줄 규칙과
 # 같다. 형제 규칙 중 하나만 막으면 우회가 그쪽으로 옮겨갈 뿐이라 함께 닫는다.
-# (가드 #1은 이름이 항상 `class`/`enum` 키워드 뒤에 붙어 이 우회가 성립하지 않고,
-#  가드 #3은 줄바꿈된 형태를 3b가 이미 잡는다 — 둘 다 실측으로 확인했다.)
+# (가드 #1은 이름이 항상 `class`/`enum` 키워드 뒤에 붙어 이 우회가 성립하지 않는다.
+#  가드 #3은 성립해서 3c로 함께 닫았다 — 처음엔 "3b가 이미 잡는다"고 적었는데,
+#  패키지 밖에서 잰 들여쓰기(0·2칸)를 저장소 값으로 착각한 오판이었다.)
 consts_wrapped=$(scan "^[[:space:]]*_?(${SSOT_CONSTANTS})[[:space:]]*=([^=>]|\$)") || exit 1
 if [ -n "$consts_wrapped" ]; then
   consts="${consts:+$consts
@@ -162,7 +191,7 @@ if [ -n "$consts_wrapped" ]; then
 fi
 
 if [ -n "$consts" ]; then
-  echo "::error::[SSOT] 계약 상수를 lib/features에서 재선언했습니다. lib/shared 정본을 import해 참조만 하세요:"
+  echo "::error::[SSOT] 계약 상수를 lib/features에서 재선언(또는 지역 변수·필드로 같은 이름을 가림)했습니다. lib/shared 정본을 import해 참조만 하세요:"
   echo "$consts"
   fail=1
 fi
