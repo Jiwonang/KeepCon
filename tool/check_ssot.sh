@@ -61,7 +61,7 @@ if [ -n "$defs" ]; then
 fi
 
 # 2) SSOT provider 재선언 금지 (소비 ref.watch(...)는 허용, 선언은 금지)
-SSOT_PROVIDERS="nowProvider|allNotificationsProvider|rawGifticonsProvider|notificationsProvider|notificationsReadAtProvider|unreadNotificationCountProvider|authRepositoryProvider|gifticonRepositoryProvider|shareRepositoryProvider|themeModeProvider|myGroupsProvider|myGroupsRetryProvider|sessionUserProvider|errorReporterProvider|inviteOriginProvider"
+SSOT_PROVIDERS="nowProvider|allNotificationsProvider|rawGifticonsProvider|notificationsProvider|notificationsReadAtProvider|unreadNotificationCountProvider|authRepositoryProvider|gifticonRepositoryProvider|shareRepositoryProvider|themeModeProvider|myGroupsProvider|myGroupsRetryProvider|sharedGifticonsProvider|allSharedProvider|sharedGifticonIdsProvider|sessionUserProvider|errorReporterProvider|inviteOriginProvider|pendingDestinationProvider"
 
 # 선택적 `late`, 선택적 타입(`Provider<T> ` 등)을 포괄해 `final NAME =`,
 # `late final NAME =`, `final Provider<T> NAME =` 형태를 모두 잡는다.
@@ -70,6 +70,30 @@ SSOT_PROVIDERS="nowProvider|allNotificationsProvider|rawGifticonsProvider|notifi
 # (예: 과거의 `_currentUserProvider`·`_scanCurrentUserProvider`처럼 정본과 이름이 다른
 # 세션 체인 재조립)은 잡지 못한다 — 그 방어선은 리뷰와 매트릭스의 잔여 소비자 표다.
 prov=$(scan "^[[:space:]]*(late[[:space:]]+)?final[[:space:]]+([A-Za-z0-9_<>,.? ]+[[:space:]]+)?_?(${SSOT_PROVIDERS})[[:space:]]*=") || exit 1
+
+# ⚠️ 위 규칙은 `final`과 이름이 **한 줄에** 있을 때만 잡는다. 긴 타입 주석이 붙으면
+# `dart format`이 타입 뒤에서 줄을 끊어 이름을 다음 줄로 내린다:
+#     final AutoDisposeStreamProviderFamily<List<GroupNotification>, String>
+#         notificationsProvider = StreamProvider.family...
+# 이름이 있는 줄에는 `final`이 없으니 위 규칙이 통과시킨다. CI가 `dart format`을
+# 강제하므로 **긴 타입의 재선언은 예외가 아니라 기본형**이다 — 즉 이 구멍은 드물게
+# 밟는 것이 아니라 타입을 길게 쓰기만 하면 항상 열린다(등록된 이름으로 실측 확인).
+# 그래서 "줄의 첫 토큰이 SSOT 이름이고 곧바로 `=`"인 이어지는 줄도 함께 잡는다.
+#  - 들여쓰기를 제한하지 않는 이유: dart 3.12 실측에서 이어지는 줄이 최상위 0칸·4칸,
+#    클래스 멤버 2칸으로 갈렸다. 고정값이 아니라 불변식으로 쓸 수 없다(3b의 0~2칸
+#    제한과 다른 판단인 것은, 저쪽은 뒤따르는 `(...) {`가 오탐을 걸러 주기 때문이다).
+#  - 소비는 매칭되지 않는다 — `ref.watch(notificationsProvider)`는 이름 앞에 다른
+#    토큰이 있고, 인자가 줄바꿈된 경우도 이름 뒤가 `=`가 아니라 `)`/`,`다.
+#  - `([^=>]|$)`는 `==` 비교와 `=>`를 걸러낸다. `=>`를 빼는 이유는 Dart 3 switch 식의
+#    상수 패턴(`expirySoonDays => ...` — 정상 소비)이 오탐으로 걸리기 때문이다(실측).
+#    선언의 이어지는 줄은 언제나 `NAME = <초기화식>`이라 참 양성 손실이 없다.
+#    줄 끝에서 끊긴 `NAME =`은 `$`가 그대로 잡는다.
+prov_wrapped=$(scan "^[[:space:]]*_?(${SSOT_PROVIDERS})[[:space:]]*=([^=>]|\$)") || exit 1
+if [ -n "$prov_wrapped" ]; then
+  prov="${prov:+$prov
+}$prov_wrapped"
+fi
+
 if [ -n "$prov" ]; then
   echo "::error::[SSOT] SSOT provider를 lib/features에서 재선언했습니다. lib/shared/providers/ 정본을 import해 소비만 하세요:"
   echo "$prov"
@@ -83,7 +107,7 @@ fi
 # 시분초를 절삭해 같은 기프티콘을 두고 화면과 통계가 다른 답을 냈다. 가정이 아니라
 # 이미 발생한 재발이라 기계적 가드에 넣는다. 만료 임박 알림이 이 판정 위에 올라가므로
 # 재분기하면 알림까지 어긋난다.
-SSOT_FUNCTIONS="planExpiryNotifications|firedExpiryNotifications|retryNotifications|retrySessionIfFailed|retryMyGroups|foldSessionUser|daysUntilExpiry|isExpiringSoon|isExpiredByDate|inviteUrlFrom|inviteOriginFor|parseInviteToken|isSharableOrigin|newInviteToken|newInviteCode|isWellFormedInviteCode"
+SSOT_FUNCTIONS="planExpiryNotifications|firedExpiryNotifications|retryNotifications|retrySessionIfFailed|retryMyGroups|retryFailedSharedGifticonStreams|retrySharedGifticonIds|foldSessionUser|daysUntilExpiry|isExpiringSoon|isExpiredByDate|inviteUrlFrom|inviteOriginFor|parseInviteToken|isSharableOrigin|newInviteToken|newInviteCode|isWellFormedInviteCode"
 
 # 선언 형태 두 갈래를 잡는다(호출 `retryMyGroups(ref);`·`return foldSessionUser<...>(...)`는
 # 둘 다 통과):
@@ -125,6 +149,18 @@ fi
 SSOT_CONSTANTS="expirySoonDays|expiryNotifyLeadDays|expiryNotifyHour|expiryNotificationHistory|maxScheduledExpiryNotifications"
 
 consts=$(scan "^[[:space:]]*(static[[:space:]]+)?const[[:space:]]+([A-Za-z0-9_<>,.? ]+[[:space:]]+)?_?(${SSOT_CONSTANTS})[[:space:]]*=") || exit 1
+
+# 상수도 같은 줄바꿈 우회가 성립한다(실측: `static const Map<...>` 다음 줄에
+# `  expiryNotificationHistory = ...`). 근거·한계는 위 provider의 이어지는 줄 규칙과
+# 같다. 형제 규칙 중 하나만 막으면 우회가 그쪽으로 옮겨갈 뿐이라 함께 닫는다.
+# (가드 #1은 이름이 항상 `class`/`enum` 키워드 뒤에 붙어 이 우회가 성립하지 않고,
+#  가드 #3은 줄바꿈된 형태를 3b가 이미 잡는다 — 둘 다 실측으로 확인했다.)
+consts_wrapped=$(scan "^[[:space:]]*_?(${SSOT_CONSTANTS})[[:space:]]*=([^=>]|\$)") || exit 1
+if [ -n "$consts_wrapped" ]; then
+  consts="${consts:+$consts
+}$consts_wrapped"
+fi
+
 if [ -n "$consts" ]; then
   echo "::error::[SSOT] 계약 상수를 lib/features에서 재선언했습니다. lib/shared 정본을 import해 참조만 하세요:"
   echo "$consts"
