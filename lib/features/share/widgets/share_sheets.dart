@@ -273,6 +273,17 @@ class _JoinGroupSheetState extends ConsumerState<_JoinGroupSheet> {
   Future<void> _submit() async {
     final String token = _credential;
     if (token.isEmpty || _sending) return;
+    // **`await` 이전에 잡아 둔다.** 요청이 도는 동안 시트는 내려갈 수 있고
+    // (`showModalBottomSheet`의 기본값이 `isDismissible`·`enableDrag`), firebase 경로는
+    // 쓰기 상한이 15초라 그 창이 길다. 시트가 닫히면 이 State의 `context`도 `mounted`도
+    // 쓸 수 없는데 **실패는 여전히 알려야 한다** — 안 알리면 실패가 접수 성공과
+    // 구별되지 않는다(이 catch 블록이 broad catch인 이유와 같다).
+    //
+    // 루트 내비게이터를 잡는 이유: 팝업은 어차피 루트에 올라가므로(`showDialog`의
+    // `useRootNavigator` 기본값) 시트가 사라져도 띄울 자리가 남는다. 스낵바로 떨어뜨리면
+    // 하필 이 변경이 걷어낸 형태로 되돌아간다 — 잠깐 떴다 저절로 사라져서 놓치기 쉽다.
+    final NavigatorState rootNavigator =
+        Navigator.of(context, rootNavigator: true);
     setState(() => _sending = true);
     // try는 **저장소 호출만** 감싼다. 성공 뒤의 화면 전환까지 넣으면, 요청은 접수됐는데
     // 화면 정리에서 예외가 났을 때 실패 안내가 떠 사용자가 실패했다고 오해한다.
@@ -328,7 +339,7 @@ class _JoinGroupSheetState extends ConsumerState<_JoinGroupSheet> {
       // 잠깐 떴다 사라져서, 방금 버튼을 누른 사람이 결과를 놓치기 쉽다(특히 키보드가
       // 올라온 입력 모드에서는 가려지기까지 한다). 실패는 다음 행동을 바꾸는 정보이므로
       // 사용자가 **닫는 동작**으로 받아 가게 한다.
-      await _showFailureDialog(failure);
+      await _showFailureDialog(failure, rootNavigator);
       return;
     }
     if (!mounted) return;
@@ -343,10 +354,18 @@ class _JoinGroupSheetState extends ConsumerState<_JoinGroupSheet> {
   /// 시트를 닫지 않는다. 자격증명 문제라면 그 자리에서 다시 넣는 것이 다음 행동이고,
   /// 이미 멤버·이미 요청이라면 화면을 닫는 판단은 사용자에게 남긴다(시트를 대신 닫으면
   /// 팝업과 시트가 한꺼번에 사라져 무엇이 일어났는지 읽을 시간이 없다).
-  Future<void> _showFailureDialog(_JoinFailure failure) async {
-    if (!mounted) return;
+  ///
+  /// **이 State가 아니라 [rootNavigator]에 건다**(`_submit`이 `await` 이전에 잡아
+  /// 넘긴다). 요청이 도는 동안 시트가 내려가면 `mounted`가 `false`가 되는데, 거기서
+  /// 그냥 돌아가면 실패가 **아무 안내 없이** 사라진다.
+  Future<void> _showFailureDialog(
+    _JoinFailure failure,
+    NavigatorState rootNavigator,
+  ) async {
+    // 앱이 통째로 사라진 경우만 남는다 — 그때는 띄울 자리가 정말로 없다.
+    if (!rootNavigator.mounted) return;
     await showDialog<void>(
-      context: context,
+      context: rootNavigator.context,
       builder: (BuildContext ctx) => AlertDialog(
         title: Text(failure.title),
         content: Text(failure.body),

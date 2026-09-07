@@ -20,6 +20,8 @@
 //    오분류가 스파이의 같은 오분류에 가려 green으로 지나간다.
 library;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -41,7 +43,13 @@ class _SpyShareRepository implements ShareRepository {
     this.fail = false,
     this.expiredKinds = const <String, bool>{},
     this.failure,
+    this.gate,
   });
+
+  /// 요청을 **공중에 띄워 두는** 문. 완료 시점을 테스트가 잡아, 응답 전에 시트를 닫는
+  /// 경로를 재현한다(`showModalBottomSheet`의 기본값이 `isDismissible`·`enableDrag`라
+  /// 사용자가 실제로 할 수 있는 일이고, firebase 경로는 쓰기 상한이 15초라 창이 길다).
+  final Completer<JoinRequest>? gate;
 
   final bool fail;
 
@@ -71,6 +79,7 @@ class _SpyShareRepository implements ShareRepository {
   @override
   Future<JoinRequest> requestToJoin(String inviteToken) async {
     requestedTokens.add(inviteToken);
+    if (gate != null) return gate!.future;
     final bool? isCode = expiredKinds[inviteToken];
     if (isCode != null) {
       throw InviteExpiredException(inviteToken, isCode: isCode);
@@ -453,6 +462,36 @@ void main() {
     expect(find.text('초대코드로 참여하기'), findsNothing);
     // 예외가 실어 온 기존 요청(그룹 id·요청 id)이 화면으로 새지 않는다.
     expect(find.textContaining('g1'), findsNothing);
+    await dismissFailureDialog(tester);
+  });
+
+  testWidgets('요청 도중 시트를 닫아도 실패는 그대로 알린다', (WidgetTester tester) async {
+    // ⚠️ 시트는 응답을 기다리는 동안 내려갈 수 있다(배리어 탭·드래그가 기본값이고,
+    //    firebase 경로는 쓰기 상한이 15초라 창이 길다). 그때 이 State의 `context`도
+    //    `mounted`도 못 쓰는데, 거기서 그냥 돌아가면 **실패가 아무 안내 없이 사라져**
+    //    사용자에게는 접수된 것과 구별되지 않는다.
+    //
+    //    그래서 팝업은 `await` 이전에 잡아 둔 **루트 내비게이터**에 건다. `mounted`
+    //    가드로 되돌리면 이 테스트가 잡는다.
+    final Completer<JoinRequest> gate = Completer<JoinRequest>();
+    final _SpyShareRepository share = _SpyShareRepository(gate: gate);
+    final _SpyErrorReporter reporter = _SpyErrorReporter();
+    await pumpSheet(tester, share, reporter);
+
+    await tester.tap(find.widgetWithText(ElevatedButton, _cta));
+    await tester.pump(); // 요청은 공중에 떠 있다 — 아직 완료시키지 않는다.
+
+    // 배리어를 눌러 시트를 내린다(사용자가 실제로 하는 동작).
+    await tester.tapAt(const Offset(10, 10));
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(ElevatedButton, _cta), findsNothing,
+        reason: '시트가 내려간 것이 이 테스트의 전제');
+
+    gate.completeError(StateError('초대가 유효하지 않습니다'), StackTrace.current);
+    await tester.pumpAndSettle();
+
+    expect(find.byType(AlertDialog), findsOneWidget);
+    expect(find.text('요청을 보낼 수 없어요'), findsOneWidget);
     await dismissFailureDialog(tester);
   });
 }

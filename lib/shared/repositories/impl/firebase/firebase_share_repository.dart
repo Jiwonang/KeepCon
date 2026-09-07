@@ -725,8 +725,9 @@ class FirebaseShareRepository implements ShareRepository {
       requestedAt: DateTime.now(),
     );
     // 큐에 걸린 채 침묵하지 않도록 시간을 끊는다(위 ⚠️ — 쓰기 도중 단절 창). 타임아웃
-    // 뒤 큐의 쓰기가 나중에 도착해도 해롭지 않다 — 다음 요청에서 위 멱등 분기가 그
-    // 대기 요청을 그대로 돌려준다. 매달린 스피너보다 시끄러운 실패가 낫다.
+    // 뒤 큐의 쓰기가 나중에 도착해도 해롭지 않다 — 다음 요청에서 위 멱등 분기가
+    // [JoinRequestAlreadyPendingException]으로 그 대기 요청을 실어 알리므로, 문서는
+    // 덮이지 않고 사용자는 '이미 요청함'을 보게 된다. 매달린 스피너보다 시끄러운 실패가 낫다.
     await ref.set(<String, dynamic>{
       'groupId': req.groupId,
       'userId': req.userId,
