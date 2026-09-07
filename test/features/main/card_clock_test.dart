@@ -84,4 +84,13 @@ void main() {
     expect(find.text('만료'), findsWidgets,
         reason: '실제 시계를 읽으면 아직 만료 전이라 D-day가 뜬다');
   });
+
+  testWidgets('홈 타일은 이미지를 그리지 않는다 — 브랜드 색 블록만', (WidgetTester tester) async {
+    // scan의 imagePath 미저장 근거(gifticon_form_state.dart의 submit 주석,
+    // scan_form_screen_test.dart의 저장물 테스트 주석)가 이 사실 위에 서 있다.
+    // 여기가 깨지면 그 두 주석이 조용히 거짓이 된다 — 이미지를 렌더하던 그리드
+    // 카드가 죽은 코드로 남아 실제로 한 번 그렇게 낡았다(#160).
+    await pumpHome(tester, now: DateTime(2026, 8, 23, 15));
+    expect(find.byType(Image), findsNothing);
+  });
 }
