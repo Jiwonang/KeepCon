@@ -54,9 +54,17 @@ class _ShareGifticonConfirmDialog extends ConsumerWidget {
   /// 확인 대상. 공유 시트가 목록에서 건네준 **스냅샷**이다.
   ///
   /// 팝업이 떠 있는 동안 이 기프티콘이 후보 자격을 잃을 수 있지만(다른 기기에서 먼저
-  /// 공유·사용), 여기서 다시 조회해 화면을 바꾸지는 않는다 — 최종 판정은 저장소
-  /// 가드([ShareRepository.shareGifticon]의 [StateError])이고 호출부가 그 실패를 안내로
-  /// 바꿔 받는다. 팝업이 스스로 사라지면 사용자는 자기 탭이 먹힌 줄 알고 다시 누른다.
+  /// 공유·사용), 여기서 다시 조회해 화면을 바꾸지는 않는다 — 팝업이 스스로 사라지면
+  /// 사용자는 자기 탭이 먹힌 줄 알고 다시 누른다. 그 사이의 변화는 저장소가 실패로
+  /// 돌려주고 호출부가 안내로 바꿔 받는다.
+  ///
+  /// ⚠️ **저장소가 막는 축은 둘뿐이다 — 비멤버와 이중 공유.** 두 구현
+  /// (`InMemoryShareRepository`·`FirebaseShareRepository`의 `shareGifticon`) 모두 원본
+  /// [Gifticon]의 상태는 보지 않으므로, 팝업이 떠 있는 사이 다른 기기가 원본을 '사용
+  /// 완료'로 처리해도 공유는 그대로 성공한다(코드리뷰에서 실측). 탭 즉시 공유였을 때도
+  /// 있던 창이지만 이 팝업이 사람이 읽는 시간만큼 넓힌다. 닫으려면 계약
+  /// `ShareRepository.shareGifticon`에 원본 status 축을 더해야 하고, 그것은 두 구현·보안
+  /// 규칙·규칙 검증을 함께 건드리는 별건이다.
   final Gifticon gifticon;
 
   @override
@@ -70,9 +78,9 @@ class _ShareGifticonConfirmDialog extends ConsumerWidget {
     // [DateTime.now]를 읽으면 자정 근처에서 목록·상세·이 팝업이 서로 다른 "오늘"로
     // 만료를 판정한다.
     final DateTime now = ref.watch(nowProvider);
+    final int daysLeft = daysUntilExpiry(g.expiryDate, now: now);
     final bool expired = isExpiredByDate(g.expiryDate, now: now);
-    final bool expiryEmphasis =
-        expired || isExpiringSoon(g.expiryDate, now: now);
+    final bool soon = isExpiringSoon(g.expiryDate, now: now);
 
     final String? barcode = g.barcode?.trim();
 
@@ -81,10 +89,15 @@ class _ShareGifticonConfirmDialog extends ConsumerWidget {
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(AppRadii.card),
       ),
-      // 라우트 이름 — `AlertDialog`와 달리 맨 [Dialog]은 이것을 채우지 않는다. 없으면
-      // 스크린리더가 "팝업이 열렸다"를 알리지 못한 채 포커스만 본문 조각으로 옮겨 간다.
+      // 라우트 이름 — `scopesRoute`는 `DialogRoute`가 이미 주지만 **이름은 아무도 채우지
+      // 않는다**(`AlertDialog`은 title로 채운다). 없으면 스크린리더가 무엇이 열렸는지
+      // 알리지 못한 채 포커스만 본문 조각으로 옮겨 간다.
       child: Semantics(
         namesRoute: true,
+        // `AlertDialog`과 같은 조합. 이게 없으면 이 노드가 자손 텍스트를 삼켜 라우트
+        // 이름이 "기프티콘 공유 확인 + 배너 + 질문 + 부제" 한 덩어리로 읽히고, 배너·질문이
+        // 개별 포커스 노드로 분리되지 않는다(코드리뷰에서 시맨틱스 트리로 실측).
+        explicitChildNodes: true,
         label: '기프티콘 공유 확인',
         child: ConstrainedBox(
           // 태블릿·웹에서 팝업이 화면 너비만큼 늘어나면 상세가 아니라 페이지처럼 읽힌다.
@@ -93,9 +106,14 @@ class _ShareGifticonConfirmDialog extends ConsumerWidget {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
-              // 상세 본문. 작은 화면·큰 글꼴에서도 질문과 버튼이 잘리지 않도록 본문만
-              // 스크롤시킨다(`Flexible` + 스크롤뷰) — 팝업 전체를 스크롤시키면 결정
-              // 버튼이 화면 밖으로 밀려 "닫을 수도 확인할 수도 없는" 상태가 된다.
+              // 상세 본문 **과 배너·질문까지** 함께 스크롤시키고, 스크롤 밖에 고정으로
+              // 남기는 것은 결정 버튼 한 줄뿐이다(표준 `AlertDialog`과 같은 배치).
+              //
+              // 질문·배너까지 고정으로 두면 세로가 짧은 화면(가로 모드·분할 화면)이나 큰
+              // 글꼴에서 고정분이 가용 높이를 넘겨 **버튼이 화면 밖으로 나간다** — 배리어
+              // 탭으로 닫을 수만 있고 공유는 완료할 수 없는 상태다. 코드리뷰가 실측했다:
+              // 720x360dp·글꼴 1.5배·만료 배너에서 78px 오버플로. 하필 배너가 뜨는
+              // 케이스(이 팝업이 가장 필요한 케이스)에서 임계가 가장 낮았다.
               Flexible(
                 child: SingleChildScrollView(
                   padding: const EdgeInsets.fromLTRB(24, 24, 24, 4),
@@ -116,7 +134,10 @@ class _ShareGifticonConfirmDialog extends ConsumerWidget {
                       Text(g.productName, style: context.heroProductStyle),
                       const SizedBox(height: 14),
 
-                      // 금액 · 카테고리 · 유효기간 — 상세 화면과 같은 줄·같은 포맷.
+                      // 금액 · 카테고리 · 유효기간 — 상세 화면과 같은 줄. 다만 만료 줄에
+                      // 상세가 붙이는 `· D-N` 접미는 없다(`formatDDay`는 main 고유 표현이라
+                      // 승격 대상에서 빠져 있다 — `features/main/widgets/format.dart`).
+                      // 그 자리는 아래 임박 배너가 문장으로 대신한다.
                       GifticonMetaRow(
                         icon: Icons.account_balance_wallet_outlined,
                         text: g.price > 0 ? '${formatWon(g.price)}원' : '금액 미입력',
@@ -127,7 +148,7 @@ class _ShareGifticonConfirmDialog extends ConsumerWidget {
                       const SizedBox(height: 8),
                       GifticonMetaRow(
                         icon: Icons.schedule,
-                        emphasize: expiryEmphasis,
+                        emphasize: expired || soon,
                         text: '${formatYmdDot(g.expiryDate)} 만료',
                       ),
                       // 바코드 번호는 **같은 브랜드·같은 상품 두 장**을 가르는 마지막
@@ -137,54 +158,63 @@ class _ShareGifticonConfirmDialog extends ConsumerWidget {
                         const SizedBox(height: 8),
                         GifticonMetaRow(icon: Icons.qr_code_2, text: barcode),
                       ],
+                      const SizedBox(height: 22),
+
+                      // 만료·임박은 **말로** 알린다. 후보 목록은 상태만 보고 날짜는 보지
+                      // 않아(`unsharedGifticonsProvider`) 만료일이 지났거나 코앞인
+                      // 기프티콘도 그대로 후보에 뜨는데, 그것을 붉은 글씨 한 줄로만
+                      // 암시하면 이 팝업이 막으려던 바로 그 실수(못 쓰는 것을 공유)가
+                      // 그대로 통과한다. 배너는 결정 바로 위에 둔다([DetailInfoBanner] 규약).
+                      if (expired)
+                        const DetailInfoBanner(
+                          icon: Icons.event_busy_outlined,
+                          text: '만료일이 지난 기프티콘이에요. 그래도 공유할까요?',
+                        )
+                      // 임박은 실수가 아니라 정보다 — 캐묻지 않고 남은 기간만 알린다.
+                      else if (soon)
+                        DetailInfoBanner(
+                          icon: Icons.schedule,
+                          text: daysLeft == 0
+                              ? '오늘 만료되는 기프티콘이에요.'
+                              : '만료까지 $daysLeft일 남은 기프티콘이에요.',
+                        ),
+
+                      Text(
+                        '이 기프티콘을 공유할까요?',
+                        style: theme.textTheme.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.w800),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        '공유하면 그룹 멤버 누구나 사용할 수 있어요.',
+                        style: theme.textTheme.bodySmall
+                            ?.copyWith(color: scheme.onSurfaceVariant),
+                      ),
                     ],
                   ),
                 ),
               ),
 
-              // ── 질문 + 결정 ──
+              // ── 결정 ──
               Padding(
-                padding: const EdgeInsets.fromLTRB(24, 20, 24, 12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                padding: const EdgeInsets.fromLTRB(24, 8, 24, 12),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
                   children: <Widget>[
-                    // 만료는 **말로** 알린다. 후보 목록은 상태만 보고 날짜는 보지 않아
-                    // (`unsharedGifticonsProvider`) 만료일이 지난 기프티콘도 그대로 후보에
-                    // 뜨는데, 그것을 붉은 글씨 한 줄로만 암시하면 이 팝업이 막으려던 바로 그
-                    // 실수(못 쓰는 것을 공유)가 그대로 통과한다. 배너는 결정 버튼 바로 위에
-                    // 둔다([DetailInfoBanner] 규약).
-                    if (expired)
-                      const DetailInfoBanner(
-                        icon: Icons.event_busy_outlined,
-                        text: '만료일이 지난 기프티콘이에요. 그래도 공유할까요?',
-                      ),
-                    Text(
-                      '이 기프티콘을 공유할까요?',
-                      style: theme.textTheme.titleMedium
-                          ?.copyWith(fontWeight: FontWeight.w800),
+                    TextButton(
+                      onPressed: () => Navigator.of(context).pop(false),
+                      style: TextButton.styleFrom(
+                          foregroundColor: scheme.onSurfaceVariant),
+                      // 보이는 글자는 '아니오'지만 읽히는 이름에는 무엇에 대한
+                      // 아니오인지까지 담는다 — 포커스가 버튼으로 바로 간 사용자에게는
+                      // 질문이 들리지 않는다. 보이는 라벨을 접두로 포함해 '라벨 속 이름'
+                      // 규칙은 지킨다.
+                      child: const Text('아니오', semanticsLabel: '아니오, 공유하지 않기'),
                     ),
-                    const SizedBox(height: 6),
-                    Text(
-                      '공유하면 그룹 멤버 누구나 사용할 수 있어요.',
-                      style: theme.textTheme.bodySmall
-                          ?.copyWith(color: scheme.onSurfaceVariant),
-                    ),
-                    const SizedBox(height: 4),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.end,
-                      children: <Widget>[
-                        TextButton(
-                          onPressed: () => Navigator.of(context).pop(false),
-                          style: TextButton.styleFrom(
-                              foregroundColor: scheme.onSurfaceVariant),
-                          child: const Text('아니오'),
-                        ),
-                        const SizedBox(width: 4),
-                        TextButton(
-                          onPressed: () => Navigator.of(context).pop(true),
-                          child: const Text('예'),
-                        ),
-                      ],
+                    const SizedBox(width: 4),
+                    TextButton(
+                      onPressed: () => Navigator.of(context).pop(true),
+                      child: const Text('예', semanticsLabel: '예, 공유하기'),
                     ),
                   ],
                 ),

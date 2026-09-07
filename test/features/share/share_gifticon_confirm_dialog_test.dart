@@ -20,6 +20,7 @@ import 'package:keepcon/features/share/widgets/share_sheets.dart';
 import 'package:keepcon/shared/models/gifticon.dart';
 import 'package:keepcon/shared/models/group.dart';
 import 'package:keepcon/shared/models/share.dart';
+import 'package:keepcon/shared/providers/now_provider.dart';
 import 'package:keepcon/shared/providers/repositories.dart';
 import 'package:keepcon/shared/repositories/impl/in_memory_auth_repository.dart';
 import 'package:keepcon/shared/repositories/impl/in_memory_gifticon_repository.dart';
@@ -71,10 +72,19 @@ void main() {
       );
 
   /// 시트를 연 상태까지 만든다. 시트는 함수형 API라 진입점 버튼을 둔 호스트에서 연다.
-  Future<void> openSheet(WidgetTester tester, String groupId) async {
-    // 팝업 본문(히어로+상세)이 기본 600px 뷰포트에서 잘려 버튼 탭이 빗나가지 않도록
-    // 세로를 키운다. 검증 대상은 레이아웃이 아니라 확인 절차다.
-    tester.view.physicalSize = const Size(1000, 3000);
+  ///
+  /// [size]·[textScale]은 좁은/큰 글꼴 화면에서 결정 버튼이 살아남는지 보는 축이고,
+  /// [now]는 만료·임박 판정을 고정하기 위한 것이다(`nowProvider` 정본 override).
+  Future<void> openSheet(
+    WidgetTester tester,
+    String groupId, {
+    Size size = const Size(1000, 3000),
+    double textScale = 1.0,
+    DateTime? now,
+  }) async {
+    // 기본값은 본문이 잘리지 않는 큰 뷰포트다 — 대부분의 테스트가 보는 것은 레이아웃이
+    // 아니라 확인 절차라, 탭이 스크롤 밖으로 빗나가는 소음을 없앤다.
+    tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
 
@@ -84,8 +94,15 @@ void main() {
           authRepositoryProvider.overrideWithValue(auth),
           gifticonRepositoryProvider.overrideWithValue(gifticons),
           shareRepositoryProvider.overrideWithValue(repo),
+          if (now != null) nowProvider.overrideWithValue(now),
         ],
         child: MaterialApp(
+          // 다이얼로그도 Navigator 안이라 이 builder가 함께 덮는다.
+          builder: (BuildContext context, Widget? child) => MediaQuery(
+            data: MediaQuery.of(context)
+                .copyWith(textScaler: TextScaler.linear(textScale)),
+            child: child!,
+          ),
           home: Builder(
             builder: (BuildContext context) => Scaffold(
               body: Center(
@@ -200,33 +217,97 @@ void main() {
     expect(find.text('내 기프티콘에서 선택'), findsNothing); // 시트가 닫혔다.
   });
 
+  // ── 만료·임박은 색이 아니라 문장으로 알린다 ────────────────────────────────
+  //
+  // 후보 목록은 `status`만 보고 날짜는 보지 않으므로(`unsharedGifticonsProvider`),
+  // 만료일이 지났거나 코앞인 기프티콘도 그대로 후보에 뜬다. 붉은 글씨 한 줄로만 암시하면
+  // 이 팝업이 막으려던 실수(못 쓰는 것을 공유)가 그대로 통과한다.
+  //
+  // 판정 시각은 `nowProvider` 정본을 override해 고정한다 — 실제 시계에 기대면 이 단언들이
+  // 어느 날 갑자기 하루씩 밀린다.
+  final DateTime fixedNow = DateTime(2026, 6, 1, 10);
+
   testWidgets('만료일이 지난 후보는 팝업이 말로 알린다', (WidgetTester tester) async {
-    // 후보 목록은 `status`만 보고 날짜는 보지 않으므로(`unsharedGifticonsProvider`),
-    // 만료일이 지난 기프티콘도 그대로 후보에 뜬다 — 못 쓰는 것을 공유해 버리는 것이
-    // 이 팝업이 막으려는 실수 중 하나다.
     final Group g = await repo.createGroup(name: '가족', emoji: '🏠');
     await gifticons
-        .addGifticon(gifticon(id: 'gx-1', expiryDate: DateTime(2020, 1, 1)));
+        .addGifticon(gifticon(id: 'gx-1', expiryDate: DateTime(2026, 5, 31)));
 
-    await openSheet(tester, g.id);
+    await openSheet(tester, g.id, now: fixedNow);
     await tester.tap(find.text('아이스 아메리카노'));
     await tester.pumpAndSettle();
 
     expect(find.text('만료일이 지난 기프티콘이에요. 그래도 공유할까요?'), findsOneWidget);
   });
 
-  testWidgets('아직 유효한 후보에는 만료 안내를 띄우지 않는다', (WidgetTester tester) async {
+  testWidgets('만료 임박(D-1) 후보는 남은 기간을 알린다', (WidgetTester tester) async {
     final Group g = await repo.createGroup(name: '가족', emoji: '🏠');
-    await gifticons.addGifticon(gifticon(
-      id: 'gx-1',
-      expiryDate: DateTime.now().add(const Duration(days: 90)),
-    ));
+    await gifticons
+        .addGifticon(gifticon(id: 'gx-1', expiryDate: DateTime(2026, 6, 2)));
 
-    await openSheet(tester, g.id);
+    await openSheet(tester, g.id, now: fixedNow);
+    await tester.tap(find.text('아이스 아메리카노'));
+    await tester.pumpAndSettle();
+
+    // 임박은 실수가 아니라 정보다 — 캐묻지 않고 남은 기간만 말한다.
+    expect(find.text('만료까지 1일 남은 기프티콘이에요.'), findsOneWidget);
+    expect(find.textContaining('만료일이 지난'), findsNothing);
+  });
+
+  testWidgets('오늘 만료되는 후보는 그렇게 말한다(D-0은 아직 만료가 아니다)',
+      (WidgetTester tester) async {
+    final Group g = await repo.createGroup(name: '가족', emoji: '🏠');
+    await gifticons
+        .addGifticon(gifticon(id: 'gx-1', expiryDate: DateTime(2026, 6, 1)));
+
+    await openSheet(tester, g.id, now: fixedNow);
+    await tester.tap(find.text('아이스 아메리카노'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('오늘 만료되는 기프티콘이에요.'), findsOneWidget);
+  });
+
+  testWidgets('넉넉히 남은 후보에는 만료 안내를 띄우지 않는다', (WidgetTester tester) async {
+    final Group g = await repo.createGroup(name: '가족', emoji: '🏠');
+    await gifticons
+        .addGifticon(gifticon(id: 'gx-1', expiryDate: DateTime(2026, 9, 1)));
+
+    await openSheet(tester, g.id, now: fixedNow);
     await tester.tap(find.text('아이스 아메리카노'));
     await tester.pumpAndSettle();
 
     expect(find.text('이 기프티콘을 공유할까요?'), findsOneWidget);
     expect(find.textContaining('만료일이 지난'), findsNothing);
+    expect(find.textContaining('만료까지'), findsNothing);
+  });
+
+  testWidgets('세로가 짧고 글꼴이 큰 화면에서도 결정 버튼은 화면 안에 남는다',
+      (WidgetTester tester) async {
+    // 회귀 방어: 질문·배너까지 스크롤 밖에 고정으로 두면 가로 모드·분할 화면에서 고정분이
+    // 가용 높이를 넘겨 '예'가 화면 밖으로 나갔다(배리어로 닫을 수만 있고 공유는 완료할 수
+    // 없는 상태). 배너가 뜨는 만료 케이스가 임계가 가장 낮으므로 그 조합으로 잰다.
+    final Group g = await repo.createGroup(name: '가족', emoji: '🏠');
+    await gifticons.addGifticon(gifticon(
+      id: 'gx-1',
+      barcode: '9412 3344 5566',
+      expiryDate: DateTime(2026, 5, 31),
+    ));
+
+    await openSheet(
+      tester,
+      g.id,
+      size: const Size(720, 360),
+      textScale: 1.5,
+      now: fixedNow,
+    );
+    await tester.tap(find.text('아이스 아메리카노'));
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull); // RenderFlex 오버플로 없음.
+    final Rect yes = tester.getRect(find.widgetWithText(TextButton, '예'));
+    expect(yes.bottom, lessThanOrEqualTo(360.0));
+    // 실제로 눌리기까지 확인한다 — 화면 안에 있어도 잘려 있으면 탭이 빗나간다.
+    await tester.tap(find.widgetWithText(TextButton, '예'));
+    await tester.pumpAndSettle();
+    expect(await sharedIn(g.id), hasLength(1));
   });
 }
