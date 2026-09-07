@@ -409,6 +409,10 @@ void main() {
       );
       await tester.tap(find.text('아이스 아메리카노'));
       await tester.pumpAndSettle();
+      // 탭은 이제 상세 확인 팝업까지만 간다 — '예'를 눌러야 저장소 호출로 넘어간다
+      // (팝업 자체의 규약은 share_gifticon_confirm_dialog_test.dart가 고정한다).
+      await tester.tap(find.widgetWithText(TextButton, '예'));
+      await tester.pumpAndSettle();
 
       expect(find.text('지금은 공유할 수 없어요.'), findsOneWidget);
       expect(

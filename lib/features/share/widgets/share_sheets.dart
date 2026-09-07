@@ -19,6 +19,7 @@ import '../../../shared/widgets/inline_error_banner.dart';
 import '../state/share_providers.dart';
 import 'share_common.dart';
 import 'share_format.dart';
+import 'share_gifticon_confirm_dialog.dart';
 
 /// 바텀시트 공통 컨테이너 — 키보드 인셋·핸들·패딩을 통일한다.
 class _SheetScaffold extends StatelessWidget {
@@ -532,7 +533,7 @@ class _ShareGifticonSheet extends ConsumerWidget {
                               '${g.brand} · ${formatExpiryLabel(g.expiryDate)}',
                               style: theme.textTheme.bodySmall),
                           trailing: const Icon(Icons.add_circle_outline),
-                          onTap: () => _share(context, ref, g),
+                          onTap: () => _confirmAndShare(context, ref, g),
                         ),
                       );
                     },
@@ -541,6 +542,25 @@ class _ShareGifticonSheet extends ConsumerWidget {
               ],
             ),
     );
+  }
+
+  /// 상세 확인 팝업을 거쳐 공유한다.
+  ///
+  /// 탭 한 번이 곧바로 쓰기였던 것을 한 단계 늦춘다 — 후보 타일은 상품명·브랜드·만료일
+  /// 한 줄씩뿐이라 같은 브랜드 기프티콘이 여러 장이면 어느 것을 눌렀는지 구분되지 않는데,
+  /// 공유는 되돌리려면 다른 화면의 공유 취소를 타야 하고 그 사이 다른 멤버가 써 버리면
+  /// 되돌릴 수조차 없다(팝업의 근거는 `share_gifticon_confirm_dialog.dart` 헤더).
+  Future<void> _confirmAndShare(
+    BuildContext context,
+    WidgetRef ref,
+    Gifticon g,
+  ) async {
+    final bool ok = await showShareGifticonConfirmDialog(context, g);
+    // 팝업이 떠 있는 동안 시트가 사라졌을 수 있다(뒤로가기·라우트 교체). 아직 아무것도
+    // 쓰지 않았으므로 조용히 그만두는 것이 맞다 — 이 시점의 [BuildContext]로 뒤이어
+    // Navigator·ScaffoldMessenger를 찾으면 죽은 트리를 뒤진다.
+    if (!ok || !context.mounted) return;
+    await _share(context, ref, g);
   }
 
   Future<void> _share(BuildContext context, WidgetRef ref, Gifticon g) async {

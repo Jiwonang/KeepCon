@@ -7,6 +7,10 @@
 /// 바이트 단위로 같은 복사본이었고, `tool/check_ssot.sh`는 private 위젯 복제를 잡지 못해
 /// CI도 통과했다 — 코드리뷰에서 검출).
 ///
+/// 세 번째 소비자는 공유 확인 팝업(`lib/features/share/widgets/share_gifticon_confirm_dialog.dart`)
+/// 이다 — 공유 직전 "이 기프티콘이 맞는지" 대조받는 자리라, 사용자가 메인에서 본 상세와
+/// **같은 모양**이어야 대조가 성립한다.
+///
 /// 시각 값(높이·노치 크기·라운드)은 승격 전 목업 값을 **그대로 보존**한다(픽셀 무변경).
 library;
 
@@ -157,6 +161,51 @@ class DetailInfoBanner extends StatelessWidget {
           ],
         ],
       ),
+    );
+  }
+}
+
+/// 상세 화면 메타 한 줄 — 아이콘 + 텍스트(금액·카테고리·유효기간·바코드 번호).
+///
+/// 개인 상세(`main`)와 공유 확인 팝업(`share`)이 **같은 줄 언어**를 써야 한다. 확인 팝업의
+/// 역할이 "메인에서 본 그 기프티콘이 맞는지" 대조하는 것이라, 두 화면이 같은 값을 다른
+/// 모양으로 적으면 대조가 성립하지 않는다. 그래서 사본을 두지 않고 이 정본을 소비한다
+/// (승격 전에는 `main` 상세의 private `_MetaRow`였고, 두 번째 소비자가 실제로 생긴
+/// 시점에 승격했다 — CLAUDE.md 승격 규칙 ③ "늦게 승격").
+class GifticonMetaRow extends StatelessWidget {
+  const GifticonMetaRow({
+    super.key,
+    required this.icon,
+    required this.text,
+    this.emphasize = false,
+  });
+
+  final IconData icon;
+  final String text;
+
+  /// 만료 임박/경과를 error 색으로 강조할지.
+  final bool emphasize;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+    final Color color = emphasize ? scheme.error : scheme.onSurfaceVariant;
+
+    return Row(
+      children: <Widget>[
+        Icon(icon, size: 16, color: color),
+        const SizedBox(width: 6),
+        Expanded(
+          child: Text(
+            text,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: color,
+              fontWeight: emphasize ? FontWeight.w600 : FontWeight.w400,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
