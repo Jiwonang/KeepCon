@@ -150,7 +150,8 @@ extension ThemeTokensX on BuildContext {
   TextStyle? get sectionTitleStyle =>
       _tt.titleLarge?.copyWith(fontSize: 18, fontWeight: FontWeight.w800);
 
-  /// 리스트/설정 항목 타이틀(카드 상품명·설정 행·알림 카드 제목) — 17·w800.
+  /// 리스트/설정 항목 타이틀(카드 상품명·설정 행·알림 카드 제목·공유 확인 팝업의 질문)
+  /// — 17·w800.
   TextStyle? get itemTitleStyle =>
       _tt.titleMedium?.copyWith(fontSize: 17, fontWeight: FontWeight.w800);
 

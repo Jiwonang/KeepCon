@@ -141,11 +141,11 @@ class _ShareGifticonConfirmDialog extends ConsumerWidget {
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: <Widget>[
-                      Text(
-                        '이 기프티콘을 공유할까요?',
-                        style: theme.textTheme.titleMedium
-                            ?.copyWith(fontWeight: FontWeight.w800),
-                      ),
+                      // 굵기·크기를 여기서 정하지 않고 토큰을 소비한다 — 새 토큰을 만들지
+                      // 않은 이유는 [itemTitleStyle](17·w800)이 이미 같은 규격이고,
+                      // 바이트가 같은 토큰을 하나 더 두면 다음 사람이 어느 쪽을 쓸지
+                      // 갈리기 때문이다.
+                      Text('이 기프티콘을 공유할까요?', style: context.itemTitleStyle),
                       const SizedBox(height: 6),
                       Text(
                         '공유하면 그룹 멤버 누구나 사용할 수 있어요.',
