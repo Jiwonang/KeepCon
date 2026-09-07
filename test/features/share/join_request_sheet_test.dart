@@ -492,6 +492,11 @@ void main() {
 
     expect(find.byType(AlertDialog), findsOneWidget);
     expect(find.text('요청을 보낼 수 없어요'), findsOneWidget);
+    // 진단도 함께 남는다. `ref`는 시트와 죽으므로 `reportHandledFailure`로 보고하면
+    // `ref.read`가 던져 그 함수의 `catch (_)`에 삼켜진다 — 사용자 안내는 지켜지지만
+    // **로그만 조용히 빈다**. 하필 그 표본이 원격 진단에 가장 필요한 것이라
+    // (화면을 떠난 뒤의 백엔드 실패) 리포터도 `await` 이전에 잡아 넘긴다.
+    expect(reporter.contexts, <String>['JoinGroupSheet.requestToJoin']);
     await dismissFailureDialog(tester);
   });
 }

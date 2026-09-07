@@ -11,7 +11,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../shared/models/gifticon.dart';
 import '../../../shared/models/group.dart';
+import '../../../shared/diagnostics/error_reporter.dart';
 import '../../../shared/diagnostics/report_handled_failure.dart';
+import '../../../shared/providers/error_reporter_provider.dart';
 import '../../../shared/providers/repositories.dart';
 import '../../../shared/repositories/share_repository.dart';
 import '../../../shared/util/korean_particle.dart';
@@ -112,6 +114,9 @@ class _CreateGroupSheetState extends ConsumerState<_CreateGroupSheet> {
     if (name.isEmpty || _sending) return;
     final NavigatorState navigator = Navigator.of(context);
     final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
+    // 리포터도 안내 자원과 **같은 자리에서** 잡는다 — `ref`는 시트와 함께 죽고, 그때
+    // `reportHandledFailure`는 조용히 아무것도 남기지 않는다(참여 시트와 동일 규약).
+    final ErrorReporter reporter = ref.read(errorReporterProvider);
     setState(() => _sending = true);
     // try는 **저장소 호출만** 감싼다(참여 시트와 동일 규약 — `_JoinGroupSheetState._submit`).
     try {
@@ -119,7 +124,8 @@ class _CreateGroupSheetState extends ConsumerState<_CreateGroupSheet> {
           .read(shareRepositoryProvider)
           .createGroup(name: name, emoji: _emoji, maxMembers: _maxMembers);
     } catch (e, s) {
-      reportHandledFailure(ref, e, s, context: 'CreateGroupSheet.createGroup');
+      reportHandledFailureTo(reporter, e, s,
+          context: 'CreateGroupSheet.createGroup');
       if (mounted) setState(() => _sending = false);
       messenger
         ..hideCurrentSnackBar()
@@ -284,13 +290,20 @@ class _JoinGroupSheetState extends ConsumerState<_JoinGroupSheet> {
     // 하필 이 변경이 걷어낸 형태로 되돌아간다 — 잠깐 떴다 저절로 사라져서 놓치기 쉽다.
     final NavigatorState rootNavigator =
         Navigator.of(context, rootNavigator: true);
+    // 같은 이유로 리포터도 여기서 잡는다 — `ref`는 시트와 함께 죽고, 그때
+    // `reportHandledFailure`의 `ref.read`가 던져 자기 `catch (_)`에 삼켜진다. 사용자
+    // 안내는 그 설계 덕에 지켜지지만 **진단만 조용히 빈다**. 하필 그 표본이 원격
+    // 진단에 가장 필요한 것이다(화면을 떠난 뒤의 백엔드 실패) — 그것만 빠지면 로그가
+    // "시트를 안 닫은 실패"로 편향된다.
+    final ErrorReporter reporter = ref.read(errorReporterProvider);
     setState(() => _sending = true);
     // try는 **저장소 호출만** 감싼다. 성공 뒤의 화면 전환까지 넣으면, 요청은 접수됐는데
     // 화면 정리에서 예외가 났을 때 실패 안내가 떠 사용자가 실패했다고 오해한다.
     try {
       await ref.read(shareRepositoryProvider).requestToJoin(token);
     } catch (e, s) {
-      reportHandledFailure(ref, e, s, context: 'JoinGroupSheet.requestToJoin');
+      reportHandledFailureTo(reporter, e, s,
+          context: 'JoinGroupSheet.requestToJoin');
       // `on StateError`로 좁히면 백엔드가 던지는 예외(권한 거부·네트워크 등)가 그대로
       // 빠져나가 **아무 안내도 없이 시트가 멈춘다** — 사용자에겐 버튼이 죽은 것으로만
       // 보인다. 실패 원인과 무관하게 항상 결과를 알려준다.
@@ -672,12 +685,14 @@ class _ShareGifticonSheet extends ConsumerWidget {
   Future<void> _share(BuildContext context, WidgetRef ref, Gifticon g) async {
     final NavigatorState navigator = Navigator.of(context);
     final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
+    // 안내 자원과 같은 자리에서 리포터도 잡는다(참여 시트와 동일 규약).
+    final ErrorReporter reporter = ref.read(errorReporterProvider);
     try {
       await ref
           .read(shareRepositoryProvider)
           .shareGifticon(groupId: groupId, gifticon: g);
     } catch (e, s) {
-      reportHandledFailure(ref, e, s,
+      reportHandledFailureTo(reporter, e, s,
           context: 'ShareGifticonSheet.shareGifticon');
       messenger
         ..hideCurrentSnackBar()
