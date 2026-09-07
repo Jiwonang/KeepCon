@@ -40,6 +40,7 @@ class _SpyShareRepository implements ShareRepository {
   _SpyShareRepository({
     this.fail = false,
     this.expiredKinds = const <String, bool>{},
+    this.failure,
   });
 
   final bool fail;
@@ -58,6 +59,13 @@ class _SpyShareRepository implements ShareRepository {
   /// 그 두 번째 응답을 다르게 줄 수 없다.
   final Map<String, bool> expiredKinds;
 
+  /// 자격증명과 무관하게 던질 예외 — 만료가 아닌 **구별되는** 실패를 주입한다
+  /// (이미 멤버 / 이미 대기 중인 요청). `null`이면 던지지 않는다.
+  ///
+  /// [expiredKinds]와 별개인 이유는 이 둘이 자격증명의 문제가 아니기 때문이다 —
+  /// 어떤 링크·코드로 들어와도 **행위자**의 상태가 같으면 같은 답이 나온다.
+  final Object? failure;
+
   final List<String> requestedTokens = <String>[];
 
   @override
@@ -67,6 +75,7 @@ class _SpyShareRepository implements ShareRepository {
     if (isCode != null) {
       throw InviteExpiredException(inviteToken, isCode: isCode);
     }
+    if (failure != null) throw failure!;
     if (fail) throw StateError('초대가 유효하지 않습니다');
     return JoinRequest(
       id: 'g1_u1',
@@ -134,6 +143,19 @@ void main() {
   Future<void> tapCta(WidgetTester tester) async {
     await tester.tap(find.widgetWithText(ElevatedButton, _cta));
     await tester.pumpAndSettle();
+  }
+
+  /// 실패 팝업을 닫는다 — 실패한 **뒤에도** 시트를 조작하는 테스트가 쓴다.
+  ///
+  /// 팝업은 모달이라 닫기 전에는 시트의 버튼·입력란이 히트 테스트에 걸리지 않는다
+  /// (`tap`은 경고만 내고 아무 일도 일어나지 않아, 안 닫으면 뒤의 단언이 엉뚱한 이유로
+  /// 깨진다). 안내를 **닫는 동작으로 받아 가게** 한 것이 이 변경의 요점이므로, 그
+  /// 모달성 자체가 고정 대상이다.
+  Future<void> dismissFailureDialog(WidgetTester tester) async {
+    expect(find.byType(AlertDialog), findsOneWidget);
+    await tester.tap(find.widgetWithText(TextButton, '확인'));
+    await tester.pumpAndSettle();
+    expect(find.byType(AlertDialog), findsNothing);
   }
 
   testWidgets('링크로 열린 시트는 requestToJoin을 부른다(즉시 합류가 아니다)',
@@ -347,6 +369,7 @@ void main() {
     await pumpSheet(tester, share, reporter);
 
     await tapCta(tester); // 링크 토큰으로 실패 → 전환 버튼 노출.
+    await dismissFailureDialog(tester);
     await tester.tap(find.text('초대코드로 참여하기'));
     await tester.pumpAndSettle();
 
@@ -360,5 +383,76 @@ void main() {
     // 두 번째 요청은 **입력값**으로 나간다(토큰이 아니다).
     expect(share.requestedTokens, <String>['TOKEN123', '482913']);
     expect(find.textContaining('만료된 초대코드'), findsOneWidget);
+  });
+
+  testWidgets('실패는 하단 스낵바가 아니라 시스템 팝업으로 알린다', (WidgetTester tester) async {
+    // 스낵바는 시트 뒤편 아래쪽에 잠깐 떴다 **저절로** 사라진다 — 방금 버튼을 누른
+    // 사람이 결과를 놓치기 쉽고, 키보드가 올라온 입력 모드에서는 가려지기까지 한다.
+    // 실패는 다음 행동을 바꾸는 정보이므로 닫는 동작으로 받아 가게 한다.
+    final _SpyShareRepository share = _SpyShareRepository(fail: true);
+    final _SpyErrorReporter reporter = _SpyErrorReporter();
+    await pumpSheet(tester, share, reporter);
+
+    await tapCta(tester);
+
+    expect(find.byType(AlertDialog), findsOneWidget);
+    expect(find.byType(SnackBar), findsNothing);
+    // 시간이 지나도 사라지지 않는다 — 스낵바로 되돌아가면 이 단언이 잡는다.
+    await tester.pump(const Duration(seconds: 10));
+    expect(find.byType(AlertDialog), findsOneWidget);
+    await dismissFailureDialog(tester);
+  });
+
+  testWidgets('이미 멤버면 "이미 초대된 회원입니다"라고 알린다', (WidgetTester tester) async {
+    // 멤버가 단톡방에 남아 있는 자기 그룹 링크를 무심코 누르는 흔한 경로다.
+    // 이 실패에는 **다음 행동이 없다** — 코드를 다시 받아 와도, 링크를 재발급받아도
+    // 같은 답이 돌아온다. 뭉뚱그리면 사용자가 고칠 수 없는 것을 고치려 든다.
+    final _SpyShareRepository share =
+        _SpyShareRepository(failure: AlreadyGroupMemberException('g1'));
+    final _SpyErrorReporter reporter = _SpyErrorReporter();
+    await pumpSheet(tester, share, reporter);
+
+    await tapCta(tester);
+
+    expect(find.text('이미 초대된 회원입니다'), findsOneWidget);
+    // 뭉뚱그린 문구로 되돌아가면 이 단언이 잡는다.
+    expect(find.textContaining('잘못됐을 수 있'), findsNothing);
+    // 코드 입력 전환을 열어 주면 안 된다 — 코드를 받아 와도 같은 답이 돌아오는
+    // 길로 안내하는 셈이다.
+    expect(find.text('초대코드로 참여하기'), findsNothing);
+    expect(find.text('참여 요청을 보냈어요'), findsNothing);
+    // 그룹을 식별할 정보는 여전히 새지 않는다(예외가 실어 온 groupId 포함).
+    expect(find.textContaining('g1'), findsNothing);
+    await dismissFailureDialog(tester);
+  });
+
+  testWidgets('이미 대기 중인 요청이면 "이미 승인 요청을 보낸 그룹입니다"라고 알린다',
+      (WidgetTester tester) async {
+    // ⚠️ 이 변경 **이전에는 성공 경로였다** — 저장소가 기존 요청을 조용히 반환해서
+    //    화면이 "참여 요청을 보냈어요"를 다시 띄웠다. 승인을 기다리다 답답해 다시
+    //    눌러 본 사람에게 새로 보낸 것 같은 착시를 주고, 그래서 계속 다시 누른다.
+    final _SpyShareRepository share = _SpyShareRepository(
+      failure: JoinRequestAlreadyPendingException(JoinRequest(
+        id: 'g1_u1',
+        groupId: 'g1',
+        userId: 'u1',
+        displayName: '나',
+        avatarEmoji: '🙂',
+        requestedAt: DateTime(2026, 1, 1),
+      )),
+    );
+    final _SpyErrorReporter reporter = _SpyErrorReporter();
+    await pumpSheet(tester, share, reporter);
+
+    await tapCta(tester);
+
+    expect(find.text('이미 승인 요청을 보낸 그룹입니다'), findsOneWidget);
+    // 접수 화면으로 넘어가면 안 된다 — 그것이 착시를 만들던 옛 동작이다.
+    expect(find.text('참여 요청을 보냈어요'), findsNothing);
+    expect(find.textContaining('잘못됐을 수 있'), findsNothing);
+    expect(find.text('초대코드로 참여하기'), findsNothing);
+    // 예외가 실어 온 기존 요청(그룹 id·요청 id)이 화면으로 새지 않는다.
+    expect(find.textContaining('g1'), findsNothing);
+    await dismissFailureDialog(tester);
   });
 }

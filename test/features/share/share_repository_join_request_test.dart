@@ -20,6 +20,7 @@ import 'package:keepcon/shared/models/user.dart';
 import 'package:keepcon/shared/repositories/impl/in_memory_auth_repository.dart';
 import 'package:keepcon/shared/repositories/impl/in_memory_gifticon_repository.dart';
 import 'package:keepcon/shared/repositories/impl/in_memory_share_repository.dart';
+import 'package:keepcon/shared/repositories/share_repository.dart';
 
 void main() {
   late InMemoryAuthRepository auth;
@@ -101,17 +102,34 @@ void main() {
       expect(await repo.getGroups(guest.id), isEmpty);
     });
 
-    test('같은 링크를 두 번 눌러도 요청은 하나다(멱등)', () async {
+    test('같은 링크를 두 번 눌러도 요청은 하나다(멱등) — 두 번째는 그 사실을 알린다', () async {
       final Group g = await createOwnedGroup();
-      await asGuest();
+      final User guest = await asGuest();
 
       final JoinRequest first = await repo.requestToJoin(g.inviteToken);
-      final JoinRequest second = await repo.requestToJoin(g.inviteToken);
 
-      expect(second.id, first.id);
+      // 두 번째는 **아무것도 쓰지 않고** 기존 요청을 실어 알린다. 조용히 반환하면
+      // 화면이 방금 보낸 것과 구별할 수 없어 "보냈어요"를 다시 띄운다 — 기다리다
+      // 다시 눌러 본 사람에게 새로 보낸 것 같은 착시를 준다.
+      await expectLater(
+        repo.requestToJoin(g.inviteToken),
+        throwsA(isA<JoinRequestAlreadyPendingException>().having(
+          (JoinRequestAlreadyPendingException e) => e.request.id,
+          'request.id',
+          first.id,
+        )),
+      );
+      // 계약의 가드 위반은 전부 StateError라는 규약을 깨지 않는다.
+      await expectLater(repo.requestToJoin(g.inviteToken), throwsStateError);
+
       // 방장이 보는 신호(대기 목록)에도 하나만 쌓인다 — 이게 요청 도착을 알리는
       // 유일한 경로이므로, 여기서 중복되면 방장 화면이 곧바로 어지러워진다.
       expect(await repo.getPendingJoinRequests(g.id), hasLength(1));
+      // 실패해도 기존 요청은 그대로다 — 재요청이 `requestedAt`을 뒤로 미루면 방장
+      // 목록(오래된 순)에서 먼저 기다린 사람이 뒤로 밀린다.
+      final List<JoinRequest> mine = await repo.getMyJoinRequests(guest.id);
+      expect(mine, hasLength(1));
+      expect(mine.single.requestedAt, first.requestedAt);
     });
 
     test('존재하지 않는 토큰으로는 요청할 수 없다', () async {

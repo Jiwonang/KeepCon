@@ -59,8 +59,11 @@ import '../models/share.dart';
 /// 예외 메시지를 `contains('expired')`로 검사하면 메시지를 다듬는 순간 UI가 조용히
 /// 깨진다(테스트도 함께 통과한 채로). 타입은 컴파일러가 지켜 준다.
 ///
-/// 만료가 아닌 실패(없는 코드·이미 멤버·세션 없음)는 평범한 [StateError]로 남긴다 —
+/// 만료가 아닌 실패(없는 코드·세션 없음)는 평범한 [StateError]로 남긴다 —
 /// "없는 코드"를 "만료"라고 말하면 존재하지 않는 그룹을 기다리게 만든다.
+/// (이미 멤버·이미 대기 중인 요청은 각각 [AlreadyGroupMemberException]·
+/// [JoinRequestAlreadyPendingException]으로 좁혀져 있다 — 같은 이유로, 다음 행동이
+/// 서로 다르다.)
 class InviteExpiredException extends StateError {
   /// 만료된 자격증명에 대한 예외를 만든다.
   ///
@@ -105,6 +108,68 @@ class JoinRequestUnreadableException extends StateError {
   /// 타입으로 한다([InviteExpiredException]의 "문자열로 구별하지 않는 이유" 참조).
   JoinRequestUnreadableException(String joinRequestId)
       : super('Join request not found: $joinRequestId');
+}
+
+/// 행위자가 **이미 그 그룹의 멤버**라서 참여 요청이 거부됐음을 알리는 예외.
+///
+/// [InviteExpiredException]과 같은 규약이다 — 가드 위반은 전부 [StateError]라는
+/// 계약을 지키면서, 화면이 이 실패만 **구별**할 수 있게 하위 타입으로 좁힌다.
+/// 기존 `on StateError`·`catch (e)`는 그대로 잡으므로 non-breaking이다.
+///
+/// ## 왜 구별해야 하는가
+/// 이 실패의 다음 행동은 **없다**. 자격증명이 잘못됐거나 만료된 경우와 달리 코드를
+/// 다시 받아 와도, 링크를 재발급받아도 결과가 같다 — 이미 들어와 있기 때문이다.
+/// 그래서 "요청을 보낼 수 없어요, 링크나 코드가 잘못됐을 수 있어요" 같은 뭉뚱그린
+/// 안내를 받으면 사용자는 **고칠 수 없는 것을 고치려 든다**(같은 코드를 다시 넣거나
+/// 방장에게 재발급을 요청한다). 이미 멤버라고 말해 주면 할 일이 정해진다 — 공유 탭에서
+/// 그 그룹을 열면 된다.
+///
+/// 흔한 경로다: 멤버가 단톡방에 남아 있는 자기 그룹 링크를 무심코 누른다.
+///
+/// ⚠️ **만료 검사가 이 판정보다 먼저 온다**(v2.9 이후 규약) — 이미 멤버라도 링크가
+/// 24시간을 넘겼으면 [InviteExpiredException]으로 거부된다. 옛 `joinGroup`은 반대로
+/// 멤버십을 먼저 봐서 no-op으로 성공했다.
+class AlreadyGroupMemberException extends StateError {
+  /// 행위자가 이미 멤버인 [groupId]에 대한 예외를 만든다.
+  ///
+  /// 그룹 id는 진단용이다 — 화면은 이 **타입**을 보고 문구를 고르며, 요청자에게
+  /// 그룹을 식별할 정보를 보여주지 않는다는 이 흐름의 규약은 그대로다.
+  AlreadyGroupMemberException(this.groupId)
+      : super('Already a member of group: $groupId');
+
+  /// 행위자가 이미 멤버인 그룹의 id.
+  final String groupId;
+}
+
+/// **이미 대기 중인 참여 요청이 있어서** 새 요청을 만들지 않았음을 알리는 예외.
+///
+/// ## 왜 성공이 아니라 예외인가
+/// 저장소가 하는 일은 전과 같다 — 대기 중 요청이 있으면 **아무것도 쓰지 않는다**.
+/// 방장에게 요청이 두 개 쌓이지 않는다는 멱등의 목적은 그대로다. 바뀐 것은 그 사실을
+/// 호출부에 **알린다**는 것뿐이다.
+///
+/// 기존 요청을 조용히 반환하면 화면은 방금 보낸 것과 구별할 수 없어 "참여 요청을
+/// 보냈어요"를 다시 띄운다 — 승인을 기다리다 답답해 다시 눌러 본 사람에게 **새로 보낸
+/// 것 같은 착시**를 주고, 그래서 계속 다시 누른다. 이미 보냈다고 말해 주면 할 일이
+/// 정해진다: 기다리거나, 방장에게 확인을 청한다.
+///
+/// 판정을 화면이 대신할 방법은 없다 — 요청자는 아직 비멤버라 그룹도, 그 그룹의 대기
+/// 목록도 읽을 수 없다(보안 규칙). 저장소만 아는 사실이므로 저장소가 실어 보낸다.
+///
+/// ## 무엇을 싣는가
+/// [request]는 **기존** 대기 요청이다(방금 만든 것이 아니다). 취소 경로
+/// ([ShareRepository.cancelJoinRequest])가 id를 요구하므로, 호출부가 되묻지 않고
+/// 곧바로 이어 갈 수 있게 그대로 싣는다.
+///
+/// ⚠️ **결정이 끝난 요청(거절·승인 후 강퇴)에는 던지지 않는다** — 그 요청은 다시
+/// 대기로 되살아나고(재요청은 오거절을 되돌리는 유일한 경로다) 정상 성공으로 반환된다.
+class JoinRequestAlreadyPendingException extends StateError {
+  /// 이미 대기 중인 [request]에 대한 예외를 만든다.
+  JoinRequestAlreadyPendingException(this.request)
+      : super('Join request already pending: ${request.id}');
+
+  /// 이미 대기 중인 기존 요청(이번 호출이 만든 것이 아니다).
+  final JoinRequest request;
 }
 
 /// 그룹/공유 데이터 계약.
@@ -259,7 +324,8 @@ abstract class ShareRepository {
   /// 가드: 해당하는 그룹이 없으면 [StateError]. **만료됐으면
   /// [InviteExpiredException]** — 화면이 "만료된 초대코드"라고 구별해 안내해야 하므로
   /// 이 실패만 하위 타입으로 좁혀 둔다(만료는 5분짜리 코드에서 정상 경로다).
-  /// 행위자가 이미 멤버면 [StateError](요청할 이유가 없다).
+  /// 행위자가 이미 멤버면 [AlreadyGroupMemberException](요청할 이유가 없다) — 화면이
+  /// "이미 참여 중"이라고 구별해 안내해야 하므로 이 실패도 하위 타입으로 좁혀 둔다.
   /// 세션에 현재 사용자가 없으면 [StateError].
   ///
   /// **구현체는 [InviteExpiredException.isCode]에 자기 폴백 판정을 그대로 실어야 한다**
@@ -278,11 +344,15 @@ abstract class ShareRepository {
   /// 정원 검사는 [approveJoinRequest] 시점에 한다 — 대기자가 자리를 선점하면 방장이
   /// 정작 받고 싶은 사람을 못 넣는다.
   ///
-  /// 멱등: 이미 [JoinRequestStatus.pending] 요청이 있으면 **새로 만들지 않고** 그것을
-  /// 반환한다(같은 링크를 두 번 눌러도 방장에게 요청이 두 개 쌓이지 않는다).
+  /// 멱등: 이미 [JoinRequestStatus.pending] 요청이 있으면 **새로 만들지 않고**
+  /// [JoinRequestAlreadyPendingException]으로 그 기존 요청을 실어 알린다(같은 링크를
+  /// 두 번 눌러도 방장에게 요청이 두 개 쌓이지 않는다 — 저장소의 부작용은 그대로 없다).
+  /// 조용히 반환하지 않는 이유는 그 예외의 문서를 참조: 화면이 방금 보낸 것과 구별할 수
+  /// 없으면 "보냈어요"를 다시 띄워, 기다리다 다시 눌러 본 사람에게 새로 보낸 것 같은
+  /// 착시를 준다.
   /// 이미 **결정이 끝난** 요청(거절당했거나, 승인된 뒤 강퇴당한 경우)이 남아 있으면 그
-  /// 요청이 다시 [JoinRequestStatus.pending]이 된다 — 오거절을 되돌리고 강퇴된 사람이
-  /// 다시 물어볼 경로가 이것뿐이기 때문이다(재요청 빈도 제한은 아직 없다).
+  /// 요청이 다시 [JoinRequestStatus.pending]이 되어 **정상 반환**된다 — 오거절을 되돌리고
+  /// 강퇴된 사람이 다시 물어볼 경로가 이것뿐이기 때문이다(재요청 빈도 제한은 아직 없다).
   ///
   /// 그룹이 삭제되면 그 그룹의 요청도 함께 사라진다 — 남겨 두면 아무도 끝낼 수 없는
   /// '대기 중'이 요청자 화면에 영원히 남는다.

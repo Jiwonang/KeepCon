@@ -263,12 +263,64 @@ void runCredentialResolutionContract(ShareBackend Function() makeBackend) {
       );
     });
 
-    test('이미 멤버면 요청할 수 없다', () async {
+    test('이미 멤버면 요청할 수 없다 — 화면이 구별할 수 있는 타입으로 거부한다', () async {
       final Group g = await newGroup();
       final Group issued = await backend.repo.issueInviteCode(groupId: g.id);
       // 방장 본인이 자기 코드를 넣는 경로 — 세션을 바꾸지 않는다.
+      //
+      // 타입까지 고정하는 이유: 이 실패에는 **다음 행동이 없다**(코드를 다시 받아
+      // 와도 같은 답이다). 뭉뚱그린 StateError로 두면 화면이 "링크나 코드가
+      // 잘못됐을 수 있어요"라고 말해 고칠 수 없는 것을 고치게 만든다.
       await expectLater(
-          backend.repo.requestToJoin(issued.inviteCode!), throwsStateError);
+        backend.repo.requestToJoin(issued.inviteCode!),
+        throwsA(allOf(
+          isA<AlreadyGroupMemberException>(),
+          // 계약의 가드 위반은 전부 StateError라는 규약을 깨지 않는다.
+          isA<StateError>(),
+        )),
+      );
+    });
+
+    test('이미 대기 중인 요청이 있으면 새로 만들지 않고 그 사실을 알린다', () async {
+      // 두 구현 모두에 도는 것이 요점이다 — in-memory는 리스트를, firebase는
+      // 결정론적 문서 id(`{groupId}_{userId}`)를 근거로 같은 판정을 해야 한다.
+      final Group g = await newGroup();
+      await asGuest();
+      final JoinRequest first = await backend.repo.requestToJoin(g.inviteToken);
+
+      await expectLater(
+        backend.repo.requestToJoin(g.inviteToken),
+        throwsA(allOf(
+          isA<JoinRequestAlreadyPendingException>().having(
+            (JoinRequestAlreadyPendingException e) => e.request.id,
+            'request.id',
+            first.id,
+          ),
+          isA<StateError>(),
+        )),
+      );
+      // 저장소의 부작용은 그대로 없다 — 방장 목록에 요청이 쌓이지 않는다.
+      expect(await backend.repo.getPendingJoinRequests(g.id), hasLength(1));
+    });
+
+    test('결정이 끝난 요청은 다시 대기로 되살아난다(알림이 아니라 정상 반환)', () async {
+      // ⚠️ 위 분기와 갈리는 지점이다. 거절당한 사람의 재요청은 오거절을 되돌리는
+      //    유일한 경로이므로 **성공해야** 한다 — 여기까지 예외로 닫으면 승인제에
+      //    복구 경로가 없어진다.
+      final Group g = await newGroup();
+      await asGuest();
+      final JoinRequest first = await backend.repo.requestToJoin(g.inviteToken);
+
+      // 방장 세션으로 돌아가 거절한다 — 거절은 방장만 할 수 있다.
+      await backend.auth.signIn(
+          email: 'contract-owner@keepcon.test', password: guestPassword);
+      await backend.repo.rejectJoinRequest(first.id);
+
+      await asGuest();
+      final JoinRequest again = await backend.repo.requestToJoin(g.inviteToken);
+      expect(again.id, first.id);
+      expect(again.status, JoinRequestStatus.pending);
+      expect(await backend.repo.getPendingJoinRequests(g.id), hasLength(1));
     });
   });
 }
