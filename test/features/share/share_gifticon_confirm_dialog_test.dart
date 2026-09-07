@@ -304,10 +304,97 @@ void main() {
 
     expect(tester.takeException(), isNull); // RenderFlex 오버플로 없음.
     final Rect yes = tester.getRect(find.widgetWithText(TextButton, '예'));
-    expect(yes.bottom, lessThanOrEqualTo(360.0));
+    // 뷰포트(360)가 아니라 **팝업의 아래끝**(360 − insetPadding 40 = 320)으로 잰다.
+    // 뷰포트로 재면 40px 슬랙이 생겨, 회귀를 일으켜도 통과한다 — 결함을 되돌리고
+    // 오버플로 단언만 무력화하면 336 ≤ 360으로 빠져나갔다(뮤테이션으로 확인).
+    expect(yes.bottom, lessThanOrEqualTo(320.0));
     // 실제로 눌리기까지 확인한다 — 화면 안에 있어도 잘려 있으면 탭이 빗나간다.
     await tester.tap(find.widgetWithText(TextButton, '예'));
     await tester.pumpAndSettle();
     expect(await sharedIn(g.id), hasLength(1));
+  });
+
+  // 위 테스트의 **반대 방향**. 버튼을 살리려고 배너·질문을 스크롤 안으로 넣으면, 이번엔
+  // 그것들이 첫 화면 밖으로 밀린다 — 사용자는 무엇을 묻는지도 만료 경고도 못 본 채
+  // '예/아니오'만 본다. 그런데 **오버플로 예외가 나지 않아 조용히 지나간다**(위 테스트는
+  // 이 상태를 green으로 통과시켰다). 그래서 위치로 직접 잰다.
+  for (final ({String label, Size size, double scale}) c
+      in <({String label, Size size, double scale})>[
+    (label: '360x640 기본 글꼴(구형·컴팩트 폰)', size: const Size(360, 640), scale: 1.0),
+    (label: '360x800 글꼴 1.5배', size: const Size(360, 800), scale: 1.5),
+  ]) {
+    testWidgets('${c.label} — 질문과 만료 경고가 첫 화면에 보인다',
+        (WidgetTester tester) async {
+      final Group g = await repo.createGroup(name: '가족', emoji: '🏠');
+      await gifticons.addGifticon(gifticon(
+        id: 'gx-1',
+        barcode: '9412 3344 5566',
+        expiryDate: DateTime(2026, 5, 31), // 만료 → 배너가 뜨는 최악 조합.
+      ));
+
+      await openSheet(tester, g.id,
+          size: c.size, textScale: c.scale, now: fixedNow);
+      await tester.tap(find.text('아이스 아메리카노'));
+      await tester.pumpAndSettle();
+
+      final Rect viewport = tester.getRect(find.descendant(
+        of: find.byType(Dialog),
+        matching: find.byType(SingleChildScrollView),
+      ));
+      for (final String text in <String>[
+        '만료일이 지난 기프티콘이에요. 그래도 공유할까요?',
+        '이 기프티콘을 공유할까요?',
+      ]) {
+        expect(tester.getRect(find.text(text)).bottom,
+            lessThanOrEqualTo(viewport.bottom),
+            reason: '"$text"가 스크롤 아래로 밀렸다 — 스크롤하지 않으면 안 보인다');
+      }
+    });
+  }
+
+  // 임박 배너의 임계(`expirySoonDays` = 7). 이 경계가 비어 있으면 임계를 조용히
+  // 바꿔도 아무도 모른다 — D-1·D-0·D-92만으로는 3으로 좁혀도 전부 통과했다(뮤테이션).
+  testWidgets('임박 경계 — D-7은 알린다', (WidgetTester tester) async {
+    final Group g = await repo.createGroup(name: '가족', emoji: '🏠');
+    await gifticons
+        .addGifticon(gifticon(id: 'gx-1', expiryDate: DateTime(2026, 6, 8)));
+
+    await openSheet(tester, g.id, now: fixedNow); // 2026-06-01 → D-7
+    await tester.tap(find.text('아이스 아메리카노'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('만료까지 7일 남은 기프티콘이에요.'), findsOneWidget);
+  });
+
+  testWidgets('임박 경계 — D-8은 알리지 않는다', (WidgetTester tester) async {
+    final Group g = await repo.createGroup(name: '가족', emoji: '🏠');
+    await gifticons
+        .addGifticon(gifticon(id: 'gx-1', expiryDate: DateTime(2026, 6, 9)));
+
+    await openSheet(tester, g.id, now: fixedNow); // 2026-06-01 → D-8
+    await tester.tap(find.text('아이스 아메리카노'));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('만료까지'), findsNothing);
+  });
+
+  testWidgets('팝업이 라우트 이름을 알리고, 버튼 이름에 무엇에 대한 예/아니오인지 담는다',
+      (WidgetTester tester) async {
+    // `namesRoute`/`semanticsLabel`이 실제로 트리에 실리는지. 저장소에 시맨틱스 회귀
+    // 테스트가 하나도 없어(`grep ensureSemantics test/` → 0건) 이 층이 비어 있었다.
+    final SemanticsHandle handle = tester.ensureSemantics();
+    final Group g = await repo.createGroup(name: '가족', emoji: '🏠');
+    await gifticons.addGifticon(gifticon(id: 'gx-1'));
+
+    await openSheet(tester, g.id);
+    await tester.tap(find.text('아이스 아메리카노'));
+    await tester.pumpAndSettle();
+
+    expect(find.bySemanticsLabel('기프티콘 공유 확인'), findsOneWidget);
+    expect(find.bySemanticsLabel('예, 공유하기'), findsOneWidget);
+    expect(find.bySemanticsLabel('아니오, 공유하지 않기'), findsOneWidget);
+    // 라우트 이름이 본문을 삼키지 않는지 — 질문이 자기 노드로 남아야 한다.
+    expect(find.bySemanticsLabel('이 기프티콘을 공유할까요?'), findsOneWidget);
+    handle.dispose();
   });
 }

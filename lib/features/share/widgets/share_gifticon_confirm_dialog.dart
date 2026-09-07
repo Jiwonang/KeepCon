@@ -58,7 +58,7 @@ class _ShareGifticonConfirmDialog extends ConsumerWidget {
   /// 사용자는 자기 탭이 먹힌 줄 알고 다시 누른다. 그 사이의 변화는 저장소가 실패로
   /// 돌려주고 호출부가 안내로 바꿔 받는다.
   ///
-  /// ⚠️ **저장소가 막는 축은 둘뿐이다 — 비멤버와 이중 공유.** 두 구현
+  /// ⚠️ **저장소가 막는 축은 셋뿐이다 — 그룹 없음·비멤버·이중 공유.** 두 구현
   /// (`InMemoryShareRepository`·`FirebaseShareRepository`의 `shareGifticon`) 모두 원본
   /// [Gifticon]의 상태는 보지 않으므로, 팝업이 떠 있는 사이 다른 기기가 원본을 '사용
   /// 완료'로 처리해도 공유는 그대로 성공한다(코드리뷰에서 실측). 탭 즉시 공유였을 때도
@@ -94,9 +94,11 @@ class _ShareGifticonConfirmDialog extends ConsumerWidget {
       // 알리지 못한 채 포커스만 본문 조각으로 옮겨 간다.
       child: Semantics(
         namesRoute: true,
-        // `AlertDialog`과 같은 조합. 이게 없으면 이 노드가 자손 텍스트를 삼켜 라우트
-        // 이름이 "기프티콘 공유 확인 + 배너 + 질문 + 부제" 한 덩어리로 읽히고, 배너·질문이
-        // 개별 포커스 노드로 분리되지 않는다(코드리뷰에서 시맨틱스 트리로 실측).
+        // `AlertDialog`과 같은 조합으로 맞춰 둔다. ⚠️ **지금 구조에서는 이 값이 없어도
+        // 트리가 같다** — `Semantics`는 `MergeSemantics`가 아니라서 자손이 만든 노드를
+        // 삼키지 않는다(코드리뷰가 두 상태의 트리를 덤프해 대조: 동일). 그래도 남기는
+        // 이유는 여기에 `MergeSemantics`나 라벨 없는 래퍼가 끼어드는 순간 갈리기
+        // 때문이고, 그 갈림은 아래 회귀 테스트가 잡는다.
         explicitChildNodes: true,
         label: '기프티콘 공유 확인',
         child: ConstrainedBox(
@@ -106,14 +108,23 @@ class _ShareGifticonConfirmDialog extends ConsumerWidget {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
-              // 상세 본문 **과 배너·질문까지** 함께 스크롤시키고, 스크롤 밖에 고정으로
-              // 남기는 것은 결정 버튼 한 줄뿐이다(표준 `AlertDialog`과 같은 배치).
+              // 스크롤 밖에 고정으로 남기는 것은 **결정 버튼 한 줄뿐**이다(표준
+              // `AlertDialog`과 같은 배치). 질문·배너까지 고정으로 두면 세로가 짧은
+              // 화면(가로 모드·분할 화면)이나 큰 글꼴에서 고정분이 가용 높이를 넘겨
+              // **버튼이 화면 밖으로 나간다** — 배리어 탭으로 닫을 수만 있고 공유는
+              // 완료할 수 없는 상태다(720x360dp·글꼴 1.5배·만료 배너에서 위젯 테스트로
+              // 28px 오버플로 재현).
               //
-              // 질문·배너까지 고정으로 두면 세로가 짧은 화면(가로 모드·분할 화면)이나 큰
-              // 글꼴에서 고정분이 가용 높이를 넘겨 **버튼이 화면 밖으로 나간다** — 배리어
-              // 탭으로 닫을 수만 있고 공유는 완료할 수 없는 상태다. 코드리뷰가 실측했다:
-              // 720x360dp·글꼴 1.5배·만료 배너에서 78px 오버플로. 하필 배너가 뜨는
-              // 케이스(이 팝업이 가장 필요한 케이스)에서 임계가 가장 낮았다.
+              // ⚠️ **그렇다고 배너·질문을 스크롤 아래쪽에 두어도 안 된다.** 첫 화면 밖으로
+              // 밀려 사용자가 무엇을 묻는지도 만료 경고도 못 본 채 '예/아니오'만 보게
+              // 되는데, 오버플로 예외가 나지 않아 **조용히** 지나간다(실측: 360x640dp
+              // 기본 글꼴에서 질문이, 360x800dp 1.5배에서 배너까지 가려졌다). 그래서
+              // 질문·부제·배너를 스크롤 **맨 위**에 둔다 — 스크롤 시작 지점이라 어떤
+              // 화면 높이에서도 첫 화면에 들어온다.
+              //
+              // 그 대가로 [DetailInfoBanner]의 "액션 바로 위" 규약에서 벗어난다. 그 규약의
+              // 목적은 "버튼이 없거나 눌리지 않는 이유를 그 자리에서 설명"하는 것인데, 여기
+              // 배너는 버튼을 막지 않고 **항목**을 경고하므로 인접보다 **보이는 것**이 앞선다.
               Flexible(
                 child: SingleChildScrollView(
                   padding: const EdgeInsets.fromLTRB(24, 24, 24, 4),
@@ -121,6 +132,38 @@ class _ShareGifticonConfirmDialog extends ConsumerWidget {
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: <Widget>[
+                      Text(
+                        '이 기프티콘을 공유할까요?',
+                        style: theme.textTheme.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.w800),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        '공유하면 그룹 멤버 누구나 사용할 수 있어요.',
+                        style: theme.textTheme.bodySmall
+                            ?.copyWith(color: scheme.onSurfaceVariant),
+                      ),
+                      const SizedBox(height: 16),
+
+                      // 만료·임박은 **말로** 알린다. 후보 목록은 상태만 보고 날짜는 보지
+                      // 않아(`unsharedGifticonsProvider`) 만료일이 지났거나 코앞인
+                      // 기프티콘도 그대로 후보에 뜨는데, 그것을 붉은 글씨 한 줄로만
+                      // 암시하면 이 팝업이 막으려던 바로 그 실수(못 쓰는 것을 공유)가
+                      // 그대로 통과한다.
+                      if (expired)
+                        const DetailInfoBanner(
+                          icon: Icons.event_busy_outlined,
+                          text: '만료일이 지난 기프티콘이에요. 그래도 공유할까요?',
+                        )
+                      // 임박은 실수가 아니라 정보다 — 캐묻지 않고 남은 기간만 알린다.
+                      else if (soon)
+                        DetailInfoBanner(
+                          icon: Icons.schedule,
+                          text: daysLeft == 0
+                              ? '오늘 만료되는 기프티콘이에요.'
+                              : '만료까지 $daysLeft일 남은 기프티콘이에요.',
+                        ),
+
                       BrandHero(brand: brand, brandName: g.brand),
                       const SizedBox(height: 22),
 
@@ -158,38 +201,6 @@ class _ShareGifticonConfirmDialog extends ConsumerWidget {
                         const SizedBox(height: 8),
                         GifticonMetaRow(icon: Icons.qr_code_2, text: barcode),
                       ],
-                      const SizedBox(height: 22),
-
-                      // 만료·임박은 **말로** 알린다. 후보 목록은 상태만 보고 날짜는 보지
-                      // 않아(`unsharedGifticonsProvider`) 만료일이 지났거나 코앞인
-                      // 기프티콘도 그대로 후보에 뜨는데, 그것을 붉은 글씨 한 줄로만
-                      // 암시하면 이 팝업이 막으려던 바로 그 실수(못 쓰는 것을 공유)가
-                      // 그대로 통과한다. 배너는 결정 바로 위에 둔다([DetailInfoBanner] 규약).
-                      if (expired)
-                        const DetailInfoBanner(
-                          icon: Icons.event_busy_outlined,
-                          text: '만료일이 지난 기프티콘이에요. 그래도 공유할까요?',
-                        )
-                      // 임박은 실수가 아니라 정보다 — 캐묻지 않고 남은 기간만 알린다.
-                      else if (soon)
-                        DetailInfoBanner(
-                          icon: Icons.schedule,
-                          text: daysLeft == 0
-                              ? '오늘 만료되는 기프티콘이에요.'
-                              : '만료까지 $daysLeft일 남은 기프티콘이에요.',
-                        ),
-
-                      Text(
-                        '이 기프티콘을 공유할까요?',
-                        style: theme.textTheme.titleMedium
-                            ?.copyWith(fontWeight: FontWeight.w800),
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        '공유하면 그룹 멤버 누구나 사용할 수 있어요.',
-                        style: theme.textTheme.bodySmall
-                            ?.copyWith(color: scheme.onSurfaceVariant),
-                      ),
                     ],
                   ),
                 ),
