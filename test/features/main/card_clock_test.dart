@@ -91,6 +91,27 @@ void main() {
     // 여기가 깨지면 그 두 주석이 조용히 거짓이 된다 — 이미지를 렌더하던 그리드
     // 카드가 죽은 코드로 남아 실제로 한 번 그렇게 낡았다(#160).
     await pumpHome(tester, now: DateTime(2026, 8, 23, 15));
+    // Image 타입만 보면 DecorationImage·RawImage로 구현된 썸네일을 놓친다
+    // (CodeRabbit 지적). 데코 이미지는 `BoxDecoration`뿐 아니라
+    // `ShapeDecoration`에도 있고, 이 카드는 Material+InkWell 안이라 썸네일을
+    // 붙이는 정석 관용구가 `Ink.image`다(`Ink(`는 저장소에 이미 4곳). 축은
+    // 둘이다 — 위젯 이미지(RawImage가 Image·FadeInImage를 덮는다)와 데코
+    // 이미지. Container·AnimatedContainer의 decoration은 내부적으로
+    // DecoratedBox로 그려지므로 DecoratedBox 술어가 덮는다.
+    // 미고침: CustomPaint의 `canvas.drawImage` — 위젯 트리로는 판별 불가.
+    //   저장소 내 사용 0건이라 지금 깨져 있지는 않다.
+    bool hasImage(Decoration? d) =>
+        (d is BoxDecoration && d.image != null) ||
+        (d is ShapeDecoration && d.image != null);
     expect(find.byType(Image), findsNothing);
+    expect(find.byType(RawImage), findsNothing);
+    expect(
+      find.byWidgetPredicate(
+        (Widget w) =>
+            (w is DecoratedBox && hasImage(w.decoration)) ||
+            (w is Ink && hasImage(w.decoration)),
+      ),
+      findsNothing,
+    );
   });
 }
