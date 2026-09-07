@@ -2,7 +2,9 @@
 ///
 /// 개인 기프티콘 상세(`lib/features/main/pages/gifticon_detail_page.dart`)와 공유 기프티콘
 /// 상세(`lib/features/share/pages/shared_gifticon_detail_page.dart`)는 **같은 상세 화면
-/// 언어**를 쓴다 — 브랜드 쿠폰 히어로가 위에 오고, 상태 안내 배너가 액션 바로 위에 온다.
+/// 언어**를 쓴다 — 같은 히어로·같은 메타 줄·같은 배너를 쓴다. 다만 **배치는 화면 종류를
+/// 따른다**: 전체 화면 상세 두 곳은 히어로가 위·배너가 액션 바로 위지만, 공유 확인 팝업은
+/// 뷰포트가 좁아 그 순서를 쓰지 못한다(아래 [DetailInfoBanner] 규약의 예외 참조).
 /// 두 페이지가 각자 사본을 두면 한쪽만 손볼 때 조용히 갈라진다(승격 전 실제로 세 클래스가
 /// 바이트 단위로 같은 복사본이었고, `tool/check_ssot.sh`는 private 위젯 복제를 잡지 못해
 /// CI도 통과했다 — 코드리뷰에서 검출).
@@ -111,6 +113,13 @@ class _Notch extends StatelessWidget {
 ///
 /// 액션 버튼 **바로 위**에 놓는 것이 규약이다 — 버튼이 없거나 눌리지 않는 이유를 그 자리에서
 /// 설명해야 사용자가 고장으로 읽지 않는다.
+///
+/// **예외 — 배너가 버튼이 아니라 항목을 경고할 때.** 공유 확인 팝업
+/// (`features/share/widgets/share_gifticon_confirm_dialog.dart`)의 만료·임박 배너가 그렇다.
+/// 버튼을 막지 않으므로 인접보다 **첫 화면 가시성**이 앞서고, 팝업의 스크롤 영역이 좁아
+/// 액션 옆에 두면 짧은 화면에서 통째로 가려진다(실측: 360x640dp 기본 글꼴에서 미노출).
+/// 예외를 여기 적어 두는 이유는 호출부 주석에만 두면 다음 사람이 ①이탈을 규약 위반으로
+/// 읽고 되돌리거나 ②이 정본만 읽고 새 소비자에 잘못 적용하기 때문이다.
 class DetailInfoBanner extends StatelessWidget {
   const DetailInfoBanner({
     super.key,

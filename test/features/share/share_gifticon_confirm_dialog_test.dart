@@ -318,12 +318,44 @@ void main() {
   // 그것들이 첫 화면 밖으로 밀린다 — 사용자는 무엇을 묻는지도 만료 경고도 못 본 채
   // '예/아니오'만 본다. 그런데 **오버플로 예외가 나지 않아 조용히 지나간다**(위 테스트는
   // 이 상태를 green으로 통과시켰다). 그래서 위치로 직접 잰다.
-  for (final ({String label, Size size, double scale}) c
-      in <({String label, Size size, double scale})>[
-    (label: '360x640 기본 글꼴(구형·컴팩트 폰)', size: const Size(360, 640), scale: 1.0),
-    (label: '360x800 글꼴 1.5배', size: const Size(360, 800), scale: 1.5),
+  //
+  // ⚠️ 뷰포트 목록에 **720x360@1.5를 반드시 포함한다.** 이 파일이 이미 쓰던 조합인데
+  // 첫 화면 축이 그것을 비켜 갔고, 하필 거기서 배너가 밀린다(스크롤 뷰포트가 212px뿐이라
+  // 질문·부제까지만 물리적으로 들어간다). 그래서 케이스마다 **그 높이에서 달성 가능한
+  // 것**을 명시적으로 적는다 — 전부 같은 목록으로 뭉뚱그리면 좁은 화면이 목록에서 빠진다.
+  for (final ({String label, Size size, double scale, List<String> visible}) c
+      in <({String label, Size size, double scale, List<String> visible})>[
+    (
+      label: '360x640 기본 글꼴(구형·컴팩트 폰)',
+      size: const Size(360, 640),
+      scale: 1.0,
+      // 대조 근거까지 전부 — 바코드는 "같은 브랜드·같은 상품 두 장"을 가르는 마지막
+      // 단서라, 이게 첫 화면 밖이면 이 팝업의 존재 이유가 무너진다.
+      visible: <String>[
+        '이 기프티콘을 공유할까요?',
+        '만료일이 지난 기프티콘이에요. 그래도 공유할까요?',
+        '9412 3344 5566',
+      ],
+    ),
+    (
+      label: '360x800 글꼴 1.5배',
+      size: const Size(360, 800),
+      scale: 1.5,
+      visible: <String>[
+        '이 기프티콘을 공유할까요?',
+        '만료일이 지난 기프티콘이에요. 그래도 공유할까요?',
+      ],
+    ),
+    (
+      label: '720x360 글꼴 1.5배(가로 모드·분할 화면)',
+      size: const Size(720, 360),
+      scale: 1.5,
+      // 이 높이에는 배너까지 안 들어간다(위젯 주석의 '남은 구멍'). 적어도 **무엇을
+      // 묻는지**는 항상 보인다는 것만 못박는다.
+      visible: <String>['이 기프티콘을 공유할까요?', '공유하면 그룹 멤버 누구나 사용할 수 있어요.'],
+    ),
   ]) {
-    testWidgets('${c.label} — 질문과 만료 경고가 첫 화면에 보인다',
+    testWidgets('${c.label} — ${c.visible.length}개 항목이 첫 화면에 보인다',
         (WidgetTester tester) async {
       final Group g = await repo.createGroup(name: '가족', emoji: '🏠');
       await gifticons.addGifticon(gifticon(
@@ -341,10 +373,7 @@ void main() {
         of: find.byType(Dialog),
         matching: find.byType(SingleChildScrollView),
       ));
-      for (final String text in <String>[
-        '만료일이 지난 기프티콘이에요. 그래도 공유할까요?',
-        '이 기프티콘을 공유할까요?',
-      ]) {
+      for (final String text in c.visible) {
         expect(tester.getRect(find.text(text)).bottom,
             lessThanOrEqualTo(viewport.bottom),
             reason: '"$text"가 스크롤 아래로 밀렸다 — 스크롤하지 않으면 안 보인다');
@@ -390,7 +419,13 @@ void main() {
     await tester.tap(find.text('아이스 아메리카노'));
     await tester.pumpAndSettle();
 
-    expect(find.bySemanticsLabel('기프티콘 공유 확인'), findsOneWidget);
+    // 라벨 존재만 보면 `namesRoute`를 지워도 통과한다(뮤테이션으로 확인) — 다이얼로그
+    // 진입을 **라우트 이름으로 읽어 주게** 하는 것은 그 플래그다. 플래그까지 단언한다.
+    expect(
+      tester.getSemantics(find.bySemanticsLabel('기프티콘 공유 확인')),
+      // `containsSemantics`는 v3.40 이후 deprecated — 같은 부분 매칭을 하는 후속이다.
+      isSemantics(label: '기프티콘 공유 확인', namesRoute: true),
+    );
     expect(find.bySemanticsLabel('예, 공유하기'), findsOneWidget);
     expect(find.bySemanticsLabel('아니오, 공유하지 않기'), findsOneWidget);
     // 라우트 이름이 본문을 삼키지 않는지 — 질문이 자기 노드로 남아야 한다.

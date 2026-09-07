@@ -97,8 +97,10 @@ class _ShareGifticonConfirmDialog extends ConsumerWidget {
         // `AlertDialog`과 같은 조합으로 맞춰 둔다. ⚠️ **지금 구조에서는 이 값이 없어도
         // 트리가 같다** — `Semantics`는 `MergeSemantics`가 아니라서 자손이 만든 노드를
         // 삼키지 않는다(코드리뷰가 두 상태의 트리를 덤프해 대조: 동일). 그래도 남기는
-        // 이유는 여기에 `MergeSemantics`나 라벨 없는 래퍼가 끼어드는 순간 갈리기
-        // 때문이고, 그 갈림은 아래 회귀 테스트가 잡는다.
+        // 이유는 `AlertDialog`과 조합을 맞춰 두면 이 자리 구조가 바뀌어도 표준과 같게
+        // 움직이기 때문이다. ⚠️ **테스트가 이 줄을 지키지는 않는다** — 제거해도,
+        // `MergeSemantics`를 덧씌워도 전부 통과한다(뮤테이션 확인. `Scrollable`이 자체
+        // 시맨틱스 경계를 만들어 본문 병합이 관통하지 못한다).
         explicitChildNodes: true,
         label: '기프티콘 공유 확인',
         child: ConstrainedBox(
@@ -119,8 +121,15 @@ class _ShareGifticonConfirmDialog extends ConsumerWidget {
               // 밀려 사용자가 무엇을 묻는지도 만료 경고도 못 본 채 '예/아니오'만 보게
               // 되는데, 오버플로 예외가 나지 않아 **조용히** 지나간다(실측: 360x640dp
               // 기본 글꼴에서 질문이, 360x800dp 1.5배에서 배너까지 가려졌다). 그래서
-              // 질문·부제·배너를 스크롤 **맨 위**에 둔다 — 스크롤 시작 지점이라 어떤
-              // 화면 높이에서도 첫 화면에 들어온다.
+              // 질문·부제·배너를 스크롤 **맨 위**에 둔다 — 세로 640dp 이상이면
+              // (글꼴 1.5배까지) 셋 다 첫 화면에 들어온다.
+              //
+              // ⚠️ **"어떤 높이에서도"는 아니다.** 720x360dp·1.5배(가로 모드·분할 화면)에서는
+              // 스크롤 뷰포트가 212px뿐이라 질문·부제까지만 들어오고 배너는 274 > 252로
+              // 밀린다(코드리뷰 실측). 그 높이에는 셋이 물리적으로 안 들어가므로 **순서로는
+              // 해결되지 않는다** — 스크롤 힌트나 짧은 뷰포트 전용 축약이 필요하고 그건 별건이다.
+              // 남은 구멍: 720x360dp@1.5에서 만료 배너가 첫 화면 밖이다(아래 테스트가
+              // 그 높이에서 달성 가능한 것 — 질문·부제 — 만 못박는다).
               //
               // 그 대가로 [DetailInfoBanner]의 "액션 바로 위" 규약에서 벗어난다. 그 규약의
               // 목적은 "버튼이 없거나 눌리지 않는 이유를 그 자리에서 설명"하는 것인데, 여기
@@ -164,9 +173,6 @@ class _ShareGifticonConfirmDialog extends ConsumerWidget {
                               : '만료까지 $daysLeft일 남은 기프티콘이에요.',
                         ),
 
-                      BrandHero(brand: brand, brandName: g.brand),
-                      const SizedBox(height: 22),
-
                       // 브랜드 · 상품명.
                       Text(
                         g.brand,
@@ -201,6 +207,15 @@ class _ShareGifticonConfirmDialog extends ConsumerWidget {
                         const SizedBox(height: 8),
                         GifticonMetaRow(icon: Icons.qr_code_2, text: barcode),
                       ],
+
+                      // 히어로는 **맨 아래**다. 글꼴과 무관한 고정 180px(+여백 22)을
+                      // 선점하는데 나르는 정보는 브랜드명 하나뿐이고, 그건 바로 위 줄이
+                      // 이미 적는다. 위에 두면 좁은 화면에서 정작 대조 근거인 상품명·금액·
+                      // 만료일·바코드를 첫 화면 밖으로 밀어낸다 — 360x640dp 기본 글꼴에서
+                      // 바코드가, 1.5배에서는 상품명부터 밀렸다(코드리뷰 실측). 그러면
+                      // 이 팝업의 존재 이유("메인에서 본 그 기프티콘이 맞는지")가 무너진다.
+                      const SizedBox(height: 22),
+                      BrandHero(brand: brand, brandName: g.brand),
                     ],
                   ),
                 ),
