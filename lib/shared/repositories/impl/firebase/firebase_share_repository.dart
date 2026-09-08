@@ -1307,7 +1307,9 @@ class FirebaseShareRepository implements ShareRepository {
   ///
   /// 만료일까지 되돌리지는 못한다(계약에 만료일을 앞당기는 API가 없다). 사용 완료된
   /// 기프티콘의 만료일은 표시에 쓰이지 않으므로 상태를 맞추는 것으로 충분하다.
-  /// 실패는 삼킨다 — 보정 여부와 무관하게 원래의 거부가 전파돼야 한다.
+  ///
+  /// 예상된 런타임 실패(권한·네트워크)만 삼킨다 — [_syncOriginalUsed]와 같은 기준이다.
+  /// `Error`는 삼키지 않으므로, 그 경우 호출자는 원래의 거부 대신 보정의 예외를 본다.
   Future<void> _compensateUsedAfterExtend(
     DocumentReference<Map<String, dynamic>> sharedRef,
     String gifticonId,

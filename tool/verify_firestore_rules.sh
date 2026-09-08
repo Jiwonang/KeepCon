@@ -17,8 +17,9 @@
 #   돌린다(`firebase emulators:exec`). Dart 테스트는 in-memory 구현을 쓰므로 규칙 계층을
 #   검증하지 못한다 — 이 스크립트가 그 계층의 유일한 회귀 방어선이다.
 #
-# 주의: 인증 헤더 없이 Firestore 에뮬레이터 REST를 호출하면 **관리자로 취급되어 규칙을
-#   우회**한다. 그래서 모든 케이스는 반드시 사용자 ID 토큰을 붙여 호출한다.
+# 주의: 모든 케이스는 반드시 사용자 ID 토큰을 붙여 호출한다. 인증 헤더를 **생략**하면
+#   관리자가 되는 것이 아니라 `request.auth == null`이 되어 `isSignedIn()`에서 403이다
+#   (실측). 규칙을 우회해 픽스처를 심어야 할 때만 아래 `AUTH_ADMIN`을 쓴다.
 set -uo pipefail
 
 PROJECT="${FIRESTORE_PROJECT:-demo-keepcon}"
@@ -601,6 +602,18 @@ check "계약 밖 필드를 담아 공유 생성 → 차단" 403 \
   -X PATCH "${DOCS}/sharedGifticons/shared-${SG_RUN}-extra" \
   "${AUTH_B[@]}" "${JSON[@]}" \
   -d "{\"fields\":{\"groupId\":{\"stringValue\":\"${G_JR}\"},\"gifticonId\":{\"stringValue\":\"gif-other-${SG_RUN}\"},\"sharedByUserId\":{\"stringValue\":\"${UID_B}\"},\"brand\":{\"stringValue\":\"스타벅스\"},\"productName\":{\"stringValue\":\"아메리카노\"},\"expiryDate\":{\"timestampValue\":\"${SG_EXP_OLD}\"},\"status\":{\"stringValue\":\"available\"},\"isAdmin\":{\"booleanValue\":true}}}"
+# ⚠️ 위 「B가 A의 이름으로…」는 남의 **원본**까지 붙어 있어 `ownsGifticon` 하나로도 403이다
+#    — 신원 조항의 커버리지가 아니다(뮤테이션으로 확인: 그 조항을 지워도 전건 통과였다).
+#    원본은 자기 것으로 두고 **이름만** 남의 것으로 달아 그 조항만 홀로 지게 한다.
+check "B가 자기 원본에 A의 이름을 달아 생성 → 차단" 403 \
+  -X PATCH "${DOCS}/sharedGifticons/shared-${SG_RUN}-name" \
+  "${AUTH_B[@]}" "${JSON[@]}" \
+  -d "{\"fields\":{\"groupId\":{\"stringValue\":\"${G_JR}\"},\"gifticonId\":{\"stringValue\":\"gif-other-${SG_RUN}\"},\"sharedByUserId\":{\"stringValue\":\"${UID_A}\"},\"brand\":{\"stringValue\":\"스타벅스\"},\"productName\":{\"stringValue\":\"아메리카노\"},\"expiryDate\":{\"timestampValue\":\"${SG_EXP_OLD}\"},\"status\":{\"stringValue\":\"available\"}}}"
+# 필수 필드 누락은 `hasAll`만 잡는다 — 나머지 조항은 전부 통과하는 페이로드다.
+check "필수 필드(status) 누락 생성 → 차단" 403 \
+  -X PATCH "${DOCS}/sharedGifticons/shared-${SG_RUN}-partial" \
+  "${AUTH_B[@]}" "${JSON[@]}" \
+  -d "{\"fields\":{\"groupId\":{\"stringValue\":\"${G_JR}\"},\"gifticonId\":{\"stringValue\":\"gif-other-${SG_RUN}\"},\"sharedByUserId\":{\"stringValue\":\"${UID_B}\"},\"brand\":{\"stringValue\":\"스타벅스\"},\"productName\":{\"stringValue\":\"아메리카노\"},\"expiryDate\":{\"timestampValue\":\"${SG_EXP_OLD}\"}}}"
 # 대조군 — 자기 원본을 자기 이름으로 공유하는 정상 경로는 열려 있어야 한다.
 check "B가 자기 원본을 자기 이름으로 공유" 200 \
   -X PATCH "${DOCS}/sharedGifticons/shared-${SG_RUN}-ok" \
@@ -668,11 +681,15 @@ check "B(멤버)가 사용 완료 처리" 200 \
 # ── delete → create 재생성 우회 ──────────────────────────────────────────
 # `delete`가 멤버 전원에게 열려 있으면, 지운 자리에 같은 id로 다시 만들어 위 제한을
 # 통째로 건너뛴다(`create`는 재생성인지 원리상 알 수 없다).
+#
+# 위 create 케이스가 그 우회를 한 겹 더 막았다 — 재생성하려면 **원본을 소유**해야 하므로
+# 남의 기프티콘을 자기 이름으로 되살릴 수 없다. 이 절은 그 백스톱이다(지우는 것 자체를
+# 막아, 파괴로 끝나는 경로도 남기지 않는다).
 check "B가 A의 공유 항목 삭제 → 차단" 403 \
   -X DELETE "${DOCS}/sharedGifticons/${SG_A}" "${AUTH_B[@]}"
 
-# ⚠️ 이 픽스처는 **인증 헤더 없이** 심는다 — 이 스크립트 머리말대로 인증 없는 요청은
-#    관리자로 취급돼 규칙을 우회한다. 생성 규칙이 `sharedByUserId == uid()`를 요구하게
+# ⚠️ 이 픽스처는 `AUTH_ADMIN`으로 심는다(인증 헤더 생략이 아니다 — 그쪽은 403이다).
+#    생성 규칙이 `sharedByUserId == uid()`를 요구하게
 #    되면서 클라이언트로는 이 모양을 만들 수 없게 됐지만, **옛 클라이언트가 남긴 문서**는
 #    현실에 존재한다. 그 문서 위에서 나머지 규칙이 어떻게 도는지가 여기서 볼 것이다.
 check "  (준비) sharedByUserId 없는 문서(관리자 시드)" 200 \

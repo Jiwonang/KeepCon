@@ -729,10 +729,17 @@ class InMemoryShareRepository implements ShareRepository {
     // 다시 보므로, 여기서 빼면 그 사이에 사용 완료된 항목을 두고 두 구현이 다른 답을
     // 낸다(in-memory는 성공, firebase는 StateError).
     final SharedGifticon latest = fresh.list[fresh.index];
-    if (latest.status == ShareStatus.used) {
-      await _compensateUsedAfterExtend(item.gifticonId);
+    // ⚠️ 보정은 **거부가 확정된 뒤**에 한다(firebase 구현과 같은 모양). 바로 위 주석이
+    //    못박은 "재탐색 뒤에는 자리가 낡는다"를 지키려면, `await`가 끼는 갈래는 반드시
+    //    던지고 끝나야 한다 — catch 안에 두면 그것이 구조로 보장된다.
+    try {
+      _guardExtendSharedExpiry(latest, me, newExpiryDate);
+    } on StateError {
+      if (latest.status == ShareStatus.used) {
+        await _compensateUsedAfterExtend(latest.gifticonId);
+      }
+      rethrow;
     }
-    _guardExtendSharedExpiry(latest, me, newExpiryDate);
 
     final SharedGifticon updated = latest.copyWith(expiryDate: newExpiryDate);
     fresh.list[fresh.index] = updated;
@@ -782,7 +789,9 @@ class InMemoryShareRepository implements ShareRepository {
   ///
   /// 만료일까지 되돌리지는 못한다(계약에 만료일을 앞당기는 API가 없다). 사용 완료된
   /// 기프티콘의 만료일은 표시에 쓰이지 않으므로 상태를 맞추는 것으로 충분하다.
-  /// 실패는 삼킨다 — 보정이 실패해도 원래의 거부는 그대로 전파돼야 한다.
+  ///
+  /// 예상된 런타임 실패만 삼킨다(`on Exception`) — [_syncOriginalUsed]와 같은 기준이다.
+  /// `Error`는 그대로 전파되므로, 그 경우 호출자는 원래의 거부 대신 보정의 예외를 본다.
   Future<void> _compensateUsedAfterExtend(String gifticonId) async {
     try {
       final Gifticon? original = await _gifticons.getGifticonById(gifticonId);

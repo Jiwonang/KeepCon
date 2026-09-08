@@ -272,8 +272,10 @@ service cloud.firestore {
       // 반대 방향도 방장 조항이 막는다: 공유자가 그룹을 떠나면(멤버 이탈·강퇴 경로에는
       // 공유 정리가 없다) 그 항목은 공유자도 비멤버라 못 지우고 남은 멤버도 못 지운다.
       //
-      // ⚠️ 잔여: 방장은 여전히 delete → create로 남의 공유를 가로챌 수 있다. 완전 차단은
-      //    생성자를 불변 기록으로 남겨야 하므로 별도 작업이다.
+      // ⚠️ 잔여: 방장은 남의 공유 항목을 **지울** 수는 있다. 가로채기(지우고 자기 것으로
+      //    재생성)는 아래 `create`의 [ownsGifticon]이 닫았다 — 재생성은 자기가 소유한
+      //    원본으로만 되므로 남의 기프티콘을 자기 이름으로 되살릴 수 없다. 지운 사실을
+      //    남기려면 별도 기록이 필요하다.
       allow delete:
         if isSignedIn() && isGroupMember(resource.data.groupId)
         && (isSharer() || isGroupOwner(resource.data.groupId));
