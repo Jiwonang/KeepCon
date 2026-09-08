@@ -650,6 +650,11 @@ check "주인 없는 문서는 방장이 거둔다" 200 \
 SG_GONE="shared-${SG_RUN}-g"
 check "  (준비) 공유자가 비멤버(C)인 항목" 200 -X PATCH "${DOCS}/sharedGifticons/${SG_GONE}" \
   "${AUTH_A[@]}" "${JSON[@]}" -d "$(shared_doc "${UID_C}" "${SG_EXP_OLD}")"
+# 방장 조항이 필요한 **근거 자체**를 지킨다 — 공유자 C는 이미 비멤버라 자기 항목도 못
+# 지운다. 이 케이스가 없으면 `isGroupMember`에 '공유자 예외'를 뚫는 변경이 위 주석의
+# 전제를 무너뜨리면서도 전건 통과한다.
+check "떠난 공유자(비멤버) 본인도 자기 항목을 못 지운다 → 차단" 403 \
+  -X DELETE "${DOCS}/sharedGifticons/${SG_GONE}" "${AUTH_C[@]}"
 check "떠난 공유자의 항목을 일반 멤버가 거두기 → 차단" 403 \
   -X DELETE "${DOCS}/sharedGifticons/${SG_GONE}" "${AUTH_B[@]}"
 check "떠난 공유자의 항목은 방장이 거둔다" 200 \

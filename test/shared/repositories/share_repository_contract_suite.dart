@@ -569,10 +569,16 @@ void runSharedExpiryExtensionContract(ShareBackend Function() makeBackend) {
       // 항목이 `used`가 되어 재연장 가드에 영구히 막히므로, 계약이 적어 둔 복구("같은
       // 연장을 다시")가 통하지 않는다. 지금 고정되는 상태를 그대로 적어 둔다 — 이
       // 비대칭을 없애는 변경은 여기서 시끄럽게 실패해야 한다.
+      //
+      // ⚠️ **이 픽스처는 markUsed의 행위자가 공유자 본인**이라 원본도 `used`로 따라간다.
+      // 실서비스의 교차-멤버 경합에서는 따라가지 않는다(원본은 소유자만 쓸 수 있어
+      // 권한으로 건너뛴다) — 그 갈래는 두 백엔드 모두 표현할 수 없어 여기서 고정하지
+      // 못한다(계약 dartdoc 참조).
       final Gifticon? origin =
           await backend.gifticons.getGifticonById(original.id);
       expect(origin!.expiryDate, newExpiry,
-          reason: '원본만 옮겨진 채 남는다(사용 완료된 기프티콘이라 실질 피해는 없다)');
+          reason: '원본만 옮겨진 채 남는다 — 행위자가 공유자 본인인 이 픽스처에서만 '
+              '원본도 used로 따라간다');
     });
 
     test('앞당기기는 연장이 아니다', () async {
