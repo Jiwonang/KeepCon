@@ -710,18 +710,7 @@ class InMemoryShareRepository implements ShareRepository {
       throw StateError('Shared gifticon not found: $sharedGifticonId');
     }
     final SharedGifticon item = loc.list[loc.index];
-    if (item.sharedByUserId != me.id) {
-      throw StateError('Only the sharer can extend the expiry');
-    }
-    if (item.status == ShareStatus.used) {
-      throw StateError('A used shared gifticon cannot be extended');
-    }
-    if (!isLaterExpiryDate(newExpiryDate, than: item.expiryDate)) {
-      throw StateError(
-        'New expiry must be later than the current one: '
-        '${item.expiryDate} -> $newExpiryDate',
-      );
-    }
+    _guardExtendSharedExpiry(item, me, newExpiryDate);
 
     // **원본을 먼저 옮긴다.** 스냅샷만 옮긴 뒤 원본이 실패하면 그룹과 개인 목록이 같은
     // 기프티콘을 두고 다른 만료일을 말한다 — 그 어긋남은 화면에서 보이지 않는다.
@@ -736,20 +725,48 @@ class InMemoryShareRepository implements ShareRepository {
     if (fresh == null) {
       throw StateError('Shared gifticon not found: $sharedGifticonId');
     }
-    final SharedGifticon updated =
-        fresh.list[fresh.index].copyWith(expiryDate: newExpiryDate);
+    // 자리뿐 아니라 **판정도 다시 한다.** firebase 구현은 트랜잭션 안에서 같은 가드를
+    // 다시 보므로, 여기서 빼면 그 사이에 사용 완료된 항목을 두고 두 구현이 다른 답을
+    // 낸다(in-memory는 성공, firebase는 StateError).
+    final SharedGifticon latest = fresh.list[fresh.index];
+    _guardExtendSharedExpiry(latest, me, newExpiryDate);
+
+    final SharedGifticon updated = latest.copyWith(expiryDate: newExpiryDate);
     fresh.list[fresh.index] = updated;
 
     _pushNotification(
-      groupId: item.groupId,
+      groupId: latest.groupId,
       type: GroupNotificationType.expiryExtended,
       title: '기간 연장',
-      message: '${me.displayName}님이 ${item.brand} ${item.productName} '
+      message: '${me.displayName}님이 ${latest.brand} ${latest.productName} '
           '유효기간을 ${formatYmdDot(newExpiryDate)}까지 연장했어요.',
     );
 
     _emit();
     return updated;
+  }
+
+  /// [extendSharedExpiry]의 가드(계약 정본은 [ShareRepository.extendSharedExpiry] 문서다).
+  ///
+  /// `await` 전후 두 곳에서 같은 판정을 써야 해서 함수로 뺐다 — 한쪽만 고치면 앞은
+  /// 막는데 뒤는 통과시키는(또는 그 반대) 어긋남이 생긴다.
+  void _guardExtendSharedExpiry(
+    SharedGifticon item,
+    User me,
+    DateTime newExpiryDate,
+  ) {
+    if (item.sharedByUserId != me.id) {
+      throw StateError('Only the sharer can extend the expiry');
+    }
+    if (item.status == ShareStatus.used) {
+      throw StateError('A used shared gifticon cannot be extended');
+    }
+    if (!isLaterExpiryDate(newExpiryDate, than: item.expiryDate)) {
+      throw StateError(
+        'New expiry must be later than the current one: '
+        '${item.expiryDate} -> $newExpiryDate',
+      );
+    }
   }
 
   /// 원본 [Gifticon]의 만료일을 함께 옮긴다.

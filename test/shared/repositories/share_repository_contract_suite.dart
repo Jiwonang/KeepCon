@@ -541,6 +541,30 @@ void runSharedExpiryExtensionContract(ShareBackend Function() makeBackend) {
       );
     });
 
+    test('연장 도중 사용 완료되면 거부한다 — 원본 동기화 뒤에도 다시 판정한다', () async {
+      // 연장은 원본을 옮기는 동안 한 번 멈춘다(`await`). 그 창에서 누가 써 버리면
+      // 판정 근거가 사라진 것이므로 거부해야 한다. **한쪽만 다시 판정하면 두 구현이
+      // 같은 입력에 다른 답을 낸다** — firebase는 트랜잭션 안에서 다시 보고,
+      // in-memory는 재조회 뒤에 다시 본다.
+      final (Group group, _, SharedGifticon item) = await shareOne();
+
+      // 결과를 **즉시** 붙잡아 둔다. `expectLater`를 나중에 걸면, 그 사이에 실패한
+      // Future가 리스너 없이 완료돼 unhandled async error로 터진다(검증하려던 실패가
+      // 테스트 실패로 둔갑한다).
+      final Future<Object?> outcome = backend.repo
+          .extendSharedExpiry(item.id, newExpiry)
+          .then<Object?>((SharedGifticon v) => v, onError: (Object e) => e);
+      await backend.repo.markUsed(item.id);
+
+      expect(await outcome, isA<StateError>());
+
+      final List<SharedGifticon> shared =
+          await backend.repo.getSharedGifticons(group.id);
+      expect(shared.single.status, ShareStatus.used);
+      expect(shared.single.expiryDate, oldExpiry,
+          reason: '사용 완료된 항목의 만료일이 옮겨지면 "쓴 기프티콘이 되살아난 것처럼" 보인다');
+    });
+
     test('앞당기기는 연장이 아니다', () async {
       final (_, _, SharedGifticon item) = await shareOne();
 

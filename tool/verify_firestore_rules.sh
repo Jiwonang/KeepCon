@@ -574,7 +574,11 @@ check "B(멤버)가 찜 설정" 200 -X PATCH "${DOCS}/sharedGifticons/${SG_A}?${
 check "B(멤버·비공유자)가 만료일 연장 → 차단" 403 \
   -X PATCH "${DOCS}/sharedGifticons/${SG_A}?${MASK_EXPIRY}" \
   "${AUTH_B[@]}" "${JSON[@]}" -d "{\"fields\":{\"expiryDate\":{\"timestampValue\":\"${SG_EXP_NEW}\"}}}"
-check "C(비멤버)가 만료일 연장 → 차단" 403 \
+# ⚠️ 이 케이스는 **멤버십 단계에서** 막힌다(공유자 조항에 닿지 않는다). 지우지 않는
+#    이유는 멤버십 회귀 가드로는 유효하기 때문이고, 라벨에 그 사실을 적어 두는 이유는
+#    이것을 공유자 조항의 커버리지로 오독하지 않게 하기 위함이다(뮤테이션으로 확인:
+#    공유자 조항을 지워도 이 케이스는 흔들리지 않는다).
+check "C(비멤버)가 만료일 연장 → 차단(멤버십 단계 — 공유자 조항 미도달)" 403 \
   -X PATCH "${DOCS}/sharedGifticons/${SG_A}?${MASK_EXPIRY}" \
   "${AUTH_C[@]}" "${JSON[@]}" -d "{\"fields\":{\"expiryDate\":{\"timestampValue\":\"${SG_EXP_NEW}\"}}}"
 check "A(공유자)가 만료일 연장" 200 \
@@ -583,21 +587,51 @@ check "A(공유자)가 만료일 연장" 200 \
 
 # 전체 되쓰기(마스크 없음)로 만료일을 바꾸는 우회. `diff`는 값 기준이라 필드를 나눠
 # 보내지 않아도 잡힌다 — 이 케이스가 그것을 보인다.
+#
+# ⚠️ 페이로드의 만료일은 **앞 케이스와 독립인 값**을 쓴다. `SG_EXP_OLD`를 쓰면 앞
+#    케이스(A의 연장)가 실패했을 때 "만료일이 안 바뀐 요청"이 되어 200으로 통과한다 —
+#    앞 케이스의 성공에 의미가 매달린 케이스가 된다(뮤테이션에서 실제로 그랬다).
+SG_EXP_ALT='2028-01-01T00:00:00Z'
 check "B가 전체 되쓰기로 만료일 변경 → 차단" 403 \
   -X PATCH "${DOCS}/sharedGifticons/${SG_A}" \
-  "${AUTH_B[@]}" "${JSON[@]}" -d "$(shared_doc "${UID_A}" "${SG_EXP_OLD}")"
+  "${AUTH_B[@]}" "${JSON[@]}" -d "$(shared_doc "${UID_A}" "${SG_EXP_ALT}")"
+
+# ── 신원 필드를 못박지 않으면 위 제한이 두 요청으로 무너진다 ─────────────
+# ①`sharedByUserId`를 자기로 바꾸고(만료일을 안 건드리니 통과) ②그다음 연장한다.
+check "B가 sharedByUserId를 자기로 위조 → 차단" 403 \
+  -X PATCH "${DOCS}/sharedGifticons/${SG_A}?updateMask.fieldPaths=sharedByUserId" \
+  "${AUTH_B[@]}" "${JSON[@]}" -d "{\"fields\":{\"sharedByUserId\":{\"stringValue\":\"${UID_B}\"}}}"
+check "B가 gifticonId를 다른 원본으로 변경 → 차단" 403 \
+  -X PATCH "${DOCS}/sharedGifticons/${SG_A}?updateMask.fieldPaths=gifticonId" \
+  "${AUTH_B[@]}" "${JSON[@]}" -d "{\"fields\":{\"gifticonId\":{\"stringValue\":\"gif-hijack\"}}}"
+check "B가 표시용 스냅샷(브랜드) 변경 → 차단" 403 \
+  -X PATCH "${DOCS}/sharedGifticons/${SG_A}?updateMask.fieldPaths=brand" \
+  "${AUTH_B[@]}" "${JSON[@]}" -d '{"fields":{"brand":{"stringValue":"위조 브랜드"}}}'
+# 대조군 — 사용 흐름은 좁히면 안 된다. 여기가 막히면 공유 기능 자체가 죽는다.
+check "B(멤버)가 사용 완료 처리" 200 \
+  -X PATCH "${DOCS}/sharedGifticons/${SG_A}?updateMask.fieldPaths=status" \
+  "${AUTH_B[@]}" "${JSON[@]}" -d '{"fields":{"status":{"stringValue":"used"}}}'
+
+# ── delete → create 재생성 우회 ──────────────────────────────────────────
+# `delete`가 멤버 전원에게 열려 있으면, 지운 자리에 같은 id로 다시 만들어 위 제한을
+# 통째로 건너뛴다(`create`는 재생성인지 원리상 알 수 없다).
+check "B가 A의 공유 항목 삭제 → 차단" 403 \
+  -X DELETE "${DOCS}/sharedGifticons/${SG_A}" "${AUTH_B[@]}"
 
 check "  (준비) sharedByUserId 없는 문서" 200 -X PATCH "${DOCS}/sharedGifticons/${SG_LEGACY}" \
   "${AUTH_A[@]}" "${JSON[@]}" -d "$(shared_doc_no_sharer "${SG_EXP_OLD}")"
-check "그 문서에도 찜은 된다(평가 오류로 죽지 않음)" 200 \
+check "그 문서에도 찜은 된다(레거시 문서 회귀)" 200 \
   -X PATCH "${DOCS}/sharedGifticons/${SG_LEGACY}?${MASK_RESERVED}" \
   "${AUTH_B[@]}" "${JSON[@]}" -d "{\"fields\":{\"reservedByUserId\":{\"stringValue\":\"${UID_B}\"}}}"
 check "그 문서의 만료일 연장은 아무도 못 한다 → 차단" 403 \
   -X PATCH "${DOCS}/sharedGifticons/${SG_LEGACY}?${MASK_EXPIRY}" \
   "${AUTH_A[@]}" "${JSON[@]}" -d "{\"fields\":{\"expiryDate\":{\"timestampValue\":\"${SG_EXP_NEW}\"}}}"
+# 주인을 확정할 수 없는 문서는 **거둘 수는 있어야 한다** — 아니면 아무도 못 지우는
+# 채로 그룹에 박힌다(공유자 제한의 예외. 규칙 주석 참조).
+check "주인 없는 문서는 멤버가 거둘 수 있다" 200 \
+  -X DELETE "${DOCS}/sharedGifticons/${SG_LEGACY}" "${AUTH_B[@]}"
 
-check "  (정리) 공유 항목 삭제" 200 -X DELETE "${DOCS}/sharedGifticons/${SG_A}" "${AUTH_A[@]}"
-check "  (정리) 레거시 문서 삭제" 200 -X DELETE "${DOCS}/sharedGifticons/${SG_LEGACY}" "${AUTH_A[@]}"
+check "  (정리) 공유 항목 삭제(공유자 본인)" 200 -X DELETE "${DOCS}/sharedGifticons/${SG_A}" "${AUTH_A[@]}"
 
 echo
 echo "결과: 통과 ${pass} / 실패 ${fail}"

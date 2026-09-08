@@ -473,6 +473,10 @@ abstract class ShareRepository {
   /// - 항목이 [ShareStatus.used]면 안 된다(이미 소진됐다). [ShareStatus.inUse]는
   ///   **허용한다** — 잠금은 "누가 지금 쓰는 중"일 뿐이고, 그 사람에게도 늘어난
   ///   기간이 유효하다.
+  ///   ⚠️ **이 허용에는 테스트가 없다.** 계약에 [ShareStatus.inUse]를 만드는 API가
+  ///   없어(그 상태는 in-memory 데모 시드에만 존재한다) 행위로 고정할 방법이 없다.
+  ///   가드를 `!= available`로 조여도 어느 테스트도 실패하지 않는다(실측) — 잠금
+  ///   API가 생기면 그때 계약 스위트에 케이스를 넣는다.
   /// - [newExpiryDate]가 현재 [SharedGifticon.expiryDate]보다 **뒤 날짜**여야 한다
   ///   ([isLaterExpiryDate] — 달력 일 단위).
   ///
