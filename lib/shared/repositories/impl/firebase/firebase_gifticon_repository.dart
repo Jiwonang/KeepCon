@@ -22,6 +22,7 @@ import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'doc_read.dart';
 
 import '../../../models/gifticon.dart';
+import '../../../util/expiry_policy.dart';
 import '../../gifticon_repository.dart';
 
 /// [GifticonRepository]의 Cloud Firestore 구현.
@@ -88,6 +89,43 @@ class FirebaseGifticonRepository implements GifticonRepository {
       }
       tx.update(ref, <String, dynamic>{'status': status.name});
       return current.copyWith(status: status);
+    });
+  }
+
+  @override
+  Future<Gifticon> extendExpiry(String id, DateTime newExpiryDate) async {
+    final DocumentReference<Map<String, dynamic>> ref = _col.doc(id);
+
+    // 가드는 트랜잭션 내부에서 현재 값을 읽어 판정한다 — 읽고 쓰는 사이에 다른 기기가
+    // 만료일을 옮기면 "이미 더 뒤로 간 만료일"을 앞으로 당기게 된다.
+    return _db.runTransaction<Gifticon>((Transaction tx) async {
+      final DocumentSnapshot<Map<String, dynamic>> doc = await tx.get(ref);
+      if (!doc.exists) {
+        throw StateError('Gifticon not found: $id');
+      }
+      final Gifticon current = _fromDoc(doc);
+      if (current.status == GifticonStatus.used) {
+        throw StateError('A used gifticon cannot be extended: $id');
+      }
+      if (!isLaterExpiryDate(newExpiryDate, than: current.expiryDate)) {
+        throw StateError(
+          'New expiry must be later than the current one: '
+          '${current.expiryDate} -> $newExpiryDate',
+        );
+      }
+      final GifticonStatus nextStatus = current.status == GifticonStatus.expired
+          ? GifticonStatus.available
+          : current.status;
+      // 만료일과 상태만 담은 **부분 갱신**이다. 전체 되쓰기를 하면 이 매퍼가 모르는
+      // 레거시 필드가 기본값으로 덮이고, 규칙이 보는 "변경 후 문서"도 실제와 달라진다.
+      tx.update(ref, <String, dynamic>{
+        'expiryDate': Timestamp.fromDate(newExpiryDate),
+        'status': nextStatus.name,
+      });
+      return current.copyWith(
+        expiryDate: newExpiryDate,
+        status: nextStatus,
+      );
     });
   }
 

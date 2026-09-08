@@ -22,6 +22,18 @@ library;
 ///
 /// 되돌리는 전이(used→available, expired→available 등)와 used↔expired는 **불허**.
 /// 프로그램적 검증은 [GifticonStatusTransition.isAllowed]를 사용한다.
+///
+/// ## 단 하나의 예외 — 유효기간 연장
+/// [expired] → [available]을 만드는 경로가 **하나** 있다:
+/// `GifticonRepository.extendExpiry`. 저장된 [expired]는 "그 만료일 때문에" 붙은 것이고,
+/// 연장은 그 근거 자체를 바꾸므로 상태도 함께 되돌린다.
+///
+/// **그래도 아래 전이 표에는 넣지 않는다.** 표에 넣으면
+/// `GifticonRepository.updateStatus(id, available)`로도 되돌릴 수 있게 되어, 만료일은
+/// 그대로인 채 상태만 살아나는 문서가 만들어진다. 표는 "상태만 바꾸는 API"의 규칙이고,
+/// 연장은 만료일과 상태를 **함께** 옮기는 별도 계약이다.
+///
+/// [used]는 이 예외에서도 되돌아오지 않는다 — 이미 쓴 기프티콘은 기간을 늘려도 쓸 수 없다.
 enum GifticonStatus {
   /// 사용 가능. scan이 신규 생성 시 채우는 기본 상태.
   available,

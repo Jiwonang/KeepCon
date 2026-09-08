@@ -191,11 +191,100 @@ service cloud.firestore {
     }
 
     // 공유 기프티콘 — 소속 그룹 멤버.
+    //
+    // 필드를 세 등급으로 나눈다.
+    //   ① 신원(groupId·gifticonId·sharedByUserId) — **불변.**
+    //   ② 원본 스냅샷(expiryDate·brand·productName·barcode) — **공유자만.**
+    //   ③ 사용 흐름(status·lockedByUserId·reservedByUserId) — **멤버 누구나.**
+    //
+    // ②가 이번에 생긴 제한이다. 유효기간 연장은 등록한 본인만 할 수 있고
+    // (계약 `ShareRepository.extendSharedExpiry`), 클라이언트 가드만 두면 규칙을 안
+    // 거치는 요청에 무력하다. ③을 함께 좁히면 안 된다 — 찜·사용 완료를 그룹 누구나
+    // 하는 것이 공유의 목적이다.
+    //
+    // ⚠️ 이 분류는 **denylist다.** 두 목록에 없는 키는 자동으로 ③등급이 된다 — 모델에
+    // 11번째 필드가 생기면 아무 멤버나 쓸 수 있고, 그 사실을 알려 줄 게이트가 없다
+    // (계약 밖 임의 키를 써넣는 요청이 지금도 200이다 — 실측). allowlist(`hasOnly`)로
+    // 뒤집으려면 레거시 문서에 계약 밖 키가 있는지 먼저 세어야 해서 별도 작업이다.
+    //
+    // **①이 없으면 ②가 성립하지 않는다.** `sharedByUserId`가 스스로 ②의 판정 근거인데
+    // 그 필드가 가변이면, 멤버는 먼저 자기 uid로 바꿔 놓고(그 요청은 만료일을 안 건드리니
+    // 통과) 그다음 만료일을 옮기면 된다 — 요청 두 번으로 제한이 사라진다(리뷰에서
+    // 에뮬레이터로 재현). `groupId`·`gifticonId`도 같은 이유로 못박는다(문서를 남의
+    // 그룹으로 옮기거나 다른 원본에 붙이는 경로).
     match /sharedGifticons/{id} {
-      allow read, update, delete:
+      // 이 요청이 [keys] 중 하나라도 **값을 바꾸는가**. `diff`는 값 기준이라
+      // 필드를 나눠 보내지 않고 전체를 되쓰는 우회도 같이 잡힌다.
+      function sharedChangesAny(keys) {
+        return request.resource.data.diff(resource.data).affectedKeys().hasAny(keys);
+      }
+
+      // 행위자가 이 항목의 공유자인가.
+      //
+      // `.get(…, '')`로 읽는 이유: 그 필드가 없는 손상 문서를 직접 접근하면 규칙 평가가
+      // 오류로 죽는다. 지금은 `||`의 단락 평가 덕에 만료일을 안 건드리는 요청이 이 항에
+      // 닿지 않아 직접 접근으로도 결과가 같지만(실측), 이 검사를 `||` 밖으로 옮기는
+      // 순간 그런 문서는 **모든 쓰기**가 막힌다. 폴백은 그때를 대비한 것이다.
+      // 필드가 없으면 빈 문자열이라 `uid()`와 같을 수 없다(fail-closed).
+      function isSharer() {
+        return resource.data.get('sharedByUserId', '') == uid();
+      }
+
+      // 행위자가 [gifticonId]의 원본을 실제로 소유하는가.
+      //
+      // 없는 문서를 가리키면 `exists`에서 거짓이 된다(fail-closed) — 남의 기프티콘 id를
+      // 붙이거나 존재하지 않는 id로 공유 항목을 만드는 경로를 함께 막는다.
+      function ownsGifticon(gifticonId) {
+        return exists(/databases/$(database)/documents/gifticons/$(gifticonId))
+          && get(/databases/$(database)/documents/gifticons/$(gifticonId)).data.ownerId == uid();
+      }
+
+      allow read:
         if isSignedIn() && isGroupMember(resource.data.groupId);
+
+      // 생성도 신원을 검사한다. `update`에서 신원을 못박아도 `create`가 열려 있으면
+      // **남의 이름으로 새 항목을 만들면 그만**이라, 위 ① 등급이 종이 규칙이 된다.
+      // 필드도 allowlist로 좁힌다 — update 쪽 분류는 denylist라 계약 밖 키가 들어오는데,
+      // 적어도 생성 시점에는 막아 둔다.
       allow create:
-        if isSignedIn() && isGroupMember(request.resource.data.groupId);
+        if isSignedIn()
+        && isGroupMember(request.resource.data.groupId)
+        && request.resource.data.sharedByUserId == uid()
+        && ownsGifticon(request.resource.data.gifticonId)
+        && request.resource.data.keys().hasAll(
+             ['groupId', 'gifticonId', 'sharedByUserId', 'brand',
+              'productName', 'expiryDate', 'status'])
+        && request.resource.data.keys().hasOnly(
+             ['groupId', 'gifticonId', 'sharedByUserId', 'brand',
+              'productName', 'expiryDate', 'status',
+              'lockedByUserId', 'reservedByUserId', 'barcode']);
+
+      // 회수(계약 `cancelShare`)는 공유자 본인만 — 계약과 같은 제한을 규칙에도 둔다.
+      // 없으면 ①남의 공유를 아무 멤버나 거둘 수 있고, 더 나쁘게는 ②지운 자리에 **같은
+      // 문서 id로 다시 만들어** 위 update 제한을 통째로 건너뛴다(`create`는 재생성인지
+      // 원리상 알 수 없다).
+      //
+      // 정리 권한은 **방장**에게 남긴다. 문서 모양(`sharedByUserId` 유무)으로 예외를
+      // 두면 그것이 곧 우회로다 — 우회의 목적은 그 문서의 만료일을 바꾸는 것이 아니라
+      // **주인이 되는 것**이고, `create`에 필드 검증이 없어 지운 자리에 자기를 sharer로
+      // 다시 써넣으면 그만이다(에뮬레이터 실측: 삭제 200 → 재생성 200 → 연장 200).
+      //
+      // 반대 방향도 방장 조항이 막는다: 공유자가 그룹을 떠나면(멤버 이탈·강퇴 경로에는
+      // 공유 정리가 없다) 그 항목은 공유자도 비멤버라 못 지우고 남은 멤버도 못 지운다.
+      //
+      // ⚠️ 잔여: 방장은 남의 공유 항목을 **지울** 수는 있다. 가로채기(지우고 자기 것으로
+      //    재생성)는 아래 `create`의 [ownsGifticon]이 닫았다 — 재생성은 자기가 소유한
+      //    원본으로만 되므로 남의 기프티콘을 자기 이름으로 되살릴 수 없다. 지운 사실을
+      //    남기려면 별도 기록이 필요하다.
+      allow delete:
+        if isSignedIn() && isGroupMember(resource.data.groupId)
+        && (isSharer() || isGroupOwner(resource.data.groupId));
+
+      allow update:
+        if isSignedIn() && isGroupMember(resource.data.groupId)
+        && !sharedChangesAny(['groupId', 'gifticonId', 'sharedByUserId'])
+        && (!sharedChangesAny(['expiryDate', 'brand', 'productName', 'barcode'])
+            || isSharer());
     }
 
     // 사용 이력 — 멤버 읽기/생성, 불변(수정·삭제 금지).
