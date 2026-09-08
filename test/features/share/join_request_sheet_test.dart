@@ -499,4 +499,25 @@ void main() {
     expect(reporter.contexts, <String>['JoinGroupSheet.requestToJoin']);
     await dismissFailureDialog(tester);
   });
+
+  testWidgets('계약 밖 예외(백엔드 실패)도 안내한다 — on StateError로 좁히면 잡힌다',
+      (WidgetTester tester) async {
+    // 실서버가 던지는 `FirebaseException`(권한 거부·오프라인)의 대역이다. `_submit`의
+    // `catch (e, s)`를 `on StateError catch`로 좁히면 이 예외가 밖으로 빠져나가
+    // **팝업도 리포트도 없이 `_sending`이 true로 굳는다**(버튼이 영구히 죽는다).
+    //
+    // 이 축이 비어 있었다: 기존 실패 테스트 3건은 전부 `StateError` 하위 타입을
+    // 던지고(`fail: true` 포함), `share_action_failure_ui_test`는 참여 경로를 아예
+    // 다루지 않는다 — 좁히는 뮤테이션에서 767건이 전부 green이었다.
+    final _SpyShareRepository share =
+        _SpyShareRepository(failure: Exception('backend down'));
+    final _SpyErrorReporter reporter = _SpyErrorReporter();
+    await pumpSheet(tester, share, reporter);
+
+    await tapCta(tester);
+
+    expect(find.text('요청을 보낼 수 없어요'), findsOneWidget);
+    expect(reporter.contexts, <String>['JoinGroupSheet.requestToJoin']);
+    await dismissFailureDialog(tester);
+  });
 }

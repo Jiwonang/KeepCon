@@ -44,7 +44,10 @@ import 'package:firebase_core/firebase_core.dart' show FirebaseException;
 import 'package:flutter/foundation.dart';
 
 import '../repositories/share_repository.dart'
-    show JoinRequestUnreadableException;
+    show
+        AlreadyGroupMemberException,
+        JoinRequestAlreadyPendingException,
+        JoinRequestUnreadableException;
 
 /// 처리된 실패를 개발자에게 남기는 계약.
 ///
@@ -93,6 +96,20 @@ class DebugPrintErrorReporter implements ErrorReporter {
     if (error is JoinRequestUnreadableException) {
       return 'StateError(join-request-unreadable)';
     }
+    // 아래 둘은 **정상 사용자 경로**다 — 승인을 기다리다 버튼을 다시 누르거나, 자기가
+    // 이미 속한 그룹의 링크를 넣은 것. 평범한 `StateError`로 접으면 '없는·손상된 토큰'
+    // (진짜 이상 신호)과 release 로그에서 **같은 글자**가 되어,
+    // `JoinGroupSheet.requestToJoin` 라벨의 유일한 진단 채널이 재탭 소음에 덮인다.
+    // 그리고 재탭은 이 화면에서 가장 흔한 동작이다.
+    if (error is JoinRequestAlreadyPendingException) {
+      return 'StateError(join-request-already-pending)';
+    }
+    if (error is AlreadyGroupMemberException) {
+      return 'StateError(already-group-member)';
+    }
+    // ⚠️ [InviteExpiredException]도 정상 경로인데(5분 코드 만료) 아직 아래 버킷으로
+    // 접힌다 — 이 PR 이전부터의 상태라 범위 밖으로 뒀다. 고칠 때는 위와 같은 형태로
+    // 한 분기를 더한다.
     if (error is StateError) return 'StateError';
     if (error is ArgumentError) return 'ArgumentError';
     if (error is TypeError) return 'TypeError';

@@ -3,7 +3,9 @@
 // 검증 대상 계약:
 // - requestToJoin: 링크 소지자는 **요청만** 할 수 있고 멤버가 되지 않는다.
 //   알림 문서는 만들지 않는다 — 방장에게 도착을 알리는 신호는 대기 목록 하나다.
-//   만료·이미 멤버는 StateError. 같은 사람의 재요청은 멱등(요청이 쌓이지 않는다).
+//   만료는 InviteExpiredException, 이미 멤버는 AlreadyGroupMemberException(둘 다
+//   StateError 하위). 같은 사람의 재요청은 **부작용 기준으로** 멱등이지만(요청이 쌓이지
+//   않는다) 조용히 반환하지 않고 JoinRequestAlreadyPendingException으로 알린다.
 //   정원은 요청 시점에 보지 않는다(대기자는 자리를 차지하지 않는다).
 // - approveJoinRequest: 방장만, 대기 중인 요청만. 승인 시점에 정원을 본다.
 // - rejectJoinRequest: 방장만. 거절은 기록으로 남는다(요청자가 결과를 볼 유일한 경로).
