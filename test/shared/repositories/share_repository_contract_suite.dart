@@ -570,15 +570,40 @@ void runSharedExpiryExtensionContract(ShareBackend Function() makeBackend) {
       // 연장을 다시")가 통하지 않는다. 지금 고정되는 상태를 그대로 적어 둔다 — 이
       // 비대칭을 없애는 변경은 여기서 시끄럽게 실패해야 한다.
       //
-      // ⚠️ **이 픽스처는 markUsed의 행위자가 공유자 본인**이라 원본도 `used`로 따라간다.
-      // 실서비스의 교차-멤버 경합에서는 따라가지 않는다(원본은 소유자만 쓸 수 있어
-      // 권한으로 건너뛴다) — 그 갈래는 두 백엔드 모두 표현할 수 없어 여기서 고정하지
-      // 못한다(계약 dartdoc 참조).
+      // 원본은 이미 옮겨진 뒤이므로 만료일은 새 값으로 남는다. **상태는 반드시 `used`
+      // 여야 한다** — 거부하면서 저장소가 보정한다. 이것이 없으면 개인 목록에 "이미
+      // 소진됐는데 더 오래 쓸 수 있는" 기프티콘이 남는다. (이 픽스처는 markUsed의
+      // 행위자가 공유자 본인이라 markUsed 쪽 동기화만으로도 `used`가 되지만, 실서비스의
+      // 교차-멤버 경합에서는 그쪽이 권한으로 건너뛰고 보정만 남는다 — 그 조건 자체는
+      // 두 백엔드 모두 표현할 수 없다. 계약 dartdoc 참조.)
       final Gifticon? origin =
           await backend.gifticons.getGifticonById(original.id);
       expect(origin!.expiryDate, newExpiry,
-          reason: '원본만 옮겨진 채 남는다 — 행위자가 공유자 본인인 이 픽스처에서만 '
-              '원본도 used로 따라간다');
+          reason: '원본만 옮겨진 채 남는다(만료일은 되돌리지 못한다 — 앞당기는 API가 없다)');
+      expect(origin.status, GifticonStatus.used,
+          reason: '거부하면서 원본을 사용 완료로 맞춘다 — 소진된 기프티콘이 되살아나면 안 된다');
+    });
+
+    test('만료된 원본이 그 경합에서 되살아난 채 남지 않는다', () async {
+      // 위 케이스는 보정을 검증하지 못한다 — 행위자가 공유자 본인이라 `markUsed`의 원본
+      // 동기화만으로도 원본이 `used`가 되기 때문이다. **원본이 `expired`면 다르다**:
+      // 전이 표에 `expired → used`가 없어 그쪽이 건너뛰고, 그 사이 연장이 원본을
+      // `available` + 새 만료일로 되살려 놓는다. 보정이 없으면 개인 목록에 **이미
+      // 소진됐는데 여섯 달 더 쓸 수 있는** 기프티콘이 남는다.
+      //
+      // 만료된 기프티콘이 이 기능의 주 사용 사례이므로 드문 갈래가 아니다.
+      final (_, Gifticon original, SharedGifticon item) =
+          await shareOne(status: GifticonStatus.expired);
+
+      final Future<Object?> outcome = backend.repo
+          .extendSharedExpiry(item.id, newExpiry)
+          .then<Object?>((SharedGifticon v) => v, onError: (Object e) => e);
+      await backend.repo.markUsed(item.id);
+
+      expect(await outcome, isA<StateError>());
+      expect((await backend.gifticons.getGifticonById(original.id))?.status,
+          GifticonStatus.used,
+          reason: '연장이 되살린 원본을 거부하면서 사용 완료로 맞춘다');
     });
 
     test('앞당기기는 연장이 아니다', () async {

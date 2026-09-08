@@ -1254,6 +1254,26 @@ class FirebaseShareRepository implements ShareRepository {
     await _syncOriginalExpiry(current.gifticonId, newExpiryDate);
 
     // ③ 스냅샷 + 알림.
+    try {
+      return await _extendSharedExpiryTx(ref, notifRef, me, newExpiryDate,
+          sharedGifticonId: sharedGifticonId);
+    } on StateError {
+      // 그 사이 사용 완료돼 거부된 경우, 이미 옮겨 둔 원본을 사용 완료로 맞춘다
+      // (아래 [_compensateUsedAfterExtend] 참조). 보정하든 못 하든 거부는 그대로
+      // 전파한다 — 연장은 실제로 실패했다.
+      await _compensateUsedAfterExtend(ref, current.gifticonId);
+      rethrow;
+    }
+  }
+
+  /// [extendSharedExpiry]의 ③단계(스냅샷 갱신 + 알림) 트랜잭션.
+  Future<SharedGifticon> _extendSharedExpiryTx(
+    DocumentReference<Map<String, dynamic>> ref,
+    DocumentReference<Map<String, dynamic>> notifRef,
+    User me,
+    DateTime newExpiryDate, {
+    required String sharedGifticonId,
+  }) {
     return _db.runTransaction<SharedGifticon>((Transaction tx) async {
       final DocumentSnapshot<Map<String, dynamic>> doc = await tx.get(ref);
       if (!doc.exists) {
@@ -1275,6 +1295,39 @@ class FirebaseShareRepository implements ShareRepository {
       );
       return next;
     });
+  }
+
+  /// 연장 도중 항목이 사용 완료돼 거부할 때, **옮겨 둔 원본을 사용 완료로 맞춘다.**
+  ///
+  /// 이 시점의 원본은 이미 새 만료일을 갖고 있고([_syncOriginalExpiry]가 먼저 돈다),
+  /// 만료 상태였다면 `available`로 되살아나 있다. 그대로 두면 개인 목록에 **이미 소진된
+  /// 기프티콘이 더 오래 쓸 수 있는 것처럼** 남는다 — [_syncOriginalUsed]는 best-effort라
+  /// 그쪽이 채워 준다는 보장이 없다(다른 멤버가 사용하면 원본에 권한이 없고, 원본이
+  /// `expired`면 전이 표에 `expired → used`가 없어 건너뛴다).
+  ///
+  /// 만료일까지 되돌리지는 못한다(계약에 만료일을 앞당기는 API가 없다). 사용 완료된
+  /// 기프티콘의 만료일은 표시에 쓰이지 않으므로 상태를 맞추는 것으로 충분하다.
+  /// 실패는 삼킨다 — 보정 여부와 무관하게 원래의 거부가 전파돼야 한다.
+  Future<void> _compensateUsedAfterExtend(
+    DocumentReference<Map<String, dynamic>> sharedRef,
+    String gifticonId,
+  ) async {
+    try {
+      final DocumentSnapshot<Map<String, dynamic>> doc = await sharedRef.get();
+      if (!doc.exists) return;
+      if (_sharedFromDoc(doc).status != ShareStatus.used) return;
+      final Gifticon? original = await _gifticons.getGifticonById(gifticonId);
+      if (original == null || original.status == GifticonStatus.used) return;
+      if (!GifticonStatusTransition.isAllowed(
+        original.status,
+        GifticonStatus.used,
+      )) {
+        return;
+      }
+      await _gifticons.updateStatus(gifticonId, GifticonStatus.used);
+    } on Exception {
+      return;
+    }
   }
 
   /// [extendSharedExpiry]의 가드(계약 정본은 그 문서다).

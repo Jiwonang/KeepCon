@@ -230,10 +230,34 @@ service cloud.firestore {
         return resource.data.get('sharedByUserId', '') == uid();
       }
 
+      // 행위자가 [gifticonId]의 원본을 실제로 소유하는가.
+      //
+      // 없는 문서를 가리키면 `exists`에서 거짓이 된다(fail-closed) — 남의 기프티콘 id를
+      // 붙이거나 존재하지 않는 id로 공유 항목을 만드는 경로를 함께 막는다.
+      function ownsGifticon(gifticonId) {
+        return exists(/databases/$(database)/documents/gifticons/$(gifticonId))
+          && get(/databases/$(database)/documents/gifticons/$(gifticonId)).data.ownerId == uid();
+      }
+
       allow read:
         if isSignedIn() && isGroupMember(resource.data.groupId);
+
+      // 생성도 신원을 검사한다. `update`에서 신원을 못박아도 `create`가 열려 있으면
+      // **남의 이름으로 새 항목을 만들면 그만**이라, 위 ① 등급이 종이 규칙이 된다.
+      // 필드도 allowlist로 좁힌다 — update 쪽 분류는 denylist라 계약 밖 키가 들어오는데,
+      // 적어도 생성 시점에는 막아 둔다.
       allow create:
-        if isSignedIn() && isGroupMember(request.resource.data.groupId);
+        if isSignedIn()
+        && isGroupMember(request.resource.data.groupId)
+        && request.resource.data.sharedByUserId == uid()
+        && ownsGifticon(request.resource.data.gifticonId)
+        && request.resource.data.keys().hasAll(
+             ['groupId', 'gifticonId', 'sharedByUserId', 'brand',
+              'productName', 'expiryDate', 'status'])
+        && request.resource.data.keys().hasOnly(
+             ['groupId', 'gifticonId', 'sharedByUserId', 'brand',
+              'productName', 'expiryDate', 'status',
+              'lockedByUserId', 'reservedByUserId', 'barcode']);
 
       // 회수(계약 `cancelShare`)는 공유자 본인만 — 계약과 같은 제한을 규칙에도 둔다.
       // 없으면 ①남의 공유를 아무 멤버나 거둘 수 있고, 더 나쁘게는 ②지운 자리에 **같은

@@ -144,6 +144,14 @@ AUTH_B=(-H "Authorization: Bearer ${TOKEN_B}")
 AUTH_C=(-H "Authorization: Bearer ${TOKEN_C}")
 JSON=(-H 'Content-Type: application/json')
 
+# 규칙을 우회해 문서를 심는 **픽스처 전용** 토큰(에뮬레이터 관례 — `Bearer owner`).
+#
+# ⚠️ 인증 헤더를 **생략**하는 것으로는 안 된다. 이 스크립트 머리말의 "인증 헤더 없이
+#    호출하면 관리자로 취급된다"는 서술과 달리, 무인증 쓰기는 `request.auth == null`이
+#    되어 `isSignedIn()`에서 **403**이다(실측). 케이스에는 절대 쓰지 말 것 — 규칙을
+#    통째로 건너뛰므로 무엇도 검증하지 못한다.
+AUTH_ADMIN=(-H 'Authorization: Bearer owner')
+
 # Firestore REST 형식의 기프티콘 문서를 만든다. $1 = ownerId(이 값이 규칙 판정 대상).
 gifticon_doc() {
   printf '{"fields":{"ownerId":{"stringValue":"%s"},"brand":{"stringValue":"스타벅스"},"productName":{"stringValue":"아메리카노"},"price":{"integerValue":"4500"},"category":{"stringValue":"카페"},"status":{"stringValue":"available"}}}' "$1"
@@ -564,8 +572,42 @@ MASK_RESERVED='updateMask.fieldPaths=reservedByUserId'
 SG_EXP_OLD='2026-01-01T00:00:00Z'
 SG_EXP_NEW='2027-01-01T00:00:00Z'
 
+# 공유 생성은 **원본 소유**를 요구하므로 원본을 먼저 심는다(A 소유). 이 픽스처가 없으면
+# 아래 정상 생성이 존재하지 않는 원본을 가리켜 403이 되고, 뒤 케이스가 통째로 무너진다.
+check "  (준비) A의 원본 기프티콘" 200 -X PATCH "${DOCS}/gifticons/gif-${SG_RUN}" \
+  "${AUTH_A[@]}" "${JSON[@]}" -d "$(gifticon_doc "${UID_A}")"
+check "  (준비) B의 원본 기프티콘(남의 것 붙이기 대조군)" 200 \
+  -X PATCH "${DOCS}/gifticons/gif-other-${SG_RUN}" \
+  "${AUTH_B[@]}" "${JSON[@]}" -d "$(gifticon_doc "${UID_B}")"
+
 check "  (준비) A가 기프티콘 공유" 200 -X PATCH "${DOCS}/sharedGifticons/${SG_A}" \
   "${AUTH_A[@]}" "${JSON[@]}" -d "$(shared_doc "${UID_A}" "${SG_EXP_OLD}")"
+
+# ── 생성도 신원을 검사한다 ───────────────────────────────────────────────
+# update에서 신원을 못박아도 create가 열려 있으면 남의 이름으로 새 항목을 만들면 그만이다.
+check "B가 A의 이름으로 공유 항목 생성 → 차단" 403 \
+  -X PATCH "${DOCS}/sharedGifticons/shared-${SG_RUN}-forge" \
+  "${AUTH_B[@]}" "${JSON[@]}" -d "$(shared_doc "${UID_A}" "${SG_EXP_OLD}")"
+# 자기 이름으로 만들더라도 **남의 원본**을 붙일 수는 없다.
+check "B가 남의 원본(A 소유)을 붙여 공유 → 차단" 403 \
+  -X PATCH "${DOCS}/sharedGifticons/shared-${SG_RUN}-steal" \
+  "${AUTH_B[@]}" "${JSON[@]}" \
+  -d "{\"fields\":{\"groupId\":{\"stringValue\":\"${G_JR}\"},\"gifticonId\":{\"stringValue\":\"gif-${SG_RUN}\"},\"sharedByUserId\":{\"stringValue\":\"${UID_B}\"},\"brand\":{\"stringValue\":\"스타벅스\"},\"productName\":{\"stringValue\":\"아메리카노\"},\"expiryDate\":{\"timestampValue\":\"${SG_EXP_OLD}\"},\"status\":{\"stringValue\":\"available\"}}}"
+check "없는 원본을 붙여 공유 → 차단" 403 \
+  -X PATCH "${DOCS}/sharedGifticons/shared-${SG_RUN}-ghost" \
+  "${AUTH_B[@]}" "${JSON[@]}" \
+  -d "{\"fields\":{\"groupId\":{\"stringValue\":\"${G_JR}\"},\"gifticonId\":{\"stringValue\":\"gif-nope-${SG_RUN}\"},\"sharedByUserId\":{\"stringValue\":\"${UID_B}\"},\"brand\":{\"stringValue\":\"스타벅스\"},\"productName\":{\"stringValue\":\"아메리카노\"},\"expiryDate\":{\"timestampValue\":\"${SG_EXP_OLD}\"},\"status\":{\"stringValue\":\"available\"}}}"
+check "계약 밖 필드를 담아 공유 생성 → 차단" 403 \
+  -X PATCH "${DOCS}/sharedGifticons/shared-${SG_RUN}-extra" \
+  "${AUTH_B[@]}" "${JSON[@]}" \
+  -d "{\"fields\":{\"groupId\":{\"stringValue\":\"${G_JR}\"},\"gifticonId\":{\"stringValue\":\"gif-other-${SG_RUN}\"},\"sharedByUserId\":{\"stringValue\":\"${UID_B}\"},\"brand\":{\"stringValue\":\"스타벅스\"},\"productName\":{\"stringValue\":\"아메리카노\"},\"expiryDate\":{\"timestampValue\":\"${SG_EXP_OLD}\"},\"status\":{\"stringValue\":\"available\"},\"isAdmin\":{\"booleanValue\":true}}}"
+# 대조군 — 자기 원본을 자기 이름으로 공유하는 정상 경로는 열려 있어야 한다.
+check "B가 자기 원본을 자기 이름으로 공유" 200 \
+  -X PATCH "${DOCS}/sharedGifticons/shared-${SG_RUN}-ok" \
+  "${AUTH_B[@]}" "${JSON[@]}" \
+  -d "{\"fields\":{\"groupId\":{\"stringValue\":\"${G_JR}\"},\"gifticonId\":{\"stringValue\":\"gif-other-${SG_RUN}\"},\"sharedByUserId\":{\"stringValue\":\"${UID_B}\"},\"brand\":{\"stringValue\":\"배스킨\"},\"productName\":{\"stringValue\":\"싱글킹\"},\"expiryDate\":{\"timestampValue\":\"${SG_EXP_OLD}\"},\"status\":{\"stringValue\":\"available\"}}}"
+check "  (정리) 대조군 공유 항목 삭제" 200 \
+  -X DELETE "${DOCS}/sharedGifticons/shared-${SG_RUN}-ok" "${AUTH_B[@]}"
 
 # 대조군 — 공유의 본래 동작(멤버 누구나 찜)은 그대로여야 한다.
 check "B(멤버)가 찜 설정" 200 -X PATCH "${DOCS}/sharedGifticons/${SG_A}?${MASK_RESERVED}" \
@@ -629,8 +671,13 @@ check "B(멤버)가 사용 완료 처리" 200 \
 check "B가 A의 공유 항목 삭제 → 차단" 403 \
   -X DELETE "${DOCS}/sharedGifticons/${SG_A}" "${AUTH_B[@]}"
 
-check "  (준비) sharedByUserId 없는 문서" 200 -X PATCH "${DOCS}/sharedGifticons/${SG_LEGACY}" \
-  "${AUTH_A[@]}" "${JSON[@]}" -d "$(shared_doc_no_sharer "${SG_EXP_OLD}")"
+# ⚠️ 이 픽스처는 **인증 헤더 없이** 심는다 — 이 스크립트 머리말대로 인증 없는 요청은
+#    관리자로 취급돼 규칙을 우회한다. 생성 규칙이 `sharedByUserId == uid()`를 요구하게
+#    되면서 클라이언트로는 이 모양을 만들 수 없게 됐지만, **옛 클라이언트가 남긴 문서**는
+#    현실에 존재한다. 그 문서 위에서 나머지 규칙이 어떻게 도는지가 여기서 볼 것이다.
+check "  (준비) sharedByUserId 없는 문서(관리자 시드)" 200 \
+  -X PATCH "${DOCS}/sharedGifticons/${SG_LEGACY}" \
+  "${AUTH_ADMIN[@]}" "${JSON[@]}" -d "$(shared_doc_no_sharer "${SG_EXP_OLD}")"
 check "그 문서에도 찜은 된다(레거시 문서 회귀)" 200 \
   -X PATCH "${DOCS}/sharedGifticons/${SG_LEGACY}?${MASK_RESERVED}" \
   "${AUTH_B[@]}" "${JSON[@]}" -d "{\"fields\":{\"reservedByUserId\":{\"stringValue\":\"${UID_B}\"}}}"
@@ -648,8 +695,12 @@ check "주인 없는 문서는 방장이 거둔다" 200 \
 # 공유자가 그룹을 떠난 뒤 남은 항목 — 공유자는 비멤버라 못 지운다. 방장 조항이 없으면
 # **아무도** 못 지우는 문서가 된다(멤버 이탈·강퇴 경로에는 공유 정리가 없어 정상 경로다).
 SG_GONE="shared-${SG_RUN}-g"
-check "  (준비) 공유자가 비멤버(C)인 항목" 200 -X PATCH "${DOCS}/sharedGifticons/${SG_GONE}" \
-  "${AUTH_A[@]}" "${JSON[@]}" -d "$(shared_doc "${UID_C}" "${SG_EXP_OLD}")"
+# 공유자가 그룹을 떠난 상태 = 문서에는 C가 공유자로 남아 있는데 C는 멤버가 아니다.
+# 생성 규칙이 `sharedByUserId == uid()`를 요구하므로 클라이언트로는 이 모양을 만들 수
+# 없다 — 관리자로 심는다(그 상태 자체는 '공유 후 탈퇴'라는 정상 경로로 생긴다).
+check "  (준비) 공유자가 비멤버(C)인 항목(관리자 시드)" 200 \
+  -X PATCH "${DOCS}/sharedGifticons/${SG_GONE}" \
+  "${AUTH_ADMIN[@]}" "${JSON[@]}" -d "$(shared_doc "${UID_C}" "${SG_EXP_OLD}")"
 # 방장 조항이 필요한 **근거 자체**를 지킨다 — 공유자 C는 이미 비멤버라 자기 항목도 못
 # 지운다. 이 케이스가 없으면 `isGroupMember`에 '공유자 예외'를 뚫는 변경이 위 주석의
 # 전제를 무너뜨리면서도 전건 통과한다.

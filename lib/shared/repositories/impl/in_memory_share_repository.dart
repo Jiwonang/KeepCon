@@ -729,6 +729,9 @@ class InMemoryShareRepository implements ShareRepository {
     // 다시 보므로, 여기서 빼면 그 사이에 사용 완료된 항목을 두고 두 구현이 다른 답을
     // 낸다(in-memory는 성공, firebase는 StateError).
     final SharedGifticon latest = fresh.list[fresh.index];
+    if (latest.status == ShareStatus.used) {
+      await _compensateUsedAfterExtend(item.gifticonId);
+    }
     _guardExtendSharedExpiry(latest, me, newExpiryDate);
 
     final SharedGifticon updated = latest.copyWith(expiryDate: newExpiryDate);
@@ -766,6 +769,33 @@ class InMemoryShareRepository implements ShareRepository {
         'New expiry must be later than the current one: '
         '${item.expiryDate} -> $newExpiryDate',
       );
+    }
+  }
+
+  /// 연장 도중 항목이 사용 완료돼 거부할 때, **옮겨 둔 원본을 사용 완료로 맞춘다.**
+  ///
+  /// 이 시점의 원본은 이미 새 만료일을 갖고 있고([_syncOriginalExpiry]가 먼저 돈다),
+  /// 만료 상태였다면 `available`로 되살아나 있다. 그대로 두면 개인 목록에 **이미 소진된
+  /// 기프티콘이 더 오래 쓸 수 있는 것처럼** 남는다 — `markUsed`의 원본 동기화는
+  /// best-effort라 그쪽이 채워 준다는 보장이 없다(교차-멤버 권한, `expired → used`
+  /// 전이 부재).
+  ///
+  /// 만료일까지 되돌리지는 못한다(계약에 만료일을 앞당기는 API가 없다). 사용 완료된
+  /// 기프티콘의 만료일은 표시에 쓰이지 않으므로 상태를 맞추는 것으로 충분하다.
+  /// 실패는 삼킨다 — 보정이 실패해도 원래의 거부는 그대로 전파돼야 한다.
+  Future<void> _compensateUsedAfterExtend(String gifticonId) async {
+    try {
+      final Gifticon? original = await _gifticons.getGifticonById(gifticonId);
+      if (original == null || original.status == GifticonStatus.used) return;
+      if (!GifticonStatusTransition.isAllowed(
+        original.status,
+        GifticonStatus.used,
+      )) {
+        return;
+      }
+      await _gifticons.updateStatus(gifticonId, GifticonStatus.used);
+    } on Exception {
+      return;
     }
   }
 
