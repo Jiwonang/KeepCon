@@ -607,6 +607,17 @@ check "B가 gifticonId를 다른 원본으로 변경 → 차단" 403 \
 check "B가 표시용 스냅샷(브랜드) 변경 → 차단" 403 \
   -X PATCH "${DOCS}/sharedGifticons/${SG_A}?updateMask.fieldPaths=brand" \
   "${AUTH_B[@]}" "${JSON[@]}" -d '{"fields":{"brand":{"stringValue":"위조 브랜드"}}}'
+# `groupId`를 못박지 않으면 멤버가 **자기가 속하지 않은 그룹으로** 항목을 옮길 수 있다
+# (update의 멤버십 판정은 **옛** groupId로만 본다).
+check "B가 groupId를 다른 그룹으로 변경 → 차단" 403 \
+  -X PATCH "${DOCS}/sharedGifticons/${SG_A}?updateMask.fieldPaths=groupId" \
+  "${AUTH_B[@]}" "${JSON[@]}" -d '{"fields":{"groupId":{"stringValue":"grp-hijack"}}}'
+check "B가 표시용 스냅샷(상품명) 변경 → 차단" 403 \
+  -X PATCH "${DOCS}/sharedGifticons/${SG_A}?updateMask.fieldPaths=productName" \
+  "${AUTH_B[@]}" "${JSON[@]}" -d '{"fields":{"productName":{"stringValue":"위조 상품"}}}'
+check "B가 표시용 스냅샷(바코드) 변경 → 차단" 403 \
+  -X PATCH "${DOCS}/sharedGifticons/${SG_A}?updateMask.fieldPaths=barcode" \
+  "${AUTH_B[@]}" "${JSON[@]}" -d '{"fields":{"barcode":{"stringValue":"9999"}}}'
 # 대조군 — 사용 흐름은 좁히면 안 된다. 여기가 막히면 공유 기능 자체가 죽는다.
 check "B(멤버)가 사용 완료 처리" 200 \
   -X PATCH "${DOCS}/sharedGifticons/${SG_A}?updateMask.fieldPaths=status" \
@@ -626,10 +637,23 @@ check "그 문서에도 찜은 된다(레거시 문서 회귀)" 200 \
 check "그 문서의 만료일 연장은 아무도 못 한다 → 차단" 403 \
   -X PATCH "${DOCS}/sharedGifticons/${SG_LEGACY}?${MASK_EXPIRY}" \
   "${AUTH_A[@]}" "${JSON[@]}" -d "{\"fields\":{\"expiryDate\":{\"timestampValue\":\"${SG_EXP_NEW}\"}}}"
-# 주인을 확정할 수 없는 문서는 **거둘 수는 있어야 한다** — 아니면 아무도 못 지우는
-# 채로 그룹에 박힌다(공유자 제한의 예외. 규칙 주석 참조).
-check "주인 없는 문서는 멤버가 거둘 수 있다" 200 \
+# 주인을 확정할 수 없는 문서를 **일반 멤버**에게 열면 그것이 곧 delete → create 우회로다
+# (지운 자리에 자기를 sharer로 재생성 → 스냅샷 자유 변경. 초안이 그랬고 실측으로 세 요청이
+# 전부 200이었다). 정리는 방장 몫으로 남긴다.
+check "주인 없는 문서를 일반 멤버가 거두기 → 차단" 403 \
   -X DELETE "${DOCS}/sharedGifticons/${SG_LEGACY}" "${AUTH_B[@]}"
+check "주인 없는 문서는 방장이 거둔다" 200 \
+  -X DELETE "${DOCS}/sharedGifticons/${SG_LEGACY}" "${AUTH_A[@]}"
+
+# 공유자가 그룹을 떠난 뒤 남은 항목 — 공유자는 비멤버라 못 지운다. 방장 조항이 없으면
+# **아무도** 못 지우는 문서가 된다(멤버 이탈·강퇴 경로에는 공유 정리가 없어 정상 경로다).
+SG_GONE="shared-${SG_RUN}-g"
+check "  (준비) 공유자가 비멤버(C)인 항목" 200 -X PATCH "${DOCS}/sharedGifticons/${SG_GONE}" \
+  "${AUTH_A[@]}" "${JSON[@]}" -d "$(shared_doc "${UID_C}" "${SG_EXP_OLD}")"
+check "떠난 공유자의 항목을 일반 멤버가 거두기 → 차단" 403 \
+  -X DELETE "${DOCS}/sharedGifticons/${SG_GONE}" "${AUTH_B[@]}"
+check "떠난 공유자의 항목은 방장이 거둔다" 200 \
+  -X DELETE "${DOCS}/sharedGifticons/${SG_GONE}" "${AUTH_A[@]}"
 
 check "  (정리) 공유 항목 삭제(공유자 본인)" 200 -X DELETE "${DOCS}/sharedGifticons/${SG_A}" "${AUTH_A[@]}"
 
