@@ -670,7 +670,9 @@ class FirebaseShareRepository implements ShareRepository {
     try {
       final Group? g = await getGroupById(groupId);
       if (g != null && g.isMember(me.id)) {
-        throw StateError('Already a member of group: $groupId');
+        // 타입으로 좁힌다(계약 참조) — 화면이 "이미 참여 중"만 구별해 안내한다.
+        // `on FirebaseException`은 이것을 잡지 않으므로 그대로 호출부까지 올라간다.
+        throw AlreadyGroupMemberException(groupId);
       }
     } on FirebaseException catch (e) {
       // 읽기 **거부** = 비멤버. 요청을 계속 진행한다. 거부만 그렇다 — 일시적 실패
@@ -700,7 +702,10 @@ class FirebaseShareRepository implements ShareRepository {
     final JoinRequest? existing =
         snap == null ? null : _joinRequestFromDocOrNull(snap);
     if (existing != null && existing.isPending) {
-      return existing; // 멱등 — 같은 링크를 두 번 눌러도 요청이 쌓이지 않는다.
+      // 멱등 — **아무것도 쓰지 않는다**(같은 링크를 두 번 눌러도 요청이 쌓이지 않는다).
+      // 조용히 반환하지 않고 알리는 이유는 계약 참조 — 화면이 방금 보낸 것과 구별할 수
+      // 없으면 "보냈어요"를 다시 띄운다.
+      throw JoinRequestAlreadyPendingException(existing);
     }
     // 결정이 끝난 요청(거절, 또는 승인 후 강퇴)은 다시 대기로 되돌린다.
     //
@@ -720,8 +725,9 @@ class FirebaseShareRepository implements ShareRepository {
       requestedAt: DateTime.now(),
     );
     // 큐에 걸린 채 침묵하지 않도록 시간을 끊는다(위 ⚠️ — 쓰기 도중 단절 창). 타임아웃
-    // 뒤 큐의 쓰기가 나중에 도착해도 해롭지 않다 — 다음 요청에서 위 멱등 분기가 그
-    // 대기 요청을 그대로 돌려준다. 매달린 스피너보다 시끄러운 실패가 낫다.
+    // 뒤 큐의 쓰기가 나중에 도착해도 해롭지 않다 — 다음 요청에서 위 멱등 분기가
+    // [JoinRequestAlreadyPendingException]으로 그 대기 요청을 실어 알리므로, 문서는
+    // 덮이지 않고 사용자는 '이미 요청함'을 보게 된다. 매달린 스피너보다 시끄러운 실패가 낫다.
     await ref.set(<String, dynamic>{
       'groupId': req.groupId,
       'userId': req.userId,

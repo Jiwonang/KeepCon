@@ -12,8 +12,12 @@ import 'dart:async' show TimeoutException;
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:keepcon/shared/diagnostics/error_reporter.dart';
+import 'package:keepcon/shared/models/join_request.dart';
 import 'package:keepcon/shared/repositories/share_repository.dart'
-    show JoinRequestUnreadableException;
+    show
+        AlreadyGroupMemberException,
+        JoinRequestAlreadyPendingException,
+        JoinRequestUnreadableException;
 
 void main() {
   group('DebugPrintErrorReporter', () {
@@ -97,6 +101,23 @@ void main() {
         (
           JoinRequestUnreadableException('g_u'),
           'StateError(join-request-unreadable)',
+        ),
+        // 아래 둘은 **정상 사용자 경로**(재탭·자기 그룹 링크)라, 평범한 StateError로
+        // 접히면 '없는 토큰'이라는 진짜 이상 신호가 재탭 소음에 덮인다.
+        (
+          JoinRequestAlreadyPendingException(JoinRequest(
+            id: 'g1_u1',
+            groupId: 'g1',
+            userId: 'u1',
+            displayName: '요청자',
+            avatarEmoji: '🙂',
+            requestedAt: DateTime(2026, 1, 1),
+          )),
+          'StateError(join-request-already-pending)',
+        ),
+        (
+          AlreadyGroupMemberException('g1'),
+          'StateError(already-group-member)',
         ),
         (ArgumentError('x'), 'ArgumentError'),
         (UnsupportedError('x'), 'UnsupportedError'),

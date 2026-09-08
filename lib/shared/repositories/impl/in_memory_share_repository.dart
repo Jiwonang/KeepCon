@@ -400,7 +400,9 @@ class InMemoryShareRepository implements ShareRepository {
       throw InviteExpiredException(credential, isCode: isCode);
     }
     if (g.isMember(me.id)) {
-      throw StateError('Already a member of group: ${g.id}');
+      // 타입으로 좁힌다 — 화면이 "이미 참여 중"이라고 구별해 안내해야 하는데, 그
+      // 판정을 메시지 문자열로 하면 메시지를 다듬는 순간 조용히 깨진다(계약 참조).
+      throw AlreadyGroupMemberException(g.id);
     }
 
     // (그룹, 사용자)당 요청은 하나만 둔다 — 같은 링크를 두 번 눌러도 방장에게 요청이
@@ -411,7 +413,10 @@ class InMemoryShareRepository implements ShareRepository {
     );
     if (existing >= 0) {
       final JoinRequest prev = _joinRequests[existing];
-      if (prev.isPending) return prev; // 멱등 — 알림도 다시 보내지 않는다.
+      // 멱등 — **아무것도 쓰지 않는다**(방장에게 요청이 쌓이지 않는다). 다만 조용히
+      // 반환하지 않고 알린다: 화면이 방금 보낸 것과 구별할 수 없으면 "보냈어요"를 다시
+      // 띄워, 기다리다 다시 눌러 본 사람에게 새로 보낸 것 같은 착시를 준다(계약 참조).
+      if (prev.isPending) throw JoinRequestAlreadyPendingException(prev);
       // 결정이 끝난 요청(거절, 또는 승인 후 강퇴)은 다시 대기로 되돌린다.
       final JoinRequest revived = prev.copyWith(
         status: JoinRequestStatus.pending,

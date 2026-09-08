@@ -118,4 +118,21 @@ void main() {
     );
     expect(reporter.contexts, isEmpty, reason: '폐기된 ref로는 보고할 수 없다(그래도 안 던진다)');
   });
+
+  test('reportHandledFailureTo — 리포터가 던져도 호출부로 새지 않는다', () {
+    // 이 불변식은 래퍼(`reportHandledFailure`)를 거치면 **원리상 볼 수 없다** —
+    // 그쪽 catch가 리포터 예외를 다시 삼키기 때문이다. 그래서 위 테스트들로는
+    // 안쪽 try/catch를 제거해도 전부 green이었다(뮤테이션으로 확인).
+    //
+    // 새면 아픈 자리가 실재한다: 시트 셋의 catch 블록에서 이 호출이 **첫 문장**이라,
+    // 여기서 던지면 뒤따르는 `setState`·실패 팝업이 통째로 건너뛰어져 **안내 없이
+    // 전송 플래그가 true로 굳는다**(버튼이 죽는다).
+    final _ThrowingErrorReporter reporter = _ThrowingErrorReporter();
+    expect(
+      () => reportHandledFailureTo(reporter, Exception('x'), StackTrace.current,
+          context: 'JoinGroupSheet.requestToJoin'),
+      returnsNormally,
+    );
+    expect(reporter.called, isTrue, reason: '실제로 리포터를 태운 뒤 삼켰는지 확인');
+  });
 }

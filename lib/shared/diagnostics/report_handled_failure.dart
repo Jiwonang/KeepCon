@@ -48,9 +48,52 @@ void reportHandledFailure(
   required String context,
 }) {
   try {
-    ref.read(errorReporterProvider).report(error, stack, context: context);
+    reportHandledFailureTo(
+      ref.read(errorReporterProvider),
+      error,
+      stack,
+      context: context,
+    );
   } catch (_) {
     // 폐기된 ref·리포터 자체 실패 — 여기서 새어 나가면 원래 실패의 안내가 사라진다.
     // 진단을 못 남기는 것이 안내를 못 띄우는 것보다 낫다.
+  }
+}
+
+/// `await` **이전에 읽어 둔** [reporter]로 보고한다 — 위젯이 사라진 뒤에도 남는다.
+///
+/// ## 왜 형제가 필요한가
+/// [reportHandledFailure]는 `WidgetRef`를 쓰므로, 위젯이 폐기된 뒤에는 `ref.read`가
+/// 던지고 그것이 위 `catch (_)`에 삼켜져 **아무것도 남지 않는다.** 사용자 안내는
+/// 그 설계 덕에 지켜지지만(진단이 원래 실패를 가리지 않는다 — 이 파일의 존재 이유),
+/// 진단 쪽은 조용히 비는 것이다.
+///
+/// 그런데 그 창이 **정상 경로**인 자리가 있다: 닫을 수 있는 시트의 `await` 뒤 catch.
+/// 하필 거기가 원격 진단이 가장 필요한 표본이다 — 사용자가 화면을 떠난 뒤의 백엔드
+/// 실패이고, 그것만 로그에서 빠지면 표본이 조용히 편향된다("시트를 안 닫은 실패"만
+/// 모인다). 그런 자리는 리포터를 `await` 이전에 잡아 이쪽으로 보고한다.
+///
+/// ```dart
+/// final ErrorReporter reporter = ref.read(errorReporterProvider);
+/// try {
+///   await ref.read(shareRepositoryProvider).requestToJoin(token);
+/// } catch (e, s) {
+///   reportHandledFailureTo(reporter, e, s, context: 'JoinGroupSheet.requestToJoin');
+///   // …안내(사전 캡처한 navigator·messenger로)
+/// }
+/// ```
+///
+/// 보고 계약([context] 라벨 규약·던지지 않음)은 [reportHandledFailure]와 같다.
+void reportHandledFailureTo(
+  ErrorReporter reporter,
+  Object error,
+  StackTrace stack, {
+  required String context,
+}) {
+  try {
+    reporter.report(error, stack, context: context);
+  } catch (_) {
+    // 리포터 구현이 던지는 경우(원격 수집 SDK 초기화 전 호출·플랫폼 채널 부재 등).
+    // 위와 같은 규약 — 진단 경로는 원래 실패를 절대 가리지 않는다.
   }
 }
