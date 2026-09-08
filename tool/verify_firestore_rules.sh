@@ -535,6 +535,70 @@ check "  (정리) 만료 코드 문서 삭제" 200 -X DELETE "${DOCS}/inviteCode
 check "비방장이 코드 문서 삭제 → 차단" 403 -X DELETE "${DOCS}/inviteCodes/${CODE_LIVE}" "${AUTH_C[@]}"
 check "방장이 코드 문서 삭제" 200 -X DELETE "${DOCS}/inviteCodes/${CODE_LIVE}" "${AUTH_A[@]}"
 
+echo "sharedGifticons — 만료 연장은 공유자만"
+
+# 유효기간 연장(`ShareRepository.extendSharedExpiry`)은 **등록한 본인만** 할 수 있다.
+# 클라이언트 가드만 두면 규칙을 안 거치는 요청에 무력하므로(PR #89) 규칙에도 못박았고,
+# 이 절이 그 못을 지킨다. 나머지 필드(찜·잠금·사용 완료)는 그룹 누구나 바꿀 수 있어야
+# 한다 — 좁히다가 그쪽을 함께 막으면 공유 기능 자체가 죽는다.
+
+SG_RUN="sg-$$-${RANDOM}"
+SG_A="shared-${SG_RUN}-a"      # A가 공유한 항목
+SG_LEGACY="shared-${SG_RUN}-l" # sharedByUserId가 없는 손상/레거시 문서
+
+# 공유 항목 문서. $1=sharedByUserId $2=만료 시각
+shared_doc() {
+  printf '{"fields":{"groupId":{"stringValue":"%s"},"gifticonId":{"stringValue":"gif-%s"},"sharedByUserId":{"stringValue":"%s"},"brand":{"stringValue":"스타벅스"},"productName":{"stringValue":"아메리카노"},"expiryDate":{"timestampValue":"%s"},"status":{"stringValue":"available"}}}' \
+    "${G_JR}" "${SG_RUN}" "$1" "$2"
+}
+
+# `sharedByUserId`가 통째로 없는 문서. 규칙이 그 필드를 직접 만지면 평가 오류로 죽어
+# **찜·사용 완료까지** 막히므로, 없는 경우에도 나머지 갱신이 살아 있는지 본다.
+shared_doc_no_sharer() {
+  printf '{"fields":{"groupId":{"stringValue":"%s"},"gifticonId":{"stringValue":"gif-legacy-%s"},"brand":{"stringValue":"스타벅스"},"productName":{"stringValue":"아메리카노"},"expiryDate":{"timestampValue":"%s"},"status":{"stringValue":"available"}}}' \
+    "${G_JR}" "${SG_RUN}" "$1"
+}
+
+MASK_EXPIRY='updateMask.fieldPaths=expiryDate'
+MASK_RESERVED='updateMask.fieldPaths=reservedByUserId'
+SG_EXP_OLD='2026-01-01T00:00:00Z'
+SG_EXP_NEW='2027-01-01T00:00:00Z'
+
+check "  (준비) A가 기프티콘 공유" 200 -X PATCH "${DOCS}/sharedGifticons/${SG_A}" \
+  "${AUTH_A[@]}" "${JSON[@]}" -d "$(shared_doc "${UID_A}" "${SG_EXP_OLD}")"
+
+# 대조군 — 공유의 본래 동작(멤버 누구나 찜)은 그대로여야 한다.
+check "B(멤버)가 찜 설정" 200 -X PATCH "${DOCS}/sharedGifticons/${SG_A}?${MASK_RESERVED}" \
+  "${AUTH_B[@]}" "${JSON[@]}" -d "{\"fields\":{\"reservedByUserId\":{\"stringValue\":\"${UID_B}\"}}}"
+
+check "B(멤버·비공유자)가 만료일 연장 → 차단" 403 \
+  -X PATCH "${DOCS}/sharedGifticons/${SG_A}?${MASK_EXPIRY}" \
+  "${AUTH_B[@]}" "${JSON[@]}" -d "{\"fields\":{\"expiryDate\":{\"timestampValue\":\"${SG_EXP_NEW}\"}}}"
+check "C(비멤버)가 만료일 연장 → 차단" 403 \
+  -X PATCH "${DOCS}/sharedGifticons/${SG_A}?${MASK_EXPIRY}" \
+  "${AUTH_C[@]}" "${JSON[@]}" -d "{\"fields\":{\"expiryDate\":{\"timestampValue\":\"${SG_EXP_NEW}\"}}}"
+check "A(공유자)가 만료일 연장" 200 \
+  -X PATCH "${DOCS}/sharedGifticons/${SG_A}?${MASK_EXPIRY}" \
+  "${AUTH_A[@]}" "${JSON[@]}" -d "{\"fields\":{\"expiryDate\":{\"timestampValue\":\"${SG_EXP_NEW}\"}}}"
+
+# 전체 되쓰기(마스크 없음)로 만료일을 바꾸는 우회. `diff`는 값 기준이라 필드를 나눠
+# 보내지 않아도 잡힌다 — 이 케이스가 그것을 보인다.
+check "B가 전체 되쓰기로 만료일 변경 → 차단" 403 \
+  -X PATCH "${DOCS}/sharedGifticons/${SG_A}" \
+  "${AUTH_B[@]}" "${JSON[@]}" -d "$(shared_doc "${UID_A}" "${SG_EXP_OLD}")"
+
+check "  (준비) sharedByUserId 없는 문서" 200 -X PATCH "${DOCS}/sharedGifticons/${SG_LEGACY}" \
+  "${AUTH_A[@]}" "${JSON[@]}" -d "$(shared_doc_no_sharer "${SG_EXP_OLD}")"
+check "그 문서에도 찜은 된다(평가 오류로 죽지 않음)" 200 \
+  -X PATCH "${DOCS}/sharedGifticons/${SG_LEGACY}?${MASK_RESERVED}" \
+  "${AUTH_B[@]}" "${JSON[@]}" -d "{\"fields\":{\"reservedByUserId\":{\"stringValue\":\"${UID_B}\"}}}"
+check "그 문서의 만료일 연장은 아무도 못 한다 → 차단" 403 \
+  -X PATCH "${DOCS}/sharedGifticons/${SG_LEGACY}?${MASK_EXPIRY}" \
+  "${AUTH_A[@]}" "${JSON[@]}" -d "{\"fields\":{\"expiryDate\":{\"timestampValue\":\"${SG_EXP_NEW}\"}}}"
+
+check "  (정리) 공유 항목 삭제" 200 -X DELETE "${DOCS}/sharedGifticons/${SG_A}" "${AUTH_A[@]}"
+check "  (정리) 레거시 문서 삭제" 200 -X DELETE "${DOCS}/sharedGifticons/${SG_LEGACY}" "${AUTH_A[@]}"
+
 echo
 echo "결과: 통과 ${pass} / 실패 ${fail}"
 [[ "${fail}" -eq 0 ]] || exit 1

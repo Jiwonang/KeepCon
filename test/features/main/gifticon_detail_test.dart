@@ -376,4 +376,8 @@ class _FailingUpdateRepo implements GifticonRepository {
   @override
   Stream<List<Gifticon>> watchGifticons(String ownerId) =>
       _inner.watchGifticons(ownerId);
+
+  @override
+  Future<Gifticon> extendExpiry(String id, DateTime newExpiryDate) =>
+      _inner.extendExpiry(id, newExpiryDate);
 }

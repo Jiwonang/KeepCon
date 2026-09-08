@@ -191,9 +191,23 @@ service cloud.firestore {
     }
 
     // 공유 기프티콘 — 소속 그룹 멤버.
+    //
+    // 예외 하나: **만료일(`expiryDate`)은 공유자만 옮길 수 있다.** 유효기간 연장은
+    // 등록한 본인만 할 수 있다는 규칙이고(계약 `ShareRepository.extendSharedExpiry`),
+    // 클라이언트 가드만 두면 규칙을 안 거치는 요청에 무력하다. 나머지 필드(찜·잠금·
+    // 사용 완료)는 그룹 누구나 바꾼다 — 그것이 공유의 목적이다.
+    //
+    // `sharedByUserId`를 `.get(…, '')`로 읽는 이유: 그 필드가 없는 손상/레거시 문서에서
+    // 직접 접근하면 규칙 평가가 **오류로 죽어** 찜·사용 완료까지 통째로 막힌다.
+    // 없으면 빈 문자열이 되고 `uid()`와 같을 수 없어 만료일 변경만 거부된다(fail-closed).
     match /sharedGifticons/{id} {
-      allow read, update, delete:
+      allow read, delete:
         if isSignedIn() && isGroupMember(resource.data.groupId);
+      allow update:
+        if isSignedIn() && isGroupMember(resource.data.groupId)
+        && (!request.resource.data.diff(resource.data)
+              .affectedKeys().hasAny(['expiryDate'])
+            || resource.data.get('sharedByUserId', '') == uid());
       allow create:
         if isSignedIn() && isGroupMember(request.resource.data.groupId);
     }

@@ -223,6 +223,11 @@ class _NotificationCard extends ConsumerWidget {
           case GroupNotificationType.used:
             icon = Icons.check_circle_outline;
             tint = scheme.onSurfaceVariant;
+          case GroupNotificationType.expiryExtended:
+            // '만료 임박'(시계)과 같은 계열이되 되살아났음을 나타내는 아이콘을 쓴다.
+            // 색도 error가 아니라 primary다 — 이건 나쁜 소식이 아니라 좋은 소식이다.
+            icon = Icons.more_time;
+            tint = scheme.primary;
         }
       case ExpiryNotificationItem():
         // 그룹의 '만료 임박'(시계)과 다른 아이콘을 쓴다 — 같은 목록에 섞이므로

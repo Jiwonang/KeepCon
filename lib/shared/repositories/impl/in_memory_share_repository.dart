@@ -22,6 +22,8 @@ import '../../models/group.dart';
 import '../../models/join_request.dart';
 import '../../models/share.dart';
 import '../../models/user.dart';
+import '../../util/date_format.dart';
+import '../../util/expiry_policy.dart';
 import '../../util/invite_code.dart';
 import '../../util/invite_token.dart';
 import '../../util/korean_particle.dart';
@@ -695,6 +697,79 @@ class InMemoryShareRepository implements ShareRepository {
 
     _emit();
     return updated;
+  }
+
+  @override
+  Future<SharedGifticon> extendSharedExpiry(
+    String sharedGifticonId,
+    DateTime newExpiryDate,
+  ) async {
+    final User me = _requireUser();
+    final loc = _locateShared(sharedGifticonId);
+    if (loc == null) {
+      throw StateError('Shared gifticon not found: $sharedGifticonId');
+    }
+    final SharedGifticon item = loc.list[loc.index];
+    if (item.sharedByUserId != me.id) {
+      throw StateError('Only the sharer can extend the expiry');
+    }
+    if (item.status == ShareStatus.used) {
+      throw StateError('A used shared gifticon cannot be extended');
+    }
+    if (!isLaterExpiryDate(newExpiryDate, than: item.expiryDate)) {
+      throw StateError(
+        'New expiry must be later than the current one: '
+        '${item.expiryDate} -> $newExpiryDate',
+      );
+    }
+
+    // **원본을 먼저 옮긴다.** 스냅샷만 옮긴 뒤 원본이 실패하면 그룹과 개인 목록이 같은
+    // 기프티콘을 두고 다른 만료일을 말한다 — 그 어긋남은 화면에서 보이지 않는다.
+    // 원본이 실패하면 여기서 예외가 전파되고 스냅샷은 옛 값 그대로 남는다.
+    await _syncOriginalExpiry(item.gifticonId, newExpiryDate);
+
+    // ⚠️ `await` 뒤에 **다시 찾는다.** 위에서 잡은 (list, index)는 그 사이에 다른 호출이
+    // 항목을 지우거나(`cancelShare`) 순서를 바꾸면 어긋난 자리를 가리키고, 그 자리에
+    // 쓰면 엉뚱한 항목을 덮어쓴다. 값도 다시 읽어야 그 사이의 찜/잠금 변경을 되돌리지
+    // 않는다(`markUsed`는 await 전에 써서 이 창이 없다).
+    final fresh = _locateShared(sharedGifticonId);
+    if (fresh == null) {
+      throw StateError('Shared gifticon not found: $sharedGifticonId');
+    }
+    final SharedGifticon updated =
+        fresh.list[fresh.index].copyWith(expiryDate: newExpiryDate);
+    fresh.list[fresh.index] = updated;
+
+    _pushNotification(
+      groupId: item.groupId,
+      type: GroupNotificationType.expiryExtended,
+      title: '기간 연장',
+      message: '${me.displayName}님이 ${item.brand} ${item.productName} '
+          '유효기간을 ${formatYmdDot(newExpiryDate)}까지 연장했어요.',
+    );
+
+    _emit();
+    return updated;
+  }
+
+  /// 원본 [Gifticon]의 만료일을 함께 옮긴다.
+  ///
+  /// 원본이 조회되지 않으면(데모 시드의 가짜 gifticonId) 건너뛴다. 그 밖의 실패는
+  /// **삼키지 않는다** — 행위자가 공유자=소유자로 좁혀져 있어 권한 문제가 아니고,
+  /// 조용히 넘기면 스냅샷과 원본이 갈린다(계약 [ShareRepository.extendSharedExpiry] 참조).
+  ///
+  /// 원본이 **이미 그 날짜 이후**면 건너뛴다 — 스냅샷만 따라붙으면 둘이 만나므로,
+  /// `extendExpiry`의 "뒤로만" 가드에 걸려 통째로 실패시킬 이유가 없다. 그런 상태는
+  /// 스냅샷이 뒤처졌을 때 생기고(그룹 화면은 뒤처진 값을 보여준다), 사용자는 자기가
+  /// 본 화면 기준으로 날짜를 고른다.
+  Future<void> _syncOriginalExpiry(
+    String gifticonId,
+    DateTime newExpiryDate,
+  ) async {
+    final Gifticon? original = await _gifticons.getGifticonById(gifticonId);
+    if (original == null) return;
+    if (!isLaterExpiryDate(newExpiryDate, than: original.expiryDate)) return;
+    await _gifticons.extendExpiry(gifticonId, newExpiryDate);
   }
 
   @override

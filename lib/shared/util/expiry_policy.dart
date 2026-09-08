@@ -70,3 +70,15 @@ bool isExpiringSoon(DateTime expiryDate, {DateTime? now}) {
   final int days = daysUntilExpiry(expiryDate, now: now);
   return days >= 0 && days <= expirySoonDays;
 }
+
+/// [candidate]가 [than]보다 **뒤 날짜**인지(시분초 무시, 달력 일 단위).
+///
+/// 유효기간 연장([GifticonRepository.extendExpiry])의 가드다 — 연장은 만료일을 **뒤로만**
+/// 옮길 수 있고, 같은 날이나 앞당기기는 연장이 아니다.
+///
+/// `candidate.isAfter(than)`을 쓰지 않는 이유: 두 값의 시분초가 다르면 **같은 날짜인데
+/// 뒤로 옮긴 것**이 된다(자정에 저장된 만료일 위에 화면이 09:00을 얹으면 그렇다).
+/// 이 파일의 다른 판정이 전부 달력 일 단위라, 여기만 시각을 보면 "연장했는데 D-day가
+/// 그대로"인 상태가 만들어진다.
+bool isLaterExpiryDate(DateTime candidate, {required DateTime than}) =>
+    daysUntilExpiry(candidate, now: than) > 0;

@@ -7,6 +7,7 @@ library;
 import 'dart:async';
 
 import '../../models/gifticon.dart';
+import '../../util/expiry_policy.dart';
 import '../gifticon_repository.dart';
 
 /// [GifticonRepository]의 in-memory mock 구현.
@@ -66,6 +67,35 @@ class InMemoryGifticonRepository implements GifticonRepository {
       );
     }
     final Gifticon updated = current.copyWith(status: status);
+    _store[idx] = updated;
+    _emit();
+    return updated;
+  }
+
+  @override
+  Future<Gifticon> extendExpiry(String id, DateTime newExpiryDate) async {
+    final int idx = _store.indexWhere((Gifticon g) => g.id == id);
+    if (idx < 0) {
+      throw StateError('Gifticon not found: $id');
+    }
+    final Gifticon current = _store[idx];
+    if (current.status == GifticonStatus.used) {
+      throw StateError('A used gifticon cannot be extended: $id');
+    }
+    if (!isLaterExpiryDate(newExpiryDate, than: current.expiryDate)) {
+      throw StateError(
+        'New expiry must be later than the current one: '
+        '${current.expiryDate} -> $newExpiryDate',
+      );
+    }
+    // 저장된 만료 상태는 옛 만료일이 근거였으므로 함께 되돌린다(계약의 유일한
+    // expired→available 경로 — [GifticonStatus] 문서 참조).
+    final Gifticon updated = current.copyWith(
+      expiryDate: newExpiryDate,
+      status: current.status == GifticonStatus.expired
+          ? GifticonStatus.available
+          : current.status,
+    );
     _store[idx] = updated;
     _emit();
     return updated;

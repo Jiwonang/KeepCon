@@ -464,6 +464,48 @@ abstract class ShareRepository {
   /// 성공 시 갱신된 항목을 반환한다.
   Future<SharedGifticon> markUsed(String sharedGifticonId);
 
+  /// 공유 항목의 유효기간을 [newExpiryDate]로 **연장한다** — 스냅샷과 원본을 함께 옮긴다.
+  ///
+  /// 가드 — 위반 시 [StateError]:
+  /// - 항목이 없으면 안 된다.
+  /// - 행위자가 공유자([SharedGifticon.sharedByUserId])여야 한다. **등록한 본인만**
+  ///   연장할 수 있다는 규칙이 여기서 강제된다(다른 멤버는 만료를 늘릴 수 없다).
+  /// - 항목이 [ShareStatus.used]면 안 된다(이미 소진됐다). [ShareStatus.inUse]는
+  ///   **허용한다** — 잠금은 "누가 지금 쓰는 중"일 뿐이고, 그 사람에게도 늘어난
+  ///   기간이 유효하다.
+  /// - [newExpiryDate]가 현재 [SharedGifticon.expiryDate]보다 **뒤 날짜**여야 한다
+  ///   ([isLaterExpiryDate] — 달력 일 단위).
+  ///
+  /// 효과: [SharedGifticon.expiryDate]를 옮기고, 그룹에
+  /// [GroupNotificationType.expiryExtended] 알림을 남기고, **원본 [Gifticon]을
+  /// `GifticonRepository.extendExpiry`로 함께 갱신**한다(만료 상태였다면 되살아난다).
+  ///
+  /// ## 스냅샷과 원본은 갈리지 않는다
+  /// [SharedGifticon.expiryDate]는 공유 시점의 스냅샷이라, 한쪽만 옮기면 그룹과 개인
+  /// 목록이 **같은 기프티콘을 두고 다른 만료일**을 말한다.
+  ///
+  /// `markUsed`의 원본 동기화는 best-effort(권한 없으면 조용히 건너뜀)인데 여기는 그렇게
+  /// 하지 않는 이유: 그쪽 행위자는 **아무 멤버나** 될 수 있어 남의 원본을 쓸 권한이 없지만,
+  /// 연장의 행위자는 위 가드로 **공유자 = 원본 소유자**로 좁혀져 있어 권한이 항상 있다.
+  /// 실패하면 그것은 진짜 실패이므로 삼키지 않는다.
+  ///
+  /// 순서는 **원본 → 스냅샷**으로 못박는다. 원본이 실패하면 스냅샷은 옛 값 그대로라
+  /// 아무 일도 없었던 것이 되고, 화면은 실패를 그대로 안내할 수 있다. 반대 순서였다면
+  /// "그룹에는 늘어난 날짜, 내 목록에는 옛 날짜"가 남는데 그 어긋남은 화면에 보이지
+  /// 않는다. (구현은 원본 갱신을 트랜잭션 밖에서 한다 — 주입된 `GifticonRepository`가
+  /// 같은 백엔드라는 보장이 계약에 없기 때문이다. 그래서 원본만 성공하고 스냅샷이 실패하는
+  /// 창은 남으며, 복구 경로는 **같은 연장을 다시 하는 것**이다: 원본이 이미 그 날짜
+  /// 이후면 건너뛰고 스냅샷만 따라붙어 둘이 만난다.)
+  ///
+  /// 예외: 원본이 조회되지 않으면(데모 시드의 가짜 `gifticonId`) 스냅샷만 옮긴다.
+  /// 원본이 이미 [newExpiryDate] 이후면 원본은 그대로 두고 스냅샷만 따라붙는다.
+  ///
+  /// 성공 시 갱신된 항목을 반환한다.
+  Future<SharedGifticon> extendSharedExpiry(
+    String sharedGifticonId,
+    DateTime newExpiryDate,
+  );
+
   /// 공유 취소(회수) — 공유자 본인이, 사용 가능한 항목만 회수한다.
   ///
   /// 가드: 행위자가 공유자([SharedGifticon.sharedByUserId])여야 하고, 항목이
