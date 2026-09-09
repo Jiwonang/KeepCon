@@ -136,9 +136,11 @@ class GifticonDetailPage extends ConsumerWidget {
     //
     // ⚠️ `theme.textTheme.labelLarge`를 소비하지 않는다 — 이 앱의 [TextTheme]은 그 슬롯을
     //    **정의하지 않아서**(app_theme.dart는 headline/title/body/labelMedium만 채운다)
-    //    Material 기본값(letterSpacing 0.1 등)이 딸려 들어오고, 그러면 이 PR과 무관한
-    //    기존 '사용 완료' 버튼의 렌더링까지 바뀐다. 버튼 타이포를 토큰화하려면 테마에
-    //    슬롯을 먼저 정의해야 하며 그것은 이 PR의 범위가 아니다.
+    //    Material 기본값(height 1.43 · letterSpacing 0.1 · fontFamily Roboto)이 딸려 들어와
+    //    이 PR과 무관한 기존 '사용 완료' 버튼이 **52 → 56px로 자란다**(측정값. 지배적인
+    //    것은 자간이 아니라 행높이다). 색만은 `foregroundColor`가 덮으므로 무관하다.
+    //    버튼 타이포를 토큰화하려면 테마에 슬롯을 먼저 정의해야 하고, `labelLarge`는 M3에서
+    //    모든 버튼의 기본 스타일이라 앱 전역 변경이다 — 이 PR의 범위가 아니다.
     final ButtonStyle actionButtonStyle = ElevatedButton.styleFrom(
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(AppRadii.tile),

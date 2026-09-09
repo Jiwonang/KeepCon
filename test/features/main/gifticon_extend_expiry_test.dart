@@ -468,4 +468,26 @@ void main() {
     expect(snapshot!.expiryDate, origin.expiryDate,
         reason: '그룹 스냅샷과 원본이 같은 만료일을 가리켜야 한다');
   });
+
+  /// 하단 액션 버튼의 타이포는 **테마 슬롯을 소비하지 않는다**(공용 `actionButtonStyle`).
+  /// 이 앱의 [TextTheme]에는 `labelLarge`가 없어 그 슬롯을 쓰면 Material 기본값의
+  /// `height: 1.43`·`letterSpacing: 0.1`이 딸려 들어오고 버튼이 4px 자란다(52 → 56).
+  /// 경로 지침("폰트를 하드코딩하지 마라")을 읽고 그 변경을 다시 시도하면 여기서 막힌다 —
+  /// 실제로 이번 PR에서 봇 처방을 따르다 한 번 일어난 일이다.
+  testWidgets('연장 버튼 라벨에 테마 기본 자간·행높이가 섞이지 않는다', (WidgetTester tester) async {
+    boot(<Gifticon>[_gifticon()]);
+    await mountDetail(tester, _gifticon());
+
+    final RichText label = tester.widget<RichText>(
+      find.descendant(
+        of: find.text(_buttonLabel),
+        matching: find.byType(RichText),
+      ),
+    );
+    final TextStyle? style = label.text.style;
+    expect(style?.fontSize, 17);
+    expect(style?.fontWeight, FontWeight.w700);
+    expect(style?.height, isNull, reason: '행높이가 붙으면 버튼 높이가 바뀐다');
+    expect(style?.letterSpacing, isNull, reason: '자간이 붙으면 버튼 폭이 바뀐다');
+  });
 }
