@@ -75,9 +75,15 @@ final gifticonByIdProvider =
 /// 기프티콘을 개인 경로로 연장하고 그룹 스냅샷만 옛 날짜로 남긴다(어느 화면에도 안 보이는
 /// 어긋남이다).
 ///
-/// 그래서 집합이 "공유 중"이라는데 항목을 아직 못 찾으면 **[AsyncLoading]을 낸다.** 그것이
-/// 사실이기 때문이다 — 어느 그룹의 어느 항목인지가 아직 확정되지 않았다. 소비자는
-/// `AsyncData`일 때만 버튼을 열면 되고, 값이 null이면 개인 경로, 항목이면 공유 경로다.
+/// 소비자는 `AsyncData`일 때만 버튼을 열면 되고, 값이 null이면 개인 경로, 항목이면 공유
+/// 경로다. fail-closed 성질을 실제로 만드는 것은 **집합이 로딩/에러일 때 그대로 전파하는
+/// 앞의 두 갈래**다.
+///
+/// ⚠️ 마지막 갈래("집합은 공유라는데 항목을 못 찾음 → 로딩")는 **현재 구조에서 도달하지
+/// 않는다.** 두 정본이 같은 의존성(`myGroupsProvider` × 그룹별 스트림)에서 파생되므로,
+/// 집합이 데이터면 그 리스트들도 데이터이고 집합은 바로 그 리스트에서 만들어진다. 그래서
+/// 테스트도 이 갈래를 고정하지 못한다(뮤테이션으로 확인 — fail-open으로 뒤집어도 전건
+/// 통과). [allSharedProvider]가 언젠가 자체 필터를 갖게 될 때를 위한 보험으로 남긴다.
 final sharedItemForGifticonProvider = Provider.autoDispose
     .family<AsyncValue<SharedGifticon?>, String>((ref, String gifticonId) {
   final AsyncValue<Set<String>> idsAsync = ref.watch(sharedGifticonIdsProvider);

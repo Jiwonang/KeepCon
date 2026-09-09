@@ -110,8 +110,16 @@ class GifticonDetailPage extends ConsumerWidget {
         sessionUserProvider.select((AsyncValue<User?> s) => s.valueOrNull?.id));
     final bool expiredNow = expiredByDate || g.status == GifticonStatus.expired;
     final bool mine = myUserId != null && g.ownerId == myUserId;
-    final bool canExtend =
-        expiredNow && !used && mine && sharedItemAsync.hasValue;
+    // ⑤ 공유 항목이 아직 소진되지 않았을 때만. 다른 멤버가 내 공유분을 사용해도 **내
+    //    원본은 available로 남는다** — `gifticons`는 소유자만 쓸 수 있어 그쪽의 원본
+    //    동기화가 권한으로 건너뛰기 때문이다(계약이 명시한 best-effort). 그래서
+    //    `!used`만으로는 이 상태가 걸러지지 않고, 그대로 두면 눌러도 계약 가드가
+    //    반드시 거부하는 버튼이 남는다.
+    final bool canExtend = expiredNow &&
+        !used &&
+        mine &&
+        sharedItemAsync.hasValue &&
+        sharedItemAsync.value?.status != ShareStatus.used;
 
     // 공유 여부가 확정되기 전까지 함께 막히는 두 행동. 배너 하나로 안내한다.
     final bool markUsedBlocked =
@@ -235,13 +243,7 @@ class GifticonDetailPage extends ConsumerWidget {
 
             if (canExtend)
               ElevatedButton.icon(
-                onPressed: () => _extendExpiry(
-                  context,
-                  ref,
-                  g,
-                  sharedItem: sharedItemAsync.value,
-                  now: now,
-                ),
+                onPressed: () => _extendExpiry(context, ref, g, now: now),
                 icon: const Icon(Icons.event_repeat_outlined, size: 20),
                 label: const Text('기프티콘 기간 연장하기'),
                 style: ElevatedButton.styleFrom(
@@ -288,13 +290,14 @@ class GifticonDetailPage extends ConsumerWidget {
   /// 개인 경로를 부르면 스냅샷이 옛 날짜로 남아 그룹 화면과 내 목록이 **같은 기프티콘을
   /// 두고 다른 만료일**을 말한다(계약 dartdoc의 경고).
   ///
-  /// [sharedItem]은 그 판정의 결과다 — null이면 개인 경로. 호출부가 `hasValue`일 때만
-  /// 버튼을 열므로 "아직 모름"은 여기 오지 않는다.
+  /// **판정은 날짜를 확정한 뒤에 읽는다.** 빌드 시점 값을 클로저에 담아 두면 날짜
+  /// 선택기가 열려 있는 동안(모달이라 몇 초에서 몇 분) 공유 상태가 바뀌어도 그대로
+  /// 쓰게 되고, 그 창에서 fail-closed 가드가 **fail-open** 한다 — 다른 기기가 그 사이
+  /// 그룹에 공유하면 개인 경로가 호출되어 그룹 스냅샷만 옛 날짜로 남는다.
   Future<void> _extendExpiry(
     BuildContext context,
     WidgetRef ref,
     Gifticon g, {
-    required SharedGifticon? sharedItem,
     required DateTime now,
   }) async {
     final ExtendDatePick pick = await pickExtendedExpiryDate(
@@ -316,6 +319,22 @@ class GifticonDetailPage extends ConsumerWidget {
       return;
     }
     final DateTime picked = (pick as ExtendDatePicked).date;
+
+    // 공유 판정을 **여기서 다시 읽는다**(위 dartdoc 참조 — 선택기가 열려 있던 창).
+    // 확정되지 않았으면 어느 경로도 부르지 않는다: 둘 중 하나를 추측해 부르는 것이
+    // 정확히 이 화면이 막으려는 것이다.
+    final AsyncValue<SharedGifticon?> fresh =
+        ref.read(sharedItemForGifticonProvider(g.id));
+    if (!fresh.hasValue) {
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(const SnackBar(
+          content: Text('공유 상태를 확인하는 중이에요. 잠시 후 다시 시도해 주세요.'),
+        ));
+      return;
+    }
+    final SharedGifticon? sharedItem = fresh.value;
+
     try {
       if (sharedItem != null) {
         await ref

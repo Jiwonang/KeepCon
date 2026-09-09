@@ -190,6 +190,26 @@ void main() {
       expect(find.widgetWithText(ElevatedButton, _buttonLabel), findsNothing);
     });
 
+    testWidgets('그룹에서 이미 사용된 공유 항목에는 버튼이 없다', (WidgetTester tester) async {
+      // 다른 멤버가 내 공유분을 사용해도 **내 원본은 available로 남는다**(원본 동기화는
+      // 소유자 권한이 없어 건너뛴다). `!used`만 보면 이 상태에서 버튼이 뜨고, 누르면
+      // 계약 가드가 반드시 거부한다 — 몇 번을 눌러도 같은 실패다.
+      final SharedGifticon usedInGroup = SharedGifticon(
+        id: 'shared-1',
+        groupId: 'g_family',
+        gifticonId: 'g1',
+        sharedByUserId: _ownerId,
+        brand: '스타벅스',
+        productName: '아메리카노 T',
+        expiryDate: _now.subtract(const Duration(days: 3)),
+        status: ShareStatus.used,
+      );
+      boot(<Gifticon>[_gifticon()], sharedItem: usedInGroup);
+      await mountDetail(tester, _gifticon());
+
+      expect(find.widgetWithText(ElevatedButton, _buttonLabel), findsNothing);
+    });
+
     testWidgets('공유 여부가 확정되기 전에는 버튼 대신 안내가 뜬다(fail-closed)',
         (WidgetTester tester) async {
       // 로딩을 "공유 안 됨"으로 접으면 개인 경로가 열려, 공유 중인 기프티콘의 원본만
@@ -254,6 +274,54 @@ void main() {
     expect(find.text('2035.12.31까지만 연장할 수 있어요.'), findsOneWidget);
   });
 
+  group('선택 가능 하한', () {
+    // 하한 계산은 이 화면의 계약이다 — "저장소가 거부하는 값을 화면이 먼저 내주지
+    // 않는다". 값을 단언하지 않으면 하한을 401일 밀어도 스위트가 통과한다(뮤테이션 실측).
+
+    testWidgets('이미 만료된 것은 오늘부터 고를 수 있다', (WidgetTester tester) async {
+      boot(<Gifticon>[_gifticon()]);
+      await mountDetail(tester, _gifticon());
+
+      await tester.tap(find.widgetWithText(ElevatedButton, _buttonLabel));
+      await tester.pumpAndSettle();
+
+      expect(
+        tester
+            .widget<DatePickerDialog>(find.byType(DatePickerDialog))
+            .firstDate,
+        DateTime(2026, 8, 18),
+      );
+    });
+
+    testWidgets('만료일이 남아 있으면 그 다음 날부터고, 저장소가 그 값을 받는다',
+        (WidgetTester tester) async {
+      // 만료일 당일은 `isLaterExpiryDate`가 거부한다(같은 날은 연장이 아니다).
+      // 하한이 하루 어긋나면 화면이 내준 값을 저장소가 튕겨 낸다.
+      final Gifticon stored = _gifticon(
+        status: GifticonStatus.expired,
+        expiresIn: const Duration(days: 10), // 2026-08-28
+      );
+      boot(<Gifticon>[stored]);
+      await mountDetail(tester, stored);
+
+      await tester.tap(find.widgetWithText(ElevatedButton, _buttonLabel));
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<DatePickerDialog>(find.byType(DatePickerDialog))
+            .firstDate,
+        DateTime(2026, 8, 29),
+      );
+
+      await tester.tap(find.widgetWithText(TextButton, '연장'));
+      await tester.pumpAndSettle();
+
+      expect(
+          (await repo.getGifticonById('g1'))!.expiryDate, DateTime(2026, 8, 29),
+          reason: '화면이 내준 하한을 저장소가 실제로 받는다');
+    });
+  });
+
   group('개인 경로(공유 중이 아닌 기프티콘)', () {
     testWidgets('날짜를 고르면 계약 extendExpiry로 만료일이 실제로 옮겨진다',
         (WidgetTester tester) async {
@@ -293,6 +361,51 @@ void main() {
           _gifticon().expiryDate);
       expect(find.widgetWithText(ElevatedButton, _buttonLabel), findsOneWidget);
     });
+  });
+
+  testWidgets('날짜 선택기가 열려 있는 사이 공유되면 개인 경로로 새지 않는다',
+      (WidgetTester tester) async {
+    // 판정을 빌드 시점에 클로저로 잡아 두면, 모달이 열려 있는 동안(몇 초~몇 분) 다른
+    // 기기가 그룹에 공유해도 그대로 개인 경로를 부른다 — 그러면 그룹 스냅샷만 옛 날짜로
+    // 남고 **어느 화면에도 보이지 않는 어긋남**이 된다. fail-closed 가드가 이 창에서만
+    // fail-open 하던 것을 잡는다(에이전트 리뷰 검출).
+    boot(<Gifticon>[_gifticon()]);
+    await mountDetail(tester, _gifticon());
+
+    await tester.tap(find.widgetWithText(ElevatedButton, _buttonLabel));
+    await tester.pumpAndSettle();
+    expect(find.byType(DatePickerDialog), findsOneWidget);
+
+    // 선택기가 열린 사이 공유됐다.
+    final SharedGifticon nowShared = SharedGifticon(
+      id: 'shared-1',
+      groupId: 'g_family',
+      gifticonId: 'g1',
+      sharedByUserId: _ownerId,
+      brand: '스타벅스',
+      productName: '아메리카노 T',
+      expiryDate: _gifticon().expiryDate,
+      status: ShareStatus.available,
+    );
+    container.updateOverrides(<Override>[
+      nowProvider.overrideWithValue(_now),
+      gifticonRepositoryProvider.overrideWithValue(repo),
+      rawGifticonsProvider.overrideWith((_) => repo.watchGifticons(_ownerId)),
+      sessionUserProvider.overrideWith((_) => Stream<User?>.value(_me)),
+      sharedGifticonIdsProvider.overrideWithValue(
+          const AsyncValue<Set<String>>.data(<String>{'g1'})),
+      allSharedProvider.overrideWithValue(<SharedGifticon>[nowShared]),
+    ]);
+    await tester.pump();
+
+    await tester.tap(find.widgetWithText(TextButton, '연장'));
+    await tester.pumpAndSettle();
+
+    // 공유 경로를 탔다는 증거: 개인 저장소의 원본은 건드려지지 않았다. (이 컨테이너의
+    // ShareRepository는 그 항목을 모르므로 계약 가드가 거부하고 화면이 안내한다.)
+    expect(
+        (await repo.getGifticonById('g1'))!.expiryDate, _gifticon().expiryDate,
+        reason: '공유 중인 기프티콘을 개인 경로로 연장하면 안 된다');
   });
 
   testWidgets('공유 중이면 스냅샷과 원본이 함께 옮겨진다 — 계약 구현을 실제로 태운다',

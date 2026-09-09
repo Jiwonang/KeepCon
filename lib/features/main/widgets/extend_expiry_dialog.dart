@@ -64,11 +64,17 @@ Future<ExtendDatePick> pickExtendedExpiryDate(
   required DateTime now,
 }) async {
   final DateTime today = DateTime(now.year, now.month, now.day);
+  // ⚠️ `.add(const Duration(days: 1))`을 쓰지 마라 — 그것은 **정확히 24시간**이라 DST
+  // 폴백(25시간짜리 하루)이 낀 타임존에서는 같은 달력 날짜에 머문다(Dart 문서: "may not
+  // even hit the calendar date"). 그러면 하한이 현재 만료일 자신이 되고, `showDatePicker`가
+  // 하한을 날짜로 정규화하면서 **저장소가 거부하는 값**(같은 날 = 연장이 아니다)을 화면이
+  // 내주게 된다. 웹 빌드는 사용자 브라우저 타임존에서 돌아가므로 실제로 닿는 경로다.
+  // 생성자의 오버플로 정규화는 달력 기준이라 그 함정이 없다.
   final DateTime dayAfterCurrent = DateTime(
     currentExpiry.year,
     currentExpiry.month,
-    currentExpiry.day,
-  ).add(const Duration(days: 1));
+    currentExpiry.day + 1,
+  );
   final DateTime first =
       dayAfterCurrent.isAfter(today) ? dayAfterCurrent : today;
 
