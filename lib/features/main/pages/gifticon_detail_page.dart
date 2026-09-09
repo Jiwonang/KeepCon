@@ -18,7 +18,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../shared/diagnostics/report_handled_failure.dart';
 import '../../../shared/models/gifticon.dart';
+import '../../../shared/models/share.dart';
+import '../../../shared/models/user.dart';
 import '../../../shared/providers/repositories.dart';
+import '../../../shared/providers/session_provider.dart';
 import '../../../shared/providers/shared_gifticons_provider.dart';
 import '../../../shared/theme/brand_palette.dart';
 import '../../../shared/theme/theme_tokens.dart';
@@ -29,6 +32,7 @@ import '../../../shared/util/korean_particle.dart';
 import '../../../shared/util/money_format.dart' show formatWon;
 import '../state/gifticon_list_providers.dart';
 import '../../../shared/providers/now_provider.dart';
+import '../widgets/extend_expiry_dialog.dart';
 import '../widgets/format.dart';
 import '../widgets/gifticon_status_label.dart';
 
@@ -87,6 +91,37 @@ class GifticonDetailPage extends ConsumerWidget {
     // 사용 완료로 정리하지 못하고 목록에 남는다.
     final bool canMarkUsed =
         g.status == GifticonStatus.available && sharedIds != null && !shared;
+
+    // 유효기간 연장 버튼 노출 조건.
+    //
+    // ① 만료됐을 때만 — 아직 쓸 수 있는 기프티콘에까지 버튼을 두면 상세 화면의 주된
+    //    행동(바코드 제시·사용 완료)에서 시선을 나눠 간다. 날짜 만료(expiredByDate)와
+    //    저장된 `expired`를 모두 받는다: 만료 판정의 실질 정본은 날짜이고, 저장된 상태는
+    //    레거시·데모 시드에만 있지만 그것도 사용자에게는 똑같이 '만료'로 보인다.
+    // ② 사용 완료가 아닐 때 — 이미 쓴 기프티콘은 기간을 늘려도 쓸 수 없다(계약도 거부).
+    // ③ 등록한 본인일 때 — 요구사항이 "최초 등록자만". main은 자기 목록만 보므로 사실상
+    //    항상 참이지만, 진입 스냅샷 폴백으로 남의 것이 표시될 여지를 여기서 닫는다.
+    // ④ 공유 경로가 **확정된 뒤에만**([sharedItemForGifticonProvider] — fail-closed).
+    //    공유 중인데 개인 경로로 연장하면 그룹 스냅샷만 옛 날짜로 남고, 그 어긋남은 어느
+    //    화면에도 보이지 않는다.
+    final AsyncValue<SharedGifticon?> sharedItemAsync =
+        ref.watch(sharedItemForGifticonProvider(g.id));
+    final String? myUserId = ref.watch(
+        sessionUserProvider.select((AsyncValue<User?> s) => s.valueOrNull?.id));
+    final bool expiredNow = expiredByDate || g.status == GifticonStatus.expired;
+    final bool mine = myUserId != null && g.ownerId == myUserId;
+    final bool canExtend =
+        expiredNow && !used && mine && sharedItemAsync.hasValue;
+
+    // 공유 여부가 확정되기 전까지 함께 막히는 두 행동. 배너 하나로 안내한다.
+    final bool markUsedBlocked =
+        !used && g.status == GifticonStatus.available && sharedIds == null;
+    final bool extendBlocked =
+        !used && expiredNow && mine && !sharedItemAsync.hasValue;
+    final bool blockedByShareState = markUsedBlocked || extendBlocked;
+    final String blockedActionLabel = markUsedBlocked && extendBlocked
+        ? '사용 완료와 기간 연장'
+        : (extendBlocked ? '기간 연장' : '사용 완료');
 
     // 목록 카드는 날짜 만료도 '만료'로 칠하는데(`_DDayBadge`), 뱃지가 status만 보면 목록에서
     // '만료'인 카드를 눌렀는데 상세 헤더는 '사용가능'이라고 답한다. 같은 기프티콘을 두고 두
@@ -174,15 +209,19 @@ class GifticonDetailPage extends ConsumerWidget {
               ),
             // 공유 여부가 아직 확정되지 않아 버튼을 막아 둔 상태. 이유를 적지 않으면
             // 사용자는 버튼이 왜 없는지 알 수 없다(고장으로 읽힌다).
-            if (!used &&
-                g.status == GifticonStatus.available &&
-                sharedIds == null)
+            //
+            // **배너는 하나다.** 사용 완료와 기간 연장은 같은 이유로 함께 막히므로
+            // (둘 다 공유 여부에 따라 경로가 갈린다) 따로 띄우면 같은 문장이 두 번 뜬다.
+            // 대신 무엇이 막혔는지는 상황에 맞게 적는다.
+            if (blockedByShareState)
               DetailInfoBanner(
                 icon: sharedIdsAsync.hasError
                     ? Icons.error_outline
                     : Icons.hourglass_empty,
                 text: sharedIdsAsync.hasError
-                    ? '공유 상태를 확인하지 못해 사용 완료를 잠시 막아 뒀어요.'
+                    ? '공유 상태를 확인하지 못해 '
+                        '$blockedActionLabel${blockedActionLabel.eulReul} '
+                        '잠시 막아 뒀어요.'
                     : '공유 상태를 확인하는 중이에요…',
                 // 에러일 때 **반드시** 되살릴 길을 준다. 스트림 provider는 스스로
                 // 재구독하지 않으므로 화면이 보고 있는 동안 실패한 에러는 캐시된 채
@@ -194,6 +233,31 @@ class GifticonDetailPage extends ConsumerWidget {
                     : null,
               ),
 
+            if (canExtend)
+              ElevatedButton.icon(
+                onPressed: () => _extendExpiry(
+                  context,
+                  ref,
+                  g,
+                  sharedItem: sharedItemAsync.value,
+                  now: now,
+                ),
+                icon: const Icon(Icons.event_repeat_outlined, size: 20),
+                label: const Text('기프티콘 기간 연장하기'),
+                style: ElevatedButton.styleFrom(
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(AppRadii.tile),
+                  ),
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  textStyle: const TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            // 두 버튼은 함께 뜬다(만료됐고·아직 사용 전이고·공유 중이 아닌 기프티콘이
+            // 흔한 경우다). 사이 여백이 없으면 맞닿아 그려지고 오탭도 생긴다.
+            if (canExtend && canMarkUsed) const SizedBox(height: 12),
             if (canMarkUsed)
               ElevatedButton.icon(
                 onPressed: () => _confirmAndMarkUsed(context, ref, g),
@@ -214,6 +278,78 @@ class GifticonDetailPage extends ConsumerWidget {
         ),
       ),
     );
+  }
+
+  /// 새 만료일 선택 → 계약의 연장 경로 호출.
+  ///
+  /// **경로가 둘이고, 고르는 기준은 공유 여부다.** 공유 중이면
+  /// [ShareRepository.extendSharedExpiry]가 그룹 스냅샷과 원본을 함께 옮기고,
+  /// 공유 중이 아니면 [GifticonRepository.extendExpiry]가 원본만 옮긴다. 공유 중인데
+  /// 개인 경로를 부르면 스냅샷이 옛 날짜로 남아 그룹 화면과 내 목록이 **같은 기프티콘을
+  /// 두고 다른 만료일**을 말한다(계약 dartdoc의 경고).
+  ///
+  /// [sharedItem]은 그 판정의 결과다 — null이면 개인 경로. 호출부가 `hasValue`일 때만
+  /// 버튼을 열므로 "아직 모름"은 여기 오지 않는다.
+  Future<void> _extendExpiry(
+    BuildContext context,
+    WidgetRef ref,
+    Gifticon g, {
+    required SharedGifticon? sharedItem,
+    required DateTime now,
+  }) async {
+    final ExtendDatePick pick = await pickExtendedExpiryDate(
+      context,
+      currentExpiry: g.expiryDate,
+      now: now,
+    );
+    if (pick is ExtendDateCancelled || !context.mounted) return;
+
+    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
+    if (pick is ExtendDateUnavailable) {
+      // 고를 수 있는 날이 없다 — 선택기를 못 연 이유를 말해 준다. 여기서 조용히
+      // 돌아가면 버튼이 먹통인 것과 구별되지 않는다.
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(
+          content: Text('${formatYmdDot(pick.limit)}까지만 연장할 수 있어요.'),
+        ));
+      return;
+    }
+    final DateTime picked = (pick as ExtendDatePicked).date;
+    try {
+      if (sharedItem != null) {
+        await ref
+            .read(shareRepositoryProvider)
+            .extendSharedExpiry(sharedItem.id, picked);
+      } else {
+        await ref.read(gifticonRepositoryProvider).extendExpiry(g.id, picked);
+      }
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(
+          content: Text('${formatYmdDot(picked)}까지로 연장했어요.'),
+        ));
+    } on StateError catch (e, st) {
+      reportHandledFailure(ref, e, st,
+          context: 'GifticonDetailPage.extendExpiry(guard)');
+      // 계약 가드에 막혔다 — 화면을 열어 둔 사이 다른 경로가 상태를 옮긴 경우다
+      // (그룹에서 누군가 사용 완료했거나, 다른 기기가 먼저 더 뒤로 연장했거나).
+      // 다시 눌러도 같은 결과라 재시도를 권하지 않는다.
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(const SnackBar(content: Text('지금은 기간을 연장할 수 없어요.')));
+    } catch (e, st) {
+      // 사용 완료 경로와 같은 규약 — 로그를 남기고(진짜 결함이 "연결 확인"으로 위장되지
+      // 않도록), 문구는 "지금 안 될 뿐"으로 재시도를 권한다. 연장도 트랜잭션이라 오프라인
+      // 큐잉이 되지 않는다.
+      reportHandledFailure(ref, e, st,
+          context: 'GifticonDetailPage.extendExpiry');
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(content: Text('연장하지 못했어요. 연결을 확인하고 다시 시도해 주세요.')),
+        );
+    }
   }
 
   /// 사용 완료 확인 → 계약 [GifticonRepository.updateStatus] 호출.
