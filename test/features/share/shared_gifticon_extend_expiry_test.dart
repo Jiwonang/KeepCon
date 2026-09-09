@@ -132,13 +132,35 @@ void main() {
       expect(find.widgetWithText(ElevatedButton, _buttonLabel), findsNothing);
     });
 
-    testWidgets('이미 사용 완료된 항목에는 버튼이 없다', (WidgetTester tester) async {
+    testWidgets('이미 사용 완료된 항목에는 액션 블록 자체가 없다', (WidgetTester tester) async {
+      // ⚠️ 이 케이스가 지키는 것은 `canExtend`의 `!item.isUsed`가 **아니라** 바깥
+      //    액션 블록이다(그 항은 중복이라 지워도 통과한다 — 뮤테이션 실측). 이름과
+      //    단언을 그 사실에 맞춘다: 사용 완료된 항목에는 액션이 통째로 없다.
       final (SharedGifticon item, _) = await shareMineExpired();
       await share.markUsed(item.id);
       await mount(tester, item.id);
 
       expect(find.text('이미 사용 완료된 기프티콘이에요.'), findsOneWidget);
       expect(find.widgetWithText(ElevatedButton, _buttonLabel), findsNothing);
+      expect(find.widgetWithText(ElevatedButton, '사용 완료'), findsNothing);
+      expect(find.textContaining('찜'), findsNothing);
+    });
+
+    testWidgets('상한을 지난 시계 — 고를 수 있는 날이 없으면 이유를 알린다',
+        (WidgetTester tester) async {
+      // `expiry_date_range.dart`가 "이 상한은 언젠가 지난다"고 못박아 둔 상태다.
+      // 그때 조용히 돌아가면 사용자에게는 버튼 먹통과 구별되지 않는다.
+      final (SharedGifticon item, _) = await shareMineExpired();
+      await mount(tester, item.id, now: DateTime(2036, 1, 5));
+
+      expect(find.widgetWithText(ElevatedButton, _buttonLabel), findsOneWidget,
+          reason: '2036년에도 버튼은 뜬다(만료·공유자·미사용)');
+      await tester.tap(find.widgetWithText(ElevatedButton, _buttonLabel));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(DatePickerDialog), findsNothing);
+      // 상수를 보간하지 않는다 — 상한이 바뀌면 이 단언이 조용히 따라가면 안 된다.
+      expect(find.text('2035.12.31까지만 연장할 수 있어요.'), findsOneWidget);
     });
   });
 

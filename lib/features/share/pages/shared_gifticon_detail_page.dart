@@ -109,7 +109,14 @@ class _DetailBody extends ConsumerWidget {
     //    시선을 나눠 간다. 판정은 계약 정본 [isExpiredByDate](달력 일 단위).
     // ③ 사용 완료가 아닐 때 — 소진된 것은 기간을 늘려도 못 쓴다(계약도 거부).
     //
-    // 잠김(`locked`, 다른 멤버가 사용중)은 아래 액션 블록이 이미 걸러 준다.
+    // ⚠️ ③과 잠김(`locked`)은 **아래 액션 블록이 이미 거른다** — 버튼이 그 안에 있다.
+    //    즉 이 항은 지금 중복이고 커버리지가 0이다(뮤테이션 실측: 지워도 전부 green).
+    //    버튼이 블록 밖으로 나갈 때를 위한 방어로만 남긴다 — 조건을 고칠 때는 아래
+    //    `if (!item.isUsed && !locked)` 블록을 함께 봐야 한다.
+    //
+    // 계약은 [ShareStatus.inUse] 연장을 **허용**하지만 이 화면은 잠금 UX를 우선해 막는다
+    // (그 상태를 만드는 계약 API가 아직 없어 데모 시드에만 존재한다). 잠금 API가 생기면
+    // 이 결정을 다시 본다.
     final DateTime now = ref.watch(nowProvider);
     final bool canExtend =
         iShared && !item.isUsed && isExpiredByDate(item.expiryDate, now: now);
@@ -341,14 +348,30 @@ class _DetailBody extends ConsumerWidget {
       await ref
           .read(shareRepositoryProvider)
           .extendSharedExpiry(item.id, picked);
+    } on StateError catch (e, s) {
+      // 계약 가드에 막혔다 — 선택기를 열어 둔 사이 다른 경로가 상태를 옮긴 경우다
+      // (누가 사용 완료했거나, 다른 기기가 먼저 더 뒤로 연장했거나). 다시 눌러도 같다.
+      //
+      // **개인 상세와 같은 구분을 쓴다.** 같은 연장 행위인데 한쪽만 "연결을 확인하세요"라고
+      // 하면 같은 실패에 다른 다음 행동을 지시하게 된다. 이 화면의 다른 핸들러들은 아직
+      // 단일 broad catch지만(선재 — 별건), 그 비대칭보다 두 화면의 모순이 더 나쁘다.
+      reportHandledFailure(ref, e, s,
+          context: 'SharedGifticonDetailPage.extendSharedExpiry(guard)');
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(const SnackBar(content: Text('지금은 기간을 연장할 수 없어요.')));
+      return;
     } catch (e, s) {
-      // 다른 핸들러와 같은 규약 — `on StateError`로 좁히면 백엔드 예외(권한 거부·네트워크)가
-      // 그대로 빠져나가 아무 안내도 없이 화면이 멈춘다.
+      // 그 외는 사실상 전부 통신 문제다 — 연장도 트랜잭션이라 오프라인 큐잉이 안 되고,
+      // 지하철·엘리베이터에서 `unavailable`로 떨어진다. 재시도하면 되는 실패다.
+      // broad catch가 진짜 결함까지 삼키므로 로그는 반드시 남긴다.
       reportHandledFailure(ref, e, s,
           context: 'SharedGifticonDetailPage.extendSharedExpiry');
       messenger
         ..hideCurrentSnackBar()
-        ..showSnackBar(const SnackBar(content: Text('지금은 기간을 연장할 수 없어요.')));
+        ..showSnackBar(
+          const SnackBar(content: Text('연장하지 못했어요. 연결을 확인하고 다시 시도해 주세요.')),
+        );
       return;
     }
     messenger

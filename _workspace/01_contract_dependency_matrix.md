@@ -4,7 +4,7 @@
 > 이번 검증 슬라이스 범위: **scan(생산) → main(소비)**. auth는 인터페이스+mock으로 대체.
 > 계약 위치: `lib/shared/`. 이 문서와 소스가 어긋나면 소스가 아니라 **양쪽을 함께** 갱신한다.
 
-작성일: 2026-07-06 · 최종 갱신: 2026-09-08 · 계약 버전: **v3.14** (non-breaking — 만료된 기프티콘 유효기간 연장 계약 추가)
+작성일: 2026-07-06 · 최종 갱신: 2026-09-10 · 계약 버전: **v3.15** (non-breaking — 연장 UI 두 화면 + 피커 경계·연장 다이얼로그·상세 버튼 스타일 승격)
 
 > ⚠️ 이 줄은 아래 **"변경 이력" 표의 마지막 행과 반드시 함께** 갱신한다. 버전을 올리면서 이 줄을
 > 놓치면 표를 안 읽은 사람이 옛 버전을 현재 계약으로 읽는다 — 실제로 v2.7에서 11개 버전 동안 방치됐다.
@@ -88,6 +88,9 @@
 | `josa(word, withBatchim, withoutBatchim)` / `KoreanJosa` 확장(`eulReul`/`iGa`/`eunNeun`/`waGwa`) | util | `lib/shared/util/korean_particle.dart` | 2 |
 | `groupThousands(digits)` (코어) / `digitsOnly(input)` / `formatThousands(input)` (scan 진입점) / `formatWon(won)` (main 진입점) | util | `lib/shared/util/money_format.dart` | 2.3 |
 | `formatYmdDot(DateTime)` → `'YYYY.MM.DD'` (코어 — main·share·scan 공통 날짜 표기) | util | `lib/shared/util/date_format.dart` | 2.4 |
+| `expirySelectableFrom`(2020-01-01) / `expirySelectableTo`(2035-12-31) — 유효기간 피커의 하한·상한. ⚠️ 상한은 **연말**이어야 한다(월·일 생략 금지 — `DateTime(2035)`는 그 해 첫날이다) | util | `lib/shared/util/expiry_date_range.dart` | 3.15 |
+| `pickExtendedExpiryDate(context, {currentExpiry, now})` → `ExtendDatePick`(sealed: `Picked`/`Cancelled`/`Unavailable`) — 새 만료일 선택기. 하한은 오늘과 현재 만료일 **다음 날** 중 나중 | widget | `lib/shared/widgets/extend_expiry_dialog.dart` | 3.15 |
+| `detailActionButtonStyle()` → `ButtonStyle` — 상세 하단 주 액션 버튼 공용 스타일. ⚠️ `labelLarge`를 소비하지 않는다(앱 `TextTheme`에 그 슬롯이 없어 버튼이 52 → 56px로 자란다) | widget | `lib/shared/widgets/gifticon_detail_widgets.dart` | 3.15 |
 | `myGroupsProvider` (`AutoDisposeProvider<AsyncValue<List<Group>>>`) — **SSOT**. 세션→`watchGroups` 체인 정본. scan·share **공용 구독 1개** | provider | `lib/shared/providers/my_groups_provider.dart` | 2.5 |
 | `sessionUserProvider` (`AutoDisposeStreamProvider<User?>`) — **SSOT**. `watchCurrentUser()` 세션 스트림 정본 | provider | `lib/shared/providers/session_provider.dart` | 2.6 |
 | `myGroupsRetryProvider` (`Provider<MyGroupsRetry>`) + `MyGroupsRetry.retry()` — 내 그룹 체인 **수동 재시도 훅**(에러 계층만 재구독) | provider | `lib/shared/providers/my_groups_provider.dart` | 2.6 |

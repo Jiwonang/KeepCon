@@ -385,7 +385,11 @@ void main() {
       await tester.tap(find.widgetWithText(TextButton, '연장'));
       await tester.pumpAndSettle();
 
-      expect(find.text('지금은 기간을 연장할 수 없어요.'), findsOneWidget);
+      // 백엔드 예외(계약 밖)는 **재시도를 권하는** 쪽이다 — 계약 가드 거부와 문구가
+      // 갈린다(개인 상세와 같은 규약). 둘을 한 문구로 접으면 재시도하면 되는 실패에
+      // "다시 해도 소용없다"고 말하게 된다.
+      expect(find.text('연장하지 못했어요. 연결을 확인하고 다시 시도해 주세요.'), findsOneWidget);
+      expect(find.text('지금은 기간을 연장할 수 없어요.'), findsNothing);
       // 실패했으므로 성공 안내는 뜨지 않는다(try가 성공 처리까지 감싸면 순서가 꼬인다).
       expect(find.textContaining('까지로 연장했어요'), findsNothing);
       expect(reporter.reports.single.context,

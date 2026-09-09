@@ -50,7 +50,7 @@ scan() {
 # `(class|enum|mixin)`에 **도달하지 않는다** — 페이지가 같은 이름의 extension을 선언해도
 # 통과한다. 그리고 `MyGifticon`은 lib/shared에 정본이 없는 죽은 이름이다. 고칠 때는
 # 키워드에 `extension`을 더하고 죽은 이름을 지운다(이름만 올려 두면 막았다고 착각한다).
-SHARED_TYPES="AppNotification|GroupNotificationItem|ExpiryNotificationItem|ScheduledExpiryNotification|Group|GroupMember|SharedGifticon|UsageLog|GroupNotification|MyGifticon|Gifticon|User|JoinRequest|ShareStatus|MemberRole|JoinRequestStatus|GroupNotificationType|GifticonStatus|SortOption|FilterOption|ShareStatusTransition|GifticonStatusTransition|ShareRepository|GifticonRepository|AuthRepository|MyGroupsRetry|ErrorReporter|InviteExpiredException|JoinRequestUnreadableException|AlreadyGroupMemberException|JoinRequestAlreadyPendingException|InlineErrorBanner"
+SHARED_TYPES="AppNotification|GroupNotificationItem|ExpiryNotificationItem|ScheduledExpiryNotification|Group|GroupMember|SharedGifticon|UsageLog|GroupNotification|MyGifticon|Gifticon|User|JoinRequest|ShareStatus|MemberRole|JoinRequestStatus|GroupNotificationType|GifticonStatus|SortOption|FilterOption|ShareStatusTransition|GifticonStatusTransition|ShareRepository|GifticonRepository|AuthRepository|MyGroupsRetry|ErrorReporter|InviteExpiredException|JoinRequestUnreadableException|AlreadyGroupMemberException|JoinRequestAlreadyPendingException|InlineErrorBanner|ExtendDatePick|ExtendDatePicked|ExtendDateCancelled|ExtendDateUnavailable"
 
 # 선행 수식어 `([a-z]+ )*`로 Dart 3 클래스 수식어를 모두 포괄한다:
 # abstract/base/interface/final/sealed/mixin(및 조합, 예: `abstract interface class`,
@@ -116,7 +116,7 @@ fi
 # 시분초를 절삭해 같은 기프티콘을 두고 화면과 통계가 다른 답을 냈다. 가정이 아니라
 # 이미 발생한 재발이라 기계적 가드에 넣는다. 만료 임박 알림이 이 판정 위에 올라가므로
 # 재분기하면 알림까지 어긋난다.
-SSOT_FUNCTIONS="planExpiryNotifications|firedExpiryNotifications|retryNotifications|retrySessionIfFailed|retryMyGroups|retryFailedSharedGifticonStreams|retrySharedGifticonIds|foldSessionUser|daysUntilExpiry|isExpiringSoon|isExpiredByDate|isLaterExpiryDate|inviteUrlFrom|inviteOriginFor|parseInviteToken|isSharableOrigin|newInviteToken|newInviteCode|isWellFormedInviteCode"
+SSOT_FUNCTIONS="planExpiryNotifications|firedExpiryNotifications|retryNotifications|retrySessionIfFailed|retryMyGroups|retryFailedSharedGifticonStreams|retrySharedGifticonIds|foldSessionUser|daysUntilExpiry|isExpiringSoon|isExpiredByDate|isLaterExpiryDate|inviteUrlFrom|inviteOriginFor|parseInviteToken|isSharableOrigin|newInviteToken|newInviteCode|isWellFormedInviteCode|pickExtendedExpiryDate|detailActionButtonStyle"
 
 # 선언 형태 두 갈래를 잡는다(호출 `retryMyGroups(ref);`·`return foldSessionUser<...>(...)`는
 # 둘 다 통과):
@@ -194,9 +194,11 @@ fi
 # 조용히 생긴다.
 # ⚠️ 그래서 `const`뿐 아니라 **`final`도 잡는다** — 이 둘은 `DateTime`이라 `const`가 될 수
 #    없고, 목록에 이름만 넣고 `const`만 검사하면 가드가 통과만 시킨다(등록 전 실측).
+#    `late`도 함께 받는다 — provider 규칙(#2)이 이미 그렇게 하고 있고, `late final`도
+#    똑같이 컴파일되는 사본 형태다(리뷰 프로브로 통과하는 것을 확인).
 SSOT_CONSTANTS="expirySoonDays|expiryNotifyLeadDays|expiryNotifyHour|expiryNotificationHistory|maxScheduledExpiryNotifications|expirySelectableFrom|expirySelectableTo"
 
-consts=$(scan "^[[:space:]]*(static[[:space:]]+)?(const|final)[[:space:]]+([A-Za-z0-9_<>,.? ]+[[:space:]]+)?_?(${SSOT_CONSTANTS})[[:space:]]*=") || exit 1
+consts=$(scan "^[[:space:]]*(static[[:space:]]+)?(late[[:space:]]+)?(const|final)[[:space:]]+([A-Za-z0-9_<>,.? ]+[[:space:]]+)?_?(${SSOT_CONSTANTS})[[:space:]]*=") || exit 1
 
 # 상수도 같은 줄바꿈 우회가 성립한다(실측: `static const Map<...>` 다음 줄에
 # `      expiryNotificationHistory = ...` — **저장소 안에서** 포맷한 값이라 클래스 멤버
