@@ -131,6 +131,20 @@ class GifticonDetailPage extends ConsumerWidget {
         ? '사용 완료와 기간 연장'
         : (extendBlocked ? '기간 연장' : '사용 완료');
 
+    // 하단 액션 버튼들의 공용 스타일. 연장과 사용 완료는 같은 자리의 같은 무게라 모양이
+    // 갈리면 안 되고, 사본을 두면 한쪽만 고쳐져 갈라진다(CodeRabbit 지적).
+    // 크기·굵기는 테마의 `labelLarge`에서 받아 폰트 토큰 변경이 여기까지 닿게 한다.
+    final ButtonStyle actionButtonStyle = ElevatedButton.styleFrom(
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppRadii.tile),
+      ),
+      padding: const EdgeInsets.symmetric(vertical: 16),
+      textStyle: theme.textTheme.labelLarge?.copyWith(
+        fontSize: 17,
+        fontWeight: FontWeight.w700,
+      ),
+    );
+
     // 목록 카드는 날짜 만료도 '만료'로 칠하는데(`_DDayBadge`), 뱃지가 status만 보면 목록에서
     // '만료'인 카드를 눌렀는데 상세 헤더는 '사용가능'이라고 답한다. 같은 기프티콘을 두고 두
     // 화면이 다른 말을 하지 않도록 표시용 상태를 맞춘다(저장된 status는 건드리지 않는다).
@@ -246,16 +260,7 @@ class GifticonDetailPage extends ConsumerWidget {
                 onPressed: () => _extendExpiry(context, ref, g, now: now),
                 icon: const Icon(Icons.event_repeat_outlined, size: 20),
                 label: const Text('기프티콘 기간 연장하기'),
-                style: ElevatedButton.styleFrom(
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(AppRadii.tile),
-                  ),
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  textStyle: const TextStyle(
-                    fontSize: 17,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
+                style: actionButtonStyle,
               ),
             // 두 버튼은 함께 뜬다(만료됐고·아직 사용 전이고·공유 중이 아닌 기프티콘이
             // 흔한 경우다). 사이 여백이 없으면 맞닿아 그려지고 오탭도 생긴다.
@@ -265,16 +270,7 @@ class GifticonDetailPage extends ConsumerWidget {
                 onPressed: () => _confirmAndMarkUsed(context, ref, g),
                 icon: const Icon(Icons.check, size: 20),
                 label: const Text('사용 완료'),
-                style: ElevatedButton.styleFrom(
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(AppRadii.tile),
-                  ),
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  textStyle: const TextStyle(
-                    fontSize: 17,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
+                style: actionButtonStyle,
               ),
           ],
         ),
