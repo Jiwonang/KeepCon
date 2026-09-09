@@ -11,7 +11,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../shared/models/gifticon.dart';
 import '../../../shared/models/group.dart';
+import '../../../shared/diagnostics/error_reporter.dart';
 import '../../../shared/diagnostics/report_handled_failure.dart';
+import '../../../shared/providers/error_reporter_provider.dart';
 import '../../../shared/providers/repositories.dart';
 import '../../../shared/repositories/share_repository.dart';
 import '../../../shared/util/korean_particle.dart';
@@ -19,6 +21,7 @@ import '../../../shared/widgets/inline_error_banner.dart';
 import '../state/share_providers.dart';
 import 'share_common.dart';
 import 'share_format.dart';
+import 'share_gifticon_confirm_dialog.dart';
 
 /// 바텀시트 공통 컨테이너 — 키보드 인셋·핸들·패딩을 통일한다.
 class _SheetScaffold extends StatelessWidget {
@@ -111,6 +114,9 @@ class _CreateGroupSheetState extends ConsumerState<_CreateGroupSheet> {
     if (name.isEmpty || _sending) return;
     final NavigatorState navigator = Navigator.of(context);
     final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
+    // 리포터도 안내 자원과 **같은 자리에서** 잡는다 — `ref`는 시트와 함께 죽고, 그때
+    // `reportHandledFailure`는 조용히 아무것도 남기지 않는다(참여 시트와 동일 규약).
+    final ErrorReporter reporter = ref.read(errorReporterProvider);
     setState(() => _sending = true);
     // try는 **저장소 호출만** 감싼다(참여 시트와 동일 규약 — `_JoinGroupSheetState._submit`).
     try {
@@ -118,7 +124,8 @@ class _CreateGroupSheetState extends ConsumerState<_CreateGroupSheet> {
           .read(shareRepositoryProvider)
           .createGroup(name: name, emoji: _emoji, maxMembers: _maxMembers);
     } catch (e, s) {
-      reportHandledFailure(ref, e, s, context: 'CreateGroupSheet.createGroup');
+      reportHandledFailureTo(reporter, e, s,
+          context: 'CreateGroupSheet.createGroup');
       if (mounted) setState(() => _sending = false);
       messenger
         ..hideCurrentSnackBar()
@@ -272,14 +279,31 @@ class _JoinGroupSheetState extends ConsumerState<_JoinGroupSheet> {
   Future<void> _submit() async {
     final String token = _credential;
     if (token.isEmpty || _sending) return;
-    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
+    // **`await` 이전에 잡아 둔다.** 요청이 도는 동안 시트는 내려갈 수 있고
+    // (`showModalBottomSheet`의 기본값이 `isDismissible`·`enableDrag`), firebase 경로는
+    // 쓰기 상한이 15초라 그 창이 길다. 시트가 닫히면 이 State의 `context`도 `mounted`도
+    // 쓸 수 없는데 **실패는 여전히 알려야 한다** — 안 알리면 실패가 접수 성공과
+    // 구별되지 않는다(이 catch 블록이 broad catch인 이유와 같다).
+    //
+    // 루트 내비게이터를 잡는 이유: 팝업은 어차피 루트에 올라가므로(`showDialog`의
+    // `useRootNavigator` 기본값) 시트가 사라져도 띄울 자리가 남는다. 스낵바로 떨어뜨리면
+    // 하필 이 변경이 걷어낸 형태로 되돌아간다 — 잠깐 떴다 저절로 사라져서 놓치기 쉽다.
+    final NavigatorState rootNavigator =
+        Navigator.of(context, rootNavigator: true);
+    // 같은 이유로 리포터도 여기서 잡는다 — `ref`는 시트와 함께 죽고, 그때
+    // `reportHandledFailure`의 `ref.read`가 던져 자기 `catch (_)`에 삼켜진다. 사용자
+    // 안내는 그 설계 덕에 지켜지지만 **진단만 조용히 빈다**. 하필 그 표본이 원격
+    // 진단에 가장 필요한 것이다(화면을 떠난 뒤의 백엔드 실패) — 그것만 빠지면 로그가
+    // "시트를 안 닫은 실패"로 편향된다.
+    final ErrorReporter reporter = ref.read(errorReporterProvider);
     setState(() => _sending = true);
     // try는 **저장소 호출만** 감싼다. 성공 뒤의 화면 전환까지 넣으면, 요청은 접수됐는데
     // 화면 정리에서 예외가 났을 때 실패 안내가 떠 사용자가 실패했다고 오해한다.
     try {
       await ref.read(shareRepositoryProvider).requestToJoin(token);
     } catch (e, s) {
-      reportHandledFailure(ref, e, s, context: 'JoinGroupSheet.requestToJoin');
+      reportHandledFailureTo(reporter, e, s,
+          context: 'JoinGroupSheet.requestToJoin');
       // `on StateError`로 좁히면 백엔드가 던지는 예외(권한 거부·네트워크 등)가 그대로
       // 빠져나가 **아무 안내도 없이 시트가 멈춘다** — 사용자에겐 버튼이 죽은 것으로만
       // 보인다. 실패 원인과 무관하게 항상 결과를 알려준다.
@@ -308,28 +332,27 @@ class _JoinGroupSheetState extends ConsumerState<_JoinGroupSheet> {
       // 보면 v3.0 이전의 6자리 **링크 토큰**에서 답이 갈린다(팀 공용 시드 `482913`이
       // 그것이다) — 멀쩡한 링크가 '만료된 코드'로 안내된다. 같은 입력에 저장소는
       // '링크', 화면은 '코드'라고 답하던 어긋남이라, 판정을 한 곳으로 모은 것이다.
-      final InviteExpiredException? expired =
-          e is InviteExpiredException ? e : null;
+      //
+      // **이미 참여 중 / 이미 요청함도 같은 규약으로 구별한다**(각각
+      // [AlreadyGroupMemberException]·[JoinRequestAlreadyPendingException]). 이 둘은
+      // 자격증명 문제와 달리 **고칠 것이 없다** — 코드를 다시 받아 와도 결과가 같으므로,
+      // 뭉뚱그리면 사용자가 고칠 수 없는 것을 고치려 든다.
+      final _JoinFailure failure = _JoinFailure.of(e);
       if (mounted) {
         setState(() {
           _sending = false;
           // 확인 모드에 코드 입력 전환을 띄우는 조건이다(성공 경로는 버튼 하나로 둔다).
-          _failed = true;
+          //
+          // **자격증명 문제일 때만** 세운다. 이미 멤버이거나 이미 요청한 사람에게 코드
+          // 입력란을 열어 주면, 코드를 받아 와도 같은 답이 돌아오는 길로 안내하는 셈이다.
+          _failed = _failed || failure.retryWithCodeMayHelp;
         });
       }
-      messenger
-        ..hideCurrentSnackBar()
-        ..showSnackBar(SnackBar(
-          // 세 갈래가 정확히 세 상태다 — 만료 아님 / 만료된 코드 / 만료된 링크.
-          // 튜플로 풀면 `(false, true)`(만료가 아닌데 코드)라는 있을 수 없는 조합이
-          // 언어상 표현 가능해져, 뒤에 오는 사람이 도달하지 않는 분기를 더할 수 있다.
-          content: Text(switch (expired) {
-            null => '요청을 보낼 수 없어요. 링크나 코드가 잘못됐을 수 있어요.',
-            InviteExpiredException(isCode: true) =>
-              '만료된 초대코드예요. 방장에게 새 코드를 요청하세요.',
-            InviteExpiredException() => '만료된 초대 링크예요. 방장에게 링크 재발급을 요청하세요.',
-          }),
-        ));
+      // 하단 스낵바가 아니라 **시스템 팝업**으로 알린다. 스낵바는 시트 뒤편 아래쪽에
+      // 잠깐 떴다 사라져서, 방금 버튼을 누른 사람이 결과를 놓치기 쉽다(특히 키보드가
+      // 올라온 입력 모드에서는 가려지기까지 한다). 실패는 다음 행동을 바꾸는 정보이므로
+      // 사용자가 **닫는 동작**으로 받아 가게 한다.
+      await _showFailureDialog(failure, rootNavigator);
       return;
     }
     if (!mounted) return;
@@ -337,6 +360,36 @@ class _JoinGroupSheetState extends ConsumerState<_JoinGroupSheet> {
       _sending = false;
       _requested = true;
     });
+  }
+
+  /// 실패를 **시스템 팝업**으로 알린다 — 사용자가 닫아야 사라진다.
+  ///
+  /// 시트를 닫지 않는다. 자격증명 문제라면 그 자리에서 다시 넣는 것이 다음 행동이고,
+  /// 이미 멤버·이미 요청이라면 화면을 닫는 판단은 사용자에게 남긴다(시트를 대신 닫으면
+  /// 팝업과 시트가 한꺼번에 사라져 무엇이 일어났는지 읽을 시간이 없다).
+  ///
+  /// **이 State가 아니라 [rootNavigator]에 건다**(`_submit`이 `await` 이전에 잡아
+  /// 넘긴다). 요청이 도는 동안 시트가 내려가면 `mounted`가 `false`가 되는데, 거기서
+  /// 그냥 돌아가면 실패가 **아무 안내 없이** 사라진다.
+  Future<void> _showFailureDialog(
+    _JoinFailure failure,
+    NavigatorState rootNavigator,
+  ) async {
+    // 앱이 통째로 사라진 경우만 남는다 — 그때는 띄울 자리가 정말로 없다.
+    if (!rootNavigator.mounted) return;
+    await showDialog<void>(
+      context: rootNavigator.context,
+      builder: (BuildContext ctx) => AlertDialog(
+        title: Text(failure.title),
+        content: Text(failure.body),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('확인'),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -447,6 +500,73 @@ class _JoinGroupSheetState extends ConsumerState<_JoinGroupSheet> {
   }
 }
 
+/// 참여 요청 실패를 **사용자에게 보이는 형태**로 옮긴 것 — 팝업 문구 + 다음 행동 여부.
+///
+/// 예외 → 문구 매핑을 한 곳에 모은다. `_submit` 안에 인라인으로 두면 문구를 고르는 일과
+/// 코드 입력 전환([_JoinGroupSheetState._failed])을 결정하는 일이 서로 다른 자리에서
+/// 같은 예외를 각자 분류하게 되어, 한쪽만 갱신되는 날 "고칠 것이 없다고 말하면서 고치는
+/// 입력란을 여는" 화면이 된다.
+class _JoinFailure {
+  const _JoinFailure({
+    required this.title,
+    required this.body,
+    required this.retryWithCodeMayHelp,
+  });
+
+  /// 예외를 실패 표현으로 옮긴다.
+  ///
+  /// **타입으로만 판정한다** — 메시지 문자열 검사(`contains('expired')` 등)는 저장소가
+  /// 메시지를 다듬는 순간 조용히 깨진다(계약의 "문자열로 구별하지 않는 이유").
+  ///
+  /// 마지막 `_`는 백엔드가 던지는 그 밖의 예외(권한 거부·네트워크 등)를 받는다 —
+  /// 여기서 좁히면 안내 없이 시트가 멈춘다(`_submit`의 broad catch와 같은 이유).
+  factory _JoinFailure.of(Object e) => switch (e) {
+        // 고칠 것이 없는 두 갈래 — 자격증명을 다시 받아 와도 같은 답이 돌아온다.
+        AlreadyGroupMemberException() => const _JoinFailure(
+            title: '이미 초대된 회원입니다',
+            body: '이미 이 그룹에 참여하고 있어요.\n공유 탭에서 그룹을 확인하세요.',
+            retryWithCodeMayHelp: false,
+          ),
+        JoinRequestAlreadyPendingException() => const _JoinFailure(
+            title: '이미 승인 요청을 보낸 그룹입니다',
+            // ⚠️ 그룹 이름·이모지·멤버 수를 넣지 마세요 — 요청자는 아직 멤버가 아니고
+            //    링크는 유출될 수 있다(요청 완료 화면과 같은 규약).
+            body: '방장이 아직 승인하지 않았어요.\n승인되면 공유 탭에 그룹이 나타나요.',
+            retryWithCodeMayHelp: false,
+          ),
+        // 만료 — 코드와 링크는 **다음 행동이 다르다**(재발급 대상이 다르다).
+        InviteExpiredException(isCode: true) => const _JoinFailure(
+            title: '만료된 초대코드예요',
+            body: '방장에게 새 코드를 요청하세요.',
+            retryWithCodeMayHelp: true,
+          ),
+        InviteExpiredException() => const _JoinFailure(
+            title: '만료된 초대 링크예요',
+            body: '방장에게 링크 재발급을 요청하세요.',
+            retryWithCodeMayHelp: true,
+          ),
+        // ⚠️ 정원은 말하지 않는다 — 계약상 정원 검사는 **승인 시점**이라 요청 단계의
+        //    실패 사유가 아니다(대기자가 자리를 선점하지 못하게 한 설계).
+        _ => const _JoinFailure(
+            title: '요청을 보낼 수 없어요',
+            body: '링크나 코드가 잘못됐을 수 있어요.',
+            retryWithCodeMayHelp: true,
+          ),
+      };
+
+  /// 팝업 제목 — 무엇이 일어났는지.
+  final String title;
+
+  /// 팝업 본문 — 다음에 무엇을 하면 되는지.
+  final String body;
+
+  /// 6자리 코드로 다시 시도하는 것이 도움이 될 수 있는 실패인지.
+  ///
+  /// 확인 모드(딥링크)에서 코드 입력 전환을 띄울지의 근거다. `false`인 실패에 입력란을
+  /// 열어 주면, 코드를 받아 와도 같은 답이 돌아오는 길로 안내하는 셈이다.
+  final bool retryWithCodeMayHelp;
+}
+
 /// 기프티콘 공유 바텀시트 — 내 기프티콘 중 하나를 골라 [groupId] 그룹에 공유한다.
 Future<void> showShareGifticonSheet(BuildContext context, String groupId) {
   return showModalBottomSheet<void>(
@@ -532,7 +652,7 @@ class _ShareGifticonSheet extends ConsumerWidget {
                               '${g.brand} · ${formatExpiryLabel(g.expiryDate)}',
                               style: theme.textTheme.bodySmall),
                           trailing: const Icon(Icons.add_circle_outline),
-                          onTap: () => _share(context, ref, g),
+                          onTap: () => _confirmAndShare(context, ref, g),
                         ),
                       );
                     },
@@ -543,15 +663,36 @@ class _ShareGifticonSheet extends ConsumerWidget {
     );
   }
 
+  /// 상세 확인 팝업을 거쳐 공유한다.
+  ///
+  /// 탭 한 번이 곧바로 쓰기였던 것을 한 단계 늦춘다 — 후보 타일은 상품명·브랜드·만료일
+  /// 한 줄씩뿐이라 같은 브랜드 기프티콘이 여러 장이면 어느 것을 눌렀는지 구분되지 않는데,
+  /// 공유는 되돌리려면 다른 화면의 공유 취소를 타야 하고 그 사이 다른 멤버가 써 버리면
+  /// 되돌릴 수조차 없다(팝업의 근거는 `share_gifticon_confirm_dialog.dart` 헤더).
+  Future<void> _confirmAndShare(
+    BuildContext context,
+    WidgetRef ref,
+    Gifticon g,
+  ) async {
+    final bool ok = await showShareGifticonConfirmDialog(context, g);
+    // 팝업이 떠 있는 동안 시트가 사라졌을 수 있다(뒤로가기·라우트 교체). 아직 아무것도
+    // 쓰지 않았으므로 조용히 그만두는 것이 맞다 — 이 시점의 [BuildContext]로 뒤이어
+    // Navigator·ScaffoldMessenger를 찾으면 죽은 트리를 뒤진다.
+    if (!ok || !context.mounted) return;
+    await _share(context, ref, g);
+  }
+
   Future<void> _share(BuildContext context, WidgetRef ref, Gifticon g) async {
     final NavigatorState navigator = Navigator.of(context);
     final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
+    // 안내 자원과 같은 자리에서 리포터도 잡는다(참여 시트와 동일 규약).
+    final ErrorReporter reporter = ref.read(errorReporterProvider);
     try {
       await ref
           .read(shareRepositoryProvider)
           .shareGifticon(groupId: groupId, gifticon: g);
     } catch (e, s) {
-      reportHandledFailure(ref, e, s,
+      reportHandledFailureTo(reporter, e, s,
           context: 'ShareGifticonSheet.shareGifticon');
       messenger
         ..hideCurrentSnackBar()

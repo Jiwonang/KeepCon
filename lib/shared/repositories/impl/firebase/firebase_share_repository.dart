@@ -31,6 +31,8 @@ import '../../../models/group.dart';
 import '../../../models/join_request.dart';
 import '../../../models/share.dart';
 import '../../../models/user.dart';
+import '../../../util/date_format.dart';
+import '../../../util/expiry_policy.dart';
 import '../../../util/invite_code.dart';
 import '../../../util/invite_token.dart';
 import '../../../util/korean_particle.dart';
@@ -670,7 +672,9 @@ class FirebaseShareRepository implements ShareRepository {
     try {
       final Group? g = await getGroupById(groupId);
       if (g != null && g.isMember(me.id)) {
-        throw StateError('Already a member of group: $groupId');
+        // 타입으로 좁힌다(계약 참조) — 화면이 "이미 참여 중"만 구별해 안내한다.
+        // `on FirebaseException`은 이것을 잡지 않으므로 그대로 호출부까지 올라간다.
+        throw AlreadyGroupMemberException(groupId);
       }
     } on FirebaseException catch (e) {
       // 읽기 **거부** = 비멤버. 요청을 계속 진행한다. 거부만 그렇다 — 일시적 실패
@@ -700,7 +704,10 @@ class FirebaseShareRepository implements ShareRepository {
     final JoinRequest? existing =
         snap == null ? null : _joinRequestFromDocOrNull(snap);
     if (existing != null && existing.isPending) {
-      return existing; // 멱등 — 같은 링크를 두 번 눌러도 요청이 쌓이지 않는다.
+      // 멱등 — **아무것도 쓰지 않는다**(같은 링크를 두 번 눌러도 요청이 쌓이지 않는다).
+      // 조용히 반환하지 않고 알리는 이유는 계약 참조 — 화면이 방금 보낸 것과 구별할 수
+      // 없으면 "보냈어요"를 다시 띄운다.
+      throw JoinRequestAlreadyPendingException(existing);
     }
     // 결정이 끝난 요청(거절, 또는 승인 후 강퇴)은 다시 대기로 되돌린다.
     //
@@ -720,8 +727,9 @@ class FirebaseShareRepository implements ShareRepository {
       requestedAt: DateTime.now(),
     );
     // 큐에 걸린 채 침묵하지 않도록 시간을 끊는다(위 ⚠️ — 쓰기 도중 단절 창). 타임아웃
-    // 뒤 큐의 쓰기가 나중에 도착해도 해롭지 않다 — 다음 요청에서 위 멱등 분기가 그
-    // 대기 요청을 그대로 돌려준다. 매달린 스피너보다 시끄러운 실패가 낫다.
+    // 뒤 큐의 쓰기가 나중에 도착해도 해롭지 않다 — 다음 요청에서 위 멱등 분기가
+    // [JoinRequestAlreadyPendingException]으로 그 대기 요청을 실어 알리므로, 문서는
+    // 덮이지 않고 사용자는 '이미 요청함'을 보게 된다. 매달린 스피너보다 시끄러운 실패가 낫다.
     await ref.set(<String, dynamic>{
       'groupId': req.groupId,
       'userId': req.userId,
@@ -1217,6 +1225,150 @@ class FirebaseShareRepository implements ShareRepository {
     // share → main 동기화: 원본 Gifticon을 used로 전이(기존 계약 소비, 트랜잭션 밖).
     await _syncOriginalUsed(updated.gifticonId);
     return updated;
+  }
+
+  @override
+  Future<SharedGifticon> extendSharedExpiry(
+    String sharedGifticonId,
+    DateTime newExpiryDate,
+  ) async {
+    final User me = _requireUser();
+    final DocumentReference<Map<String, dynamic>> ref =
+        _shared.doc(sharedGifticonId);
+    final DocumentReference<Map<String, dynamic>> notifRef = _notifs.doc();
+
+    // ① 사전 확인. 가드를 통과하지 못할 요청이 **원본을 먼저 건드리면 안 된다** —
+    //    남의 공유 항목에 연장을 걸어도 원본 만료일은 이미 옮겨진 뒤가 된다.
+    //    (아래 트랜잭션이 같은 가드를 다시 본다. 이 읽기는 순서를 위한 것이지
+    //    판정의 정본이 아니다.)
+    final DocumentSnapshot<Map<String, dynamic>> pre = await ref.get();
+    if (!pre.exists) {
+      throw StateError('Shared gifticon not found: $sharedGifticonId');
+    }
+    final SharedGifticon current = _requireSharedFromDoc(pre);
+    _guardExtendSharedExpiry(current, me, newExpiryDate);
+
+    // ② 원본 먼저(계약이 못박은 순서 — [ShareRepository.extendSharedExpiry] 참조).
+    //    트랜잭션 밖인 이유도 그 문서에 있다: 주입된 GifticonRepository가 같은
+    //    백엔드라는 보장이 계약에 없다.
+    await _syncOriginalExpiry(current.gifticonId, newExpiryDate);
+
+    // ③ 스냅샷 + 알림.
+    try {
+      return await _extendSharedExpiryTx(ref, notifRef, me, newExpiryDate,
+          sharedGifticonId: sharedGifticonId);
+    } on StateError {
+      // 그 사이 사용 완료돼 거부된 경우, 이미 옮겨 둔 원본을 사용 완료로 맞춘다
+      // (아래 [_compensateUsedAfterExtend] 참조). 보정하든 못 하든 거부는 그대로
+      // 전파한다 — 연장은 실제로 실패했다.
+      await _compensateUsedAfterExtend(ref, current.gifticonId);
+      rethrow;
+    }
+  }
+
+  /// [extendSharedExpiry]의 ③단계(스냅샷 갱신 + 알림) 트랜잭션.
+  Future<SharedGifticon> _extendSharedExpiryTx(
+    DocumentReference<Map<String, dynamic>> ref,
+    DocumentReference<Map<String, dynamic>> notifRef,
+    User me,
+    DateTime newExpiryDate, {
+    required String sharedGifticonId,
+  }) {
+    return _db.runTransaction<SharedGifticon>((Transaction tx) async {
+      final DocumentSnapshot<Map<String, dynamic>> doc = await tx.get(ref);
+      if (!doc.exists) {
+        throw StateError('Shared gifticon not found: $sharedGifticonId');
+      }
+      final SharedGifticon item = _requireSharedFromDoc(doc);
+      _guardExtendSharedExpiry(item, me, newExpiryDate);
+
+      final SharedGifticon next = item.copyWith(expiryDate: newExpiryDate);
+      tx.update(ref, <String, dynamic>{
+        'expiryDate': Timestamp.fromDate(newExpiryDate),
+      });
+      tx.set(
+        notifRef,
+        _notifToDoc(GroupNotificationType.expiryExtended, item.groupId,
+            title: '기간 연장',
+            message: '${me.displayName}님이 ${item.brand} ${item.productName} '
+                '유효기간을 ${formatYmdDot(newExpiryDate)}까지 연장했어요.'),
+      );
+      return next;
+    });
+  }
+
+  /// 연장 도중 항목이 사용 완료돼 거부할 때, **옮겨 둔 원본을 사용 완료로 맞춘다.**
+  ///
+  /// 이 시점의 원본은 이미 새 만료일을 갖고 있고([_syncOriginalExpiry]가 먼저 돈다),
+  /// 만료 상태였다면 `available`로 되살아나 있다. 그대로 두면 개인 목록에 **이미 소진된
+  /// 기프티콘이 더 오래 쓸 수 있는 것처럼** 남는다 — [_syncOriginalUsed]는 best-effort라
+  /// 그쪽이 채워 준다는 보장이 없다(다른 멤버가 사용하면 원본에 권한이 없고, 원본이
+  /// `expired`면 전이 표에 `expired → used`가 없어 건너뛴다).
+  ///
+  /// 만료일까지 되돌리지는 못한다(계약에 만료일을 앞당기는 API가 없다). 사용 완료된
+  /// 기프티콘의 만료일은 표시에 쓰이지 않으므로 상태를 맞추는 것으로 충분하다.
+  ///
+  /// 예상된 런타임 실패(권한·네트워크)만 삼킨다 — [_syncOriginalUsed]와 같은 기준이다.
+  /// `Error`는 삼키지 않으므로, 그 경우 호출자는 원래의 거부 대신 보정의 예외를 본다.
+  Future<void> _compensateUsedAfterExtend(
+    DocumentReference<Map<String, dynamic>> sharedRef,
+    String gifticonId,
+  ) async {
+    try {
+      final DocumentSnapshot<Map<String, dynamic>> doc = await sharedRef.get();
+      if (!doc.exists) return;
+      if (_sharedFromDoc(doc).status != ShareStatus.used) return;
+      final Gifticon? original = await _gifticons.getGifticonById(gifticonId);
+      if (original == null || original.status == GifticonStatus.used) return;
+      if (!GifticonStatusTransition.isAllowed(
+        original.status,
+        GifticonStatus.used,
+      )) {
+        return;
+      }
+      await _gifticons.updateStatus(gifticonId, GifticonStatus.used);
+    } on Exception {
+      return;
+    }
+  }
+
+  /// [extendSharedExpiry]의 가드(계약 정본은 그 문서다).
+  ///
+  /// 사전 확인과 트랜잭션 두 곳에서 같은 판정을 써야 해서 함수로 뺐다 — 한쪽만 고치면
+  /// 사전 확인은 막는데 트랜잭션은 통과시키는(또는 그 반대) 어긋남이 생긴다.
+  void _guardExtendSharedExpiry(
+    SharedGifticon item,
+    User me,
+    DateTime newExpiryDate,
+  ) {
+    if (item.sharedByUserId != me.id) {
+      throw StateError('Only the sharer can extend the expiry');
+    }
+    if (item.status == ShareStatus.used) {
+      throw StateError('A used shared gifticon cannot be extended');
+    }
+    if (!isLaterExpiryDate(newExpiryDate, than: item.expiryDate)) {
+      throw StateError(
+        'New expiry must be later than the current one: '
+        '${item.expiryDate} -> $newExpiryDate',
+      );
+    }
+  }
+
+  /// 원본 [Gifticon]의 만료일을 함께 옮긴다.
+  ///
+  /// 원본이 없으면(데모 시드의 가짜 gifticonId) 건너뛰고, **이미 그 날짜 이후여도**
+  /// 건너뛴다(스냅샷만 따라붙으면 둘이 만난다 — 계약 문서 참조).
+  /// 그 밖의 실패는 삼키지 않는다: [_syncOriginalUsed]와 달리 행위자가
+  /// 공유자=소유자로 좁혀져 있어 권한 실패가 정상 경로가 아니다.
+  Future<void> _syncOriginalExpiry(
+    String gifticonId,
+    DateTime newExpiryDate,
+  ) async {
+    final Gifticon? original = await _gifticons.getGifticonById(gifticonId);
+    if (original == null) return;
+    if (!isLaterExpiryDate(newExpiryDate, than: original.expiryDate)) return;
+    await _gifticons.extendExpiry(gifticonId, newExpiryDate);
   }
 
   @override

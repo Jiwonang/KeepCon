@@ -137,14 +137,14 @@ class GifticonDetailPage extends ConsumerWidget {
             const SizedBox(height: 14),
 
             // 금액 · 카테고리 · 유효기간.
-            _MetaRow(
+            GifticonMetaRow(
               icon: Icons.account_balance_wallet_outlined,
               text: g.price > 0 ? '${formatWon(g.price)}원' : '금액 미입력',
             ),
             const SizedBox(height: 8),
-            _MetaRow(icon: Icons.sell_outlined, text: g.category),
+            GifticonMetaRow(icon: Icons.sell_outlined, text: g.category),
             const SizedBox(height: 8),
-            _MetaRow(
+            GifticonMetaRow(
               icon: Icons.schedule,
               // 사용 완료한 것에까지 만료를 빨갛게 칠하면 처리할 일이 남은 것처럼 읽힌다.
               emphasize: !used &&
@@ -393,44 +393,6 @@ class _StatusBadge extends StatelessWidget {
           fontWeight: FontWeight.w700,
         ),
       ),
-    );
-  }
-}
-
-/// 아이콘 + 텍스트 한 줄(금액·카테고리·유효기간).
-class _MetaRow extends StatelessWidget {
-  const _MetaRow({
-    required this.icon,
-    required this.text,
-    this.emphasize = false,
-  });
-
-  final IconData icon;
-  final String text;
-
-  /// 만료 임박/경과를 error 색으로 강조할지.
-  final bool emphasize;
-
-  @override
-  Widget build(BuildContext context) {
-    final ThemeData theme = Theme.of(context);
-    final ColorScheme scheme = theme.colorScheme;
-    final Color color = emphasize ? scheme.error : scheme.onSurfaceVariant;
-
-    return Row(
-      children: <Widget>[
-        Icon(icon, size: 16, color: color),
-        const SizedBox(width: 6),
-        Expanded(
-          child: Text(
-            text,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: color,
-              fontWeight: emphasize ? FontWeight.w600 : FontWeight.w400,
-            ),
-          ),
-        ),
-      ],
     );
   }
 }

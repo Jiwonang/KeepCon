@@ -41,4 +41,32 @@ abstract class GifticonRepository {
   /// 전이는 [GifticonStatusTransition.isAllowed] 규칙을 따라야 하며, 위반 시 구현체는
   /// [StateError]를 던지는 것을 계약으로 한다. 성공 시 갱신된 [Gifticon]을 반환한다.
   Future<Gifticon> updateStatus(String id, GifticonStatus status);
+
+  /// 유효기간을 [newExpiryDate]로 **연장한다**. (만료된 기프티콘을 되살리는 경로)
+  ///
+  /// 실제 연장은 브랜드사가 해 주는 것이고, 이 계약은 그 결과(새 만료일)를 기록한다.
+  ///
+  /// 가드 — 위반 시 [StateError]:
+  /// - 문서가 없으면 안 된다.
+  /// - [newExpiryDate]가 현재 [Gifticon.expiryDate]보다 **뒤 날짜**여야 한다
+  ///   (판정은 [isLaterExpiryDate] — 달력 일 단위). 같은 날·앞당기기는 연장이 아니다.
+  /// - [Gifticon.status]가 [GifticonStatus.used]면 안 된다 — 이미 쓴 기프티콘은 기간을
+  ///   늘려도 쓸 수 없다.
+  ///
+  /// 효과: [Gifticon.expiryDate]를 옮기고, 저장된 상태가 [GifticonStatus.expired]면
+  /// [GifticonStatus.available]로 되돌린다(전이 표의 유일한 예외 — [GifticonStatus] 문서 참조).
+  /// 성공 시 갱신된 [Gifticon]을 반환한다.
+  ///
+  /// ## 행위자(누가 연장할 수 있는가)
+  /// 이 인터페이스는 행위자를 받지 않는다(`updateStatus`와 같다). **연장은 등록한
+  /// 본인만** 할 수 있고, 그 강제는 두 겹이다 — 화면은 자기 목록에서만 이 경로를
+  /// 열고(main은 `watchGifticons(ownerId)`로 자기 것만 본다), 백엔드는
+  /// `firestore.rules`의 `gifticons` 규칙이 `ownerId == uid()`인 쓰기만 허용한다.
+  ///
+  /// ## ⚠️ 공유 중인 기프티콘에 직접 부르지 마라
+  /// [SharedGifticon.expiryDate]는 원본의 **스냅샷**이라 이 메서드로는 갱신되지 않는다.
+  /// 그룹에 공유된 기프티콘의 연장은 `ShareRepository.extendSharedExpiry`로 하며, 그쪽이
+  /// 스냅샷과 원본을 함께 옮긴다(같은 이유로 `updateStatus`도 공유 중에는 부르지 않는다 —
+  /// 그 규약은 main 상세 화면의 사용 완료 가드에 이미 적혀 있다).
+  Future<Gifticon> extendExpiry(String id, DateTime newExpiryDate);
 }

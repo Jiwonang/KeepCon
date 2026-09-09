@@ -50,7 +50,7 @@ scan() {
 # `(class|enum|mixin)`에 **도달하지 않는다** — 페이지가 같은 이름의 extension을 선언해도
 # 통과한다. 그리고 `MyGifticon`은 lib/shared에 정본이 없는 죽은 이름이다. 고칠 때는
 # 키워드에 `extension`을 더하고 죽은 이름을 지운다(이름만 올려 두면 막았다고 착각한다).
-SHARED_TYPES="AppNotification|GroupNotificationItem|ExpiryNotificationItem|ScheduledExpiryNotification|Group|GroupMember|SharedGifticon|UsageLog|GroupNotification|MyGifticon|Gifticon|User|JoinRequest|ShareStatus|MemberRole|JoinRequestStatus|GroupNotificationType|GifticonStatus|SortOption|FilterOption|ShareStatusTransition|GifticonStatusTransition|ShareRepository|GifticonRepository|AuthRepository|MyGroupsRetry|ErrorReporter|InviteExpiredException|JoinRequestUnreadableException|InlineErrorBanner"
+SHARED_TYPES="AppNotification|GroupNotificationItem|ExpiryNotificationItem|ScheduledExpiryNotification|Group|GroupMember|SharedGifticon|UsageLog|GroupNotification|MyGifticon|Gifticon|User|JoinRequest|ShareStatus|MemberRole|JoinRequestStatus|GroupNotificationType|GifticonStatus|SortOption|FilterOption|ShareStatusTransition|GifticonStatusTransition|ShareRepository|GifticonRepository|AuthRepository|MyGroupsRetry|ErrorReporter|InviteExpiredException|JoinRequestUnreadableException|AlreadyGroupMemberException|JoinRequestAlreadyPendingException|InlineErrorBanner"
 
 # 선행 수식어 `([a-z]+ )*`로 Dart 3 클래스 수식어를 모두 포괄한다:
 # abstract/base/interface/final/sealed/mixin(및 조합, 예: `abstract interface class`,
@@ -116,7 +116,7 @@ fi
 # 시분초를 절삭해 같은 기프티콘을 두고 화면과 통계가 다른 답을 냈다. 가정이 아니라
 # 이미 발생한 재발이라 기계적 가드에 넣는다. 만료 임박 알림이 이 판정 위에 올라가므로
 # 재분기하면 알림까지 어긋난다.
-SSOT_FUNCTIONS="planExpiryNotifications|firedExpiryNotifications|retryNotifications|retrySessionIfFailed|retryMyGroups|retryFailedSharedGifticonStreams|retrySharedGifticonIds|foldSessionUser|daysUntilExpiry|isExpiringSoon|isExpiredByDate|inviteUrlFrom|inviteOriginFor|parseInviteToken|isSharableOrigin|newInviteToken|newInviteCode|isWellFormedInviteCode"
+SSOT_FUNCTIONS="planExpiryNotifications|firedExpiryNotifications|retryNotifications|retrySessionIfFailed|retryMyGroups|retryFailedSharedGifticonStreams|retrySharedGifticonIds|foldSessionUser|daysUntilExpiry|isExpiringSoon|isExpiredByDate|isLaterExpiryDate|inviteUrlFrom|inviteOriginFor|parseInviteToken|isSharableOrigin|newInviteToken|newInviteCode|isWellFormedInviteCode"
 
 # 선언 형태 두 갈래를 잡는다(호출 `retryMyGroups(ref);`·`return foldSessionUser<...>(...)`는
 # 둘 다 통과):

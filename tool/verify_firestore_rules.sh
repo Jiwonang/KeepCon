@@ -17,8 +17,9 @@
 #   돌린다(`firebase emulators:exec`). Dart 테스트는 in-memory 구현을 쓰므로 규칙 계층을
 #   검증하지 못한다 — 이 스크립트가 그 계층의 유일한 회귀 방어선이다.
 #
-# 주의: 인증 헤더 없이 Firestore 에뮬레이터 REST를 호출하면 **관리자로 취급되어 규칙을
-#   우회**한다. 그래서 모든 케이스는 반드시 사용자 ID 토큰을 붙여 호출한다.
+# 주의: 모든 케이스는 반드시 사용자 ID 토큰을 붙여 호출한다. 인증 헤더를 **생략**하면
+#   관리자가 되는 것이 아니라 `request.auth == null`이 되어 `isSignedIn()`에서 403이다
+#   (실측). 규칙을 우회해 픽스처를 심어야 할 때만 아래 `AUTH_ADMIN`을 쓴다.
 set -uo pipefail
 
 PROJECT="${FIRESTORE_PROJECT:-demo-keepcon}"
@@ -143,6 +144,14 @@ AUTH_A=(-H "Authorization: Bearer ${TOKEN_A}")
 AUTH_B=(-H "Authorization: Bearer ${TOKEN_B}")
 AUTH_C=(-H "Authorization: Bearer ${TOKEN_C}")
 JSON=(-H 'Content-Type: application/json')
+
+# 규칙을 우회해 문서를 심는 **픽스처 전용** 토큰(에뮬레이터 관례 — `Bearer owner`).
+#
+# ⚠️ 인증 헤더를 **생략**하는 것으로는 안 된다. 이 스크립트 머리말의 "인증 헤더 없이
+#    호출하면 관리자로 취급된다"는 서술과 달리, 무인증 쓰기는 `request.auth == null`이
+#    되어 `isSignedIn()`에서 **403**이다(실측). 케이스에는 절대 쓰지 말 것 — 규칙을
+#    통째로 건너뛰므로 무엇도 검증하지 못한다.
+AUTH_ADMIN=(-H 'Authorization: Bearer owner')
 
 # Firestore REST 형식의 기프티콘 문서를 만든다. $1 = ownerId(이 값이 규칙 판정 대상).
 gifticon_doc() {
@@ -534,6 +543,192 @@ check "없는 코드 문서 삭제는 no-op" 200 -X DELETE "${DOCS}/inviteCodes/
 check "  (정리) 만료 코드 문서 삭제" 200 -X DELETE "${DOCS}/inviteCodes/${CODE_DEAD}" "${AUTH_A[@]}"
 check "비방장이 코드 문서 삭제 → 차단" 403 -X DELETE "${DOCS}/inviteCodes/${CODE_LIVE}" "${AUTH_C[@]}"
 check "방장이 코드 문서 삭제" 200 -X DELETE "${DOCS}/inviteCodes/${CODE_LIVE}" "${AUTH_A[@]}"
+
+echo "sharedGifticons — 만료 연장은 공유자만"
+
+# 유효기간 연장(`ShareRepository.extendSharedExpiry`)은 **등록한 본인만** 할 수 있다.
+# 클라이언트 가드만 두면 규칙을 안 거치는 요청에 무력하므로(PR #89) 규칙에도 못박았고,
+# 이 절이 그 못을 지킨다. 나머지 필드(찜·잠금·사용 완료)는 그룹 누구나 바꿀 수 있어야
+# 한다 — 좁히다가 그쪽을 함께 막으면 공유 기능 자체가 죽는다.
+
+SG_RUN="sg-$$-${RANDOM}"
+SG_A="shared-${SG_RUN}-a"      # A가 공유한 항목
+SG_LEGACY="shared-${SG_RUN}-l" # sharedByUserId가 없는 손상/레거시 문서
+
+# 공유 항목 문서. $1=sharedByUserId $2=만료 시각
+shared_doc() {
+  printf '{"fields":{"groupId":{"stringValue":"%s"},"gifticonId":{"stringValue":"gif-%s"},"sharedByUserId":{"stringValue":"%s"},"brand":{"stringValue":"스타벅스"},"productName":{"stringValue":"아메리카노"},"expiryDate":{"timestampValue":"%s"},"status":{"stringValue":"available"}}}' \
+    "${G_JR}" "${SG_RUN}" "$1" "$2"
+}
+
+# `sharedByUserId`가 통째로 없는 문서. 규칙이 그 필드를 직접 만지면 평가 오류로 죽어
+# **찜·사용 완료까지** 막히므로, 없는 경우에도 나머지 갱신이 살아 있는지 본다.
+shared_doc_no_sharer() {
+  printf '{"fields":{"groupId":{"stringValue":"%s"},"gifticonId":{"stringValue":"gif-legacy-%s"},"brand":{"stringValue":"스타벅스"},"productName":{"stringValue":"아메리카노"},"expiryDate":{"timestampValue":"%s"},"status":{"stringValue":"available"}}}' \
+    "${G_JR}" "${SG_RUN}" "$1"
+}
+
+MASK_EXPIRY='updateMask.fieldPaths=expiryDate'
+MASK_RESERVED='updateMask.fieldPaths=reservedByUserId'
+SG_EXP_OLD='2026-01-01T00:00:00Z'
+SG_EXP_NEW='2027-01-01T00:00:00Z'
+
+# 공유 생성은 **원본 소유**를 요구하므로 원본을 먼저 심는다(A 소유). 이 픽스처가 없으면
+# 아래 정상 생성이 존재하지 않는 원본을 가리켜 403이 되고, 뒤 케이스가 통째로 무너진다.
+check "  (준비) A의 원본 기프티콘" 200 -X PATCH "${DOCS}/gifticons/gif-${SG_RUN}" \
+  "${AUTH_A[@]}" "${JSON[@]}" -d "$(gifticon_doc "${UID_A}")"
+check "  (준비) B의 원본 기프티콘(남의 것 붙이기 대조군)" 200 \
+  -X PATCH "${DOCS}/gifticons/gif-other-${SG_RUN}" \
+  "${AUTH_B[@]}" "${JSON[@]}" -d "$(gifticon_doc "${UID_B}")"
+
+check "  (준비) A가 기프티콘 공유" 200 -X PATCH "${DOCS}/sharedGifticons/${SG_A}" \
+  "${AUTH_A[@]}" "${JSON[@]}" -d "$(shared_doc "${UID_A}" "${SG_EXP_OLD}")"
+
+# ── 생성도 신원을 검사한다 ───────────────────────────────────────────────
+# update에서 신원을 못박아도 create가 열려 있으면 남의 이름으로 새 항목을 만들면 그만이다.
+check "B가 A의 이름으로 공유 항목 생성 → 차단" 403 \
+  -X PATCH "${DOCS}/sharedGifticons/shared-${SG_RUN}-forge" \
+  "${AUTH_B[@]}" "${JSON[@]}" -d "$(shared_doc "${UID_A}" "${SG_EXP_OLD}")"
+# 자기 이름으로 만들더라도 **남의 원본**을 붙일 수는 없다.
+check "B가 남의 원본(A 소유)을 붙여 공유 → 차단" 403 \
+  -X PATCH "${DOCS}/sharedGifticons/shared-${SG_RUN}-steal" \
+  "${AUTH_B[@]}" "${JSON[@]}" \
+  -d "{\"fields\":{\"groupId\":{\"stringValue\":\"${G_JR}\"},\"gifticonId\":{\"stringValue\":\"gif-${SG_RUN}\"},\"sharedByUserId\":{\"stringValue\":\"${UID_B}\"},\"brand\":{\"stringValue\":\"스타벅스\"},\"productName\":{\"stringValue\":\"아메리카노\"},\"expiryDate\":{\"timestampValue\":\"${SG_EXP_OLD}\"},\"status\":{\"stringValue\":\"available\"}}}"
+check "없는 원본을 붙여 공유 → 차단" 403 \
+  -X PATCH "${DOCS}/sharedGifticons/shared-${SG_RUN}-ghost" \
+  "${AUTH_B[@]}" "${JSON[@]}" \
+  -d "{\"fields\":{\"groupId\":{\"stringValue\":\"${G_JR}\"},\"gifticonId\":{\"stringValue\":\"gif-nope-${SG_RUN}\"},\"sharedByUserId\":{\"stringValue\":\"${UID_B}\"},\"brand\":{\"stringValue\":\"스타벅스\"},\"productName\":{\"stringValue\":\"아메리카노\"},\"expiryDate\":{\"timestampValue\":\"${SG_EXP_OLD}\"},\"status\":{\"stringValue\":\"available\"}}}"
+check "계약 밖 필드를 담아 공유 생성 → 차단" 403 \
+  -X PATCH "${DOCS}/sharedGifticons/shared-${SG_RUN}-extra" \
+  "${AUTH_B[@]}" "${JSON[@]}" \
+  -d "{\"fields\":{\"groupId\":{\"stringValue\":\"${G_JR}\"},\"gifticonId\":{\"stringValue\":\"gif-other-${SG_RUN}\"},\"sharedByUserId\":{\"stringValue\":\"${UID_B}\"},\"brand\":{\"stringValue\":\"스타벅스\"},\"productName\":{\"stringValue\":\"아메리카노\"},\"expiryDate\":{\"timestampValue\":\"${SG_EXP_OLD}\"},\"status\":{\"stringValue\":\"available\"},\"isAdmin\":{\"booleanValue\":true}}}"
+# ⚠️ 위 「B가 A의 이름으로…」는 남의 **원본**까지 붙어 있어 `ownsGifticon` 하나로도 403이다
+#    — 신원 조항의 커버리지가 아니다(뮤테이션으로 확인: 그 조항을 지워도 전건 통과였다).
+#    원본은 자기 것으로 두고 **이름만** 남의 것으로 달아 그 조항만 홀로 지게 한다.
+check "B가 자기 원본에 A의 이름을 달아 생성 → 차단" 403 \
+  -X PATCH "${DOCS}/sharedGifticons/shared-${SG_RUN}-name" \
+  "${AUTH_B[@]}" "${JSON[@]}" \
+  -d "{\"fields\":{\"groupId\":{\"stringValue\":\"${G_JR}\"},\"gifticonId\":{\"stringValue\":\"gif-other-${SG_RUN}\"},\"sharedByUserId\":{\"stringValue\":\"${UID_A}\"},\"brand\":{\"stringValue\":\"스타벅스\"},\"productName\":{\"stringValue\":\"아메리카노\"},\"expiryDate\":{\"timestampValue\":\"${SG_EXP_OLD}\"},\"status\":{\"stringValue\":\"available\"}}}"
+# 필수 필드 누락은 `hasAll`만 잡는다 — 나머지 조항은 전부 통과하는 페이로드다.
+check "필수 필드(status) 누락 생성 → 차단" 403 \
+  -X PATCH "${DOCS}/sharedGifticons/shared-${SG_RUN}-partial" \
+  "${AUTH_B[@]}" "${JSON[@]}" \
+  -d "{\"fields\":{\"groupId\":{\"stringValue\":\"${G_JR}\"},\"gifticonId\":{\"stringValue\":\"gif-other-${SG_RUN}\"},\"sharedByUserId\":{\"stringValue\":\"${UID_B}\"},\"brand\":{\"stringValue\":\"스타벅스\"},\"productName\":{\"stringValue\":\"아메리카노\"},\"expiryDate\":{\"timestampValue\":\"${SG_EXP_OLD}\"}}}"
+# 대조군 — 자기 원본을 자기 이름으로 공유하는 정상 경로는 열려 있어야 한다.
+check "B가 자기 원본을 자기 이름으로 공유" 200 \
+  -X PATCH "${DOCS}/sharedGifticons/shared-${SG_RUN}-ok" \
+  "${AUTH_B[@]}" "${JSON[@]}" \
+  -d "{\"fields\":{\"groupId\":{\"stringValue\":\"${G_JR}\"},\"gifticonId\":{\"stringValue\":\"gif-other-${SG_RUN}\"},\"sharedByUserId\":{\"stringValue\":\"${UID_B}\"},\"brand\":{\"stringValue\":\"배스킨\"},\"productName\":{\"stringValue\":\"싱글킹\"},\"expiryDate\":{\"timestampValue\":\"${SG_EXP_OLD}\"},\"status\":{\"stringValue\":\"available\"}}}"
+check "  (정리) 대조군 공유 항목 삭제" 200 \
+  -X DELETE "${DOCS}/sharedGifticons/shared-${SG_RUN}-ok" "${AUTH_B[@]}"
+
+# 대조군 — 공유의 본래 동작(멤버 누구나 찜)은 그대로여야 한다.
+check "B(멤버)가 찜 설정" 200 -X PATCH "${DOCS}/sharedGifticons/${SG_A}?${MASK_RESERVED}" \
+  "${AUTH_B[@]}" "${JSON[@]}" -d "{\"fields\":{\"reservedByUserId\":{\"stringValue\":\"${UID_B}\"}}}"
+
+check "B(멤버·비공유자)가 만료일 연장 → 차단" 403 \
+  -X PATCH "${DOCS}/sharedGifticons/${SG_A}?${MASK_EXPIRY}" \
+  "${AUTH_B[@]}" "${JSON[@]}" -d "{\"fields\":{\"expiryDate\":{\"timestampValue\":\"${SG_EXP_NEW}\"}}}"
+# ⚠️ 이 케이스는 **멤버십 단계에서** 막힌다(공유자 조항에 닿지 않는다). 지우지 않는
+#    이유는 멤버십 회귀 가드로는 유효하기 때문이고, 라벨에 그 사실을 적어 두는 이유는
+#    이것을 공유자 조항의 커버리지로 오독하지 않게 하기 위함이다(뮤테이션으로 확인:
+#    공유자 조항을 지워도 이 케이스는 흔들리지 않는다).
+check "C(비멤버)가 만료일 연장 → 차단(멤버십 단계 — 공유자 조항 미도달)" 403 \
+  -X PATCH "${DOCS}/sharedGifticons/${SG_A}?${MASK_EXPIRY}" \
+  "${AUTH_C[@]}" "${JSON[@]}" -d "{\"fields\":{\"expiryDate\":{\"timestampValue\":\"${SG_EXP_NEW}\"}}}"
+check "A(공유자)가 만료일 연장" 200 \
+  -X PATCH "${DOCS}/sharedGifticons/${SG_A}?${MASK_EXPIRY}" \
+  "${AUTH_A[@]}" "${JSON[@]}" -d "{\"fields\":{\"expiryDate\":{\"timestampValue\":\"${SG_EXP_NEW}\"}}}"
+
+# 전체 되쓰기(마스크 없음)로 만료일을 바꾸는 우회. `diff`는 값 기준이라 필드를 나눠
+# 보내지 않아도 잡힌다 — 이 케이스가 그것을 보인다.
+#
+# ⚠️ 페이로드의 만료일은 **앞 케이스와 독립인 값**을 쓴다. `SG_EXP_OLD`를 쓰면 앞
+#    케이스(A의 연장)가 실패했을 때 "만료일이 안 바뀐 요청"이 되어 200으로 통과한다 —
+#    앞 케이스의 성공에 의미가 매달린 케이스가 된다(뮤테이션에서 실제로 그랬다).
+SG_EXP_ALT='2028-01-01T00:00:00Z'
+check "B가 전체 되쓰기로 만료일 변경 → 차단" 403 \
+  -X PATCH "${DOCS}/sharedGifticons/${SG_A}" \
+  "${AUTH_B[@]}" "${JSON[@]}" -d "$(shared_doc "${UID_A}" "${SG_EXP_ALT}")"
+
+# ── 신원 필드를 못박지 않으면 위 제한이 두 요청으로 무너진다 ─────────────
+# ①`sharedByUserId`를 자기로 바꾸고(만료일을 안 건드리니 통과) ②그다음 연장한다.
+check "B가 sharedByUserId를 자기로 위조 → 차단" 403 \
+  -X PATCH "${DOCS}/sharedGifticons/${SG_A}?updateMask.fieldPaths=sharedByUserId" \
+  "${AUTH_B[@]}" "${JSON[@]}" -d "{\"fields\":{\"sharedByUserId\":{\"stringValue\":\"${UID_B}\"}}}"
+check "B가 gifticonId를 다른 원본으로 변경 → 차단" 403 \
+  -X PATCH "${DOCS}/sharedGifticons/${SG_A}?updateMask.fieldPaths=gifticonId" \
+  "${AUTH_B[@]}" "${JSON[@]}" -d "{\"fields\":{\"gifticonId\":{\"stringValue\":\"gif-hijack\"}}}"
+check "B가 표시용 스냅샷(브랜드) 변경 → 차단" 403 \
+  -X PATCH "${DOCS}/sharedGifticons/${SG_A}?updateMask.fieldPaths=brand" \
+  "${AUTH_B[@]}" "${JSON[@]}" -d '{"fields":{"brand":{"stringValue":"위조 브랜드"}}}'
+# `groupId`를 못박지 않으면 멤버가 **자기가 속하지 않은 그룹으로** 항목을 옮길 수 있다
+# (update의 멤버십 판정은 **옛** groupId로만 본다).
+check "B가 groupId를 다른 그룹으로 변경 → 차단" 403 \
+  -X PATCH "${DOCS}/sharedGifticons/${SG_A}?updateMask.fieldPaths=groupId" \
+  "${AUTH_B[@]}" "${JSON[@]}" -d '{"fields":{"groupId":{"stringValue":"grp-hijack"}}}'
+check "B가 표시용 스냅샷(상품명) 변경 → 차단" 403 \
+  -X PATCH "${DOCS}/sharedGifticons/${SG_A}?updateMask.fieldPaths=productName" \
+  "${AUTH_B[@]}" "${JSON[@]}" -d '{"fields":{"productName":{"stringValue":"위조 상품"}}}'
+check "B가 표시용 스냅샷(바코드) 변경 → 차단" 403 \
+  -X PATCH "${DOCS}/sharedGifticons/${SG_A}?updateMask.fieldPaths=barcode" \
+  "${AUTH_B[@]}" "${JSON[@]}" -d '{"fields":{"barcode":{"stringValue":"9999"}}}'
+# 대조군 — 사용 흐름은 좁히면 안 된다. 여기가 막히면 공유 기능 자체가 죽는다.
+check "B(멤버)가 사용 완료 처리" 200 \
+  -X PATCH "${DOCS}/sharedGifticons/${SG_A}?updateMask.fieldPaths=status" \
+  "${AUTH_B[@]}" "${JSON[@]}" -d '{"fields":{"status":{"stringValue":"used"}}}'
+
+# ── delete → create 재생성 우회 ──────────────────────────────────────────
+# `delete`가 멤버 전원에게 열려 있으면, 지운 자리에 같은 id로 다시 만들어 위 제한을
+# 통째로 건너뛴다(`create`는 재생성인지 원리상 알 수 없다).
+#
+# 위 create 케이스가 그 우회를 한 겹 더 막았다 — 재생성하려면 **원본을 소유**해야 하므로
+# 남의 기프티콘을 자기 이름으로 되살릴 수 없다. 이 절은 그 백스톱이다(지우는 것 자체를
+# 막아, 파괴로 끝나는 경로도 남기지 않는다).
+check "B가 A의 공유 항목 삭제 → 차단" 403 \
+  -X DELETE "${DOCS}/sharedGifticons/${SG_A}" "${AUTH_B[@]}"
+
+# ⚠️ 이 픽스처는 `AUTH_ADMIN`으로 심는다(인증 헤더 생략이 아니다 — 그쪽은 403이다).
+#    생성 규칙이 `sharedByUserId == uid()`를 요구하게
+#    되면서 클라이언트로는 이 모양을 만들 수 없게 됐지만, **옛 클라이언트가 남긴 문서**는
+#    현실에 존재한다. 그 문서 위에서 나머지 규칙이 어떻게 도는지가 여기서 볼 것이다.
+check "  (준비) sharedByUserId 없는 문서(관리자 시드)" 200 \
+  -X PATCH "${DOCS}/sharedGifticons/${SG_LEGACY}" \
+  "${AUTH_ADMIN[@]}" "${JSON[@]}" -d "$(shared_doc_no_sharer "${SG_EXP_OLD}")"
+check "그 문서에도 찜은 된다(레거시 문서 회귀)" 200 \
+  -X PATCH "${DOCS}/sharedGifticons/${SG_LEGACY}?${MASK_RESERVED}" \
+  "${AUTH_B[@]}" "${JSON[@]}" -d "{\"fields\":{\"reservedByUserId\":{\"stringValue\":\"${UID_B}\"}}}"
+check "그 문서의 만료일 연장은 아무도 못 한다 → 차단" 403 \
+  -X PATCH "${DOCS}/sharedGifticons/${SG_LEGACY}?${MASK_EXPIRY}" \
+  "${AUTH_A[@]}" "${JSON[@]}" -d "{\"fields\":{\"expiryDate\":{\"timestampValue\":\"${SG_EXP_NEW}\"}}}"
+# 주인을 확정할 수 없는 문서를 **일반 멤버**에게 열면 그것이 곧 delete → create 우회로다
+# (지운 자리에 자기를 sharer로 재생성 → 스냅샷 자유 변경. 초안이 그랬고 실측으로 세 요청이
+# 전부 200이었다). 정리는 방장 몫으로 남긴다.
+check "주인 없는 문서를 일반 멤버가 거두기 → 차단" 403 \
+  -X DELETE "${DOCS}/sharedGifticons/${SG_LEGACY}" "${AUTH_B[@]}"
+check "주인 없는 문서는 방장이 거둔다" 200 \
+  -X DELETE "${DOCS}/sharedGifticons/${SG_LEGACY}" "${AUTH_A[@]}"
+
+# 공유자가 그룹을 떠난 뒤 남은 항목 — 공유자는 비멤버라 못 지운다. 방장 조항이 없으면
+# **아무도** 못 지우는 문서가 된다(멤버 이탈·강퇴 경로에는 공유 정리가 없어 정상 경로다).
+SG_GONE="shared-${SG_RUN}-g"
+# 공유자가 그룹을 떠난 상태 = 문서에는 C가 공유자로 남아 있는데 C는 멤버가 아니다.
+# 생성 규칙이 `sharedByUserId == uid()`를 요구하므로 클라이언트로는 이 모양을 만들 수
+# 없다 — 관리자로 심는다(그 상태 자체는 '공유 후 탈퇴'라는 정상 경로로 생긴다).
+check "  (준비) 공유자가 비멤버(C)인 항목(관리자 시드)" 200 \
+  -X PATCH "${DOCS}/sharedGifticons/${SG_GONE}" \
+  "${AUTH_ADMIN[@]}" "${JSON[@]}" -d "$(shared_doc "${UID_C}" "${SG_EXP_OLD}")"
+# 방장 조항이 필요한 **근거 자체**를 지킨다 — 공유자 C는 이미 비멤버라 자기 항목도 못
+# 지운다. 이 케이스가 없으면 `isGroupMember`에 '공유자 예외'를 뚫는 변경이 위 주석의
+# 전제를 무너뜨리면서도 전건 통과한다.
+check "떠난 공유자(비멤버) 본인도 자기 항목을 못 지운다 → 차단" 403 \
+  -X DELETE "${DOCS}/sharedGifticons/${SG_GONE}" "${AUTH_C[@]}"
+check "떠난 공유자의 항목을 일반 멤버가 거두기 → 차단" 403 \
+  -X DELETE "${DOCS}/sharedGifticons/${SG_GONE}" "${AUTH_B[@]}"
+check "떠난 공유자의 항목은 방장이 거둔다" 200 \
+  -X DELETE "${DOCS}/sharedGifticons/${SG_GONE}" "${AUTH_A[@]}"
+
+check "  (정리) 공유 항목 삭제(공유자 본인)" 200 -X DELETE "${DOCS}/sharedGifticons/${SG_A}" "${AUTH_A[@]}"
 
 echo
 echo "결과: 통과 ${pass} / 실패 ${fail}"

@@ -57,10 +57,13 @@ library;
 
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:keepcon/shared/models/gifticon.dart';
 import 'package:keepcon/shared/models/group.dart';
 import 'package:keepcon/shared/models/join_request.dart';
+import 'package:keepcon/shared/models/share.dart';
 import 'package:keepcon/shared/models/user.dart';
 import 'package:keepcon/shared/repositories/auth_repository.dart';
+import 'package:keepcon/shared/repositories/gifticon_repository.dart';
 import 'package:keepcon/shared/repositories/share_repository.dart';
 import 'package:keepcon/shared/util/invite_code.dart';
 
@@ -79,6 +82,12 @@ abstract class ShareBackend {
 
   ShareRepository get repo;
   AuthRepository get auth;
+
+  /// 공유의 **원본**을 담는 저장소.
+  ///
+  /// 공유 항목의 만료일은 원본의 스냅샷이라, 연장 계약은 "둘이 함께 움직였는가"를
+  /// 봐야 한다 — 한쪽만 보면 갈라진 상태가 그대로 통과한다.
+  GifticonRepository get gifticons;
 
   /// 시간이 [d]만큼 흐른 것으로 만든다.
   ///
@@ -263,12 +272,355 @@ void runCredentialResolutionContract(ShareBackend Function() makeBackend) {
       );
     });
 
-    test('이미 멤버면 요청할 수 없다', () async {
+    test('이미 멤버면 요청할 수 없다 — 화면이 구별할 수 있는 타입으로 거부한다', () async {
       final Group g = await newGroup();
       final Group issued = await backend.repo.issueInviteCode(groupId: g.id);
       // 방장 본인이 자기 코드를 넣는 경로 — 세션을 바꾸지 않는다.
+      //
+      // 타입까지 고정하는 이유: 이 실패에는 **다음 행동이 없다**(코드를 다시 받아
+      // 와도 같은 답이다). 뭉뚱그린 StateError로 두면 화면이 "링크나 코드가
+      // 잘못됐을 수 있어요"라고 말해 고칠 수 없는 것을 고치게 만든다.
       await expectLater(
-          backend.repo.requestToJoin(issued.inviteCode!), throwsStateError);
+        backend.repo.requestToJoin(issued.inviteCode!),
+        throwsA(allOf(
+          isA<AlreadyGroupMemberException>(),
+          // 계약의 가드 위반은 전부 StateError라는 규약을 깨지 않는다.
+          isA<StateError>(),
+        )),
+      );
+    });
+
+    test('이미 대기 중인 요청이 있으면 새로 만들지 않고 그 사실을 알린다', () async {
+      // 두 구현 모두에 도는 것이 요점이다 — in-memory는 리스트를, firebase는
+      // 결정론적 문서 id(`{groupId}_{userId}`)를 근거로 같은 판정을 해야 한다.
+      final Group g = await newGroup();
+      await asGuest();
+      final JoinRequest first = await backend.repo.requestToJoin(g.inviteToken);
+
+      await expectLater(
+        backend.repo.requestToJoin(g.inviteToken),
+        throwsA(allOf(
+          isA<JoinRequestAlreadyPendingException>().having(
+            (JoinRequestAlreadyPendingException e) => e.request.id,
+            'request.id',
+            first.id,
+          ),
+          isA<StateError>(),
+        )),
+      );
+      // 저장소의 부작용은 그대로 없다 — 방장 목록에 요청이 쌓이지 않는다.
+      expect(await backend.repo.getPendingJoinRequests(g.id), hasLength(1));
+    });
+
+    test('결정이 끝난 요청은 다시 대기로 되살아난다(알림이 아니라 정상 반환)', () async {
+      // ⚠️ 위 분기와 갈리는 지점이다. 거절당한 사람의 재요청은 오거절을 되돌리는
+      //    유일한 경로이므로 **성공해야** 한다 — 여기까지 예외로 닫으면 승인제에
+      //    복구 경로가 없어진다.
+      final Group g = await newGroup();
+      await asGuest();
+      final JoinRequest first = await backend.repo.requestToJoin(g.inviteToken);
+
+      // 방장 세션으로 돌아가 거절한다 — 거절은 방장만 할 수 있다.
+      await backend.auth.signIn(
+          email: 'contract-owner@keepcon.test', password: guestPassword);
+      await backend.repo.rejectJoinRequest(first.id);
+
+      await asGuest();
+      final JoinRequest again = await backend.repo.requestToJoin(g.inviteToken);
+      expect(again.id, first.id);
+      expect(again.status, JoinRequestStatus.pending);
+      expect(await backend.repo.getPendingJoinRequests(g.id), hasLength(1));
+    });
+  });
+}
+
+/// 두 구현이 **같은 답을 내야 하는** 공유 기프티콘 유효기간 연장 계약.
+///
+/// 이 축이 보는 것은 하나다 — **스냅샷과 원본이 함께 움직이는가.**
+/// [SharedGifticon.expiryDate]는 공유 시점의 복사본이라, 한쪽만 옮기면 그룹 화면과 개인
+/// 목록이 같은 기프티콘을 두고 다른 만료일을 말한다. 그 어긋남은 어느 화면에도 보이지
+/// 않으므로 여기서 고정한다.
+///
+/// [makeBackend]는 `setUp()`마다 새 백엔드를 만든다.
+void runSharedExpiryExtensionContract(ShareBackend Function() makeBackend) {
+  late ShareBackend backend;
+
+  const String password = 'keepcon';
+  const String ownerEmail = 'extend-owner@keepcon.test';
+  const String memberEmail = 'extend-member@keepcon.test';
+
+  final DateTime oldExpiry = DateTime(2026, 1, 10);
+  final DateTime newExpiry = DateTime(2026, 7, 20);
+
+  setUp(() async {
+    final ShareBackend created = makeBackend();
+    // 정리는 만들어진 인스턴스에 붙인다(위 스위트의 ⚠️와 같은 이유).
+    addTearDown(created.stop);
+    backend = created;
+    await backend.auth.signUp(
+      email: ownerEmail,
+      password: password,
+      displayName: '공유자',
+    );
+  });
+
+  /// 이미 가입된 계정이면 로그인, 아니면 가입한다.
+  Future<User> signInOrUp(String email, String displayName) async {
+    try {
+      return await backend.auth.signIn(email: email, password: password);
+    } on Object {
+      return backend.auth.signUp(
+        email: email,
+        password: password,
+        displayName: displayName,
+      );
+    }
+  }
+
+  Future<User> asOwner() => signInOrUp(ownerEmail, '공유자');
+  Future<User> asMember() => signInOrUp(memberEmail, '다른 멤버');
+
+  /// 원본 기프티콘을 저장소에 심는다. [store]가 `false`면 **저장하지 않고** 값만 만든다
+  /// — 데모 시드처럼 원본이 없는 공유 항목을 재현하기 위함이다.
+  Future<Gifticon> makeOriginal({
+    DateTime? expiry,
+    GifticonStatus status = GifticonStatus.available,
+    bool store = true,
+  }) async {
+    final Gifticon g = Gifticon(
+      id: store ? '' : 'ghost-gifticon',
+      ownerId: backend.auth.currentUser!.id,
+      brand: '스타벅스',
+      productName: '아메리카노 T',
+      price: 4500,
+      category: '카페',
+      expiryDate: expiry ?? oldExpiry,
+      registeredAt: DateTime(2025, 1, 1),
+      status: status,
+    );
+    return store ? backend.gifticons.addGifticon(g) : g;
+  }
+
+  /// 방장 세션으로 그룹을 만들고 기프티콘 하나를 공유한다.
+  Future<(Group, Gifticon, SharedGifticon)> shareOne({
+    DateTime? expiry,
+    GifticonStatus status = GifticonStatus.available,
+    bool storeOriginal = true,
+  }) async {
+    await asOwner();
+    final Group group = await backend.repo
+        .createGroup(name: '연장 계약 그룹', emoji: '📄', maxMembers: 5);
+    final Gifticon original = await makeOriginal(
+      expiry: expiry,
+      status: status,
+      store: storeOriginal,
+    );
+    final SharedGifticon item =
+        await backend.repo.shareGifticon(groupId: group.id, gifticon: original);
+    return (group, original, item);
+  }
+
+  /// 승인 흐름을 그대로 타서 [group]에 두 번째 멤버를 넣는다.
+  Future<User> joinAsMember(Group group) async {
+    final User member = await asMember();
+    final JoinRequest req = await backend.repo.requestToJoin(group.inviteToken);
+    await asOwner();
+    await backend.repo.approveJoinRequest(req.id);
+    return member;
+  }
+
+  group('연장이 되는 경우', () {
+    test('스냅샷과 원본이 함께 옮겨진다', () async {
+      final (_, Gifticon original, SharedGifticon item) = await shareOne();
+
+      final SharedGifticon updated =
+          await backend.repo.extendSharedExpiry(item.id, newExpiry);
+
+      expect(updated.expiryDate, newExpiry);
+      final Gifticon? synced =
+          await backend.gifticons.getGifticonById(original.id);
+      expect(synced?.expiryDate, newExpiry,
+          reason: '원본이 안 따라오면 내 목록은 여전히 만료된 기프티콘을 보여준다');
+    });
+
+    test('만료 상태였던 원본이 available로 되살아난다', () async {
+      final (_, Gifticon original, SharedGifticon item) =
+          await shareOne(status: GifticonStatus.expired);
+
+      await backend.repo.extendSharedExpiry(item.id, newExpiry);
+
+      expect((await backend.gifticons.getGifticonById(original.id))?.status,
+          GifticonStatus.available);
+    });
+
+    test('그룹에 기간 연장 알림이 남는다', () async {
+      final (Group group, _, SharedGifticon item) = await shareOne();
+
+      await backend.repo.extendSharedExpiry(item.id, newExpiry);
+
+      final List<GroupNotification> notifs =
+          await backend.repo.getNotifications(backend.auth.currentUser!.id);
+      final Iterable<GroupNotification> extended = notifs.where(
+        (GroupNotification n) =>
+            n.groupId == group.id &&
+            n.type == GroupNotificationType.expiryExtended,
+      );
+      expect(extended, hasLength(1),
+          reason: '만료라 못 쓴다고 판단했던 멤버가 다시 쓸 수 있게 됐음을 알 경로가 이것뿐이다');
+      // 새 만료일이 문구에 실려야 "언제까지 늘었는지"를 알림만 보고 안다.
+      expect(extended.first.message, contains('2026.07.20'));
+    });
+
+    test('찜해 둔 항목도 연장된다 — 찜을 건드리지 않는다', () async {
+      final (Group group, _, SharedGifticon item) = await shareOne();
+      await joinAsMember(group);
+
+      await asMember();
+      await backend.repo.toggleReservation(item.id);
+
+      await asOwner();
+      final SharedGifticon updated =
+          await backend.repo.extendSharedExpiry(item.id, newExpiry);
+      expect(updated.expiryDate, newExpiry);
+      expect(updated.reservedByUserId, isNotNull);
+    });
+
+    test('원본이 없어도(데모 시드) 스냅샷은 옮겨진다', () async {
+      final (_, _, SharedGifticon item) = await shareOne(storeOriginal: false);
+
+      final SharedGifticon updated =
+          await backend.repo.extendSharedExpiry(item.id, newExpiry);
+      expect(updated.expiryDate, newExpiry);
+    });
+
+    test('원본이 이미 더 뒤면 원본은 그대로, 스냅샷만 따라붙는다', () async {
+      final (_, Gifticon original, SharedGifticon item) = await shareOne();
+      // 스냅샷이 뒤처진 상태를 만든다 — 원본만 2026-12-31로 옮긴다.
+      final DateTime far = DateTime(2026, 12, 31);
+      await backend.gifticons.extendExpiry(original.id, far);
+
+      // 그룹 화면이 보여주는 값(뒤처진 스냅샷) 기준으로 고른 날짜.
+      final SharedGifticon updated =
+          await backend.repo.extendSharedExpiry(item.id, newExpiry);
+
+      expect(updated.expiryDate, newExpiry);
+      expect((await backend.gifticons.getGifticonById(original.id))?.expiryDate,
+          far,
+          reason: '앞당기기 가드에 걸려 통째로 실패시키지 않는다 — 스냅샷만 따라붙으면 둘이 만난다');
+    });
+  });
+
+  group('연장이 거부되는 경우', () {
+    test('공유자가 아닌 멤버는 연장할 수 없다', () async {
+      final (Group group, Gifticon original, SharedGifticon item) =
+          await shareOne();
+      await joinAsMember(group);
+
+      await asMember();
+      await expectLater(
+        backend.repo.extendSharedExpiry(item.id, newExpiry),
+        throwsStateError,
+      );
+
+      // 거부됐으면 **양쪽 다** 그대로여야 한다. 원본만 옮겨 두면 규칙이 막은 뒤에도
+      // 개인 목록의 만료일이 조용히 바뀐다.
+      final List<SharedGifticon> shared =
+          await backend.repo.getSharedGifticons(group.id);
+      expect(shared.single.expiryDate, oldExpiry);
+      expect((await backend.gifticons.getGifticonById(original.id))?.expiryDate,
+          oldExpiry);
+    });
+
+    test('사용 완료된 항목은 연장할 수 없다', () async {
+      final (_, _, SharedGifticon item) = await shareOne();
+      await backend.repo.markUsed(item.id);
+
+      await expectLater(
+        backend.repo.extendSharedExpiry(item.id, newExpiry),
+        throwsStateError,
+      );
+    });
+
+    test('연장 도중 사용 완료되면 거부한다 — 원본 동기화 뒤에도 다시 판정한다', () async {
+      // 연장은 원본을 옮기는 동안 한 번 멈춘다(`await`). 그 창에서 누가 써 버리면
+      // 판정 근거가 사라진 것이므로 거부해야 한다. **한쪽만 다시 판정하면 두 구현이
+      // 같은 입력에 다른 답을 낸다** — firebase는 트랜잭션 안에서 다시 보고,
+      // in-memory는 재조회 뒤에 다시 본다.
+      final (Group group, Gifticon original, SharedGifticon item) =
+          await shareOne();
+
+      // 결과를 **즉시** 붙잡아 둔다. `expectLater`를 나중에 걸면, 그 사이에 실패한
+      // Future가 리스너 없이 완료돼 unhandled async error로 터진다(검증하려던 실패가
+      // 테스트 실패로 둔갑한다).
+      final Future<Object?> outcome = backend.repo
+          .extendSharedExpiry(item.id, newExpiry)
+          .then<Object?>((SharedGifticon v) => v, onError: (Object e) => e);
+      await backend.repo.markUsed(item.id);
+
+      expect(await outcome, isA<StateError>());
+
+      final List<SharedGifticon> shared =
+          await backend.repo.getSharedGifticons(group.id);
+      expect(shared.single.status, ShareStatus.used);
+      expect(shared.single.expiryDate, oldExpiry,
+          reason: '사용 완료된 항목의 만료일이 옮겨지면 "쓴 기프티콘이 되살아난 것처럼" 보인다');
+
+      // ⚠️ 거절 지점이 원본 동기화 **뒤**라 원본은 이미 옮겨져 있다. 그리고 이 분기는
+      // 항목이 `used`가 되어 재연장 가드에 영구히 막히므로, 계약이 적어 둔 복구("같은
+      // 연장을 다시")가 통하지 않는다. 지금 고정되는 상태를 그대로 적어 둔다 — 이
+      // 비대칭을 없애는 변경은 여기서 시끄럽게 실패해야 한다.
+      //
+      // 원본은 이미 옮겨진 뒤이므로 만료일은 새 값으로 남는다. **상태는 반드시 `used`
+      // 여야 한다** — 거부하면서 저장소가 보정한다. 이것이 없으면 개인 목록에 "이미
+      // 소진됐는데 더 오래 쓸 수 있는" 기프티콘이 남는다. (이 픽스처는 markUsed의
+      // 행위자가 공유자 본인이라 markUsed 쪽 동기화만으로도 `used`가 되지만, 실서비스의
+      // 교차-멤버 경합에서는 그쪽이 권한으로 건너뛰고 보정만 남는다 — 그 조건 자체는
+      // 두 백엔드 모두 표현할 수 없다. 계약 dartdoc 참조.)
+      final Gifticon? origin =
+          await backend.gifticons.getGifticonById(original.id);
+      expect(origin!.expiryDate, newExpiry,
+          reason: '원본만 옮겨진 채 남는다(만료일은 되돌리지 못한다 — 앞당기는 API가 없다)');
+      expect(origin.status, GifticonStatus.used,
+          reason: '거부하면서 원본을 사용 완료로 맞춘다 — 소진된 기프티콘이 되살아나면 안 된다');
+    });
+
+    test('만료된 원본이 그 경합에서 되살아난 채 남지 않는다', () async {
+      // 위 케이스는 보정을 검증하지 못한다 — 행위자가 공유자 본인이라 `markUsed`의 원본
+      // 동기화만으로도 원본이 `used`가 되기 때문이다. **원본이 `expired`면 다르다**:
+      // 전이 표에 `expired → used`가 없어 그쪽이 건너뛰고, 그 사이 연장이 원본을
+      // `available` + 새 만료일로 되살려 놓는다. 보정이 없으면 개인 목록에 **이미
+      // 소진됐는데 여섯 달 더 쓸 수 있는** 기프티콘이 남는다.
+      //
+      // 만료된 기프티콘이 이 기능의 주 사용 사례이므로 드문 갈래가 아니다.
+      final (_, Gifticon original, SharedGifticon item) =
+          await shareOne(status: GifticonStatus.expired);
+
+      final Future<Object?> outcome = backend.repo
+          .extendSharedExpiry(item.id, newExpiry)
+          .then<Object?>((SharedGifticon v) => v, onError: (Object e) => e);
+      await backend.repo.markUsed(item.id);
+
+      expect(await outcome, isA<StateError>());
+      expect((await backend.gifticons.getGifticonById(original.id))?.status,
+          GifticonStatus.used,
+          reason: '연장이 되살린 원본을 거부하면서 사용 완료로 맞춘다');
+    });
+
+    test('앞당기기는 연장이 아니다', () async {
+      final (_, _, SharedGifticon item) = await shareOne();
+
+      await expectLater(
+        backend.repo.extendSharedExpiry(item.id, DateTime(2025, 12, 1)),
+        throwsStateError,
+      );
+    });
+
+    test('없는 항목', () async {
+      await asOwner();
+      await expectLater(
+        backend.repo.extendSharedExpiry('no-such-item', newExpiry),
+        throwsStateError,
+      );
     });
   });
 }

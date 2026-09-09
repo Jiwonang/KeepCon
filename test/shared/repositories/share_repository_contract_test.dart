@@ -14,6 +14,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:keepcon/shared/models/group.dart';
 import 'package:keepcon/shared/repositories/auth_repository.dart';
+import 'package:keepcon/shared/repositories/gifticon_repository.dart';
 import 'package:keepcon/shared/repositories/impl/firebase/firebase_share_repository.dart';
 import 'package:keepcon/shared/repositories/impl/in_memory_auth_repository.dart';
 import 'package:keepcon/shared/repositories/impl/in_memory_gifticon_repository.dart';
@@ -64,6 +65,9 @@ class _InMemoryBackend implements ShareBackend {
   AuthRepository get auth => _auth;
 
   @override
+  GifticonRepository get gifticons => _gifticons;
+
+  @override
   Future<void> passTime(Duration d) async => _clock = _clock.add(d);
 
   @override
@@ -109,6 +113,9 @@ class _FirebaseBackend implements ShareBackend {
 
   @override
   AuthRepository get auth => _auth;
+
+  @override
+  GifticonRepository get gifticons => _gifticons;
 
   @override
   Future<void> passTime(Duration d) async {
@@ -215,6 +222,9 @@ void main() {
   backends.forEach((String label, ShareBackend Function() make) {
     group('[$label] requestToJoin — 자격증명 해석·만료', () {
       runCredentialResolutionContract(make);
+    });
+    group('[$label] extendSharedExpiry — 스냅샷·원본 동반 연장', () {
+      runSharedExpiryExtensionContract(make);
     });
   });
 }

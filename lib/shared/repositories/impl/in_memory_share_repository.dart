@@ -22,6 +22,8 @@ import '../../models/group.dart';
 import '../../models/join_request.dart';
 import '../../models/share.dart';
 import '../../models/user.dart';
+import '../../util/date_format.dart';
+import '../../util/expiry_policy.dart';
 import '../../util/invite_code.dart';
 import '../../util/invite_token.dart';
 import '../../util/korean_particle.dart';
@@ -400,7 +402,9 @@ class InMemoryShareRepository implements ShareRepository {
       throw InviteExpiredException(credential, isCode: isCode);
     }
     if (g.isMember(me.id)) {
-      throw StateError('Already a member of group: ${g.id}');
+      // 타입으로 좁힌다 — 화면이 "이미 참여 중"이라고 구별해 안내해야 하는데, 그
+      // 판정을 메시지 문자열로 하면 메시지를 다듬는 순간 조용히 깨진다(계약 참조).
+      throw AlreadyGroupMemberException(g.id);
     }
 
     // (그룹, 사용자)당 요청은 하나만 둔다 — 같은 링크를 두 번 눌러도 방장에게 요청이
@@ -411,7 +415,10 @@ class InMemoryShareRepository implements ShareRepository {
     );
     if (existing >= 0) {
       final JoinRequest prev = _joinRequests[existing];
-      if (prev.isPending) return prev; // 멱등 — 알림도 다시 보내지 않는다.
+      // 멱등 — **아무것도 쓰지 않는다**(방장에게 요청이 쌓이지 않는다). 다만 조용히
+      // 반환하지 않고 알린다: 화면이 방금 보낸 것과 구별할 수 없으면 "보냈어요"를 다시
+      // 띄워, 기다리다 다시 눌러 본 사람에게 새로 보낸 것 같은 착시를 준다(계약 참조).
+      if (prev.isPending) throw JoinRequestAlreadyPendingException(prev);
       // 결정이 끝난 요청(거절, 또는 승인 후 강퇴)은 다시 대기로 되돌린다.
       final JoinRequest revived = prev.copyWith(
         status: JoinRequestStatus.pending,
@@ -690,6 +697,135 @@ class InMemoryShareRepository implements ShareRepository {
 
     _emit();
     return updated;
+  }
+
+  @override
+  Future<SharedGifticon> extendSharedExpiry(
+    String sharedGifticonId,
+    DateTime newExpiryDate,
+  ) async {
+    final User me = _requireUser();
+    final loc = _locateShared(sharedGifticonId);
+    if (loc == null) {
+      throw StateError('Shared gifticon not found: $sharedGifticonId');
+    }
+    final SharedGifticon item = loc.list[loc.index];
+    _guardExtendSharedExpiry(item, me, newExpiryDate);
+
+    // **원본을 먼저 옮긴다.** 스냅샷만 옮긴 뒤 원본이 실패하면 그룹과 개인 목록이 같은
+    // 기프티콘을 두고 다른 만료일을 말한다 — 그 어긋남은 화면에서 보이지 않는다.
+    // 원본이 실패하면 여기서 예외가 전파되고 스냅샷은 옛 값 그대로 남는다.
+    await _syncOriginalExpiry(item.gifticonId, newExpiryDate);
+
+    // ⚠️ `await` 뒤에 **다시 찾는다.** 위에서 잡은 (list, index)는 그 사이에 다른 호출이
+    // 항목을 지우거나(`cancelShare`) 순서를 바꾸면 어긋난 자리를 가리키고, 그 자리에
+    // 쓰면 엉뚱한 항목을 덮어쓴다. 값도 다시 읽어야 그 사이의 찜/잠금 변경을 되돌리지
+    // 않는다(`markUsed`는 await 전에 써서 이 창이 없다).
+    final fresh = _locateShared(sharedGifticonId);
+    if (fresh == null) {
+      throw StateError('Shared gifticon not found: $sharedGifticonId');
+    }
+    // 자리뿐 아니라 **판정도 다시 한다.** firebase 구현은 트랜잭션 안에서 같은 가드를
+    // 다시 보므로, 여기서 빼면 그 사이에 사용 완료된 항목을 두고 두 구현이 다른 답을
+    // 낸다(in-memory는 성공, firebase는 StateError).
+    final SharedGifticon latest = fresh.list[fresh.index];
+    // ⚠️ 보정은 **거부가 확정된 뒤**에 한다(firebase 구현과 같은 모양). 바로 위 주석이
+    //    못박은 "재탐색 뒤에는 자리가 낡는다"를 지키려면, `await`가 끼는 갈래는 반드시
+    //    던지고 끝나야 한다 — catch 안에 두면 그것이 구조로 보장된다.
+    try {
+      _guardExtendSharedExpiry(latest, me, newExpiryDate);
+    } on StateError {
+      if (latest.status == ShareStatus.used) {
+        await _compensateUsedAfterExtend(latest.gifticonId);
+      }
+      rethrow;
+    }
+
+    final SharedGifticon updated = latest.copyWith(expiryDate: newExpiryDate);
+    fresh.list[fresh.index] = updated;
+
+    _pushNotification(
+      groupId: latest.groupId,
+      type: GroupNotificationType.expiryExtended,
+      title: '기간 연장',
+      message: '${me.displayName}님이 ${latest.brand} ${latest.productName} '
+          '유효기간을 ${formatYmdDot(newExpiryDate)}까지 연장했어요.',
+    );
+
+    _emit();
+    return updated;
+  }
+
+  /// [extendSharedExpiry]의 가드(계약 정본은 [ShareRepository.extendSharedExpiry] 문서다).
+  ///
+  /// `await` 전후 두 곳에서 같은 판정을 써야 해서 함수로 뺐다 — 한쪽만 고치면 앞은
+  /// 막는데 뒤는 통과시키는(또는 그 반대) 어긋남이 생긴다.
+  void _guardExtendSharedExpiry(
+    SharedGifticon item,
+    User me,
+    DateTime newExpiryDate,
+  ) {
+    if (item.sharedByUserId != me.id) {
+      throw StateError('Only the sharer can extend the expiry');
+    }
+    if (item.status == ShareStatus.used) {
+      throw StateError('A used shared gifticon cannot be extended');
+    }
+    if (!isLaterExpiryDate(newExpiryDate, than: item.expiryDate)) {
+      throw StateError(
+        'New expiry must be later than the current one: '
+        '${item.expiryDate} -> $newExpiryDate',
+      );
+    }
+  }
+
+  /// 연장 도중 항목이 사용 완료돼 거부할 때, **옮겨 둔 원본을 사용 완료로 맞춘다.**
+  ///
+  /// 이 시점의 원본은 이미 새 만료일을 갖고 있고([_syncOriginalExpiry]가 먼저 돈다),
+  /// 만료 상태였다면 `available`로 되살아나 있다. 그대로 두면 개인 목록에 **이미 소진된
+  /// 기프티콘이 더 오래 쓸 수 있는 것처럼** 남는다 — `markUsed`의 원본 동기화는
+  /// best-effort라 그쪽이 채워 준다는 보장이 없다(교차-멤버 권한, `expired → used`
+  /// 전이 부재).
+  ///
+  /// 만료일까지 되돌리지는 못한다(계약에 만료일을 앞당기는 API가 없다). 사용 완료된
+  /// 기프티콘의 만료일은 표시에 쓰이지 않으므로 상태를 맞추는 것으로 충분하다.
+  ///
+  /// 예상된 런타임 실패만 삼킨다(`on Exception`) — [_syncOriginalUsed]와 같은 기준이다.
+  /// `Error`는 그대로 전파되므로, 그 경우 호출자는 원래의 거부 대신 보정의 예외를 본다.
+  Future<void> _compensateUsedAfterExtend(String gifticonId) async {
+    try {
+      final Gifticon? original = await _gifticons.getGifticonById(gifticonId);
+      if (original == null || original.status == GifticonStatus.used) return;
+      if (!GifticonStatusTransition.isAllowed(
+        original.status,
+        GifticonStatus.used,
+      )) {
+        return;
+      }
+      await _gifticons.updateStatus(gifticonId, GifticonStatus.used);
+    } on Exception {
+      return;
+    }
+  }
+
+  /// 원본 [Gifticon]의 만료일을 함께 옮긴다.
+  ///
+  /// 원본이 조회되지 않으면(데모 시드의 가짜 gifticonId) 건너뛴다. 그 밖의 실패는
+  /// **삼키지 않는다** — 행위자가 공유자=소유자로 좁혀져 있어 권한 문제가 아니고,
+  /// 조용히 넘기면 스냅샷과 원본이 갈린다(계약 [ShareRepository.extendSharedExpiry] 참조).
+  ///
+  /// 원본이 **이미 그 날짜 이후**면 건너뛴다 — 스냅샷만 따라붙으면 둘이 만나므로,
+  /// `extendExpiry`의 "뒤로만" 가드에 걸려 통째로 실패시킬 이유가 없다. 그런 상태는
+  /// 스냅샷이 뒤처졌을 때 생기고(그룹 화면은 뒤처진 값을 보여준다), 사용자는 자기가
+  /// 본 화면 기준으로 날짜를 고른다.
+  Future<void> _syncOriginalExpiry(
+    String gifticonId,
+    DateTime newExpiryDate,
+  ) async {
+    final Gifticon? original = await _gifticons.getGifticonById(gifticonId);
+    if (original == null) return;
+    if (!isLaterExpiryDate(newExpiryDate, than: original.expiryDate)) return;
+    await _gifticons.extendExpiry(gifticonId, newExpiryDate);
   }
 
   @override
