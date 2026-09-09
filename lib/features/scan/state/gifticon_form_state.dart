@@ -436,9 +436,10 @@ class GifticonFormController extends StateNotifier<GifticonFormState> {
     // 파일이고, 카메라는 `Directory.systemTemp`에 떨군 프레임이다
     // (`scan_page.dart`의 `_writeTempFrame`). 그런데 그 경로는:
     //
-    // - **어디에서도 표시되지 않는다.** 홈 카드는 `http://`·`https://`로 시작할
-    //   때만 렌더하고 그 외는 placeholder로 떨어지며(`gifticon_card.dart`),
-    //   상세 화면은 이미지를 아예 싣지 않는다(`gifticon_detail_page.dart` doc).
+    // - **어디에서도 표시되지 않는다.** 홈 타일은 이미지를 아예 그리지 않고
+    //   브랜드 색 블록을 쓰며(`main_page.dart`의 리스트 타일 — 이미지를 렌더하던
+    //   그리드 카드는 참조 0건 죽은 코드라 삭제됐다, #160), 상세 화면도
+    //   이미지를 싣지 않는다(`gifticon_detail_page.dart` doc).
     // - **곧 무효가 된다.** OS가 임시 디렉터리를 청소하면 파일이 사라지고, 다른
     //   기기·재설치에서는 애초에 의미가 없다.
     //
