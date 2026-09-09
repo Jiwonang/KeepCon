@@ -187,9 +187,16 @@ fi
 # 티도 안 나다가, 한쪽만 바뀌는 순간 조용히 갈라진다.
 # 발송 격자(lead days × hour)와 상한은 예약과 복원이 **함께** 보는 값이다. 한쪽에
 # 사본이 생기면 푸시와 알림 센터가 서로 다른 시각을 말한다.
-SSOT_CONSTANTS="expirySoonDays|expiryNotifyLeadDays|expiryNotifyHour|expiryNotificationHistory|maxScheduledExpiryNotifications"
+#
+# `expirySelectableFrom`/`expirySelectableTo`(유효기간 피커 경계)는 scan 소유였다가 연장
+# 다이얼로그가 두 번째 소비자가 되며 계약으로 승격됐다. 소비자가 셋(scan 폼·main 상세·
+# share 상세)이라 사본이 생기면 "등록에서는 고를 수 있는데 연장에서는 못 고르는" 날짜가
+# 조용히 생긴다.
+# ⚠️ 그래서 `const`뿐 아니라 **`final`도 잡는다** — 이 둘은 `DateTime`이라 `const`가 될 수
+#    없고, 목록에 이름만 넣고 `const`만 검사하면 가드가 통과만 시킨다(등록 전 실측).
+SSOT_CONSTANTS="expirySoonDays|expiryNotifyLeadDays|expiryNotifyHour|expiryNotificationHistory|maxScheduledExpiryNotifications|expirySelectableFrom|expirySelectableTo"
 
-consts=$(scan "^[[:space:]]*(static[[:space:]]+)?const[[:space:]]+([A-Za-z0-9_<>,.? ]+[[:space:]]+)?_?(${SSOT_CONSTANTS})[[:space:]]*=") || exit 1
+consts=$(scan "^[[:space:]]*(static[[:space:]]+)?(const|final)[[:space:]]+([A-Za-z0-9_<>,.? ]+[[:space:]]+)?_?(${SSOT_CONSTANTS})[[:space:]]*=") || exit 1
 
 # 상수도 같은 줄바꿈 우회가 성립한다(실측: `static const Map<...>` 다음 줄에
 # `      expiryNotificationHistory = ...` — **저장소 안에서** 포맷한 값이라 클래스 멤버

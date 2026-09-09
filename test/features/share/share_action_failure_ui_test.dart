@@ -141,6 +141,15 @@ class _BackendFailingShareRepository extends InMemoryShareRepository {
           : super.markUsed(sharedGifticonId);
 
   @override
+  Future<SharedGifticon> extendSharedExpiry(
+    String sharedGifticonId,
+    DateTime newExpiryDate,
+  ) =>
+      failing.contains('extendSharedExpiry')
+          ? _boom('extendSharedExpiry')
+          : super.extendSharedExpiry(sharedGifticonId, newExpiryDate);
+
+  @override
   Future<void> cancelShare(String sharedGifticonId) =>
       failing.contains('cancelShare')
           ? _boom('cancelShare')
@@ -259,14 +268,14 @@ void main() {
         ],
       );
 
-  Gifticon gifticon(String id) => Gifticon(
+  Gifticon gifticon(String id, {DateTime? expiry}) => Gifticon(
         id: id,
         ownerId: me,
         brand: '메가커피',
         productName: '아이스 아메리카노',
         price: 3000,
         category: '카페',
-        expiryDate: DateTime(2027, 1, 1),
+        expiryDate: expiry ?? DateTime(2027, 1, 1),
         registeredAt: DateTime(2026, 1, 1),
       );
 
@@ -359,6 +368,28 @@ void main() {
       expect(find.text('사용 완료 처리했어요.'), findsNothing);
       expect(
           reporter.reports.single.context, 'SharedGifticonDetailPage.markUsed');
+    });
+
+    testWidgets('기간 연장 실패', (WidgetTester tester) async {
+      // 연장 버튼은 **만료된** 항목에만 뜨므로 픽스처의 만료일을 과거로 둔다.
+      final Group g = await repo.createGroup(name: '가족', emoji: '🏠');
+      final SharedGifticon item = await repo.shareGifticon(
+        groupId: g.id,
+        gifticon: gifticon('gx-exp', expiry: DateTime(2020, 1, 1)),
+      );
+      repo.failing.add('extendSharedExpiry');
+
+      await pump(tester, SharedGifticonDetailPage(itemId: item.id));
+      await tester.tap(find.widgetWithText(ElevatedButton, '기프티콘 기간 연장하기'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(TextButton, '연장'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('지금은 기간을 연장할 수 없어요.'), findsOneWidget);
+      // 실패했으므로 성공 안내는 뜨지 않는다(try가 성공 처리까지 감싸면 순서가 꼬인다).
+      expect(find.textContaining('까지로 연장했어요'), findsNothing);
+      expect(reporter.reports.single.context,
+          'SharedGifticonDetailPage.extendSharedExpiry');
     });
 
     testWidgets('공유 취소(회수) 실패', (WidgetTester tester) async {

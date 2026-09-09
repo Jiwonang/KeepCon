@@ -1,8 +1,16 @@
-/// main 페이지 — 유효기간 연장 날짜 선택.
+/// KeepCon 공유 계약 — 유효기간 연장 날짜 선택 (단일 정본 / SSOT).
 ///
 /// 브랜드사가 기프티콘 기간을 늘려 줬을 때 그 결과를 앱에 반영하는 경로다. 그래서
 /// **새 만료일을 사용자가 직접 고른다** — "+1개월" 같은 프리셋은 실제로 연장된 날짜와
 /// 어긋나고, 어긋난 날짜는 만료 임박 알림·D-day 표시를 통째로 틀리게 만든다.
+///
+/// ## 왜 계약(lib/shared)으로 승격했는가
+/// 소비자가 둘이다 — 개인 기프티콘 상세(`lib/features/main/pages/gifticon_detail_page.dart`)와
+/// 공유 기프티콘 상세(`lib/features/share/pages/shared_gifticon_detail_page.dart`). 두 화면은
+/// **같은 연장 흐름**을 제공하며(요구사항: 어느 쪽에서 연장하든 양쪽에 반영된다), 각자 사본을
+/// 두면 하한 계산 같은 규칙이 한쪽만 고쳐져 조용히 갈라진다. 이 파일의 하한 계산에는 실제로
+/// DST 결함이 하나 있었고(아래 [pickExtendedExpiryDate] 참조) 그때 사본이 둘이었다면 한쪽만
+/// 고쳐졌을 것이다.
 ///
 /// 범위는 scan의 등록 폼과 같은 상수([expirySelectableTo])를 쓴다. 하한만 다르다 —
 /// 등록은 지난 날짜도 허용하지만(이미 만료된 것을 기록해 두는 것도 정당한 사용),
@@ -12,7 +20,7 @@ library;
 
 import 'package:flutter/material.dart';
 
-import '../../scan/util/expiry_date_range.dart';
+import '../util/expiry_date_range.dart';
 
 /// [pickExtendedExpiryDate]의 결과.
 ///
@@ -39,9 +47,9 @@ class ExtendDateCancelled extends ExtendDatePick {
 ///
 /// 하한(연장 가능한 첫날)이 상한을 넘은 경우다. 호출부는 이 사실을 사용자에게 알려야 한다.
 ///
-/// [limit]을 함께 싣는 이유: 상한 상수는 scan 소유(`features/scan/util`)라 호출 화면이
-/// 그것을 직접 import하면 **페이지 간 의존이 하나 더 생긴다**(이 저장소에 그런 선례가
-/// 없다). 값을 결과에 실어 교차 참조를 이 파일 하나로 가둔다.
+/// [limit]을 함께 싣는 이유: 안내 문구가 "언제까지 연장할 수 있는지"를 말해야 하는데, 그
+/// 경계를 정하는 것은 이 함수다. 호출 화면이 [expirySelectableTo]를 따로 읽으면 판정과
+/// 표시가 두 곳에서 나뉘어, 상한을 옮길 때 한쪽만 따라오는 창이 생긴다.
 class ExtendDateUnavailable extends ExtendDatePick {
   const ExtendDateUnavailable(this.limit);
 

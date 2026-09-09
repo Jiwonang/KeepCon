@@ -25,6 +25,7 @@ import '../../../shared/providers/session_provider.dart';
 import '../../../shared/providers/shared_gifticons_provider.dart';
 import '../../../shared/theme/brand_palette.dart';
 import '../../../shared/theme/theme_tokens.dart';
+import '../../../shared/widgets/extend_expiry_dialog.dart';
 import '../../../shared/widgets/gifticon_detail_widgets.dart';
 import '../../../shared/util/date_format.dart' show formatYmdDot;
 import '../../../shared/util/expiry_policy.dart';
@@ -32,7 +33,6 @@ import '../../../shared/util/korean_particle.dart';
 import '../../../shared/util/money_format.dart' show formatWon;
 import '../state/gifticon_list_providers.dart';
 import '../../../shared/providers/now_provider.dart';
-import '../widgets/extend_expiry_dialog.dart';
 import '../widgets/format.dart';
 import '../widgets/gifticon_status_label.dart';
 
@@ -131,23 +131,9 @@ class GifticonDetailPage extends ConsumerWidget {
         ? '사용 완료와 기간 연장'
         : (extendBlocked ? '기간 연장' : '사용 완료');
 
-    // 하단 액션 버튼들의 공용 스타일. 연장과 사용 완료는 같은 자리의 같은 무게라 모양이
-    // 갈리면 안 되고, 사본을 두면 한쪽만 고쳐져 갈라진다(CodeRabbit 지적).
-    //
-    // ⚠️ `theme.textTheme.labelLarge`를 소비하지 않는다 — 이 앱의 [TextTheme]은 그 슬롯을
-    //    **정의하지 않아서**(app_theme.dart는 headline/title/body/labelMedium만 채운다)
-    //    Material 기본값(height 1.43 · letterSpacing 0.1 · fontFamily Roboto)이 딸려 들어와
-    //    이 PR과 무관한 기존 '사용 완료' 버튼이 **52 → 56px로 자란다**(측정값. 지배적인
-    //    것은 자간이 아니라 행높이다). 색만은 `foregroundColor`가 덮으므로 무관하다.
-    //    버튼 타이포를 토큰화하려면 테마에 슬롯을 먼저 정의해야 하고, `labelLarge`는 M3에서
-    //    모든 버튼의 기본 스타일이라 앱 전역 변경이다 — 이 PR의 범위가 아니다.
-    final ButtonStyle actionButtonStyle = ElevatedButton.styleFrom(
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(AppRadii.tile),
-      ),
-      padding: const EdgeInsets.symmetric(vertical: 16),
-      textStyle: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
-    );
+    // 하단 액션 버튼들의 공용 스타일. 정본은 [detailActionButtonStyle] — 공유 상세도 같은
+    // 것을 쓴다(사본이 갈라지는 것을 막는 이유는 그 dartdoc에 있다).
+    final ButtonStyle actionButtonStyle = detailActionButtonStyle();
 
     // 목록 카드는 날짜 만료도 '만료'로 칠하는데(`_DDayBadge`), 뱃지가 status만 보면 목록에서
     // '만료'인 카드를 눌렀는데 상세 헤더는 '사용가능'이라고 답한다. 같은 기프티콘을 두고 두
