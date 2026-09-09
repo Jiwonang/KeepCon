@@ -67,6 +67,11 @@ class _ScanPageState extends ConsumerState<ScanPage> {
   /// ML Kit의 [InputImage.fromFilePath]와 폼의 이미지 미리보기([Image.file])가
   /// 모두 경로를 요구하므로, 바이트를 한 번만 파일로 만들어 둘 다에 쓴다.
   /// 갤러리 경로에서 image_picker가 만드는 임시 파일과 같은 성격이다.
+  ///
+  /// 정리는 [_openForm]의 `finally`가 맡는다 — 파일의 수명이 폼 미리보기와
+  /// 같으므로(폼이 닫히면 아무도 안 읽는다), 폼 플로우가 끝나는 그 지점이
+  /// 유일하게 안전한 삭제 시점이다. 여기서 지우면 미리보기가 깨지고, 안 지우면
+  /// 스캔마다 디렉터리가 하나씩 쌓인다(OS 청소 전까지).
   Future<File> _writeTempFrame(Uint8List bytes) async {
     final Directory dir = await Directory.systemTemp.createTemp('keepcon_scan');
     final File file = File('${dir.path}/frame.jpg');
@@ -89,6 +94,9 @@ class _ScanPageState extends ConsumerState<ScanPage> {
     );
 
     MlKitService? mlKitService;
+    // 카메라 경로가 만든 프레임 임시 디렉터리. finally에서 지운다(위
+    // [_writeTempFrame] doc — 폼이 닫힌 뒤라 미리보기도 더는 안 읽는다).
+    Directory? tempFrameDir;
 
     try {
       if (source == ScanSource.manual) {
@@ -132,6 +140,7 @@ class _ScanPageState extends ConsumerState<ScanPage> {
         if (frame != null) {
           try {
             final File file = await _writeTempFrame(frame);
+            tempFrameDir = file.parent;
 
             mlKitService = MlKitService();
             final scanResult =
@@ -231,6 +240,12 @@ class _ScanPageState extends ConsumerState<ScanPage> {
       );
     } finally {
       await mlKitService?.dispose();
+      // 프레임 임시 디렉터리 정리. 이 시점엔 폼 플로우가 끝나 미리보기도 더는
+      // 안 읽는다. 실패는 삼킨다 — 못 지워도 무해하고(OS가 언젠가 청소),
+      // 여기서 던지면 정리 실패가 정작 성공한 등록 흐름을 오류로 위장시킨다.
+      try {
+        await tempFrameDir?.delete(recursive: true);
+      } catch (_) {}
       if (mounted) {
         setState(() {
           _busy = false;
