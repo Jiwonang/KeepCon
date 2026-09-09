@@ -23,9 +23,11 @@ library;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../shared/models/gifticon.dart';
+import '../../../shared/models/share.dart';
 import '../../../shared/models/user.dart';
 import '../../../shared/providers/raw_gifticons_provider.dart';
 import '../../../shared/providers/session_provider.dart';
+import '../../../shared/providers/shared_gifticons_provider.dart';
 import 'gifticon_filter.dart';
 import 'gifticon_sorter.dart';
 import '../../../shared/providers/now_provider.dart';
@@ -58,6 +60,51 @@ final gifticonByIdProvider =
     if (g.id == id) return g;
   }
   return null;
+});
+
+/// 이 기프티콘이 그룹에 공유돼 있다면 그 공유 항목. 공유 중이 아니면 `AsyncData(null)`.
+///
+/// 상세 화면의 **연장 경로 분기**가 소비한다 — 공유 중이면 유효기간을 원본에 직접 쓰면
+/// 안 되고([GifticonRepository.extendExpiry]의 경고), `ShareRepository.extendSharedExpiry`가
+/// 스냅샷과 원본을 함께 옮겨야 한다. 그 호출에 필요한 것이 [SharedGifticon.id]다.
+///
+/// ## 판정과 항목을 두 정본에서 각각 받는다
+/// "공유 중인가"는 fail-closed 정본 [sharedGifticonIdsProvider]에, 항목 자체는 표시용
+/// [allSharedProvider]에 묻는다. 후자는 로딩/에러를 빈 목록으로 접으므로 **혼자 쓰면
+/// 가드가 fail-open** 한다 — 그룹 스트림이 도착하기 전에는 "공유 안 됨"으로 보여, 공유 중인
+/// 기프티콘을 개인 경로로 연장하고 그룹 스냅샷만 옛 날짜로 남긴다(어느 화면에도 안 보이는
+/// 어긋남이다).
+///
+/// 소비자는 `AsyncData`일 때만 버튼을 열면 되고, 값이 null이면 개인 경로, 항목이면 공유
+/// 경로다. fail-closed 성질을 실제로 만드는 것은 **집합이 로딩/에러일 때 그대로 전파하는
+/// 앞의 두 갈래**다.
+///
+/// ⚠️ 마지막 갈래("집합은 공유라는데 항목을 못 찾음 → 로딩")는 **현재 구조에서 도달하지
+/// 않는다.** 두 정본이 같은 의존성(`myGroupsProvider` × 그룹별 스트림)에서 파생되므로,
+/// 집합이 데이터면 그 리스트들도 데이터이고 집합은 바로 그 리스트에서 만들어진다. 그래서
+/// 테스트도 이 갈래를 고정하지 못한다(뮤테이션으로 확인 — fail-open으로 뒤집어도 전건
+/// 통과). [allSharedProvider]가 언젠가 자체 필터를 갖게 될 때를 위한 보험으로 남긴다.
+final sharedItemForGifticonProvider = Provider.autoDispose
+    .family<AsyncValue<SharedGifticon?>, String>((ref, String gifticonId) {
+  final AsyncValue<Set<String>> idsAsync = ref.watch(sharedGifticonIdsProvider);
+  final Set<String>? ids = idsAsync.valueOrNull;
+  if (ids == null) {
+    // 값이 없는 상태를 그대로 옮긴다(정본과 같은 규약).
+    return idsAsync.hasError
+        ? AsyncValue<SharedGifticon?>.error(
+            idsAsync.error!, idsAsync.stackTrace!)
+        : const AsyncValue<SharedGifticon?>.loading();
+  }
+  if (!ids.contains(gifticonId)) {
+    return const AsyncValue<SharedGifticon?>.data(null);
+  }
+  for (final SharedGifticon s in ref.watch(allSharedProvider)) {
+    if (s.gifticonId == gifticonId) {
+      return AsyncValue<SharedGifticon?>.data(s);
+    }
+  }
+  // 집합은 공유라는데 항목을 아직 못 찾았다 — 확정이 아니므로 로딩이다.
+  return const AsyncValue<SharedGifticon?>.loading();
 });
 
 /// 현재 선택된 정렬 옵션(계약 [SortOption]). 기본값: 만료임박순.
