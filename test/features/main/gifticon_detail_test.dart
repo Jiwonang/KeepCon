@@ -17,11 +17,15 @@ import 'package:keepcon/features/main/main_page.dart';
 import 'package:keepcon/features/main/pages/gifticon_detail_page.dart';
 import 'package:keepcon/features/main/state/gifticon_filter.dart';
 import 'package:keepcon/features/main/state/gifticon_list_providers.dart';
+import 'package:keepcon/features/scan/util/expiry_date_range.dart'
+    show expirySelectableTo;
 import 'package:keepcon/shared/providers/raw_gifticons_provider.dart';
 import 'package:keepcon/shared/models/gifticon.dart';
+import 'package:keepcon/shared/providers/now_provider.dart';
 import 'package:keepcon/shared/providers/repositories.dart';
 import 'package:keepcon/shared/providers/shared_gifticons_provider.dart';
 import 'package:keepcon/shared/repositories/gifticon_repository.dart';
+import 'package:keepcon/shared/util/expiry_policy.dart';
 import 'package:keepcon/shared/repositories/impl/in_memory_auth_repository.dart';
 import 'package:keepcon/shared/repositories/impl/in_memory_gifticon_repository.dart';
 import 'package:keepcon/shared/repositories/impl/in_memory_share_repository.dart';
@@ -34,6 +38,7 @@ Gifticon _gifticon({
   String productName = '아메리카노 T',
   String? barcode = '9788901234567',
   GifticonStatus status = GifticonStatus.available,
+  DateTime? expiryDate,
 }) {
   return Gifticon(
     id: id,
@@ -43,11 +48,17 @@ Gifticon _gifticon({
     category: '카페',
     price: 4500,
     barcode: barcode,
-    expiryDate: _now.add(const Duration(days: 30)),
+    expiryDate: expiryDate ?? _now.add(const Duration(days: 30)),
     registeredAt: _now,
     status: status,
   );
 }
+
+/// 실행 시각과 무관하게 확실히 지난 만료일.
+///
+/// 이 파일은 [nowProvider]를 덮지 않아 화면이 실제 시계를 읽는다 — 상대값
+/// (`_now - 30일`)으로 두면 테스트가 도는 날짜에 따라 판정이 뒤집힌다.
+final DateTime _pastExpiry = DateTime(2026, 1, 1);
 
 void main() {
   late InMemoryGifticonRepository repo;
@@ -71,6 +82,10 @@ void main() {
             : AsyncValue<Set<String>>.data(sharedIds);
     container = ProviderContainer(
       overrides: <Override>[
+        // 시각을 고정한다 — 고정하지 않으면 `_gifticon()` 기본 만료일(2026-09-17)이
+        // 그날 이후 '날짜상 만료'가 되어, 연장 버튼 부재 단언이 코드가 아니라
+        // 달력 때문에 깨진다(#119가 결함으로 규정한 계열 — 리뷰 프로브로 실증).
+        nowProvider.overrideWith((_) => _now),
         gifticonRepositoryProvider.overrideWithValue(repo),
         rawGifticonsProvider.overrideWith((_) => repo.watchGifticons(_ownerId)),
         sharedGifticonIdsProvider.overrideWithValue(sharedState),
@@ -349,6 +364,227 @@ void main() {
     // 성공 안내가 함께 뜨면 더 나쁘다 — 안 된 일을 됐다고 말하는 셈이다.
     expect(find.text('사용 완료로 변경했어요.'), findsNothing);
   });
+
+  // ── 기간 연장 (계약 GifticonRepository.extendExpiry 소비) ──────────────
+
+  final Finder extendButton =
+      find.widgetWithText(OutlinedButton, '기프티콘 기간 연장하기');
+
+  testWidgets('만료된 기프티콘 — 날짜를 골라 확인하면 계약 extendExpiry로 되살아난다',
+      (WidgetTester tester) async {
+    final Gifticon expired =
+        _gifticon(status: GifticonStatus.expired, expiryDate: _pastExpiry);
+    boot(<Gifticon>[expired]);
+    await mountDetail(tester, expired);
+
+    expect(find.text('만료 처리된 기프티콘이에요.'), findsOneWidget);
+    await tester.tap(extendButton);
+    await tester.pumpAndSettle();
+
+    // 피커 기본 선택(오늘)을 그대로 확정한다 — 계약 하한(만료 다음 날) 이후다.
+    await tester.tap(find.text('OK'));
+    await tester.pumpAndSettle();
+
+    // 뒤로만 옮길 수 있는(앞당겨 되돌릴 수 없는) 변경이라 확인을 한 번 받는다.
+    expect(find.byType(AlertDialog), findsOneWidget);
+    await tester.tap(find.widgetWithText(TextButton, '연장하기'));
+    await tester.pumpAndSettle();
+
+    final Gifticon updated = (await repo.getGifticonById('g1'))!;
+    // 정확한 날짜는 실행일에 달려 있으므로(피커 기본값=오늘) 계약이 보장하는
+    // 두 효과를 단언한다 — 만료일이 실제로 뒤로 갔고, expired가 되살아났다.
+    expect(isLaterExpiryDate(updated.expiryDate, than: _pastExpiry), isTrue);
+    expect(updated.status, GifticonStatus.available);
+
+    // 화면도 따라간다 — 만료 배너·연장 버튼이 내려가고 사용 완료가 열린다.
+    expect(find.text('만료 처리된 기프티콘이에요.'), findsNothing);
+    expect(extendButton, findsNothing);
+    expect(find.widgetWithText(ElevatedButton, '사용 완료'), findsOneWidget);
+    expect(find.textContaining('연장했어요'), findsOneWidget);
+  });
+
+  testWidgets('확인 다이얼로그에서 닫으면 만료일이 그대로다', (WidgetTester tester) async {
+    final Gifticon expired =
+        _gifticon(status: GifticonStatus.expired, expiryDate: _pastExpiry);
+    boot(<Gifticon>[expired]);
+    await mountDetail(tester, expired);
+
+    await tester.tap(extendButton);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('OK'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(TextButton, '닫기'));
+    await tester.pumpAndSettle();
+
+    final Gifticon unchanged = (await repo.getGifticonById('g1'))!;
+    expect(unchanged.expiryDate, _pastExpiry);
+    expect(unchanged.status, GifticonStatus.expired);
+  });
+
+  testWidgets('날짜상 만료(available)에는 사용 완료와 연장이 공존한다',
+      (WidgetTester tester) async {
+    // status를 expired로 옮기는 주체가 아직 없어 흔한 만료 상태가 이쪽이다 —
+    // 위(사용 완료)는 정리, 아래(연장)는 되살리기.
+    final Gifticon dateExpired = _gifticon(expiryDate: _pastExpiry);
+    boot(<Gifticon>[dateExpired]);
+    await mountDetail(tester, dateExpired);
+
+    expect(find.widgetWithText(ElevatedButton, '사용 완료'), findsOneWidget);
+    expect(extendButton, findsOneWidget);
+  });
+
+  testWidgets('만료 전에는 연장 버튼이 없다', (WidgetTester tester) async {
+    boot(<Gifticon>[_gifticon()]);
+    await mountDetail(tester, _gifticon());
+
+    expect(extendButton, findsNothing);
+  });
+
+  testWidgets('사용 완료한 기프티콘에는 연장 버튼이 없다 — 계약 가드가 StateError',
+      (WidgetTester tester) async {
+    final Gifticon usedOne =
+        _gifticon(status: GifticonStatus.used, expiryDate: _pastExpiry);
+    boot(<Gifticon>[usedOne]);
+    await mountDetail(tester, usedOne);
+
+    expect(extendButton, findsNothing);
+  });
+
+  testWidgets('그룹 공유 중이면 연장 버튼을 열지 않는다', (WidgetTester tester) async {
+    // 계약: 공유 중에는 extendExpiry를 직접 부르지 마라 — 스냅샷이 안 따라와
+    // 그룹 화면과 개인 목록이 같은 기프티콘의 만료일을 다르게 말하게 된다.
+    // 공유본의 연장(extendSharedExpiry)은 그룹 상세 몫이다.
+    final Gifticon expired =
+        _gifticon(status: GifticonStatus.expired, expiryDate: _pastExpiry);
+    boot(<Gifticon>[expired], sharedIds: <String>{'g1'});
+    await mountDetail(tester, expired);
+
+    expect(extendButton, findsNothing);
+  });
+
+  testWidgets('공유 여부 확정 전에는 연장 버튼을 열지 않는다(fail-closed)',
+      (WidgetTester tester) async {
+    final Gifticon expired =
+        _gifticon(status: GifticonStatus.expired, expiryDate: _pastExpiry);
+    boot(<Gifticon>[expired], sharedIds: null);
+    await mountDetail(tester, expired);
+
+    expect(extendButton, findsNothing);
+  });
+
+  testWidgets('피커 하한 — 계약 하한(만료 다음 날) 앞의 날짜는 골라지지 않는다',
+      (WidgetTester tester) async {
+    // 저장된 expired인데 만료일이 미래인 건 — 화면 하한 max(오늘, 만료+1일)에서
+    // 계약 하한이 이기는 쪽이다. 하한 하루 앞(만료 당일)을 탭해도 선택이
+    // 바뀌지 않아야 한다. `+1일`을 지우는 뮤테이션은 여기서 죽는다(그러면
+    // 만료 당일이 골라져 확인 다이얼로그가 그 날짜를 말하게 된다).
+    final DateTime futureExpiry = _now.add(const Duration(days: 5)); // 8-23
+    final Gifticon expired =
+        _gifticon(status: GifticonStatus.expired, expiryDate: futureExpiry);
+    boot(<Gifticon>[expired]);
+    await mountDetail(tester, expired);
+
+    await tester.tap(extendButton);
+    await tester.pumpAndSettle();
+
+    // 하한 하루 앞(23일) 탭 — 비활성이라 선택은 시작 위치(24일) 그대로다.
+    await tester.tap(find.text('23'), warnIfMissed: false);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('OK'));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('2026.08.24'), findsOneWidget,
+        reason: '계약 하한이 무너지면 만료 당일(8-23)이 골라져 이 날짜가 바뀐다');
+  });
+
+  testWidgets('만료일이 이미 선택 상한이면 피커 대신 안내한다 — assert 크래시 방어',
+      (WidgetTester tester) async {
+    // scan 등록 상한(expirySelectableTo)까지 등록된 기프티콘에서 실제로 도달
+    // 가능한 상태다. 이 가드가 없으면 showDatePicker가 initialDate 범위 밖
+    // assert로 죽는다.
+    final Gifticon atCeiling = _gifticon(
+        status: GifticonStatus.expired, expiryDate: expirySelectableTo);
+    boot(<Gifticon>[atCeiling]);
+    await mountDetail(tester, atCeiling);
+
+    await tester.tap(extendButton);
+    await tester.pumpAndSettle();
+
+    expect(find.byType(DatePickerDialog), findsNothing);
+    expect(find.text('더 연장할 수 있는 날짜가 없어요.'), findsOneWidget);
+  });
+
+  testWidgets('연장이 계약 가드에 막히면 그 사실을 알린다', (WidgetTester tester) async {
+    final Gifticon expired =
+        _gifticon(status: GifticonStatus.expired, expiryDate: _pastExpiry);
+    boot(<Gifticon>[expired]);
+    final ProviderContainer failing = ProviderContainer(
+      overrides: <Override>[
+        nowProvider.overrideWith((_) => _now),
+        gifticonRepositoryProvider.overrideWithValue(
+          _FailingExtendRepo(repo, StateError('이미 사용 완료')),
+        ),
+        rawGifticonsProvider.overrideWith((_) => repo.watchGifticons(_ownerId)),
+      ],
+    );
+    addTearDown(failing.dispose);
+
+    useTallViewport(tester);
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: failing,
+        child: MaterialApp(home: GifticonDetailPage(gifticon: expired)),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(extendButton);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('OK'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(TextButton, '연장하기'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('지금은 연장할 수 없어요.'), findsOneWidget);
+    expect(find.textContaining('연장했어요'), findsNothing);
+  });
+
+  testWidgets('통신 실패로 연장이 실패하면 그 사실을 알린다', (WidgetTester tester) async {
+    // 사용 완료 쪽 '통신 실패…' 테스트와 같은 축 — 형제 중 하나만 빠지는
+    // 비대칭을 막는다(에이전트 리뷰 검출).
+    final Gifticon expired =
+        _gifticon(status: GifticonStatus.expired, expiryDate: _pastExpiry);
+    boot(<Gifticon>[expired]);
+    final ProviderContainer failing = ProviderContainer(
+      overrides: <Override>[
+        nowProvider.overrideWith((_) => _now),
+        gifticonRepositoryProvider.overrideWithValue(
+          _FailingExtendRepo(repo, Exception('오프라인')),
+        ),
+        rawGifticonsProvider.overrideWith((_) => repo.watchGifticons(_ownerId)),
+      ],
+    );
+    addTearDown(failing.dispose);
+
+    useTallViewport(tester);
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: failing,
+        child: MaterialApp(home: GifticonDetailPage(gifticon: expired)),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(extendButton);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('OK'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(TextButton, '연장하기'));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('다시 시도해 주세요'), findsOneWidget);
+    expect(find.textContaining('연장했어요'), findsNothing);
+  });
 }
 
 /// `updateStatus`만 실패시키는 데코레이터. 나머지는 실제 저장소에 위임한다.
@@ -380,4 +616,35 @@ class _FailingUpdateRepo implements GifticonRepository {
   @override
   Future<Gifticon> extendExpiry(String id, DateTime newExpiryDate) =>
       _inner.extendExpiry(id, newExpiryDate);
+}
+
+/// `extendExpiry`만 실패시키는 데코레이터 — [_FailingUpdateRepo]의 형제.
+class _FailingExtendRepo implements GifticonRepository {
+  _FailingExtendRepo(this._inner, this._error);
+
+  final GifticonRepository _inner;
+  final Object _error;
+
+  @override
+  Future<Gifticon> extendExpiry(String id, DateTime newExpiryDate) async =>
+      throw _error;
+
+  @override
+  Future<Gifticon> updateStatus(String id, GifticonStatus status) =>
+      _inner.updateStatus(id, status);
+
+  @override
+  Future<Gifticon> addGifticon(Gifticon gifticon) =>
+      _inner.addGifticon(gifticon);
+
+  @override
+  Future<List<Gifticon>> getGifticons(String ownerId) =>
+      _inner.getGifticons(ownerId);
+
+  @override
+  Future<Gifticon?> getGifticonById(String id) => _inner.getGifticonById(id);
+
+  @override
+  Stream<List<Gifticon>> watchGifticons(String ownerId) =>
+      _inner.watchGifticons(ownerId);
 }

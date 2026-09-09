@@ -29,6 +29,10 @@ import '../../../shared/util/korean_particle.dart';
 import '../../../shared/util/money_format.dart' show formatWon;
 import '../state/gifticon_list_providers.dart';
 import '../../../shared/providers/now_provider.dart';
+// 연장 피커의 상한은 scan의 등록 피커와 같은 정본을 소비한다(재사용 우선 —
+// 값을 여기 다시 적으면 두 피커의 상한이 조용히 갈라진다). 소비자가 둘이 된
+// 시점이므로 lib/shared 승격 대상이다 — contract-architect 요청은 PR에 기록.
+import '../../scan/util/expiry_date_range.dart' show expirySelectableTo;
 import '../widgets/format.dart';
 import '../widgets/gifticon_status_label.dart';
 
@@ -87,6 +91,24 @@ class GifticonDetailPage extends ConsumerWidget {
     // 사용 완료로 정리하지 못하고 목록에 남는다.
     final bool canMarkUsed =
         g.status == GifticonStatus.available && sharedIds != null && !shared;
+
+    // 기간 연장 버튼 노출 조건.
+    //
+    // ① 만료로 보이는 것에만 — 계약의 목적이 "만료돼 못 쓰게 된 것을 되살리는 경로"다
+    //    (저장된 expired든 날짜상 만료든. 만료 전 연장도 계약 가드는 허용하지만, 그
+    //    확장은 실사용 요구가 확인되면 그때 연다 — 버튼이 늘 떠 있으면 주 동선인
+    //    바코드 제시를 밀어낸다).
+    // ② used 제외 — 계약 가드가 StateError로 거부한다(이미 쓴 것은 기간을 늘려도
+    //    쓸 수 없다).
+    // ③ 공유 가드는 사용 완료와 동일(확정 전 fail-closed + 공유 중 차단) — 계약이
+    //    "공유 중인 기프티콘에 직접 부르지 마라"고 못박는다(스냅샷이 안 따라온다).
+    //    공유본의 연장 경로(extendSharedExpiry)는 그룹 상세 몫이라 여기서는 열지
+    //    않고, 안내도 하지 않는다 — 그 화면의 버튼은 아직 후속 PR이라, 있지도 않은
+    //    경로를 가리키면 틀린 안내가 된다.
+    final bool canExtend = !used &&
+        (g.status == GifticonStatus.expired || expiredByDate) &&
+        sharedIds != null &&
+        !shared;
 
     // 목록 카드는 날짜 만료도 '만료'로 칠하는데(`_DDayBadge`), 뱃지가 status만 보면 목록에서
     // '만료'인 카드를 눌렀는데 상세 헤더는 '사용가능'이라고 답한다. 같은 기프티콘을 두고 두
@@ -210,6 +232,27 @@ class GifticonDetailPage extends ConsumerWidget {
                   ),
                 ),
               ),
+
+            // 날짜상 만료인데 아직 available이면 두 버튼이 공존한다 — 위(사용 완료)는
+            // 정리, 아래(연장)는 되살리기. 저장된 expired에는 연장만 남는다.
+            if (canExtend) ...<Widget>[
+              if (canMarkUsed) const SizedBox(height: 10),
+              OutlinedButton.icon(
+                onPressed: () => _pickAndExtendExpiry(context, ref, g),
+                icon: const Icon(Icons.event_repeat, size: 20),
+                label: const Text('기프티콘 기간 연장하기'),
+                style: OutlinedButton.styleFrom(
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(AppRadii.tile),
+                  ),
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  textStyle: const TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
           ],
         ),
       ),
@@ -281,6 +324,108 @@ class GifticonDetailPage extends ConsumerWidget {
       //
       // StateError와 문구를 나누는 이유: 위는 "이미 끝난 일"(재시도 무의미)이고
       // 이쪽은 "지금 안 될 뿐"(재시도하면 된다)이다.
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(content: Text('처리하지 못했어요. 연결을 확인하고 다시 시도해 주세요.')),
+        );
+    }
+  }
+
+  /// 새 만료일 선택 → 확인 → 계약 [GifticonRepository.extendExpiry] 호출.
+  ///
+  /// 실제 연장은 브랜드사가 해 주는 것이고 이 화면은 그 결과를 기록한다(계약 doc).
+  /// 확인을 한 번 받는 이유: 계약이 만료일을 **뒤로만** 옮기므로, 잘못 고른 날짜를
+  /// 앞당겨 되돌릴 수 없다 — 사용 완료의 "되돌릴 수 없어요"와 같은 계열이다.
+  Future<void> _pickAndExtendExpiry(
+    BuildContext context,
+    WidgetRef ref,
+    Gifticon g,
+  ) async {
+    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
+
+    // 시각은 정본에서 — 여기서 DateTime.now()를 직접 읽으면 자정 경계에서 이
+    // 화면의 D-day 판정과 피커 시작 위치가 서로 다른 "오늘"을 본다.
+    final DateTime today = DateUtils.dateOnly(ref.read(nowProvider));
+    // 계약 하한 — 현재 만료일의 **다음 달력일**부터가 연장이다(판정 정본
+    // [isLaterExpiryDate]가 달력 일 단위라, 같은 날은 연장이 아니다).
+    final DateTime contractFloor =
+        DateUtils.addDaysToDate(DateUtils.dateOnly(g.expiryDate), 1);
+    // 화면 하한은 계약 하한과 **오늘** 중 나중 — 오늘 이전 날짜를 고르면 계약
+    // 가드는 통과하지만 여전히 날짜상 만료라, "연장했어요" 안내가 사용자가
+    // 얻지 못한 상태(되살아남)를 주장하게 된다(에이전트 리뷰 검출). 버튼이
+    // 만료 건에만 열리므로 대부분 오늘이 이기고, 저장된 expired인데 만료일이
+    // 미래인 건에서만 계약 하한이 이긴다.
+    final DateTime firstDate =
+        today.isAfter(contractFloor) ? today : contractFloor;
+
+    // 만료일이 이미 선택 상한이면 피커를 열 수 없다 — [showDatePicker]는
+    // initialDate가 범위 밖이면 assert로 죽는다(scan 등록 상한까지 등록된
+    // 기프티콘에서 실제로 도달 가능한 상태다).
+    if (firstDate.isAfter(expirySelectableTo)) {
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(content: Text('더 연장할 수 있는 날짜가 없어요.')),
+        );
+      return;
+    }
+
+    // 위 가드가 firstDate ≤ 상한을 보장하므로 시작 위치는 하한 그대로다.
+    final DateTime initialDate = firstDate;
+
+    final DateTime? picked = await showDatePicker(
+      context: context,
+      initialDate: initialDate,
+      firstDate: firstDate,
+      lastDate: expirySelectableTo,
+    );
+    if (picked == null || !context.mounted) return;
+
+    final bool? ok = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext ctx) => AlertDialog(
+        title: const Text('기간 연장'),
+        content: Text(
+          '유효기간을 ${formatYmdDot(picked)}까지로 연장할까요?\n'
+          '연장한 날짜를 앞당길 수는 없어요.',
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('닫기'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('연장하기'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !context.mounted) return;
+
+    try {
+      await ref.read(gifticonRepositoryProvider).extendExpiry(g.id, picked);
+      // 화면 갱신은 저장소 스트림이 한다 — 이 페이지가 gifticonByIdProvider를
+      // watch하므로 만료일·상태 뱃지(expired → available)가 함께 따라온다.
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(content: Text('유효기간을 ${formatYmdDot(picked)}까지로 연장했어요.')),
+        );
+    } on StateError catch (e, st) {
+      reportHandledFailure(ref, e, st,
+          context: 'GifticonDetailPage.extendExpiry(guard)');
+      // 계약 가드 위반(이미 사용 완료·앞당기기 등) — 화면을 열어 둔 사이 다른
+      // 경로가 상태를 옮겼을 수 있다. 다시 눌러도 결과가 같다.
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(const SnackBar(content: Text('지금은 연장할 수 없어요.')));
+    } catch (e, st) {
+      // 사용 완료 핸들러와 같은 이유의 광역 캐치 — 통신 실패를 침묵시키지 않되
+      // 진짜 결함도 로그에 남긴다(위 [_confirmAndMarkUsed] 주석 참조).
+      reportHandledFailure(ref, e, st,
+          context: 'GifticonDetailPage.extendExpiry');
       messenger
         ..hideCurrentSnackBar()
         ..showSnackBar(
