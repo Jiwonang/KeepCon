@@ -275,15 +275,21 @@ class _ScanPageState extends ConsumerState<ScanPage> {
         ),
       );
     } finally {
-      await mlKitService?.dispose();
-      // 프레임 임시 디렉터리 정리. 삭제 시점 논거는 [_writeTempFrame] doc
-      // (pop 시작 뒤 — 미리보기는 이미 디코딩된 프레임으로 그려진다).
-      // ML Kit 핸들을 놓은 뒤에 지운다(dispose가 먼저).
-      await cleanupTempFrameDir(tempFrameDir);
-      if (mounted) {
-        setState(() {
-          _busy = false;
-        });
+      // dispose가 던져도(플랫폼 채널 close 실패) 디렉터리 정리와 _busy 복구는
+      // 반드시 돈다 — 안 감싸면 스캔 버튼이 영구 비활성으로 남는다(CodeRabbit).
+      // 오류 자체는 삼키지 않고 그대로 전파시킨다.
+      try {
+        await mlKitService?.dispose();
+      } finally {
+        // 프레임 임시 디렉터리 정리. 삭제 시점 논거는 [_writeTempFrame] doc
+        // (pop 시작 뒤 — 미리보기는 이미 디코딩된 프레임으로 그려진다).
+        // ML Kit 핸들 해제를 시도한 뒤에 지운다(dispose가 먼저).
+        await cleanupTempFrameDir(tempFrameDir);
+        if (mounted) {
+          setState(() {
+            _busy = false;
+          });
+        }
       }
     }
   }
