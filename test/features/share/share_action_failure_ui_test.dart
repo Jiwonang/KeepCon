@@ -27,6 +27,7 @@ import 'package:keepcon/shared/models/group.dart';
 import 'package:keepcon/shared/models/share.dart';
 import 'package:keepcon/shared/diagnostics/error_reporter.dart';
 import 'package:keepcon/shared/providers/error_reporter_provider.dart';
+import 'package:keepcon/shared/providers/now_provider.dart';
 import 'package:keepcon/shared/providers/repositories.dart';
 import 'package:keepcon/shared/repositories/impl/in_memory_auth_repository.dart';
 import 'package:keepcon/shared/repositories/impl/in_memory_gifticon_repository.dart';
@@ -200,7 +201,9 @@ void main() {
   /// 이 화면들은 [ListView]라 화면 밖 항목을 **짓지 않는다** — 기본 800x600 뷰포트에서는
   /// 액션 버튼이 아예 존재하지 않아 탭이 조용히 빗나간다. 스크롤 안무 대신 뷰포트를 키워
   /// 전부 짓게 한다(테스트가 검증하려는 건 레이아웃이 아니라 실패 안내다).
-  Future<void> pump(WidgetTester tester, Widget page) async {
+  /// [now]를 주면 시계 정본을 고정한다. 만료 여부에 따라 노출이 갈리는 액션(기간 연장)은
+  /// 실제 시계를 쓰면 **달력이 바뀌는 날 조용히 깨진다**(PR #119가 결함으로 규정한 양상).
+  Future<void> pump(WidgetTester tester, Widget page, {DateTime? now}) async {
     tester.view.physicalSize = const Size(1000, 3000);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
@@ -211,6 +214,7 @@ void main() {
           gifticonRepositoryProvider.overrideWithValue(gifticons),
           shareRepositoryProvider.overrideWithValue(repo),
           errorReporterProvider.overrideWithValue(reporter),
+          if (now != null) nowProvider.overrideWithValue(now),
         ],
         child: MaterialApp(home: page),
       ),
@@ -379,7 +383,8 @@ void main() {
       );
       repo.failing.add('extendSharedExpiry');
 
-      await pump(tester, SharedGifticonDetailPage(itemId: item.id));
+      await pump(tester, SharedGifticonDetailPage(itemId: item.id),
+          now: DateTime(2026, 9, 9));
       await tester.tap(find.widgetWithText(ElevatedButton, '기프티콘 기간 연장하기'));
       await tester.pumpAndSettle();
       await tester.tap(find.widgetWithText(TextButton, '연장'));

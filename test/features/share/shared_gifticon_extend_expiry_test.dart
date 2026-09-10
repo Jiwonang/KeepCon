@@ -26,6 +26,13 @@ import 'package:keepcon/shared/repositories/impl/in_memory_share_repository.dart
 
 const String _buttonLabel = '기프티콘 기간 연장하기';
 
+/// 테스트의 기본 '오늘'.
+///
+/// 실제 시계를 쓰면 **코드가 아니라 달력이 바뀌어서** 스위트가 빨개진다 — 만료 전 픽스처는
+/// 그 날짜가 지나는 순간 만료가 되고, 상한(2035-12-31)을 지나면 연장 흐름이 백엔드에
+/// 닿기도 전에 끝난다. 이 저장소가 결함으로 규정하고 제거한 양상이다(PR #119).
+final DateTime _now = DateTime(2026, 9, 9);
+
 void main() {
   late InMemoryAuthRepository auth;
   late InMemoryGifticonRepository gifticons;
@@ -90,7 +97,8 @@ void main() {
           authRepositoryProvider.overrideWithValue(auth),
           gifticonRepositoryProvider.overrideWithValue(gifticons),
           shareRepositoryProvider.overrideWithValue(share),
-          if (now != null) nowProvider.overrideWithValue(now),
+          // 항상 주입한다 — 기본값도 고정 시각이다(위 [_now] 참조).
+          nowProvider.overrideWithValue(now ?? _now),
         ],
         child: MaterialApp(home: SharedGifticonDetailPage(itemId: itemId)),
       ),

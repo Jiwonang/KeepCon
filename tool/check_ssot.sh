@@ -196,9 +196,12 @@ fi
 #    없고, 목록에 이름만 넣고 `const`만 검사하면 가드가 통과만 시킨다(등록 전 실측).
 #    `late`도 함께 받는다 — provider 규칙(#2)이 이미 그렇게 하고 있고, `late final`도
 #    똑같이 컴파일되는 사본 형태다(리뷰 프로브로 통과하는 것을 확인).
+#    끝을 `[=;]`로 받는 이유: `late final DateTime expirySelectableTo;`처럼
+#    **초기화 없이 선언하고 생성자 initializer list에서 채우는** 사본은 `=`가 없어
+#    두 스캔을 모두 빠져나간다(CodeRabbit 지적).
 SSOT_CONSTANTS="expirySoonDays|expiryNotifyLeadDays|expiryNotifyHour|expiryNotificationHistory|maxScheduledExpiryNotifications|expirySelectableFrom|expirySelectableTo"
 
-consts=$(scan "^[[:space:]]*(static[[:space:]]+)?(late[[:space:]]+)?(const|final)[[:space:]]+([A-Za-z0-9_<>,.? ]+[[:space:]]+)?_?(${SSOT_CONSTANTS})[[:space:]]*=") || exit 1
+consts=$(scan "^[[:space:]]*(static[[:space:]]+)?(late[[:space:]]+)?(const|final)[[:space:]]+([A-Za-z0-9_<>,.? ]+[[:space:]]+)?_?(${SSOT_CONSTANTS})[[:space:]]*[=;]") || exit 1
 
 # 상수도 같은 줄바꿈 우회가 성립한다(실측: `static const Map<...>` 다음 줄에
 # `      expiryNotificationHistory = ...` — **저장소 안에서** 포맷한 값이라 클래스 멤버
