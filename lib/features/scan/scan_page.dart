@@ -8,7 +8,7 @@
 library;
 
 import 'dart:io';
-import 'package:flutter/foundation.dart' show kDebugMode;
+import 'package:flutter/foundation.dart' show kDebugMode, visibleForTesting;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -29,6 +29,25 @@ import 'package:keepcon/shared/diagnostics/report_handled_failure.dart';
 import 'package:keepcon/shared/models/group.dart';
 import 'package:keepcon/shared/providers/my_groups_provider.dart';
 import 'package:keepcon/shared/widgets/inline_error_banner.dart';
+
+/// 스캔 프레임 임시 디렉터리를 거둔다. 실패는 삼킨다.
+///
+/// [_ScanPageState._openForm]의 `finally` 전용이지만, 그 함수는 카메라
+/// 플러그인을 타서 위젯 테스트로 통째로 지날 수 없다
+/// (`scan_form_screen_test.dart` doc) — 정리만 떼어 내야 테스트가 붙는다.
+@visibleForTesting
+Future<void> cleanupTempFrameDir(Directory? dir) async {
+  try {
+    await dir?.delete(recursive: true);
+  } catch (e) {
+    // 삼킨다 — 못 지워도 무해하고(OS가 언젠가 청소), 던지면 정리 실패가
+    // 정작 성공한 등록 흐름을 오류로 위장시킨다. OCR 실패 catch와 같은
+    // 판단이라 로그도 같은 방식으로만 남긴다(release에서는 찍지 않는다).
+    if (kDebugMode) {
+      debugPrint('KeepCon: 스캔 프레임 임시 디렉터리 정리 실패: $e');
+    }
+  }
+}
 
 class ScanPage extends ConsumerStatefulWidget {
   const ScanPage({super.key});
@@ -62,18 +81,33 @@ class _ScanPageState extends ConsumerState<ScanPage> {
     return groups.any((Group g) => g.id == id) ? id : null;
   }
 
-  /// 스캔 프레임(JPEG)을 임시 파일로 떨군다.
+  /// 스캔 프레임(JPEG)을 [dir] 아래 임시 파일로 떨군다.
   ///
   /// ML Kit의 [InputImage.fromFilePath]와 폼의 이미지 미리보기([Image.file])가
   /// 모두 경로를 요구하므로, 바이트를 한 번만 파일로 만들어 둘 다에 쓴다.
-  /// 갤러리 경로에서 image_picker가 만드는 임시 파일과 같은 성격이다.
+  /// 갤러리 경로에서 image_picker가 만드는 임시 파일과 같은 성격이다 — 다만
+  /// 그쪽은 삭제 단위(pick마다 만드는 캐시 하위 디렉터리)가 플러그인 소유라
+  /// 이번 범위에서 뺐다. 해결된 것이 아니다: 플러그인은 정리를 `deleteOnExit`에
+  /// 맡기는데 저자 스스로 Android에서 신뢰할 수 없다는 TODO를 남겼다
+  /// (image_picker_android 0.8.13+19 `FileUtils.java`).
+  ///
+  /// [dir]은 호출부가 만들어 넘긴다 — **소유권** 때문이다. 여기서 만들면
+  /// `writeAsBytes`가 던졌을 때 만들어진 디렉터리를 호출부가 모른 채 흘린다.
+  /// 호출부가 만들자마자 잡아 두면 이 함수가 어디서 던져도 `finally`가 거둔다.
   ///
   /// 정리는 [_openForm]의 `finally`가 맡는다 — 파일의 수명이 폼 미리보기와
-  /// 같으므로(폼이 닫히면 아무도 안 읽는다), 폼 플로우가 끝나는 그 지점이
-  /// 유일하게 안전한 삭제 시점이다. 여기서 지우면 미리보기가 깨지고, 안 지우면
-  /// 스캔마다 디렉터리가 하나씩 쌓인다(OS 청소 전까지).
-  Future<File> _writeTempFrame(Uint8List bytes) async {
-    final Directory dir = await Directory.systemTemp.createTemp('keepcon_scan');
+  /// 같으므로 폼 플로우가 끝나는 그 지점이 유일하게 안전한 삭제 시점이다.
+  /// 여기서 지우면 미리보기가 깨지고, 안 지우면 스캔마다 디렉터리가 하나씩
+  /// 쌓인다(OS 청소 전까지).
+  ///
+  /// ⚠️ 정확히는 "폼이 닫힌 뒤"가 아니라 **"pop이 시작된 뒤"**다. `await
+  /// Navigator.push`는 종료 애니메이션 **전에** 재개된다([TransitionRoute.didPop]이
+  /// `reverse()`를 건 다음 completer를 채운다 — [Route.didPop] doc: "routes
+  /// should not wait for their exit animation to complete"). 그동안 폼의
+  /// [Image.file]은 아직 그려지지만 이미 디코딩된 프레임을 쓰므로 삭제가
+  /// 보이지 않는다 — 삭제 지점을 더 앞당기거나 이미지 캐시까지 건드리면
+  /// 그 여유가 사라진다.
+  Future<File> _writeTempFrame(Directory dir, Uint8List bytes) async {
     final File file = File('${dir.path}/frame.jpg');
     await file.writeAsBytes(bytes, flush: true);
     return file;
@@ -94,8 +128,8 @@ class _ScanPageState extends ConsumerState<ScanPage> {
     );
 
     MlKitService? mlKitService;
-    // 카메라 경로가 만든 프레임 임시 디렉터리. finally에서 지운다(위
-    // [_writeTempFrame] doc — 폼이 닫힌 뒤라 미리보기도 더는 안 읽는다).
+    // 카메라 경로가 만든 프레임 임시 디렉터리. finally에서 지운다
+    // (삭제 시점·소유권 논거는 위 [_writeTempFrame] doc).
     Directory? tempFrameDir;
 
     try {
@@ -139,8 +173,10 @@ class _ScanPageState extends ConsumerState<ScanPage> {
 
         if (frame != null) {
           try {
-            final File file = await _writeTempFrame(frame);
-            tempFrameDir = file.parent;
+            // 만들자마자 소유권을 잡는다(논거는 [_writeTempFrame] doc).
+            tempFrameDir =
+                await Directory.systemTemp.createTemp('keepcon_scan');
+            final File file = await _writeTempFrame(tempFrameDir, frame);
 
             mlKitService = MlKitService();
             final scanResult =
@@ -240,12 +276,10 @@ class _ScanPageState extends ConsumerState<ScanPage> {
       );
     } finally {
       await mlKitService?.dispose();
-      // 프레임 임시 디렉터리 정리. 이 시점엔 폼 플로우가 끝나 미리보기도 더는
-      // 안 읽는다. 실패는 삼킨다 — 못 지워도 무해하고(OS가 언젠가 청소),
-      // 여기서 던지면 정리 실패가 정작 성공한 등록 흐름을 오류로 위장시킨다.
-      try {
-        await tempFrameDir?.delete(recursive: true);
-      } catch (_) {}
+      // 프레임 임시 디렉터리 정리. 삭제 시점 논거는 [_writeTempFrame] doc
+      // (pop 시작 뒤 — 미리보기는 이미 디코딩된 프레임으로 그려진다).
+      // ML Kit 핸들을 놓은 뒤에 지운다(dispose가 먼저).
+      await cleanupTempFrameDir(tempFrameDir);
       if (mounted) {
         setState(() {
           _busy = false;
