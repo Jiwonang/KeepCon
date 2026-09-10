@@ -22,7 +22,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:keepcon/features/scan/state/gifticon_form_state.dart';
-import 'package:keepcon/features/scan/util/expiry_date_range.dart';
+import 'package:keepcon/shared/util/expiry_date_range.dart';
 import 'package:keepcon/features/scan/util/keep_all_ko.dart';
 import 'package:keepcon/features/scan/util/price_input_formatter.dart';
 import 'package:keepcon/features/scan/util/save_result_message.dart';

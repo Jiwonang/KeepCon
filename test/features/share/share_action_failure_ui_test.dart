@@ -27,6 +27,7 @@ import 'package:keepcon/shared/models/group.dart';
 import 'package:keepcon/shared/models/share.dart';
 import 'package:keepcon/shared/diagnostics/error_reporter.dart';
 import 'package:keepcon/shared/providers/error_reporter_provider.dart';
+import 'package:keepcon/shared/providers/now_provider.dart';
 import 'package:keepcon/shared/providers/repositories.dart';
 import 'package:keepcon/shared/repositories/impl/in_memory_auth_repository.dart';
 import 'package:keepcon/shared/repositories/impl/in_memory_gifticon_repository.dart';
@@ -141,6 +142,15 @@ class _BackendFailingShareRepository extends InMemoryShareRepository {
           : super.markUsed(sharedGifticonId);
 
   @override
+  Future<SharedGifticon> extendSharedExpiry(
+    String sharedGifticonId,
+    DateTime newExpiryDate,
+  ) =>
+      failing.contains('extendSharedExpiry')
+          ? _boom('extendSharedExpiry')
+          : super.extendSharedExpiry(sharedGifticonId, newExpiryDate);
+
+  @override
   Future<void> cancelShare(String sharedGifticonId) =>
       failing.contains('cancelShare')
           ? _boom('cancelShare')
@@ -191,7 +201,9 @@ void main() {
   /// 이 화면들은 [ListView]라 화면 밖 항목을 **짓지 않는다** — 기본 800x600 뷰포트에서는
   /// 액션 버튼이 아예 존재하지 않아 탭이 조용히 빗나간다. 스크롤 안무 대신 뷰포트를 키워
   /// 전부 짓게 한다(테스트가 검증하려는 건 레이아웃이 아니라 실패 안내다).
-  Future<void> pump(WidgetTester tester, Widget page) async {
+  /// [now]를 주면 시계 정본을 고정한다. 만료 여부에 따라 노출이 갈리는 액션(기간 연장)은
+  /// 실제 시계를 쓰면 **달력이 바뀌는 날 조용히 깨진다**(PR #119가 결함으로 규정한 양상).
+  Future<void> pump(WidgetTester tester, Widget page, {DateTime? now}) async {
     tester.view.physicalSize = const Size(1000, 3000);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
@@ -202,6 +214,7 @@ void main() {
           gifticonRepositoryProvider.overrideWithValue(gifticons),
           shareRepositoryProvider.overrideWithValue(repo),
           errorReporterProvider.overrideWithValue(reporter),
+          if (now != null) nowProvider.overrideWithValue(now),
         ],
         child: MaterialApp(home: page),
       ),
@@ -259,14 +272,14 @@ void main() {
         ],
       );
 
-  Gifticon gifticon(String id) => Gifticon(
+  Gifticon gifticon(String id, {DateTime? expiry}) => Gifticon(
         id: id,
         ownerId: me,
         brand: '메가커피',
         productName: '아이스 아메리카노',
         price: 3000,
         category: '카페',
-        expiryDate: DateTime(2027, 1, 1),
+        expiryDate: expiry ?? DateTime(2027, 1, 1),
         registeredAt: DateTime(2026, 1, 1),
       );
 
@@ -359,6 +372,33 @@ void main() {
       expect(find.text('사용 완료 처리했어요.'), findsNothing);
       expect(
           reporter.reports.single.context, 'SharedGifticonDetailPage.markUsed');
+    });
+
+    testWidgets('기간 연장 실패', (WidgetTester tester) async {
+      // 연장 버튼은 **만료된** 항목에만 뜨므로 픽스처의 만료일을 과거로 둔다.
+      final Group g = await repo.createGroup(name: '가족', emoji: '🏠');
+      final SharedGifticon item = await repo.shareGifticon(
+        groupId: g.id,
+        gifticon: gifticon('gx-exp', expiry: DateTime(2020, 1, 1)),
+      );
+      repo.failing.add('extendSharedExpiry');
+
+      await pump(tester, SharedGifticonDetailPage(itemId: item.id),
+          now: DateTime(2026, 9, 9));
+      await tester.tap(find.widgetWithText(ElevatedButton, '기프티콘 기간 연장하기'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(TextButton, '연장'));
+      await tester.pumpAndSettle();
+
+      // 백엔드 예외(계약 밖)는 **재시도를 권하는** 쪽이다 — 계약 가드 거부와 문구가
+      // 갈린다(개인 상세와 같은 규약). 둘을 한 문구로 접으면 재시도하면 되는 실패에
+      // "다시 해도 소용없다"고 말하게 된다.
+      expect(find.text('연장하지 못했어요. 연결을 확인하고 다시 시도해 주세요.'), findsOneWidget);
+      expect(find.text('지금은 기간을 연장할 수 없어요.'), findsNothing);
+      // 실패했으므로 성공 안내는 뜨지 않는다(try가 성공 처리까지 감싸면 순서가 꼬인다).
+      expect(find.textContaining('까지로 연장했어요'), findsNothing);
+      expect(reporter.reports.single.context,
+          'SharedGifticonDetailPage.extendSharedExpiry');
     });
 
     testWidgets('공유 취소(회수) 실패', (WidgetTester tester) async {

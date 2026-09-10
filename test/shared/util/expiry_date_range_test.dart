@@ -12,7 +12,7 @@
 library;
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:keepcon/features/scan/util/expiry_date_range.dart';
+import 'package:keepcon/shared/util/expiry_date_range.dart';
 
 void main() {
   group('고를 수 있는 범위', () {

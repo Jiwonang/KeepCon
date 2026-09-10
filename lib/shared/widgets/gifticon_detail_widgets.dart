@@ -218,3 +218,25 @@ class GifticonMetaRow extends StatelessWidget {
     );
   }
 }
+
+/// 상세 화면 하단 **주 액션 버튼**의 공용 스타일(사용 완료·기간 연장 등).
+///
+/// 개인 상세와 공유 상세가 같은 자리에 같은 무게의 버튼을 두므로 모양이 갈리면 안 되는데,
+/// 승격 전에는 같은 블록이 **세 벌**로 흩어져 있었다(개인 상세 2 + 공유 상세 1). 값이 같아
+/// 티가 안 나다가 한쪽만 손보는 순간 갈라진다 — 실제로 연장 버튼을 추가하며 네 번째 사본이
+/// 만들어질 뻔했고 코드리뷰가 그것을 잡았다.
+///
+/// ⚠️ **`theme.textTheme.labelLarge`를 소비하지 않는다.** 이 앱의 [TextTheme]은 그 슬롯을
+/// 정의하지 않아(`app_theme.dart`는 headline/title/body/labelMedium만 채운다) 그것을 읽으면
+/// Material 기본값(`height 1.43` · `letterSpacing 0.1` · Roboto)이 딸려 들어오고, 버튼이
+/// **52 → 56px로 자란다**(측정값. 색은 `foregroundColor`가 덮으므로 무관하고, 지배적인 것은
+/// 자간이 아니라 행높이다). 버튼 타이포를 진짜 토큰으로 만들려면 테마에 그 슬롯을 정의해야
+/// 하는데, `labelLarge`는 M3에서 **모든 버튼의 기본 스타일**이라 앱 전역 변경이다. 그 결정과
+/// 회귀 확인은 별건으로 둔다.
+ButtonStyle detailActionButtonStyle() => ElevatedButton.styleFrom(
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppRadii.tile),
+      ),
+      padding: const EdgeInsets.symmetric(vertical: 16),
+      textStyle: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
+    );
