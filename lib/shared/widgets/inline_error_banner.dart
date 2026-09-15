@@ -21,8 +21,8 @@
 ///   컴파일러에 안 잡힌 채 갈라진다).
 ///   ℹ️ **현재 이 저장소에 null 사이트는 없다(규약은 휴면 상태).** share의 마지막 남아
 ///   있던 원천인 내 그룹 목록이 계약 재시도 훅(`retryMyGroups` — `lib/shared`)을 갖게
-///   되면서 share의 모든 배너가 실제 재시도를 넘기고, 아래 **남은 소비 후보**(scan·main·
-///   auth)도 조사해 보면 셋 다 재시도 훅이 이미 계약에 있다. 그래도 이 분기를 지우지 않는
+///   되면서 share의 모든 배너가 실제 재시도를 넘기고, scan(#139로 배선됨)과 아래 **남은
+///   소비 후보**(main·auth)도 조사해 보면 셋 다 재시도 훅이 이미 계약에 있다. 그래도 이 분기를 지우지 않는
 ///   이유는 **지금 그런 사이트가 남아 있어서가 아니라**, 재시도 경로가 없는 원천이 앞으로
 ///   생겼을 때의 **안전망**이기 때문이다(경로 없는 곳에서 죽은 버튼이 부활하지 않게 한다).
 ///
@@ -34,11 +34,15 @@
 /// `InlineErrorBanner`로 개명했다 — 공유 도메인 전용이 아니게 되어 옛 접두가 사실과
 /// 어긋나기 때문이다.
 ///
-/// ⚠️ **배선은 아직이다 — 현재 실소비자는 share 하나뿐이다.** `lib/features/scan`에 이
-/// 위젯 참조는 0건이고, scan·main·auth 연결은 각 담당의 후속 PR이다(아래 "남은 소비
-/// 후보"). 즉 규칙 ③이 말하는 "실제 두 번째 소비자"가 이미 생긴 상태는 아니며, 소비
-/// **지점**이 확정됐고 그 사이에 사본이 생기는 것을 막으려고 앞당긴 승격이다
-/// (`tool/check_ssot.sh` 등록이 그 게이트다).
+/// ✅ **scan 배선 완료(PR #139)** — `lib/features/scan/scan_page.dart`와
+/// `scan_target_group_state.dart`가 이 위젯을 소비한다. 승격(PR #138) 시점에는
+/// 실소비자가 share 하나뿐이었고, 소비 **지점**만 확정된 상태에서 그 사이에 사본이
+/// 생기는 것을 막으려고 앞당긴 승격이었다(`tool/check_ssot.sh` 등록이 그 게이트다).
+/// #139로 규칙 ③이 말하는 "실제 두 번째 소비자"가 생겼다. 남은 것은
+/// `scanTargetGroupsProvider` 동명 선언 정리뿐이다 — 화면이 읽는
+/// `lib/features/scan/state/scan_target_group_state.dart`(`Provider.autoDispose`)와
+/// `lib/features/share/state/share_providers.dart`의 참조 0건 선언(#142).
+/// main·auth 연결은 각 담당의 후속 PR이다(아래 "남은 소비 후보").
 ///
 /// 옛 이름(`ShareErrorBanner`·`share_error_banner`)은 **`lib`·`test`에 0건**이다(주석 포함).
 /// 저장소 전체로는 `_workspace/qa_report.md`에 4곳 남아 있으나 **의도적으로 남긴 것이며
@@ -46,13 +50,6 @@
 /// 맞다(누락으로 읽고 덮어쓰지 말 것).
 ///
 /// ## 남은 소비 후보(아직 교체되지 않았다 — 이 목록을 지우지 말 것)
-/// - **scan** — `scanTargetGroupsProvider`가 로딩·미로그인·에러를 **모두 빈 목록으로 접어**
-///   "그룹을 못 불러옴"과 "그룹 없음"이 구분되지 않는다. 재시도 훅은 계약에 이미 있다
-///   (`retryMyGroups`). 승격을 촉발한 지점이지만 배선은 별도 PR(scan 담당)이다.
-///   ⚠️ 이 이름의 선언이 **둘**이다 — 배선 대상은 화면이 실제로 읽는
-///   `lib/features/scan/state/scan_target_group_state.dart`(`Provider.autoDispose`)이고,
-///   `lib/features/share/state/share_providers.dart`의 동명 선언(`Provider`, 참조 0건)이
-///   아니다. 본문은 같지만 수명이 다르다. 두 선언의 정리는 scan·share 담당의 별도 작업.
 /// - **main·auth** — `lib/features/main/main_page.dart`와 `lib/app/auth_gate.dart`가 raw
 ///   예외를 `'$e'`로 그대로 노출한다(내부 메시지 비노출 규약 위반). 둘 다 에러 원천이
 ///   `sessionUserProvider`이고 그 재시도 훅은 **계약에 이미 있다** —
