@@ -41,6 +41,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:keepcon/app/app_localization.dart';
 import 'package:keepcon/features/scan/pages/gifticon_form_page.dart';
 import 'package:keepcon/features/scan/scan_page.dart';
 import 'package:keepcon/features/scan/state/gifticon_form_state.dart';
@@ -156,6 +157,10 @@ void main() {
         container: container,
         child: MaterialApp(
           theme: AppTheme.light,
+          // 실제 앱과 같은 로케일(#147) — 날짜 피커가 '확인/취소'로 뜬다.
+          locale: appLocale,
+          supportedLocales: appSupportedLocales,
+          localizationsDelegates: appLocalizationsDelegates,
           home: const ScanPage(),
         ),
       ),
@@ -219,7 +224,7 @@ void main() {
     await tester.tap(find.text('날짜를 선택해 주세요'));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('OK'));
+    await tester.tap(find.text('확인'));
     await tester.pumpAndSettle();
   }
 
@@ -614,6 +619,10 @@ void main() {
         container: container,
         child: MaterialApp(
           theme: AppTheme.light,
+          // 실제 앱과 같은 로케일(#147) — `pickExpiryDate`가 '확인'을 누른다.
+          locale: appLocale,
+          supportedLocales: appSupportedLocales,
+          localizationsDelegates: appLocalizationsDelegates,
           // ⚠️ 폼을 첫 라우트에 두면 `popUntil(isFirst)`가 no-op이 되어 "홈이
           // 아니라 폼에 머문다" 단언이 원리상 실패할 수 없다(리뷰 실측 — 홈
           // 팝업 경로를 타도 폼 잔류 단언이 통과했다). 실제 경로(ScanPage → 폼)
