@@ -149,17 +149,30 @@ class _ScanPageState extends ConsumerState<ScanPage> {
   /// 여기서 지우면 미리보기가 깨지고, 안 지우면 스캔마다 디렉터리가 하나씩
   /// 쌓인다(OS 청소 전까지).
   ///
-  /// ⚠️ 정확히는 "폼이 닫힌 뒤"가 아니라 **"pop이 시작된 뒤"**다. `await
-  /// Navigator.push`는 종료 애니메이션 **전에** 재개된다([TransitionRoute.didPop]이
-  /// `reverse()`를 건 다음 completer를 채운다 — [Route.didPop] doc: "routes
-  /// should not wait for their exit animation to complete"). 그동안 폼의
-  /// [Image.file]은 아직 그려지지만 이미 디코딩된 프레임을 쓰므로 삭제가
-  /// 보이지 않는다 — 삭제 지점을 더 앞당기거나 이미지 캐시까지 건드리면
-  /// 그 여유가 사라진다.
+  /// ⚠️ "폼 플로우가 끝나는 지점"은 **종료 전환이 끝난 뒤**다 — `await push`
+  /// 하나로는 pop 시작 시점에 재개되므로 [_pushFormAndAwaitExit]가
+  /// [TransitionRoute.completed]까지 기다린다. 그 await를 빼면 큰 프레임의
+  /// 디코딩이 안 끝난 채 즉시 뒤로 갈 때 전환 중 미리보기가 깨진다.
   Future<File> _writeTempFrame(Directory dir, Uint8List bytes) async {
     final File file = File('${dir.path}/frame.jpg');
     await file.writeAsBytes(bytes, flush: true);
     return file;
+  }
+
+  /// 폼을 띄우고 **종료 전환이 끝날 때까지** 기다린다.
+  ///
+  /// `await push`만으로는 부족하다 — 그 Future는 [Route.popped]에 묶여 종료
+  /// 애니메이션 **전에** 재개된다([Route.didPop] doc: "routes should not wait
+  /// for their exit animation to complete"). 그 직후 `finally`가 임시 파일을
+  /// 지우면, 큰 이미지의 디코딩이 아직 안 끝난 채 사용자가 즉시 뒤로 가는 경우
+  /// 전환 중 미리보기에 `errorBuilder`가 뜬다. [TransitionRoute.completed]는
+  /// 전환이 끝난 뒤 완료되므로 그 창을 닫는다(CodeRabbit, PR #179).
+  Future<void> _pushFormAndAwaitExit() async {
+    final MaterialPageRoute<void> route = MaterialPageRoute<void>(
+      builder: (_) => const GifticonFormScreen(),
+    );
+    await Navigator.of(context).push(route);
+    await route.completed;
   }
 
   Future<void> _openForm(ScanSource source) async {
@@ -188,11 +201,7 @@ class _ScanPageState extends ConsumerState<ScanPage> {
       if (source == ScanSource.manual) {
         controller.setCategory(_selectedCategory.label);
         if (!mounted) return;
-        await Navigator.of(context).push(
-          MaterialPageRoute(
-            builder: (_) => const GifticonFormScreen(),
-          ),
-        );
+        await _pushFormAndAwaitExit();
         return;
       }
 
@@ -269,11 +278,7 @@ class _ScanPageState extends ConsumerState<ScanPage> {
         }
 
         if (!mounted) return;
-        await Navigator.of(context).push(
-          MaterialPageRoute(
-            builder: (_) => const GifticonFormScreen(),
-          ),
-        );
+        await _pushFormAndAwaitExit();
         return;
       }
 
@@ -315,11 +320,7 @@ class _ScanPageState extends ConsumerState<ScanPage> {
       );
 
       if (!mounted) return;
-      await Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) => const GifticonFormScreen(),
-        ),
-      );
+      await _pushFormAndAwaitExit();
     } catch (e, s) {
       // **원인은 로그로, 화면에는 다음 행동만.** 여기 오는 것은 이미지 디코딩·
       // ML Kit 실패라 사용자가 예외 문자열로 할 수 있는 것이 없다. 진단은 공유
@@ -343,8 +344,8 @@ class _ScanPageState extends ConsumerState<ScanPage> {
       try {
         await mlKitService?.dispose();
       } finally {
-        // 프레임 임시 디렉터리 정리. 삭제 시점 논거는 [_writeTempFrame] doc
-        // (pop 시작 뒤 — 미리보기는 이미 디코딩된 프레임으로 그려진다).
+        // 임시 파일 정리. 삭제 시점 논거는 [_writeTempFrame] doc
+        // (폼의 종료 전환이 끝난 뒤 — [_pushFormAndAwaitExit]).
         // ML Kit 핸들 해제를 시도한 뒤에 지운다(dispose가 먼저).
         await cleanupTempFrameDir(tempFrameDir);
         await cleanupTempPickedFile(tempPickedPath);
