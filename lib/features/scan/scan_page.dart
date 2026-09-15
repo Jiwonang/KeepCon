@@ -8,7 +8,13 @@
 library;
 
 import 'dart:io';
-import 'package:flutter/foundation.dart' show kDebugMode, visibleForTesting;
+import 'package:flutter/foundation.dart'
+    show
+        TargetPlatform,
+        defaultTargetPlatform,
+        kDebugMode,
+        kIsWeb,
+        visibleForTesting;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -49,6 +55,48 @@ Future<void> cleanupTempFrameDir(Directory? dir) async {
   }
 }
 
+/// 갤러리 pick이 돌려준 파일이 **우리가 지워도 되는 사본**인가.
+///
+/// image_picker는 플랫폼마다 돌려주는 파일의 소유가 다르다. Android는 앱
+/// 캐시에 사본을 만들어 돌려주고(image_picker_android `FileUtils.java` —
+/// pick마다 `{cacheDir}/{uuid}/`), iOS는 tmp에 사본을 둔다. 반면 데스크톱
+/// 구현(windows·linux·macos)은 file_selector로 **사용자 원본 경로**를 그대로
+/// 돌려준다 — 그것을 지우면 사용자 사진이 사라진다. 그래서 사본이 확실한
+/// 플랫폼에서만 정리 소유권을 잡는다.
+///
+/// 사본 동작은 0.6.7 무렵 들어왔다 — 그 이전에는 Android에서도 MediaStore 원본
+/// 경로를 돌려줬다(flutter/flutter#60740 본문에 0.6.1이 원본을 돌려주던 기록).
+/// 다만 그 하한은 `image_picker: ^1.1.2` → `image_picker_android: ^0.8.13`으로
+/// 이미 봉쇄돼 있다. **가드 없는 전제는 버전이 아니라 호출부의
+/// `imageQuality: 100`이다** — 그 주석 참조.
+///
+/// iOS는 2026-08-18에 저장소에서 제거됐다(빌드 대상 아님) — 되살릴 때 조용히
+/// 사용자 사진을 지우는 쪽으로 깨지지 않도록 남겨 둔 앞잡이 판정이다.
+@visibleForTesting
+bool isPickedGalleryFileDisposable() =>
+    !kIsWeb &&
+    (defaultTargetPlatform == TargetPlatform.android ||
+        defaultTargetPlatform == TargetPlatform.iOS);
+
+/// 갤러리 pick 사본을 거둔다. 실패는 삼킨다([cleanupTempFrameDir]과 같은 판단).
+///
+/// ⚠️ **파일만 지운다 — `recursive` 없음.** 사본이 들어 있는 `{cacheDir}/{uuid}/`
+/// 레이아웃은 플러그인 내부 구현이라 우리 소유가 아니고, `imageQuality < 100`
+/// 이면 리사이즈 결과가 캐시 디렉터리 **직하**에 놓여 `.parent`가 앱 캐시
+/// 자체가 된다(image_picker_android `ImageResizer.java`). 디렉터리 경로를
+/// 넘기면 [File.delete]가 던지고 여기서 삼켜진다 — 그 실패가 곧 안전장치다.
+@visibleForTesting
+Future<void> cleanupTempPickedFile(String? path) async {
+  if (path == null) return;
+  try {
+    await File(path).delete();
+  } catch (e) {
+    if (kDebugMode) {
+      debugPrint('KeepCon: 갤러리 임시 파일 정리 실패: $e');
+    }
+  }
+}
+
 class ScanPage extends ConsumerStatefulWidget {
   const ScanPage({super.key});
 
@@ -85,11 +133,12 @@ class _ScanPageState extends ConsumerState<ScanPage> {
   ///
   /// ML Kit의 [InputImage.fromFilePath]와 폼의 이미지 미리보기([Image.file])가
   /// 모두 경로를 요구하므로, 바이트를 한 번만 파일로 만들어 둘 다에 쓴다.
-  /// 갤러리 경로에서 image_picker가 만드는 임시 파일과 같은 성격이다 — 다만
-  /// 그쪽은 삭제 단위(pick마다 만드는 캐시 하위 디렉터리)가 플러그인 소유라
-  /// 이번 범위에서 뺐다. 해결된 것이 아니다: 플러그인은 정리를 `deleteOnExit`에
-  /// 맡기는데 저자 스스로 Android에서 신뢰할 수 없다는 TODO를 남겼다
-  /// (image_picker_android 0.8.13+19 `FileUtils.java`).
+  /// 갤러리 경로에서 image_picker가 만드는 사본과 같은 성격이다 — 그쪽은
+  /// 플러그인이 정리를 `deleteOnExit`에 맡기는데 저자 스스로 Android에서
+  /// 신뢰할 수 없다는 TODO를 남겼으므로(image_picker_android 0.8.13+19
+  /// `FileUtils.java`) 우리가 같은 `finally`에서 거둔다. 다만 삭제 단위가
+  /// 다르다: 여기는 우리가 만든 디렉터리, 그쪽은 파일 하나
+  /// ([cleanupTempPickedFile] doc).
   ///
   /// [dir]은 호출부가 만들어 넘긴다 — **소유권** 때문이다. 여기서 만들면
   /// `writeAsBytes`가 던졌을 때 만들어진 디렉터리를 호출부가 모른 채 흘린다.
@@ -100,17 +149,30 @@ class _ScanPageState extends ConsumerState<ScanPage> {
   /// 여기서 지우면 미리보기가 깨지고, 안 지우면 스캔마다 디렉터리가 하나씩
   /// 쌓인다(OS 청소 전까지).
   ///
-  /// ⚠️ 정확히는 "폼이 닫힌 뒤"가 아니라 **"pop이 시작된 뒤"**다. `await
-  /// Navigator.push`는 종료 애니메이션 **전에** 재개된다([TransitionRoute.didPop]이
-  /// `reverse()`를 건 다음 completer를 채운다 — [Route.didPop] doc: "routes
-  /// should not wait for their exit animation to complete"). 그동안 폼의
-  /// [Image.file]은 아직 그려지지만 이미 디코딩된 프레임을 쓰므로 삭제가
-  /// 보이지 않는다 — 삭제 지점을 더 앞당기거나 이미지 캐시까지 건드리면
-  /// 그 여유가 사라진다.
+  /// ⚠️ "폼 플로우가 끝나는 지점"은 **종료 전환이 끝난 뒤**다 — `await push`
+  /// 하나로는 pop 시작 시점에 재개되므로 [_pushFormAndAwaitExit]가
+  /// [TransitionRoute.completed]까지 기다린다. 그 await를 빼면 큰 프레임의
+  /// 디코딩이 안 끝난 채 즉시 뒤로 갈 때 전환 중 미리보기가 깨진다.
   Future<File> _writeTempFrame(Directory dir, Uint8List bytes) async {
     final File file = File('${dir.path}/frame.jpg');
     await file.writeAsBytes(bytes, flush: true);
     return file;
+  }
+
+  /// 폼을 띄우고 **종료 전환이 끝날 때까지** 기다린다.
+  ///
+  /// `await push`만으로는 부족하다 — 그 Future는 [Route.popped]에 묶여 종료
+  /// 애니메이션 **전에** 재개된다([Route.didPop] doc: "routes should not wait
+  /// for their exit animation to complete"). 그 직후 `finally`가 임시 파일을
+  /// 지우면, 큰 이미지의 디코딩이 아직 안 끝난 채 사용자가 즉시 뒤로 가는 경우
+  /// 전환 중 미리보기에 `errorBuilder`가 뜬다. [TransitionRoute.completed]는
+  /// 전환이 끝난 뒤 완료되므로 그 창을 닫는다(CodeRabbit, PR #179).
+  Future<void> _pushFormAndAwaitExit() async {
+    final MaterialPageRoute<void> route = MaterialPageRoute<void>(
+      builder: (_) => const GifticonFormScreen(),
+    );
+    await Navigator.of(context).push(route);
+    await route.completed;
   }
 
   Future<void> _openForm(ScanSource source) async {
@@ -131,16 +193,15 @@ class _ScanPageState extends ConsumerState<ScanPage> {
     // 카메라 경로가 만든 프레임 임시 디렉터리. finally에서 지운다
     // (삭제 시점·소유권 논거는 위 [_writeTempFrame] doc).
     Directory? tempFrameDir;
+    // 갤러리 경로가 받은 pick 사본의 경로. 사본인 플랫폼에서만 잡히고
+    // ([isPickedGalleryFileDisposable]) 같은 finally에서 파일만 지운다.
+    String? tempPickedPath;
 
     try {
       if (source == ScanSource.manual) {
         controller.setCategory(_selectedCategory.label);
         if (!mounted) return;
-        await Navigator.of(context).push(
-          MaterialPageRoute(
-            builder: (_) => const GifticonFormScreen(),
-          ),
-        );
+        await _pushFormAndAwaitExit();
         return;
       }
 
@@ -217,23 +278,29 @@ class _ScanPageState extends ConsumerState<ScanPage> {
         }
 
         if (!mounted) return;
-        await Navigator.of(context).push(
-          MaterialPageRoute(
-            builder: (_) => const GifticonFormScreen(),
-          ),
-        );
+        await _pushFormAndAwaitExit();
         return;
       }
 
       final picker = ImagePicker();
       final XFile? file = await picker.pickImage(
         source: ImageSource.gallery,
+        // ⚠️ 100을 내리거나 maxWidth/maxHeight를 주면 **정리가 반쪽이 된다.**
+        // 그때 image_picker_android가 리사이즈를 돌려 `{cacheDir}/scaled_*`를
+        // 돌려주는데, 갤러리가 타는 `handleMediaResult`는 카메라 경로와 달리
+        // 리사이즈 전 사본을 지우지 않는다 — [cleanupTempPickedFile]이 축소본만
+        // 거두고 원본 해상도 사본이 남아 #178이 재발한다(analyze·테스트 못 잡음).
         imageQuality: 100,
       );
 
-      if (file == null || !mounted) {
-        return;
+      if (file == null) return;
+
+      // pick 직후에 소유권을 잡는다 — 이후 어느 단계가 던져도(unmounted 포함)
+      // finally가 거둔다. 원본을 돌려주는 플랫폼에서는 잡지 않는다.
+      if (isPickedGalleryFileDisposable()) {
+        tempPickedPath = file.path;
       }
+      if (!mounted) return;
 
       mlKitService = MlKitService();
       final inputImage = InputImage.fromFilePath(file.path);
@@ -253,11 +320,7 @@ class _ScanPageState extends ConsumerState<ScanPage> {
       );
 
       if (!mounted) return;
-      await Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) => const GifticonFormScreen(),
-        ),
-      );
+      await _pushFormAndAwaitExit();
     } catch (e, s) {
       // **원인은 로그로, 화면에는 다음 행동만.** 여기 오는 것은 이미지 디코딩·
       // ML Kit 실패라 사용자가 예외 문자열로 할 수 있는 것이 없다. 진단은 공유
@@ -281,10 +344,11 @@ class _ScanPageState extends ConsumerState<ScanPage> {
       try {
         await mlKitService?.dispose();
       } finally {
-        // 프레임 임시 디렉터리 정리. 삭제 시점 논거는 [_writeTempFrame] doc
-        // (pop 시작 뒤 — 미리보기는 이미 디코딩된 프레임으로 그려진다).
+        // 임시 파일 정리. 삭제 시점 논거는 [_writeTempFrame] doc
+        // (폼의 종료 전환이 끝난 뒤 — [_pushFormAndAwaitExit]).
         // ML Kit 핸들 해제를 시도한 뒤에 지운다(dispose가 먼저).
         await cleanupTempFrameDir(tempFrameDir);
+        await cleanupTempPickedFile(tempPickedPath);
         if (mounted) {
           setState(() {
             _busy = false;
