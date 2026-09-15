@@ -13,11 +13,18 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  test('lib/의 모든 MaterialApp 생성 지점이 appLocalizationsDelegates를 소비한다', () {
+  test('lib/의 모든 MaterialApp 생성 지점이 로케일 한 벌을 소비한다', () {
     // `MaterialApp(`·`MaterialApp<T>(`·`MaterialApp.router(` — 주석 줄(`//`·`///`)은 제외.
     final RegExp site = RegExp(r'\bMaterialApp(<[^>]*>)?(\.router)?\(');
-    const String wiredMarker =
-        'localizationsDelegates: appLocalizationsDelegates';
+    // 세 가지를 **모두** 본다. 델리게이트만 걸고 `locale`/`supportedLocales`를
+    // 빠뜨리면 해석 결과가 `supportedLocales`의 기본값(en_US)이라 피커가 다시
+    // 영어로 뜬다 — 배선이 있는데도 #147이 재발하는 모양이다(에이전트 리뷰가
+    // 합성 세 번째 루트로 실측: 델리게이트만 건 루트에서 'OK'가 떴다).
+    const List<String> wiredMarkers = <String>[
+      'locale: appLocale',
+      'supportedLocales: appSupportedLocales',
+      'localizationsDelegates: appLocalizationsDelegates',
+    ];
 
     final List<String> violations = <String>[];
     int sites = 0;
@@ -34,19 +41,19 @@ void main() {
       if (codeSites == 0) continue;
 
       sites += codeSites;
-      final int wired =
-          lines.where((String l) => l.contains(wiredMarker)).length;
-      if (wired < codeSites) {
-        violations
-            .add('${entity.path}: MaterialApp $codeSites곳, 로케일 배선 $wired곳');
+      for (final String marker in wiredMarkers) {
+        final int wired = lines.where((String l) => l.contains(marker)).length;
+        if (wired < codeSites) {
+          violations.add(
+              '${entity.path}: MaterialApp $codeSites곳, `$marker` $wired곳');
+        }
       }
     }
 
     expect(
       sites,
-      greaterThanOrEqualTo(2),
-      reason: '알려진 두 곳(main.dart·emulator_unavailable_page.dart)조차 못 찾았다 — '
-          '탐지 정규식이 깨졌다',
+      greaterThanOrEqualTo(1),
+      reason: 'MaterialApp을 한 곳도 못 찾았다 — 탐지 정규식이 깨졌다',
     );
     expect(violations, isEmpty, reason: violations.join('\n'));
   });

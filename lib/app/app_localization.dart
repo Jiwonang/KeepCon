@@ -29,6 +29,14 @@ const List<Locale> appSupportedLocales = <Locale>[Locale('ko')];
 /// 웹에서는 `defaultTargetPlatform`이 **방문자 브라우저의 OS**를 따라 iOS·macOS가
 /// 되고, 그때 `TextField`의 기본 컨텍스트 메뉴(`AdaptiveTextSelectionToolbar`)가
 /// `CupertinoLocalizations.of(context)`를 요구해 없으면 던진다 — 복사/붙여넣기
-/// 메뉴가 아이폰 브라우저 방문자에게 통째로 깨진다.
+/// 메뉴가 아이폰 브라우저 방문자에게 통째로 깨진다(`ko` 고정이라 MaterialApp이
+/// 덧붙이는 `DefaultCupertinoLocalizations`는 `en`에만 걸려 폴백도 없다).
+///
+/// 비용(릴리스 빌드 실측, 에이전트 리뷰): APK +2.0 MB(+1.9%, ABI당 ~670 KB) ·
+/// 웹 main.dart.js gzip +113 KB(+11%). 델리게이트 load는 동기·캐시라 부팅 공백은
+/// 없지만, 최초 해석 때 97개 로케일의 날짜 심볼을 한 번에 초기화하고 번역은
+/// 로케일 `switch`라 트리셰이킹이 못 지운다 — `supportedLocales`를 줄여도
+/// 바이너리는 안 준다. 유일한 레버는 ko 전용 `MaterialLocalizations` 직접 구현인데
+/// 위 웹 Cupertino 요구까지 떠안아야 해서 하지 않는다.
 const List<LocalizationsDelegate<dynamic>> appLocalizationsDelegates =
     GlobalMaterialLocalizations.delegates;
