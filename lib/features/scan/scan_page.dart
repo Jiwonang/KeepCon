@@ -64,8 +64,14 @@ Future<void> cleanupTempFrameDir(Directory? dir) async {
 /// 돌려준다 — 그것을 지우면 사용자 사진이 사라진다. 그래서 사본이 확실한
 /// 플랫폼에서만 정리 소유권을 잡는다.
 ///
-/// image_picker < 0.6.7은 Android에서도 MediaStore 원본을 돌려줬다
-/// (flutter/flutter#60740). 의존성 하한을 내리면 이 판정이 틀려진다.
+/// 사본 동작은 0.6.7 무렵 들어왔다 — 그 이전에는 Android에서도 MediaStore 원본
+/// 경로를 돌려줬다(flutter/flutter#60740 본문에 0.6.1이 원본을 돌려주던 기록).
+/// 다만 그 하한은 `image_picker: ^1.1.2` → `image_picker_android: ^0.8.13`으로
+/// 이미 봉쇄돼 있다. **가드 없는 전제는 버전이 아니라 호출부의
+/// `imageQuality: 100`이다** — 그 주석 참조.
+///
+/// iOS는 2026-08-18에 저장소에서 제거됐다(빌드 대상 아님) — 되살릴 때 조용히
+/// 사용자 사진을 지우는 쪽으로 깨지지 않도록 남겨 둔 앞잡이 판정이다.
 @visibleForTesting
 bool isPickedGalleryFileDisposable() =>
     !kIsWeb &&
@@ -274,6 +280,11 @@ class _ScanPageState extends ConsumerState<ScanPage> {
       final picker = ImagePicker();
       final XFile? file = await picker.pickImage(
         source: ImageSource.gallery,
+        // ⚠️ 100을 내리거나 maxWidth/maxHeight를 주면 **정리가 반쪽이 된다.**
+        // 그때 image_picker_android가 리사이즈를 돌려 `{cacheDir}/scaled_*`를
+        // 돌려주는데, 갤러리가 타는 `handleMediaResult`는 카메라 경로와 달리
+        // 리사이즈 전 사본을 지우지 않는다 — [cleanupTempPickedFile]이 축소본만
+        // 거두고 원본 해상도 사본이 남아 #178이 재발한다(analyze·테스트 못 잡음).
         imageQuality: 100,
       );
 
