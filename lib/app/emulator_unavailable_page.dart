@@ -20,6 +20,7 @@ import 'package:flutter/services.dart';
 
 import '../shared/firebase/firebase_bootstrap.dart';
 import '../shared/theme/app_theme.dart';
+import 'app_localization.dart';
 
 /// 에뮬레이터에 닿지 못했을 때 앱 대신 실행하는 최소 앱.
 ///
@@ -40,6 +41,10 @@ class EmulatorUnavailableApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: AppTheme.light,
       darkTheme: AppTheme.dark,
+      // 로케일 한 벌은 `app_localization.dart` — main.dart의 KeepConApp과 같은 값(#147).
+      locale: appLocale,
+      supportedLocales: appSupportedLocales,
+      localizationsDelegates: appLocalizationsDelegates,
       home: _EmulatorUnavailablePage(onRetrySucceeded: onRetrySucceeded),
     );
   }

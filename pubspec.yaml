@@ -10,6 +10,10 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  # Material 내장 문구(날짜 피커의 "취소/확인" 등)의 한국어 번역. 없으면
+  # MaterialLocalizations가 en_US로 떨어져 한국어 앱에 영어 피커가 뜬다(#147).
+  flutter_localizations:
+    sdk: flutter
 
   flutter_riverpod: ^2.5.1
   firebase_core: ^3.6.0

@@ -20,6 +20,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:keepcon/app/app_localization.dart';
 import 'package:keepcon/features/scan/pages/gifticon_form_page.dart';
 import 'package:keepcon/features/scan/scan_page.dart';
 import 'package:keepcon/features/scan/state/gifticon_form_state.dart';
@@ -75,7 +76,15 @@ void main() {
     await tester.pumpWidget(
       UncontrolledProviderScope(
         container: container,
-        child: MaterialApp(theme: AppTheme.light, home: const ScanPage()),
+        // 실제 앱과 같은 로케일(#147) — 피커 버튼이 '확인/취소'로 그려져야
+        // 좁은 폭 오버플로 단언이 실제 라벨을 잰다.
+        child: MaterialApp(
+          theme: AppTheme.light,
+          locale: appLocale,
+          supportedLocales: appSupportedLocales,
+          localizationsDelegates: appLocalizationsDelegates,
+          home: const ScanPage(),
+        ),
       ),
     );
     await tester.pumpAndSettle();
@@ -101,7 +110,7 @@ void main() {
 
     await tester.tap(find.text('날짜를 선택해 주세요'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('OK'));
+    await tester.tap(find.text('확인'));
     await tester.pumpAndSettle();
 
     await tester.tap(find.widgetWithText(ElevatedButton, '저장하기'));

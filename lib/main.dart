@@ -35,6 +35,7 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'app/app_localization.dart';
 import 'app/auth_gate.dart';
 import 'app/deep_link_listener.dart';
 import 'app/emulator_unavailable_page.dart';
@@ -208,6 +209,11 @@ class KeepConApp extends ConsumerWidget {
       theme: AppTheme.light,
       darkTheme: AppTheme.dark,
       themeMode: mode,
+      // 로케일 한 벌은 `app/app_localization.dart` — 아래 EmulatorUnavailableApp과
+      // 같은 값을 써야 한다(#147).
+      locale: appLocale,
+      supportedLocales: appSupportedLocales,
+      localizationsDelegates: appLocalizationsDelegates,
       builder: (BuildContext context, Widget? child) =>
           _backendBanner(child, target),
       // 딥링크 수신은 **인증 게이트 바깥**에 둔다 — 초대 링크로 앱을 처음 여는 사용자는

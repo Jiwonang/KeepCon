@@ -14,6 +14,7 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:keepcon/app/app_localization.dart';
 import 'package:keepcon/features/main/pages/gifticon_detail_page.dart';
 import 'package:keepcon/shared/models/gifticon.dart';
 import 'package:keepcon/shared/models/share.dart';
@@ -112,7 +113,13 @@ void main() {
     await tester.pumpWidget(
       UncontrolledProviderScope(
         container: c ?? container,
-        child: MaterialApp(home: GifticonDetailPage(gifticon: g)),
+        // 실제 앱과 같은 로케일(#147) — 연장 날짜 피커가 한국어로 뜬다.
+        child: MaterialApp(
+          locale: appLocale,
+          supportedLocales: appSupportedLocales,
+          localizationsDelegates: appLocalizationsDelegates,
+          home: GifticonDetailPage(gifticon: g),
+        ),
       ),
     );
     await tester.pumpAndSettle();
