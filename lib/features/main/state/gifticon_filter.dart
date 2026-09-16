@@ -143,7 +143,8 @@ class GifticonFilter {
   /// 판정되도록 호출자가 한 번만 읽어 넘긴다(테스트에서 고정 시각을 주입하는 통로이기도 하다).
   ///
   /// 검색은 **브랜드 또는 상품명**의 부분일치다(둘 중 하나만 맞아도 통과). 다른 필터와는
-  /// AND로 묶인다 — 카테고리 "카페"를 고른 채 "스벅"을 치면 카페이면서 스벅인 것만 남는다.
+  /// AND로 묶인다 — 카테고리 "카페/음료"를 고른 채 "스벅"을 치면 카페/음료이면서 스벅인
+  /// 것만 남는다.
   bool matches(Gifticon g, {required DateTime now}) {
     if (statusFilter != null && g.status != statusFilter) return false;
     if (categoryFilter != null && g.category != categoryFilter) return false;

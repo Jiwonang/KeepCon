@@ -290,13 +290,13 @@ seed_group "${OWNER_UID}" "${OWNER_TOKEN}" '방장' "${MEMBER_UID}" '파티원' 
 
 echo "개인 기프티콘 생성 중…"
 seed_gifticon 'seed-gift-star' "${OWNER_UID}" "${OWNER_TOKEN}" \
-  "${STAR_BRAND}" "${STAR_NAME}" 4500 '카페' "${STAR_BARCODE}" "${EXP_SOON}" 'available' || exit 1
+  "${STAR_BRAND}" "${STAR_NAME}" 4500 '카페/음료' "${STAR_BARCODE}" "${EXP_SOON}" 'available' || exit 1
 seed_gifticon 'seed-gift-bbq' "${OWNER_UID}" "${OWNER_TOKEN}" \
-  'BBQ' '황금올리브 치킨' 20000 '치킨' '' "${EXP_FAR}" 'available' || exit 1
+  'BBQ' '황금올리브 치킨' 20000 '치킨/피자' '' "${EXP_FAR}" 'available' || exit 1
 seed_gifticon 'seed-gift-cu' "${OWNER_UID}" "${OWNER_TOKEN}" \
   'CU' '도시락 교환권' 4800 '편의점' '' "${EXP_PAST}" 'expired' || exit 1
 seed_gifticon 'seed-gift-baskin' "${MEMBER_UID}" "${MEMBER_TOKEN}" \
-  "${BASKIN_BRAND}" "${BASKIN_NAME}" 8900 '디저트' "${BASKIN_BARCODE}" "${EXP_MID}" 'available' || exit 1
+  "${BASKIN_BRAND}" "${BASKIN_NAME}" 8900 '기타' "${BASKIN_BARCODE}" "${EXP_MID}" 'available' || exit 1
 
 # 공유 문서는 위 기프티콘과 **같은 변수**를 넘긴다(값을 다시 적지 않는다).
 echo "그룹 공유 중…"
@@ -359,6 +359,20 @@ verify_seed() {
   res=$(curl -s -X GET "${DOCS}/gifticons/seed-gift-star" \
     -H "Authorization: Bearer ${OWNER_TOKEN}")
   expect_contains '기프티콘(스타벅스)' "${res}" '아메리카노 T'
+  # 카테고리는 스캔 페이지 선택지(`category_tile.dart`의 GifticonCategory 라벨)와
+  # 글자 그대로 같아야 한다 — 홈 필터가 저장된 문자열을 그대로 선택지로 만들어,
+  # 라벨이 다르면 필터에 중복 카테고리가 뜨고 스캔 등록분은 걸러지지 않는다(#156).
+  # 이 스크립트가 라벨을 정하는 네 문서를 전부 대조한다(하나만 보면 형제가 샌다).
+  expect_contains '기프티콘 카테고리(스타벅스 → 카페/음료)' "${res}" '카페/음료'
+  res=$(curl -s -X GET "${DOCS}/gifticons/seed-gift-bbq" \
+    -H "Authorization: Bearer ${OWNER_TOKEN}")
+  expect_contains '기프티콘 카테고리(BBQ → 치킨/피자)' "${res}" '치킨/피자'
+  res=$(curl -s -X GET "${DOCS}/gifticons/seed-gift-cu" \
+    -H "Authorization: Bearer ${OWNER_TOKEN}")
+  expect_contains '기프티콘 카테고리(CU → 편의점)' "${res}" '편의점'
+  res=$(curl -s -X GET "${DOCS}/gifticons/seed-gift-baskin" \
+    -H "Authorization: Bearer ${MEMBER_TOKEN}")
+  expect_contains '기프티콘 카테고리(배스킨 → 기타)' "${res}" '기타'
 
   # 공유 기프티콘 — 그룹 멤버 양쪽 다 읽혀야 한다.
   res=$(curl -s -X GET "${DOCS}/sharedGifticons/seed-share-baskin" \

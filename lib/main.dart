@@ -126,12 +126,15 @@ List<Override> _inMemoryOverrides() {
   final DateTime now = DateTime.now();
   final InMemoryGifticonRepository sharedGifticonRepo =
       InMemoryGifticonRepository(seed: <Gifticon>[
+    // category는 스캔 페이지 선택지(`features/scan/widgets/category_tile.dart`의
+    // GifticonCategory 라벨)와 글자 그대로 같아야 한다 — 홈 필터가 저장된 문자열을
+    // 그대로 선택지로 만들어, 다른 라벨을 넣으면 중복 카테고리가 뜬다(#156).
     Gifticon(
       id: 'seed-1',
       ownerId: 'user-1',
       brand: '스타벅스',
       productName: '아메리카노 T',
-      category: '카페',
+      category: '카페/음료',
       barcode: '1234-5678-9012',
       price: 4500,
       expiryDate: now.add(const Duration(days: 5)),
@@ -143,7 +146,7 @@ List<Override> _inMemoryOverrides() {
       ownerId: 'user-1',
       brand: '배스킨라빈스',
       productName: '파인트 아이스크림',
-      category: '디저트',
+      category: '기타',
       price: 8900,
       expiryDate: now.add(const Duration(days: 2)),
       registeredAt: now.subtract(const Duration(days: 3)),
@@ -176,7 +179,7 @@ List<Override> _inMemoryOverrides() {
       ownerId: 'user-1',
       brand: '교보문고',
       productName: '도서 상품권 3만원',
-      category: '도서',
+      category: '상품권/금액권',
       price: 30000,
       expiryDate: now.add(const Duration(days: 100)),
       registeredAt: now.subtract(const Duration(days: 5)),
