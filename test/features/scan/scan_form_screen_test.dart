@@ -61,9 +61,12 @@ import 'package:keepcon/shared/util/date_format.dart' show formatYmdDot;
 void main() {
   final String myId = InMemoryAuthRepository.defaultUser.id;
 
-  /// 모든 하네스가 공유하는 고정 '지금'. [filledWallet]의 만료일(2027-01-31)보다
-  /// 앞이어야 한도 픽스처가 살아 있다.
-  final DateTime fixedNow = DateTime(2026, 9, 16, 12);
+  /// 모든 하네스가 공유하는 고정 '지금'. [filledWallet]의 만료일(2031-01-31)보다
+  /// 앞이어야 한도 픽스처가 살아 있다. **실제 오늘과 한참 떨어뜨린 것도 의도다** —
+  /// 프로덕션이 [nowProvider]를 무시하고 `DateTime.now()`를 읽으면 그때 들킨다
+  /// (`expiry_banner_test.dart`와 같은 규약 — 커밋 작성일로 잡으면 두 값이 같은
+  /// 날짜라 그 실수가 조용히 통과한다).
+  final DateTime fixedNow = DateTime(2030, 5, 15, 12);
 
   /// 저장 결과를 직접 들여다보기 위해 Repository 인스턴스를 손에 쥔 채 주입한다.
   late InMemoryGifticonRepository repo;
@@ -113,7 +116,7 @@ void main() {
         price: 1000,
         barcode: '900000000000$i',
         category: '기타',
-        expiryDate: DateTime(2027, 1, 31),
+        expiryDate: DateTime(2031, 1, 31),
         registeredAt: DateTime(2026, 1, 1),
       ),
       growable: false,
@@ -466,13 +469,15 @@ void main() {
       // 한도가 재는 것은 "쓸 수 있는 보관분"이므로 날짜로 거른다.
       await expectLimitOutcome(
         tester,
-        mutate: (Gifticon g) => g.copyWith(expiryDate: DateTime(2026, 1, 1)),
+        mutate: (Gifticon g) => g.copyWith(
+          expiryDate: fixedNow.subtract(const Duration(days: 1)),
+        ),
         blocked: false,
       );
     });
 
     testWidgets('만료일 당일인 기프티콘은 아직 한도에 든다', (WidgetTester tester) async {
-      // "9월 16일까지"는 그 날을 포함한다([isExpiredByDate] — 당일은 만료 아님).
+      // "그 날까지"는 그 날을 포함한다([isExpiredByDate] — 당일은 만료 아님).
       // 경계를 고정해 두지 않으면 하루 이른 판정이 조용히 들어온다.
       await expectLimitOutcome(
         tester,
@@ -481,6 +486,38 @@ void main() {
         ),
         blocked: true,
       );
+    });
+
+    test('포그라운드로 자정을 넘겨도 한도가 새 "오늘"로 판정한다', () async {
+      // [nowProvider]는 resume에만 갱신되는 캐시다(now_provider.dart). 값
+      // override로 덮으면 invalidate가 no-op이라 이 게이트의 invalidate 호출을
+      // 영영 검증할 수 없다 — 팩토리로 덮어 시계를 실제로 흐르게 한다
+      // (에이전트 리뷰 — 이 호출은 어떤 테스트도 실패시키지 않고 있었다).
+      DateTime clock = DateTime(2030, 5, 15, 23, 59);
+      final List<Gifticon> wallet = <Gifticon>[
+        for (int i = 0; i < limit; i++)
+          filledWallet(limit)[i].copyWith(expiryDate: DateTime(2030, 5, 15)),
+      ];
+      final ProviderContainer c = ProviderContainer(overrides: <Override>[
+        gifticonRepositoryProvider
+            .overrideWithValue(InMemoryGifticonRepository(seed: wallet)),
+        authRepositoryProvider.overrideWithValue(InMemoryAuthRepository()),
+        nowProvider.overrideWith((Ref ref) => clock),
+      ]);
+      addTearDown(c.dispose);
+      c.read(nowProvider); // 화면이 이미 '어제' 시각을 캐시한 상태
+      clock = DateTime(2030, 5, 16, 0, 1); // 포그라운드로 자정을 넘김(값만 바뀜)
+
+      final GifticonFormController ctrl =
+          c.read(gifticonFormControllerProvider.notifier);
+      ctrl.startWith(ScanSource.manual);
+      ctrl.setBrand('새것');
+      ctrl.setProductName('새상품');
+      ctrl.setPrice('3000');
+      ctrl.setExpiryDate(DateTime(2031, 1, 1));
+
+      expect(await ctrl.submit(), isNotNull,
+          reason: '어제 만료된 $limit개는 한도를 차지하지 않아야 한다');
     });
 
     testWidgets('한도와 중복이 겹치면 한도를 먼저 알린다', (WidgetTester tester) async {

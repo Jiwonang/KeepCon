@@ -268,6 +268,45 @@ class GifticonDetailPage extends ConsumerWidget {
     );
   }
 
+  /// [g]를 연장하면 무료 한도(활성 개수)를 넘는지 확인한다.
+  ///
+  /// scan의 저장 게이트(`gifticon_form_state.dart`)와 **같은 조건**으로 세야
+  /// 한다 — 여기가 다른 조건을 쓰면 두 화면이 "한도가 찼다"에 대해 다른 답을
+  /// 내고, 그 틈이 곧 우회로다. 호출부가 이미 [g]가 날짜상 만료인지(=연장으로
+  /// 다시 세어질 항목인지) 확인한 뒤에만 부르므로, 여기서는 plan·현재 개수만 본다.
+  ///
+  /// **확인하지 못하면 막지 않는다.** 한도는 과금 정책이지 보안 경계가 아니다
+  /// (`firestore.rules`는 개수를 셀 수 없어 진짜 강제가 애초에 불가능하다 — scan의
+  /// 같은 주석 참조). 네트워크 오류로 이미 등록된 기프티콘의 연장까지 막으면
+  /// 대가가 이득보다 크다.
+  Future<bool> _wouldExceedFreeLimit(WidgetRef ref,
+      {required DateTime now}) async {
+    final String? myUserId = ref.read(
+        sessionUserProvider.select((AsyncValue<User?> s) => s.valueOrNull?.id));
+    if (myUserId == null) return false;
+
+    final UserPlan plan;
+    try {
+      plan = await ref.read(authRepositoryProvider).getPlan();
+    } catch (_) {
+      return false;
+    }
+    if (plan != UserPlan.free) return false;
+
+    final List<Gifticon> all;
+    try {
+      all = await ref.read(gifticonRepositoryProvider).getGifticons(myUserId);
+    } catch (_) {
+      return false;
+    }
+    final int activeCount = all
+        .where((Gifticon x) =>
+            x.status == GifticonStatus.available &&
+            !isExpiredByDate(x.expiryDate, now: now))
+        .length;
+    return activeCount >= UserPlan.freeGifticonLimit;
+  }
+
   /// 새 만료일 선택 → 계약의 연장 경로 호출.
   ///
   /// **경로가 둘이고, 고르는 기준은 공유 여부다.** 공유 중이면
@@ -305,6 +344,33 @@ class GifticonDetailPage extends ConsumerWidget {
       return;
     }
     final DateTime picked = (pick as ExtendDatePicked).date;
+
+    // **무료 한도 게이트(#175).** scan의 저장 게이트가 날짜상 만료를 한도에서
+    // 빼면서(gifticon_form_state.dart), 그 자리로 되살리는 이 경로에 같은 검사가
+    // 없으면 "만료 → 재등록 → 연장"으로 한도가 영구히 뚫린다 — 만료돼 빠진 10개를
+    // 그대로 두고 10개를 새로 채운 뒤, 옛 10개를 전부 연장하면 활성 20개가 된다.
+    //
+    // **조건 없이 항상 부른다.** 이 지점에 왔다는 것 자체가 [canExtend]를 통과했다는
+    // 뜻이고, `canExtend`는 `expiredNow(=expiredByDate || status==expired) && !used`를
+    // 요구한다 — activeCount의 판정(`status==available && !isExpiredByDate`)과
+    // 정확히 반대라, 버튼이 보이는 모든 경우에 이 항목은 **지금 한도에 안 세어져
+    // 있다**(날짜 만료든, 날짜는 안 지났지만 저장된 status가 레거시 expired든).
+    // 여기서 `isExpiredByDate`만 보면 후자(레거시 expired, 날짜 남음)가 새고,
+    // 그 경로는 위 "재등록 → 연장" 우회가 그대로 통한다(#175 리뷰가 실제로 잡은
+    // 두 번째 구멍).
+    if (await _wouldExceedFreeLimit(ref, now: now)) {
+      if (!context.mounted) return;
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(const SnackBar(
+          content: Text(
+            '무료 플랜은 ${UserPlan.freeGifticonLimit}개까지 보관할 수 있어, '
+            '이 기프티콘은 아직 되살릴 수 없어요. 다른 기프티콘을 사용 완료하거나 '
+            '프리미엄으로 전환해 보세요.',
+          ),
+        ));
+      return;
+    }
 
     // 공유 판정을 **여기서 다시 읽는다**(위 dartdoc 참조 — 선택기가 열려 있던 창).
     // 확정되지 않았으면 어느 경로도 부르지 않는다: 둘 중 하나를 추측해 부르는 것이
