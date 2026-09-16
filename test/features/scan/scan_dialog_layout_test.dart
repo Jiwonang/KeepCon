@@ -26,6 +26,7 @@ import 'package:keepcon/features/scan/scan_page.dart';
 import 'package:keepcon/features/scan/state/gifticon_form_state.dart';
 import 'package:keepcon/shared/models/gifticon.dart';
 import 'package:keepcon/shared/models/user.dart';
+import 'package:keepcon/shared/providers/now_provider.dart';
 import 'package:keepcon/shared/providers/repositories.dart';
 import 'package:keepcon/shared/repositories/impl/in_memory_auth_repository.dart';
 import 'package:keepcon/shared/repositories/impl/in_memory_gifticon_repository.dart';
@@ -69,6 +70,10 @@ void main() {
           InMemoryGifticonRepository(seed: seed),
         ),
         authRepositoryProvider.overrideWithValue(InMemoryAuthRepository()),
+        // 한도 계산이 날짜상 만료를 거르므로(#175) '지금'을 고정한다 — 안 하면
+        // [filledWallet]의 만료일(2030-01-01)이 지나는 날 한도 픽스처가 달력 때문에
+        // 한도에 못 미쳐 이 레이아웃 테스트가 빨개진다.
+        nowProvider.overrideWithValue(DateTime(2026, 9, 16, 12)),
       ],
     );
     addTearDown(container.dispose);

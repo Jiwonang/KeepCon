@@ -50,6 +50,7 @@ import 'package:keepcon/shared/diagnostics/error_reporter.dart';
 import 'package:keepcon/shared/models/gifticon.dart';
 import 'package:keepcon/shared/models/user.dart';
 import 'package:keepcon/shared/providers/error_reporter_provider.dart';
+import 'package:keepcon/shared/providers/now_provider.dart';
 import 'package:keepcon/shared/providers/repositories.dart';
 import 'package:keepcon/shared/repositories/auth_repository.dart';
 import 'package:keepcon/shared/repositories/impl/in_memory_auth_repository.dart';
@@ -59,6 +60,10 @@ import 'package:keepcon/shared/util/date_format.dart' show formatYmdDot;
 
 void main() {
   final String myId = InMemoryAuthRepository.defaultUser.id;
+
+  /// 모든 하네스가 공유하는 고정 '지금'. [filledWallet]의 만료일(2027-01-31)보다
+  /// 앞이어야 한도 픽스처가 살아 있다.
+  final DateTime fixedNow = DateTime(2026, 9, 16, 12);
 
   /// 저장 결과를 직접 들여다보기 위해 Repository 인스턴스를 손에 쥔 채 주입한다.
   late InMemoryGifticonRepository repo;
@@ -86,6 +91,10 @@ void main() {
         gifticonRepositoryProvider.overrideWithValue(repo),
         authRepositoryProvider.overrideWithValue(auth),
         errorReporterProvider.overrideWithValue(reporter),
+        // 화면이 보는 '지금'을 고정한다. 한도 계산이 날짜상 만료를 거르므로(#175)
+        // 고정하지 않으면 [filledWallet]의 만료일(2027-01-31)이 지나는 날 한도
+        // 테스트가 코드가 아니라 달력 때문에 빨개진다.
+        nowProvider.overrideWithValue(fixedNow),
       ],
     );
     addTearDown(container.dispose);
@@ -407,16 +416,18 @@ void main() {
       expect(find.text('저장 한도에 도달했어요'), findsNothing);
     });
 
-    testWidgets('사용 완료한 기프티콘은 한도에서 빠진다', (WidgetTester tester) async {
-      // 한도만큼 있지만 하나를 사용 완료했다면 자리가 하나 난 것이다.
-      //
-      // 전체 개수로 세면 무료 사용자가 막다른 골목에 갇힌다 — 계약에 삭제 API가
-      // 없고 dev/prod에서는 프리미엄 전환도 막혀 있어, 10개를 다 쓰면 등록이
-      // 영구히 정지한다. '사용 완료 처리'가 유일한 탈출구이므로 그것이 실제로
-      // 자리를 비우는지 고정한다.
+    /// 한도만큼 채운 지갑의 **마지막 하나를 [mutate]로 바꾼 뒤** 저장을 시도해,
+    /// 그 하나가 자리를 비우는지([blocked] = false) 아직 차지하는지 고정한다.
+    /// 세 경우(사용 완료·날짜 만료·당일 만료)가 같은 흐름이라 하나로 묶었다 —
+    /// 저장 흐름이 바뀌면 여기 한 곳만 고친다.
+    Future<void> expectLimitOutcome(
+      WidgetTester tester, {
+      required Gifticon Function(Gifticon) mutate,
+      required bool blocked,
+    }) async {
       final List<Gifticon> wallet = <Gifticon>[
         ...filledWallet(limit - 1),
-        filledWallet(limit).last.copyWith(status: GifticonStatus.used),
+        mutate(filledWallet(limit).last),
       ];
 
       await openManualForm(tester, seed: wallet);
@@ -425,8 +436,51 @@ void main() {
       await pickExpiryDate(tester);
       await tapSave(tester);
 
-      expect(find.text('저장 한도에 도달했어요'), findsNothing);
-      expect(await repo.getGifticons(myId), hasLength(limit + 1));
+      expect(
+        find.text('저장 한도에 도달했어요'),
+        blocked ? findsOneWidget : findsNothing,
+      );
+      expect(
+        await repo.getGifticons(myId),
+        hasLength(blocked ? limit : limit + 1),
+      );
+    }
+
+    testWidgets('사용 완료한 기프티콘은 한도에서 빠진다', (WidgetTester tester) async {
+      // 한도만큼 있지만 하나를 사용 완료했다면 자리가 하나 난 것이다.
+      //
+      // 전체 개수로 세면 무료 사용자가 막다른 골목에 갇힌다 — 계약에 삭제 API가
+      // 없고 dev/prod에서는 프리미엄 전환도 막혀 있어, 10개를 다 쓰면 등록이
+      // 영구히 정지한다. '사용 완료 처리'가 유일한 탈출구이므로 그것이 실제로
+      // 자리를 비우는지 고정한다.
+      await expectLimitOutcome(
+        tester,
+        mutate: (Gifticon g) => g.copyWith(status: GifticonStatus.used),
+        blocked: false,
+      );
+    });
+
+    testWidgets('날짜가 지난 기프티콘은 한도에서 빠진다', (WidgetTester tester) async {
+      // status를 expired로 옮기는 주체가 없어 만료품도 저장값은 available 그대로다.
+      // 그대로 세면 만료품이 쌓인 무료 사용자가 이유를 모른 채 막힌다(#175) —
+      // 한도가 재는 것은 "쓸 수 있는 보관분"이므로 날짜로 거른다.
+      await expectLimitOutcome(
+        tester,
+        mutate: (Gifticon g) => g.copyWith(expiryDate: DateTime(2026, 1, 1)),
+        blocked: false,
+      );
+    });
+
+    testWidgets('만료일 당일인 기프티콘은 아직 한도에 든다', (WidgetTester tester) async {
+      // "9월 16일까지"는 그 날을 포함한다([isExpiredByDate] — 당일은 만료 아님).
+      // 경계를 고정해 두지 않으면 하루 이른 판정이 조용히 들어온다.
+      await expectLimitOutcome(
+        tester,
+        mutate: (Gifticon g) => g.copyWith(
+          expiryDate: DateTime(fixedNow.year, fixedNow.month, fixedNow.day),
+        ),
+        blocked: true,
+      );
     });
 
     testWidgets('한도와 중복이 겹치면 한도를 먼저 알린다', (WidgetTester tester) async {

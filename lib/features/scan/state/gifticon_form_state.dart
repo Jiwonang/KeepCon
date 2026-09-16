@@ -40,7 +40,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../shared/models/gifticon.dart';
 import '../../../shared/models/user.dart';
 import '../../../shared/providers/error_reporter_provider.dart';
+import '../../../shared/providers/now_provider.dart';
 import '../../../shared/providers/repositories.dart';
+import '../../../shared/util/expiry_policy.dart';
 
 /// scan 입력 경로 구분.
 enum ScanSource {
@@ -354,8 +356,25 @@ class GifticonFormController extends StateNotifier<GifticonFormState> {
     // dev/prod에서는 보안 규칙이 plan 쓰기를 막아 프리미엄 전환도 되지 않는다.
     // 그러면 등록이 영구히 정지한다. available 기준이면 '사용 완료 처리'가 곧
     // 자리를 비우는 탈출구가 되고, "10개까지 **보관**"이라는 제품 의도에도 맞는다.
+    //
+    // **날짜가 지난 것도 세지 않는다(#175).** `status`를 expired로 옮기는 주체가
+    // 없어 만료품도 저장값은 available 그대로다 — 그대로 세면 만료품이 쌓인 무료
+    // 사용자는 이유를 모른 채 등록이 막힌다. 한도가 재는 것은 "쓸 수 있는 보관분"
+    // 이므로 각 화면이 표시를 보정하듯(목록 D-day·상세 displayStatus) 여기도 날짜로
+    // 보정한다. 살릴 만료품은 연장(#173)하면 다시 세어진다. 시각은 [nowProvider]
+    // 한 곳에서 읽는다 — 화면들과 다른 "오늘"로 판정하지 않게.
+    //
+    // 읽기 전에 **갱신한다.** [nowProvider]는 resume에만 갱신되는 캐시라 앱을 켜 둔
+    // 채 자정을 넘기면 어제로 남는다(그 파일의 "남은 구멍"). 표시라면 뱃지가 하루
+    // 늦을 뿐이지만 여기서는 저장을 **막는** 판정이라, 저장 시도라는 사용자 행동을
+    // resume과 같은 갱신 지점으로 삼는다. 화면들도 같은 provider를 보므로 함께
+    // 새 "오늘"로 맞춰진다. (테스트의 `overrideWithValue`는 고정값이라 영향 없음.)
+    _ref.invalidate(nowProvider);
+    final DateTime now = _ref.read(nowProvider);
     final int activeCount = allGifticons
-        .where((Gifticon g) => g.status == GifticonStatus.available)
+        .where((Gifticon g) =>
+            g.status == GifticonStatus.available &&
+            !isExpiredByDate(g.expiryDate, now: now))
         .length;
 
     // 한도 미만이면 플랜은 판정에 영향이 없다(free든 premium이든 통과) — 그때는
