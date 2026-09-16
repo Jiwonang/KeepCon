@@ -574,5 +574,47 @@ void main() {
           .firstWhere((Gifticon g) => g.id == target.id);
       expect(after.expiryDate, isNot(target.expiryDate));
     });
+
+    testWidgets('연장도 자정을 넘기면 새 "오늘"로 판정한다', (WidgetTester tester) async {
+      // [nowProvider]는 resume에만 갱신되는 캐시다(now_provider.dart). 값
+      // override로 덮으면 invalidate가 no-op이라 이 게이트의 invalidate 호출을
+      // 검증할 수 없다 — 팩토리로 덮어 시계가 실제로 흐르게 한다(CodeRabbit —
+      // 화면을 켜 둔 채 자정을 넘기면 build 시점 now가 낡아, 실제로는 날짜가
+      // 지나 한도에서 빠졌어야 할 항목을 아직 안 지났다고 세어 연장이 잘못
+      // 막힌다).
+      DateTime clock = DateTime(2030, 5, 15, 23, 59);
+      final List<Gifticon> wallet = <Gifticon>[
+        for (int i = 0; i < 10; i++)
+          _gifticon(id: 'active-$i')
+              .copyWith(expiryDate: DateTime(2030, 5, 15)),
+      ];
+      final Gifticon target = _gifticon(id: 'expired-1');
+
+      final InMemoryGifticonRepository r =
+          InMemoryGifticonRepository(seed: <Gifticon>[...wallet, target]);
+      final ProviderContainer c = ProviderContainer(overrides: <Override>[
+        nowProvider.overrideWith((Ref ref) => clock),
+        gifticonRepositoryProvider.overrideWithValue(r),
+        rawGifticonsProvider.overrideWith((_) => r.watchGifticons(_ownerId)),
+        sessionUserProvider.overrideWith((_) => Stream<User?>.value(_me)),
+        sharedGifticonIdsProvider
+            .overrideWithValue(const AsyncValue<Set<String>>.data(<String>{})),
+        allSharedProvider.overrideWithValue(const <SharedGifticon>[]),
+      ]);
+      addTearDown(() {
+        c.dispose();
+        r.dispose();
+      });
+      c.read(nowProvider); // 화면이 이미 '어제' 시각을 캐시한 상태
+      clock = DateTime(2030, 5, 16, 0, 1); // 포그라운드로 자정을 넘김(값만 바뀜)
+
+      await mountDetail(tester, target, c: c);
+      await tapExtendAndConfirm(tester);
+
+      final Gifticon after =
+          (await r.getGifticons(_ownerId)).firstWhere((g) => g.id == target.id);
+      expect(after.expiryDate, isNot(target.expiryDate),
+          reason: '어제 만료된 10개는 새 "오늘" 기준으로 한도를 차지하지 않아야 한다');
+    });
   });
 }

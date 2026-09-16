@@ -325,6 +325,16 @@ class GifticonDetailPage extends ConsumerWidget {
     Gifticon g, {
     required DateTime now,
   }) async {
+    // 연장 흐름 전체(날짜 선택기의 하한·상한, 아래 한도 판정)가 최신 시각을
+    // 봐야 한다. 인자로 받은 [now]는 build 시점 값인데, [nowProvider]는 resume
+    // 에만 갱신되는 캐시라 자정을 넘긴 채 화면을 띄워 둔 세션에서 낡을 수 있다
+    // (CodeRabbit) — 낡은 값으로 다른 항목을 재면 실제로는 이미 날짜가 지나
+    // 한도에서 빠졌어야 할 항목을 아직 안 지났다고 세어, 한도 미만인데도
+    // 연장이 잘못 막힌다. 사용자 행동(연장 시도)을 갱신 지점으로 삼는다 —
+    // gifticon_form_state.dart의 submit()과 같은 패턴.
+    ref.invalidate(nowProvider);
+    now = ref.read(nowProvider);
+
     final ExtendDatePick pick = await pickExtendedExpiryDate(
       context,
       currentExpiry: g.expiryDate,
