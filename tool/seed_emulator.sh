@@ -288,15 +288,37 @@ MEMBER_TOKEN="${SEED_TOKEN}"
 echo "그룹 생성 중…"
 seed_group "${OWNER_UID}" "${OWNER_TOKEN}" '방장' "${MEMBER_UID}" '파티원' || exit 1
 
+# 카테고리 라벨 정본 — 스캔 페이지 enum에서 **직접 읽는다.**
+# 기댓값을 여기 리터럴로 적으면 가드의 양쪽이 같은 파일이 되어, enum 라벨이 바뀌어도
+# 검사가 통과한다(#156이 초록불 아래서 재발). sed 패턴은 ASCII이고 한글은 stdout으로만
+# 흐르므로 위 인코딩 관례(네이티브 바이너리에 한글 인자 금지)를 지킨다.
+CATEGORY_SRC='lib/features/scan/widgets/category_tile.dart'
+mapfile -t VALID_CATEGORIES < <(sed -n "s/^  [a-z]*(label: '\([^']*\)'.*/\1/p" "${CATEGORY_SRC}")
+if [[ "${#VALID_CATEGORIES[@]}" -lt 2 ]]; then
+  echo "✗ ${CATEGORY_SRC}에서 카테고리 라벨을 읽지 못했습니다(enum 형식이 바뀌었나요?)."
+  exit 1
+fi
+
+# 시드에 쓸 카테고리가 정본에 있는지 — **쓰기 전에** 막는다(fail-closed). 시드 라벨이
+# 선택지와 다르면 홈 필터에 같은 뜻의 항목이 둘로 갈린다(#156).
+assert_category() {
+  local c="$1" v
+  for v in "${VALID_CATEGORIES[@]}"; do [[ "${v}" == "${c}" ]] && return 0; done
+  echo "✗ 카테고리 '${c}' 는 ${CATEGORY_SRC}의 GifticonCategory 라벨에 없습니다."
+  echo "  정본: ${VALID_CATEGORIES[*]}"
+  exit 1
+}
+for c in '카페/음료' '치킨/피자' '편의점' '기타'; do assert_category "${c}"; done
+
 echo "개인 기프티콘 생성 중…"
 seed_gifticon 'seed-gift-star' "${OWNER_UID}" "${OWNER_TOKEN}" \
-  "${STAR_BRAND}" "${STAR_NAME}" 4500 '카페' "${STAR_BARCODE}" "${EXP_SOON}" 'available' || exit 1
+  "${STAR_BRAND}" "${STAR_NAME}" 4500 '카페/음료' "${STAR_BARCODE}" "${EXP_SOON}" 'available' || exit 1
 seed_gifticon 'seed-gift-bbq' "${OWNER_UID}" "${OWNER_TOKEN}" \
-  'BBQ' '황금올리브 치킨' 20000 '치킨' '' "${EXP_FAR}" 'available' || exit 1
+  'BBQ' '황금올리브 치킨' 20000 '치킨/피자' '' "${EXP_FAR}" 'available' || exit 1
 seed_gifticon 'seed-gift-cu' "${OWNER_UID}" "${OWNER_TOKEN}" \
   'CU' '도시락 교환권' 4800 '편의점' '' "${EXP_PAST}" 'expired' || exit 1
 seed_gifticon 'seed-gift-baskin' "${MEMBER_UID}" "${MEMBER_TOKEN}" \
-  "${BASKIN_BRAND}" "${BASKIN_NAME}" 8900 '디저트' "${BASKIN_BARCODE}" "${EXP_MID}" 'available' || exit 1
+  "${BASKIN_BRAND}" "${BASKIN_NAME}" 8900 '기타' "${BASKIN_BARCODE}" "${EXP_MID}" 'available' || exit 1
 
 # 공유 문서는 위 기프티콘과 **같은 변수**를 넘긴다(값을 다시 적지 않는다).
 echo "그룹 공유 중…"
@@ -359,6 +381,25 @@ verify_seed() {
   res=$(curl -s -X GET "${DOCS}/gifticons/seed-gift-star" \
     -H "Authorization: Bearer ${OWNER_TOKEN}")
   expect_contains '기프티콘(스타벅스)' "${res}" '아메리카노 T'
+  # 저장된 category가 위 정본 라벨 그대로인지(쓰기 전 assert_category와 짝 —
+  # 저장 단계의 인코딩 손상·잘못된 인자 전달을 잡는다). 이 스크립트가 라벨을 정하는
+  # 네 문서를 전부 대조하고, 문서 어디든이 아니라 **category 필드에 앵커**한다
+  # ('기타' 같은 짧은 라벨이 다른 필드에 우연히 들어가도 오탐하지 않게).
+  local gc
+  gc=$(tr -d ' \n\r' <<<"${res}")
+  expect_contains '기프티콘 카테고리(스타벅스 → 카페/음료)' "${gc}" '"category":{"stringValue":"카페/음료"}'
+  res=$(curl -s -X GET "${DOCS}/gifticons/seed-gift-bbq" \
+    -H "Authorization: Bearer ${OWNER_TOKEN}")
+  gc=$(tr -d ' \n\r' <<<"${res}")
+  expect_contains '기프티콘 카테고리(BBQ → 치킨/피자)' "${gc}" '"category":{"stringValue":"치킨/피자"}'
+  res=$(curl -s -X GET "${DOCS}/gifticons/seed-gift-cu" \
+    -H "Authorization: Bearer ${OWNER_TOKEN}")
+  gc=$(tr -d ' \n\r' <<<"${res}")
+  expect_contains '기프티콘 카테고리(CU → 편의점)' "${gc}" '"category":{"stringValue":"편의점"}'
+  res=$(curl -s -X GET "${DOCS}/gifticons/seed-gift-baskin" \
+    -H "Authorization: Bearer ${MEMBER_TOKEN}")
+  gc=$(tr -d ' \n\r' <<<"${res}")
+  expect_contains '기프티콘 카테고리(배스킨 → 기타)' "${gc}" '"category":{"stringValue":"기타"}'
 
   # 공유 기프티콘 — 그룹 멤버 양쪽 다 읽혀야 한다.
   res=$(curl -s -X GET "${DOCS}/sharedGifticons/seed-share-baskin" \
