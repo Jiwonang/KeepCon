@@ -14,7 +14,9 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../shared/diagnostics/error_reporter.dart';
 import '../../../shared/diagnostics/report_handled_failure.dart';
+import '../../../shared/providers/error_reporter_provider.dart';
 import '../../../shared/models/join_request.dart';
 import '../../../shared/providers/repositories.dart';
 import '../../../shared/widgets/inline_error_banner.dart';
@@ -91,6 +93,10 @@ class _PendingRowState extends ConsumerState<_PendingRow> {
   Future<void> _decide({required bool approve}) async {
     if (_busy) return;
     final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
+    // 이 행은 대기 목록 스트림의 한 칸이라, 왕복 중 다른 기기의 결정·요청자 취소로
+    // 목록에서 빠질 수 있다(아래 catch의 `mounted` 검사가 그것을 가정한다). 리포터도
+    // `await` 전에 잡는다(`reportHandledFailure` 머리말 기준).
+    final ErrorReporter reporter = ref.read(errorReporterProvider);
     setState(() => _busy = true);
     try {
       final shareRepo = ref.read(shareRepositoryProvider);
@@ -100,7 +106,7 @@ class _PendingRowState extends ConsumerState<_PendingRow> {
         await shareRepo.rejectJoinRequest(widget.request.id);
       }
     } catch (e, s) {
-      reportHandledFailure(ref, e, s,
+      reportHandledFailureTo(reporter, e, s,
           context: approve
               ? 'PendingJoinRequests.approveJoinRequest'
               : 'PendingJoinRequests.rejectJoinRequest');

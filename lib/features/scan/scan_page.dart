@@ -31,7 +31,9 @@ import 'package:keepcon/features/scan/widgets/barcode_scanner_screen.dart';
 import 'package:keepcon/features/scan/widgets/category_tile.dart';
 import 'package:keepcon/features/scan/widgets/scan_method_card.dart';
 import 'package:keepcon/features/scan/widgets/target_tile.dart';
+import 'package:keepcon/shared/diagnostics/error_reporter.dart';
 import 'package:keepcon/shared/diagnostics/report_handled_failure.dart';
+import 'package:keepcon/shared/providers/error_reporter_provider.dart';
 import 'package:keepcon/shared/models/group.dart';
 import 'package:keepcon/shared/providers/my_groups_provider.dart';
 import 'package:keepcon/shared/widgets/inline_error_banner.dart';
@@ -188,6 +190,11 @@ class _ScanPageState extends ConsumerState<ScanPage> {
       source,
       targetGroupId: _resolveTargetGroupId(ref.read(scanTargetGroupsProvider)),
     );
+    // 아래 catch가 `mounted`를 검사한다 — 촬영·인식·폼 왕복 중 이 화면이 사라질 수
+    // 있다는 뜻이므로 리포터를 `await` 전에 잡는다(`reportHandledFailure` 머리말 기준).
+    // ⚠️ 이 catch는 카메라·image_picker 플러그인 뒤라 위젯 테스트로 닿지 않는다 —
+    // 형제 자리들과 달리 회귀 테스트가 없다.
+    final ErrorReporter reporter = ref.read(errorReporterProvider);
 
     MlKitService? mlKitService;
     // 카메라 경로가 만든 프레임 임시 디렉터리. finally에서 지운다
@@ -326,7 +333,7 @@ class _ScanPageState extends ConsumerState<ScanPage> {
       // ML Kit 실패라 사용자가 예외 문자열로 할 수 있는 것이 없다. 진단은 공유
       // 계약의 진입점으로 넘긴다 — 이 자리는 [WidgetRef]가 있어 그대로 쓸 수 있다
       // (컨트롤러 쪽은 [Ref]라 못 쓴다. `gifticon_form_state.dart` 참조).
-      reportHandledFailure(ref, e, s, context: 'ScanPage._openForm');
+      reportHandledFailureTo(reporter, e, s, context: 'ScanPage._openForm');
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(

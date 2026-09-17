@@ -12,7 +12,9 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../shared/diagnostics/error_reporter.dart';
 import '../../../shared/diagnostics/report_handled_failure.dart';
+import '../../../shared/providers/error_reporter_provider.dart';
 import '../../../shared/models/join_request.dart';
 import '../../../shared/providers/repositories.dart';
 import '../../../shared/theme/theme_tokens.dart';
@@ -98,6 +100,11 @@ class _JoinRequestRowState extends ConsumerState<_JoinRequestRow> {
   Future<void> _cancel() async {
     if (_busy) return;
     final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
+    // 이 행은 내 요청 스트림의 한 칸이라 왕복 중 목록에서 빠질 수 있다 — 방장의 승인
+    // (승인된 요청은 위 `visible`에서 걸러진다)·그룹 소멸 캐스케이드·다른 기기의 취소.
+    // (거절은 같은 키로 다시 그려질 뿐 폐기가 아니다.) 아래 catch의 `mounted` 검사가
+    // 그것을 가정하므로 리포터도 `await` 전에 잡는다(`reportHandledFailure` 머리말 기준).
+    final ErrorReporter reporter = ref.read(errorReporterProvider);
     setState(() => _busy = true);
     // try는 저장소 호출만 감싼다 — 취소는 됐는데 스낵바에서 예외가 나면 실패 안내가 떠
     // 사용자가 취소에 실패했다고 오해한다.
@@ -106,7 +113,7 @@ class _JoinRequestRowState extends ConsumerState<_JoinRequestRow> {
           .read(shareRepositoryProvider)
           .cancelJoinRequest(widget.request.id);
     } catch (e, s) {
-      reportHandledFailure(ref, e, s,
+      reportHandledFailureTo(reporter, e, s,
           context: 'MyJoinRequestsCard.cancelJoinRequest');
       if (mounted) setState(() => _busy = false);
       messenger

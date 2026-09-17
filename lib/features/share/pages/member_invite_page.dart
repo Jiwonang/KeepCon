@@ -26,7 +26,9 @@ import 'package:share_plus/share_plus.dart';
 
 import '../../../shared/models/group.dart';
 import '../../../shared/models/user.dart';
+import '../../../shared/diagnostics/error_reporter.dart';
 import '../../../shared/diagnostics/report_handled_failure.dart';
+import '../../../shared/providers/error_reporter_provider.dart';
 import '../../../shared/providers/invite_link_providers.dart';
 import '../../../shared/providers/repositories.dart';
 import '../../../shared/providers/session_provider.dart';
@@ -109,11 +111,14 @@ class _MemberInvitePageState extends ConsumerState<MemberInvitePage> {
   Future<void> _issueCode(String groupId) async {
     if (_issuingCode) return;
     final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
+    // 아래 catch가 `mounted`를 검사한다 — 발급 왕복 중 화면을 떠날 수 있다는 뜻이므로
+    // 리포터도 안내 자원과 함께 `await` 전에 잡는다(`reportHandledFailure` 머리말 기준).
+    final ErrorReporter reporter = ref.read(errorReporterProvider);
     setState(() => _issuingCode = true);
     try {
       await ref.read(shareRepositoryProvider).issueInviteCode(groupId: groupId);
     } catch (e, s) {
-      reportHandledFailure(ref, e, s,
+      reportHandledFailureTo(reporter, e, s,
           context: 'MemberInvitePage.issueInviteCode');
       // `on StateError`로 좁히지 않는다 — 백엔드가 던지는 예외(권한 거부·네트워크)가
       // 그대로 빠져나가면 버튼이 죽은 것처럼 보인다(안내가 아예 안 뜬다).

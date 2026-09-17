@@ -21,7 +21,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../shared/deeplink/app_destination.dart';
 import '../../../shared/models/app_notification.dart';
 import '../../../shared/models/share.dart';
+import '../../../shared/diagnostics/error_reporter.dart';
 import '../../../shared/diagnostics/report_handled_failure.dart';
+import '../../../shared/providers/error_reporter_provider.dart';
 import '../../../shared/providers/deep_link_providers.dart';
 import '../../../shared/providers/group_notifications_provider.dart';
 import '../../../shared/providers/now_provider.dart';
@@ -81,10 +83,15 @@ class _NotificationCenterPageState
   }
 
   Future<void> _markRead(AsyncValue<List<AppNotification>> attempted) async {
+    // `unawaited`로 띄운 작업이라 왕복 중 사용자가 알림 센터를 떠날 수 있다(아래 catch의
+    // `!mounted` 조기 반환이 그것을 가정한다). 리포터를 `await` 전에 잡는다
+    // (`reportHandledFailure` 머리말 기준) — 하필 "보자마자 나간" 실패가 이 경로의
+    // 흔한 표본이다.
+    final ErrorReporter reporter = ref.read(errorReporterProvider);
     try {
       await ref.read(shareRepositoryProvider).markNotificationsRead();
     } catch (e, s) {
-      reportHandledFailure(ref, e, s,
+      reportHandledFailureTo(reporter, e, s,
           context: 'NotificationCenterPage.markNotificationsRead');
       // 실패는 "읽음 처리가 안 된 것"이므로 가드를 소모하지 않은 상태로 되돌린다.
       // 흔한 두 갈래 — ① [StateError]: 세션이 `data(null)`이면 [allNotificationsProvider]가
