@@ -226,5 +226,8 @@ void main() {
     group('[$label] extendSharedExpiry — 스냅샷·원본 동반 연장', () {
       runSharedExpiryExtensionContract(make);
     });
+    group('[$label] shareGifticon — 원본 상태 가드', () {
+      runShareSourceStatusContract(make);
+    });
   });
 }

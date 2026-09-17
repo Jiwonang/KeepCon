@@ -443,6 +443,13 @@ abstract class ShareRepository {
   /// 어느 그룹에든 이미 공유돼 있으면 [StateError]를 던진다(이중 사용·[UsageLog] 다중 발생 방지).
   /// [cancelShare]로 회수하면 다시 공유할 수 있고, 사용 완료([markUsed])된 기프티콘은 재공유되지 않는다.
   ///
+  /// **원본 상태 가드:** 원본을 `GifticonRepository`에서 **다시 읽어**
+  /// `GifticonStatus.available`이 아니면(사용 완료·만료) [StateError]를 던지고 아무것도
+  /// 남기지 않는다. [gifticon]은 화면이 들고 있던 스냅샷이라, 확인 팝업이 떠 있는 사이
+  /// 다른 기기가 원본을 사용 완료로 옮겼을 수 있다 — 그대로 공유하면 멤버가 이미 쓴
+  /// 기프티콘을 매장에서야 알게 된다. 원본을 **찾지 못하면**(데모 시드의 가짜 id 등)
+  /// 이 검사는 건너뛴다 — [markUsed]·[extendSharedExpiry]의 원본 동기화와 같은 규약이다.
+  ///
   /// 그룹 없음/비멤버여도 [StateError].
   Future<SharedGifticon> shareGifticon({
     required String groupId,

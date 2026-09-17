@@ -53,6 +53,10 @@
 /// → 판정을 *만드는* 줄 무보호 → 글자만 보고 줄을 안 봄 → 접두 일치). 소스 검사는
 /// 무엇을 '같다'고 볼지 매번 명시해야 해서 수렴하지 않는다. 행위로 고정하면 그 열거가
 /// 필요 없다.
+///
+/// 그 뒤로 축이 둘 더 붙었다 — `extendSharedExpiry`의 스냅샷·원본 동반 연장
+/// ([runSharedExpiryExtensionContract]), `shareGifticon`의 원본 상태 가드
+/// ([runShareSourceStatusContract]).
 library;
 
 import 'package:flutter_test/flutter_test.dart';
@@ -384,7 +388,6 @@ void runSharedExpiryExtensionContract(ShareBackend Function() makeBackend) {
   /// — 데모 시드처럼 원본이 없는 공유 항목을 재현하기 위함이다.
   Future<Gifticon> makeOriginal({
     DateTime? expiry,
-    GifticonStatus status = GifticonStatus.available,
     bool store = true,
   }) async {
     final Gifticon g = Gifticon(
@@ -396,12 +399,15 @@ void runSharedExpiryExtensionContract(ShareBackend Function() makeBackend) {
       category: '카페',
       expiryDate: expiry ?? oldExpiry,
       registeredAt: DateTime(2025, 1, 1),
-      status: status,
     );
     return store ? backend.gifticons.addGifticon(g) : g;
   }
 
   /// 방장 세션으로 그룹을 만들고 기프티콘 하나를 공유한다.
+  ///
+  /// [status]는 **공유 뒤의** 원본 상태다. 공유 시점에는 원본이 `available`이어야
+  /// 하므로(`shareGifticon`의 원본 상태 가드) available로 공유한 뒤 전이시킨다 —
+  /// "공유해 둔 기프티콘이 그 뒤 만료됐다"는 실제 순서와도 같다.
   Future<(Group, Gifticon, SharedGifticon)> shareOne({
     DateTime? expiry,
     GifticonStatus status = GifticonStatus.available,
@@ -410,13 +416,15 @@ void runSharedExpiryExtensionContract(ShareBackend Function() makeBackend) {
     await asOwner();
     final Group group = await backend.repo
         .createGroup(name: '연장 계약 그룹', emoji: '📄', maxMembers: 5);
-    final Gifticon original = await makeOriginal(
+    Gifticon original = await makeOriginal(
       expiry: expiry,
-      status: status,
       store: storeOriginal,
     );
     final SharedGifticon item =
         await backend.repo.shareGifticon(groupId: group.id, gifticon: original);
+    if (status != GifticonStatus.available) {
+      original = await backend.gifticons.updateStatus(original.id, status);
+    }
     return (group, original, item);
   }
 
@@ -622,5 +630,97 @@ void runSharedExpiryExtensionContract(ShareBackend Function() makeBackend) {
         throwsStateError,
       );
     });
+  });
+}
+
+/// 두 구현이 **같은 답을 내야 하는** `shareGifticon`의 원본 상태 가드 계약.
+///
+/// 호출자가 넘기는 [Gifticon]은 화면이 들고 있던 **스냅샷**이다. 공유 확인 팝업이 떠
+/// 있는 사이 다른 기기가 원본을 사용 완료로 옮기면, 스냅샷은 여전히 `available`이다 —
+/// 그 값을 믿고 공유하면 멤버가 이미 쓴 기프티콘을 매장에서야 알게 된다. 그래서
+/// 판정은 스냅샷이 아니라 저장소의 **현재** 원본으로 한다. 이 축이 그것을 고정한다.
+///
+/// [makeBackend]는 `setUp()`마다 새 백엔드를 만든다.
+void runShareSourceStatusContract(ShareBackend Function() makeBackend) {
+  late ShareBackend backend;
+  late Group group;
+
+  setUp(() async {
+    final ShareBackend created = makeBackend();
+    // 정리는 만들어진 인스턴스에 붙인다(첫 스위트의 ⚠️와 같은 이유).
+    addTearDown(created.stop);
+    backend = created;
+    await backend.auth.signUp(
+      email: 'share-guard@keepcon.test',
+      password: 'keepcon',
+      displayName: '공유자',
+    );
+    group = await backend.repo
+        .createGroup(name: '원본 가드 그룹', emoji: '🛡️', maxMembers: 5);
+  });
+
+  /// 원본을 `available`로 저장하고, 화면이 들고 있을 **그 시점의 스냅샷**을 돌려준다.
+  Future<Gifticon> storeAvailable() => backend.gifticons.addGifticon(Gifticon(
+        id: '',
+        ownerId: backend.auth.currentUser!.id,
+        brand: '스타벅스',
+        productName: '아메리카노 T',
+        price: 4500,
+        category: '카페',
+        expiryDate: DateTime(2030, 1, 1),
+        registeredAt: DateTime(2025, 1, 1),
+      ));
+
+  Future<List<SharedGifticon>> sharedInGroup() =>
+      backend.repo.getSharedGifticons(group.id);
+
+  for (final GifticonStatus moved in <GifticonStatus>[
+    GifticonStatus.used,
+    GifticonStatus.expired,
+  ]) {
+    test('스냅샷은 available이어도 원본이 ${moved.name}면 거부하고 아무것도 남기지 않는다', () async {
+      final Gifticon snapshot = await storeAvailable();
+      // 팝업이 떠 있는 사이 다른 기기가 원본을 옮겼다.
+      await backend.gifticons.updateStatus(snapshot.id, moved);
+      expect(snapshot.status, GifticonStatus.available,
+          reason: '화면이 들고 있는 값은 옛 스냅샷이다 — 이 테스트의 전제');
+
+      await expectLater(
+        backend.repo.shareGifticon(groupId: group.id, gifticon: snapshot),
+        throwsStateError,
+      );
+      expect(await sharedInGroup(), isEmpty,
+          reason: '거부된 공유가 레코드를 남기면 멤버 화면에 쓸 수 없는 항목이 뜬다');
+    });
+  }
+
+  test('원본이 available이면 그대로 공유된다(가드가 정상 경로를 막지 않는다)', () async {
+    final Gifticon snapshot = await storeAvailable();
+
+    final SharedGifticon item =
+        await backend.repo.shareGifticon(groupId: group.id, gifticon: snapshot);
+
+    expect(item.gifticonId, snapshot.id);
+    expect(await sharedInGroup(), hasLength(1));
+  });
+
+  test('원본을 찾지 못하면 검사를 건너뛴다 — 원본 동기화 경로와 같은 규약', () async {
+    // 데모 시드처럼 저장소에 없는 id. 계약은 이 경우를 "건너뛴다"로 정했다
+    // (markUsed·extendSharedExpiry의 원본 동기화와 같다).
+    final Gifticon ghost = Gifticon(
+      id: 'ghost-share-guard',
+      ownerId: backend.auth.currentUser!.id,
+      brand: '스타벅스',
+      productName: '아메리카노 T',
+      price: 4500,
+      category: '카페',
+      expiryDate: DateTime(2030, 1, 1),
+      registeredAt: DateTime(2025, 1, 1),
+    );
+
+    final SharedGifticon item =
+        await backend.repo.shareGifticon(groupId: group.id, gifticon: ghost);
+
+    expect(item.gifticonId, ghost.id);
   });
 }

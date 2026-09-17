@@ -595,6 +595,9 @@ class InMemoryShareRepository implements ShareRepository {
     required Gifticon gifticon,
   }) async {
     final User me = _requireUser();
+    // 원본 상태 가드(계약 참조) — 다른 가드보다 먼저 둔다. Firebase 구현은 이 조회를
+    // 트랜잭션 앞에서 할 수밖에 없어서, 순서를 맞춰야 같은 입력에 같은 오류가 먼저 난다.
+    await _requireShareableOriginal(gifticon.id);
     final Group g = _requireGroup(groupId);
     if (!g.isMember(me.id)) {
       throw StateError('Not a member of group: $groupId');
@@ -805,6 +808,19 @@ class InMemoryShareRepository implements ShareRepository {
       await _gifticons.updateStatus(gifticonId, GifticonStatus.used);
     } on Exception {
       return;
+    }
+  }
+
+  /// [shareGifticon]의 원본 상태 가드 — 원본이 **지금** `available`이 아니면 던진다.
+  ///
+  /// 호출자가 넘긴 스냅샷이 아니라 저장소의 현재 값을 본다(계약 참조). 원본이 조회되지
+  /// 않으면(데모 시드의 가짜 gifticonId) 건너뛴다 — 아래 동기화 헬퍼들과 같은 규약이다.
+  Future<void> _requireShareableOriginal(String gifticonId) async {
+    final Gifticon? original = await _gifticons.getGifticonById(gifticonId);
+    if (original != null && original.status != GifticonStatus.available) {
+      throw StateError(
+        'Gifticon is not available: $gifticonId (${original.status.name})',
+      );
     }
   }
 
