@@ -30,13 +30,18 @@ import 'package:keepcon/shared/providers/repositories.dart';
 import 'package:keepcon/shared/repositories/impl/in_memory_auth_repository.dart';
 import 'package:keepcon/shared/repositories/impl/in_memory_gifticon_repository.dart';
 
-/// 보고된 라벨만 기록한다.
+/// 보고된 라벨을 기록하고, 첫 보고가 들어오면 [reported]를 완료한다.
 class _SpyErrorReporter implements ErrorReporter {
   final List<String> contexts = <String>[];
 
+  /// 첫 보고 도착 신호 — 고정 지연 대신 이것을 기다린다.
+  final Completer<void> reported = Completer<void>();
+
   @override
-  void report(Object error, StackTrace stack, {required String context}) =>
-      contexts.add(context);
+  void report(Object error, StackTrace stack, {required String context}) {
+    contexts.add(context);
+    if (!reported.isCompleted) reported.complete();
+  }
 }
 
 void main() {
@@ -104,10 +109,14 @@ void main() {
     await tester.pump();
     expect(find.byType(ScanPage), findsNothing, reason: '화면이 내려간 것이 이 테스트의 전제');
 
-    // 플러그인 채널 응답은 실제 비동기라 가짜 시계 밖에서 풀어 준다.
+    // 플러그인 채널 응답은 실제 비동기라 가짜 시계 밖에서 풀어 준다. 고정 지연은
+    // 느린 CI에서 보고보다 먼저 끝날 수 있으므로(CodeRabbit) 보고 도착을 기다린다.
+    // 타임아웃은 조용히 넘긴다 — 회귀가 나면 아래 단언이 Expected/Actual로 말하게
+    // 두는 편이 `TimeoutException` 한 줄보다 진단이 쉽다.
     await tester.runAsync(() async {
       gate.complete();
-      await Future<void>.delayed(const Duration(milliseconds: 50));
+      await spy.reported.future
+          .timeout(const Duration(seconds: 5), onTimeout: () {});
     });
     await tester.pumpAndSettle();
 
