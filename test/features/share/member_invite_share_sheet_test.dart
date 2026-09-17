@@ -17,6 +17,8 @@
 ///   죽은 링크를 배포하는 회귀 고정.
 library;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -51,6 +53,23 @@ class _FixedGroupsShareRepository implements ShareRepository {
   dynamic noSuchMethod(Invocation invocation) => throw UnsupportedError(
         '이 테스트는 watchGroups만 사용한다 (호출됨: ${invocation.memberName})',
       );
+}
+
+/// 초대코드 발급이 [gate]가 풀릴 때까지 **공중에 떠 있다가** 실패하는 저장소 —
+/// 발급 왕복 중 화면을 떠나는 경우를 재현한다. 나머지는 계약 구현 그대로다.
+class _GatedIssueShareRepository extends InMemoryShareRepository {
+  _GatedIssueShareRepository({
+    required super.authRepository,
+    required super.gifticonRepository,
+  });
+
+  final Completer<void> gate = Completer<void>();
+
+  @override
+  Future<Group> issueInviteCode({required String groupId}) async {
+    await gate.future;
+    throw StateError('발급 실패');
+  }
 }
 
 /// 보고된 라벨을 기록하는 리포터.
@@ -160,6 +179,50 @@ void main() {
     );
     await tester.pumpAndSettle();
   }
+
+  testWidgets('초대코드 발급 도중 화면을 떠나도 실패의 진단이 남는다', (WidgetTester tester) async {
+    // 발급 catch는 `mounted`를 검사한다 — 왕복 중 화면을 떠날 수 있다는 뜻이다. 그때
+    // `reportHandledFailure(ref, …)`는 죽은 `ref`에서 던져 조용히 아무것도 남기지 않으므로,
+    // 리포터를 `await` 전에 잡아 두지 않았다면 이 단언이 빈 목록으로 깨진다.
+    final _GatedIssueShareRepository gated = _GatedIssueShareRepository(
+      authRepository: auth,
+      gifticonRepository: gifticons,
+    );
+    addTearDown(gated.dispose);
+    final Group g = await gated.createGroup(name: '발급', emoji: '🔑');
+
+    // 같은 스코프를 유지한 채 **페이지만** 내린다 — 스코프를 통째로 버리면 실제
+    // 화면 이탈과 다른 조건이 된다.
+    final List<Override> overrides = <Override>[
+      authRepositoryProvider.overrideWithValue(auth),
+      gifticonRepositoryProvider.overrideWithValue(gifticons),
+      errorReporterProvider.overrideWithValue(reporter),
+      shareRepositoryProvider.overrideWithValue(gated),
+      inviteOriginProvider.overrideWithValue(testInviteOrigin),
+    ];
+    await tester.pumpWidget(ProviderScope(
+      overrides: overrides,
+      child: MaterialApp(home: MemberInvitePage(groupId: g.id)),
+    ));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('초대코드 발급하기'));
+    // 발급 중에는 스피너가 돌아 `pumpAndSettle`이 멈춘다 — 프레임 단위로 진행한다.
+    await tester.pump();
+
+    await tester.pumpWidget(ProviderScope(
+      overrides: overrides,
+      child: const MaterialApp(home: SizedBox()),
+    ));
+    await tester.pump();
+    expect(find.byType(MemberInvitePage), findsNothing,
+        reason: '화면이 내려간 것이 이 테스트의 전제');
+
+    gated.gate.complete();
+    await tester.pumpAndSettle();
+
+    expect(reporter.contexts, <String>['MemberInvitePage.issueInviteCode']);
+  });
 
   testWidgets('하단 CTA를 누르면 공유 시트가 열리고 클립보드는 건드리지 않는다',
       (WidgetTester tester) async {

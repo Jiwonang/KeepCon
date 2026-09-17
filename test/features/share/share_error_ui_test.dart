@@ -33,10 +33,12 @@ import 'package:keepcon/features/share/pages/shared_gifticon_detail_page.dart';
 import 'package:keepcon/features/share/pages/usage_log_page.dart';
 import 'package:keepcon/features/share/share_page.dart';
 import 'package:keepcon/features/share/widgets/share_sheets.dart';
+import 'package:keepcon/shared/diagnostics/error_reporter.dart';
 import 'package:keepcon/shared/models/group.dart';
 import 'package:keepcon/shared/models/join_request.dart';
 import 'package:keepcon/shared/models/share.dart';
 import 'package:keepcon/shared/models/user.dart';
+import 'package:keepcon/shared/providers/error_reporter_provider.dart';
 import 'package:keepcon/shared/providers/repositories.dart';
 import 'package:keepcon/shared/providers/session_provider.dart';
 import 'package:keepcon/shared/repositories/auth_repository.dart';
@@ -179,8 +181,18 @@ class _FlakyShareRepository implements ShareRepository {
   Stream<DateTime?> watchNotificationsReadAt(String userId) =>
       inner.watchNotificationsReadAt(userId);
 
+  /// 설정하면 [markNotificationsRead]가 이 게이트가 풀릴 때까지 **공중에 떠 있다가**
+  /// 실패한다 — 읽음 처리 왕복 중 화면을 떠나는 경우 재현용.
+  Completer<void>? markReadGate;
+
   @override
   Future<void> markNotificationsRead() {
+    final Completer<void>? gate = markReadGate;
+    if (gate != null) {
+      return gate.future.then<void>(
+        (_) => throw Exception('simulated write failure'),
+      );
+    }
     if (markReadFails) {
       throw Exception('simulated write failure'); // 비-StateError 실패 계열.
     }
@@ -191,6 +203,16 @@ class _FlakyShareRepository implements ShareRepository {
   dynamic noSuchMethod(Invocation invocation) => throw UnimplementedError(
         '이 테스트가 쓰지 않는 계약 메서드가 호출됐다: ${invocation.memberName}',
       );
+}
+
+/// 보고된 라벨만 기록하는 리포터 — 화면 이탈 뒤 보고가 남는지 단언할 때 쓴다.
+class _RecordingReporter implements ErrorReporter {
+  final List<String> contexts = <String>[];
+
+  @override
+  void report(Object error, StackTrace stack, {required String context}) {
+    contexts.add(context);
+  }
 }
 
 /// 세션 스트림을 **"데이터 방출 뒤 에러"(순단)** 로 만드는 [AuthRepository] 래퍼.
@@ -417,6 +439,43 @@ void main() {
 
       expect(find.text('새 기프티콘'), findsOneWidget);
       expect(await readAt(), isNotNull, reason: '정상 경로의 기존 동작은 그대로다');
+    });
+
+    testWidgets('읽음 처리 도중 화면을 떠나도 실패의 진단이 남는다', (WidgetTester tester) async {
+      // 읽음 처리는 `unawaited`로 떠 있어 사용자가 기다리지 않고 나갈 수 있다(catch의
+      // `!mounted` 조기 반환이 그것을 가정한다). 그때 `reportHandledFailure(ref, …)`는
+      // 죽은 `ref`에서 던져 조용히 아무것도 남기지 않는다 — 리포터를 `await` 전에
+      // 잡아 두지 않았다면 이 단언이 빈 목록으로 깨진다.
+      final Completer<void> gate = Completer<void>();
+      repo.markReadGate = gate;
+      final _RecordingReporter spy = _RecordingReporter();
+      // 같은 스코프를 유지한 채 **페이지만** 내린다(실제 화면 이탈과 같은 조건).
+      final List<Override> overrides = <Override>[
+        authRepositoryProvider.overrideWithValue(sessionAuth),
+        gifticonRepositoryProvider.overrideWithValue(gifticons),
+        shareRepositoryProvider.overrideWithValue(repo),
+        errorReporterProvider.overrideWithValue(spy),
+      ];
+      await tester.pumpWidget(ProviderScope(
+        overrides: overrides,
+        child: const MaterialApp(home: NotificationCenterPage()),
+      ));
+      await tester.pumpAndSettle();
+      expect(find.text('새 기프티콘'), findsOneWidget,
+          reason: '데이터가 방출돼 읽음 처리가 떠 있는 것이 이 테스트의 전제');
+
+      await tester.pumpWidget(ProviderScope(
+        overrides: overrides,
+        child: const MaterialApp(home: SizedBox()),
+      ));
+      await tester.pump();
+      expect(find.byType(NotificationCenterPage), findsNothing);
+
+      gate.complete();
+      await tester.pumpAndSettle();
+
+      expect(spy.contexts,
+          <String>['NotificationCenterPage.markNotificationsRead']);
     });
 
     testWidgets('비-StateError 쓰기 실패도 가드를 되돌린다(unhandled로 새지 않는다)',

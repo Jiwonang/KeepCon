@@ -101,9 +101,14 @@ class _StubShareRepository implements ShareRepository {
     await cancelGate.future;
   }
 
+  /// 설정하면 승인이 이 게이트가 풀릴 때까지 **공중에 떠 있다가** 실패한다 —
+  /// 왕복 중 행이 목록에서 빠지는 경우를 재현할 때 쓴다.
+  Completer<void>? approveGate;
+
   @override
   Future<Group> approveJoinRequest(String id) async {
     approved.add(id);
+    if (approveGate != null) await approveGate!.future;
     throw StateError('정원이 찼습니다'); // 승인 실패 경로를 재현한다
   }
 
@@ -273,6 +278,47 @@ void main() {
     expect(left.onPressed, isNotNull, reason: '남은 행이 앞 행의 _busy 를 물려받았다');
   });
 
+  testWidgets('취소 도중 행이 목록에서 빠져도 실패의 진단이 남는다', (WidgetTester tester) async {
+    // 왕복 중 방장이 승인하면 그 요청은 목록에서 걸러져 행이 폐기된다. 그때
+    // `reportHandledFailure(ref, …)`는 죽은 `ref`에서 던져 조용히 아무것도 남기지
+    // 않는다 — 리포터를 `await` 전에 잡아 두지 않았다면 이 단언이 빈 목록으로 깨진다.
+    final _StubShareRepository share = _StubShareRepository()
+      ..useMineController = true;
+    addTearDown(share.mineController.close);
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: <Override>[
+          authRepositoryProvider.overrideWithValue(auth),
+          shareRepositoryProvider.overrideWithValue(share),
+          errorReporterProvider.overrideWithValue(reporter),
+        ],
+        child: const MaterialApp(
+          home: Scaffold(body: MyJoinRequestsCard()),
+        ),
+      ),
+    );
+    await tester.pump();
+    share.mineController.add(<JoinRequest>[_req('a')]);
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.widgetWithText(TextButton, '취소'));
+    await tester.pump(); // 취소는 공중에 떠 있다.
+
+    // 그 사이 방장이 승인 — 승인된 요청은 카드에서 걸러지므로 행이 사라진다.
+    share.mineController
+        .add(<JoinRequest>[_req('a', status: JoinRequestStatus.approved)]);
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(TextButton, '취소 중…'), findsNothing,
+        reason: '행이 폐기된 것이 이 테스트의 전제');
+
+    share.cancelGate.completeError(StateError('이미 처리된 요청'));
+    await tester.pumpAndSettle();
+
+    expect(reporter.contexts, <String>['MyJoinRequestsCard.cancelJoinRequest']);
+    // 안내 자원도 `await` 전에 잡혀 있어 사용자 안내는 그대로 뜬다.
+    expect(find.text('요청을 취소하지 못했어요. 다시 시도해 주세요.'), findsOneWidget);
+  });
+
   group('방장 승인 목록', () {
     testWidgets('대기 요청을 이름과 함께 보여준다', (WidgetTester tester) async {
       final _StubShareRepository share = _StubShareRepository(
@@ -384,6 +430,49 @@ void main() {
           tester.widget<FilledButton>(find.widgetWithText(FilledButton, '승인'));
       expect(approve.onPressed, isNotNull,
           reason: '남은 행의 승인 버튼이 앞 행의 처리 중 상태를 물려받았다');
+    });
+
+    testWidgets('승인 도중 행이 목록에서 빠져도 실패의 진단이 남는다', (WidgetTester tester) async {
+      // 대기 목록은 `status == pending` 질의라, 왕복 중 요청자가 취소하거나 다른
+      // 기기에서 결정하면 행이 폐기된다. 형제(요청자 카드)와 같은 이유로, 리포터를
+      // `await` 전에 잡아 두지 않았다면 보고가 조용히 빈다.
+      final _StubShareRepository share = _StubShareRepository()
+        ..useController = true
+        ..approveGate = Completer<void>();
+      addTearDown(share.pendingController.close);
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: <Override>[
+            authRepositoryProvider.overrideWithValue(auth),
+            shareRepositoryProvider.overrideWithValue(share),
+            errorReporterProvider.overrideWithValue(reporter),
+          ],
+          child: const MaterialApp(
+            home: Scaffold(
+              body: PendingJoinRequestsSection(groupId: 'g-secret'),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      share.pendingController.add(<JoinRequest>[_req('a', displayName: '지원')]);
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.widgetWithText(FilledButton, '승인'));
+      await tester.pump(); // 승인은 공중에 떠 있다.
+
+      // 그 사이 요청자가 취소 — 대기 목록에서 빠진다.
+      share.pendingController.add(const <JoinRequest>[]);
+      await tester.pumpAndSettle();
+      expect(find.text('지원'), findsNothing, reason: '행이 폐기된 것이 이 테스트의 전제');
+
+      share.approveGate!.complete();
+      await tester.pumpAndSettle();
+
+      expect(share.approved, <String>['a']);
+      expect(reporter.contexts,
+          <String>['PendingJoinRequests.approveJoinRequest']);
+      expect(find.textContaining('정원이 찼거나'), findsOneWidget);
     });
 
     testWidgets('에러를 빈 목록으로 접지 않는다 — 방장이 대기자를 지나치면 안 된다',
