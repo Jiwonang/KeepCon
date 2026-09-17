@@ -163,6 +163,24 @@ void main() {
       expect(container.read(gifticonStatsProvider).expiringSoonCount, 2);
       expect(container.read(expiringSoonGifticonsProvider).length, 2);
     });
+
+    test('보유중·총금액은 날짜가 지난 것을 세지 않는다 — 당일 만료는 아직 센다', () async {
+      // status를 expired로 옮기는 주체가 없어 만료품도 available 그대로다(#175).
+      // 카드는 날짜로 만료를 그리고 스캔 한도 게이트도 날짜로 거르므로, 통계만
+      // status로 세면 "보유중 10"인데 11번째가 저장되는 모순이 난다.
+      final ProviderContainer container = containerWith(<Gifticon>[
+        g('a', daysLeft: 30),
+        g('b', daysLeft: 0), // 당일 만료 — "그 날까지"는 그 날을 포함한다
+        g('c', daysLeft: -1), // 어제 만료 — 빠진다
+        g('d', daysLeft: 30, status: GifticonStatus.used), // 사용 완료 — 빠진다
+      ]);
+      container.listen<GifticonStats>(gifticonStatsProvider, (_, __) {});
+      await pumpEventQueue();
+
+      final GifticonStats stats = container.read(gifticonStatsProvider);
+      expect(stats.holdingCount, 2);
+      expect(stats.totalPrice, 4500 * 2);
+    });
   });
 
   group('만료 배너 — 렌더링', () {

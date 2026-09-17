@@ -2,12 +2,17 @@
 ///
 /// 통계는 **소비자(main)** 가 원천 목록에서 직접 계산한다(계약 매트릭스: 통계는 소비자 계산).
 /// 계약 [Gifticon] 필드만 참조한다:
-/// - 보유중  : [GifticonStatus.available] 개수
+/// - 보유중  : [GifticonStatus.available] 이면서 날짜상 만료가 아닌 것의 개수
 /// - 만료임박: available 이면서 [isExpiringSoon] 판정을 통과한 개수
-/// - 총금액  : available 기프티콘 [Gifticon.price] 합(원, KRW)
+/// - 총금액  : 보유중 기프티콘 [Gifticon.price] 합(원, KRW)
 ///
 /// 만료 판정은 계약(`shared/util/expiry_policy.dart`)에 위임한다 — 카드·알림과 같은
 /// 답을 내야 하므로 이 파일이 자체 기준을 갖지 않는다.
+///
+/// 보유중이 **날짜도 보는 이유**: `status`를 expired로 옮기는 주체가 없어 만료품도
+/// 저장값은 available 그대로다(#175). 카드는 이미 날짜로 만료를 그리고, 스캔의 무료
+/// 한도 게이트도 날짜상 만료를 세지 않으므로, 여기만 status로 세면 "보유중 10"인데
+/// 11번째가 저장되는 모순이 난다.
 library;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -21,7 +26,7 @@ import '../../../shared/providers/now_provider.dart';
 
 /// 홈 요약 통계 값 객체.
 class GifticonStats {
-  /// 보유중(사용가능) 개수.
+  /// 보유중(사용가능이면서 날짜상 만료 아님) 개수.
   final int holdingCount;
 
   /// 만료 임박(사용가능 & [expirySoonDays]일 이내) 개수. 이미 만료된 것은 빠진다.
@@ -81,11 +86,14 @@ final gifticonStatsProvider = Provider<GifticonStats>((ref) {
   final List<Gifticon> raw =
       ref.watch(rawGifticonsProvider).valueOrNull ?? const [];
   final int soon = ref.watch(expiringSoonGifticonsProvider).length;
+  // 시각은 [nowProvider] 하나 — 카드·배너·한도 게이트와 같은 "오늘"로 판정한다.
+  final DateTime now = ref.watch(nowProvider);
 
   int holding = 0;
   int total = 0;
   for (final Gifticon g in raw) {
     if (g.status != GifticonStatus.available) continue;
+    if (isExpiredByDate(g.expiryDate, now: now)) continue;
     holding += 1;
     total += g.price;
   }

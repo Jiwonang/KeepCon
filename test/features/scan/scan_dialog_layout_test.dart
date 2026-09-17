@@ -20,11 +20,13 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:keepcon/app/app_localization.dart';
 import 'package:keepcon/features/scan/pages/gifticon_form_page.dart';
 import 'package:keepcon/features/scan/scan_page.dart';
 import 'package:keepcon/features/scan/state/gifticon_form_state.dart';
 import 'package:keepcon/shared/models/gifticon.dart';
 import 'package:keepcon/shared/models/user.dart';
+import 'package:keepcon/shared/providers/now_provider.dart';
 import 'package:keepcon/shared/providers/repositories.dart';
 import 'package:keepcon/shared/repositories/impl/in_memory_auth_repository.dart';
 import 'package:keepcon/shared/repositories/impl/in_memory_gifticon_repository.dart';
@@ -68,6 +70,12 @@ void main() {
           InMemoryGifticonRepository(seed: seed),
         ),
         authRepositoryProvider.overrideWithValue(InMemoryAuthRepository()),
+        // 한도 계산이 날짜상 만료를 거르므로(#175) '지금'을 고정한다 — 안 하면
+        // [filledWallet]의 만료일(2030-01-01)이 지나는 날 한도 픽스처가 달력 때문에
+        // 한도에 못 미쳐 이 레이아웃 테스트가 빨개진다. [filledWallet]보다 앞이면서
+        // 실제 오늘과도 한참 떨어뜨린다 — 프로덕션이 이 provider를 무시하고
+        // `DateTime.now()`를 읽으면 그때 들킨다(`expiry_banner_test.dart`와 같은 규약).
+        nowProvider.overrideWithValue(DateTime(2029, 5, 15, 12)),
       ],
     );
     addTearDown(container.dispose);
@@ -75,7 +83,15 @@ void main() {
     await tester.pumpWidget(
       UncontrolledProviderScope(
         container: container,
-        child: MaterialApp(theme: AppTheme.light, home: const ScanPage()),
+        // 실제 앱과 같은 로케일(#147) — 피커 버튼이 '확인/취소'로 그려져야
+        // 좁은 폭 오버플로 단언이 실제 라벨을 잰다.
+        child: MaterialApp(
+          theme: AppTheme.light,
+          locale: appLocale,
+          supportedLocales: appSupportedLocales,
+          localizationsDelegates: appLocalizationsDelegates,
+          home: const ScanPage(),
+        ),
       ),
     );
     await tester.pumpAndSettle();
@@ -101,7 +117,7 @@ void main() {
 
     await tester.tap(find.text('날짜를 선택해 주세요'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('OK'));
+    await tester.tap(find.text('확인'));
     await tester.pumpAndSettle();
 
     await tester.tap(find.widgetWithText(ElevatedButton, '저장하기'));

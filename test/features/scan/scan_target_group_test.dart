@@ -19,6 +19,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:keepcon/app/app_localization.dart';
 import 'package:keepcon/features/scan/scan_page.dart';
 import 'package:keepcon/features/scan/state/gifticon_form_state.dart';
 import 'package:keepcon/features/scan/state/scan_target_group_state.dart';
@@ -459,6 +460,10 @@ void main() {
           container: container,
           child: MaterialApp(
             theme: AppTheme.light,
+            // 실제 앱과 같은 로케일(#147) — 날짜 피커가 '확인/취소'로 뜬다.
+            locale: appLocale,
+            supportedLocales: appSupportedLocales,
+            localizationsDelegates: appLocalizationsDelegates,
             home: const ScanPage(),
           ),
         ),
@@ -527,7 +532,7 @@ void main() {
 
       await tester.tap(find.text('날짜를 선택해 주세요'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('OK'));
+      await tester.tap(find.text('확인'));
       await tester.pumpAndSettle();
 
       await tester.tap(find.widgetWithText(ElevatedButton, '저장하기'));

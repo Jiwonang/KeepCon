@@ -19,6 +19,7 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:keepcon/app/app_localization.dart';
 import 'package:keepcon/features/scan/scan_page.dart';
 import 'package:keepcon/features/scan/state/gifticon_form_state.dart';
 import 'package:keepcon/shared/providers/now_provider.dart';
@@ -46,7 +47,14 @@ void main() {
     await tester.pumpWidget(
       UncontrolledProviderScope(
         container: container,
-        child: MaterialApp(theme: AppTheme.light, home: const ScanPage()),
+        // 실제 앱과 같은 로케일(#147) — 날짜 피커가 '확인/취소'로 뜬다.
+        child: MaterialApp(
+          theme: AppTheme.light,
+          locale: appLocale,
+          supportedLocales: appSupportedLocales,
+          localizationsDelegates: appLocalizationsDelegates,
+          home: const ScanPage(),
+        ),
       ),
     );
     await tester.pumpAndSettle();
