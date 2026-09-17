@@ -61,6 +61,8 @@ import 'error_reporter.dart';
 /// 사용자 데이터(이름·토큰·기프티콘 내용)는 넣지 않는다 — 로그는 남고 퍼진다.
 ///
 /// ```dart
+/// // 형태 예시다. 이 자리는 머리말 기준으로는 "폐기될 수 있다"(그룹 상세 본문)지만
+/// // 일괄 전환하지 않은 기존 자리다 — 새 코드의 본보기로 삼지 않는다.
 /// try {
 ///   await ref.read(shareRepositoryProvider).leaveGroup(group.id);
 /// } catch (e, s) {

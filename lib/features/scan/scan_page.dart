@@ -192,8 +192,8 @@ class _ScanPageState extends ConsumerState<ScanPage> {
     );
     // 아래 catch가 `mounted`를 검사한다 — 촬영·인식·폼 왕복 중 이 화면이 사라질 수
     // 있다는 뜻이므로 리포터를 `await` 전에 잡는다(`reportHandledFailure` 머리말 기준).
-    // ⚠️ 이 catch는 카메라·image_picker 플러그인 뒤라 위젯 테스트로 닿지 않는다 —
-    // 형제 자리들과 달리 회귀 테스트가 없다.
+    // 갤러리 경로의 플러그인 채널을 막아 화면을 내린 뒤 실패시키는 회귀 테스트가
+    // `test/features/scan/scan_open_form_report_test.dart`에 있다.
     final ErrorReporter reporter = ref.read(errorReporterProvider);
 
     MlKitService? mlKitService;
@@ -331,8 +331,8 @@ class _ScanPageState extends ConsumerState<ScanPage> {
     } catch (e, s) {
       // **원인은 로그로, 화면에는 다음 행동만.** 여기 오는 것은 이미지 디코딩·
       // ML Kit 실패라 사용자가 예외 문자열로 할 수 있는 것이 없다. 진단은 공유
-      // 계약의 진입점으로 넘긴다 — 이 자리는 [WidgetRef]가 있어 그대로 쓸 수 있다
-      // (컨트롤러 쪽은 [Ref]라 못 쓴다. `gifticon_form_state.dart` 참조).
+      // 계약의 진입점으로 넘긴다 — 왕복 중 화면이 사라질 수 있어 `await` 전에 잡아 둔
+      // 리포터로 보낸다(위 `reporter` 선언 참조. 컨트롤러 쪽은 `gifticon_form_state.dart`).
       reportHandledFailureTo(reporter, e, s, context: 'ScanPage._openForm');
 
       if (!mounted) return;
