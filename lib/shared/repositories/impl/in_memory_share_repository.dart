@@ -597,7 +597,11 @@ class InMemoryShareRepository implements ShareRepository {
     final User me = _requireUser();
     // 원본 상태 가드(계약 참조) — 다른 가드보다 먼저 둔다. Firebase 구현은 이 조회를
     // 트랜잭션 앞에서 할 수밖에 없어서, 순서를 맞춰야 같은 입력에 같은 오류가 먼저 난다.
-    await _requireShareableOriginal(gifticon.id);
+    // 레코드도 스냅샷이 아니라 이 **현재 원본**으로 만든다 — 팝업 사이 다른 기기가 연장한
+    // 만료일이 그룹에 옛 날짜로 실리면, `extendSharedExpiry`가 막으려는 스냅샷·원본
+    // 어긋남이 공유 시점에 생긴다. 원본이 없으면(데모 시드) 스냅샷으로 폴백한다.
+    final Gifticon source =
+        await _requireShareableOriginal(gifticon.id) ?? gifticon;
     final Group g = _requireGroup(groupId);
     if (!g.isMember(me.id)) {
       throw StateError('Not a member of group: $groupId');
@@ -614,11 +618,11 @@ class InMemoryShareRepository implements ShareRepository {
       groupId: groupId,
       gifticonId: gifticon.id,
       sharedByUserId: me.id,
-      brand: gifticon.brand,
-      productName: gifticon.productName,
-      expiryDate: gifticon.expiryDate,
+      brand: source.brand,
+      productName: source.productName,
+      expiryDate: source.expiryDate,
       status: ShareStatus.available,
-      barcode: gifticon.barcode,
+      barcode: source.barcode,
     );
     _sharedByGroup
         .putIfAbsent(groupId, () => <SharedGifticon>[])
@@ -627,8 +631,8 @@ class InMemoryShareRepository implements ShareRepository {
       groupId: groupId,
       type: GroupNotificationType.registered,
       title: '새 기프티콘 공유',
-      message: '${me.displayName}님이 ${gifticon.brand} ${gifticon.productName}'
-          '${gifticon.productName.eulReul} 공유했어요.',
+      message: '${me.displayName}님이 ${source.brand} ${source.productName}'
+          '${source.productName.eulReul} 공유했어요.',
     );
     _emit();
     return shared;
@@ -814,14 +818,17 @@ class InMemoryShareRepository implements ShareRepository {
   /// [shareGifticon]의 원본 상태 가드 — 원본이 **지금** `available`이 아니면 던진다.
   ///
   /// 호출자가 넘긴 스냅샷이 아니라 저장소의 현재 값을 본다(계약 참조). 원본이 조회되지
-  /// 않으면(데모 시드의 가짜 gifticonId) 건너뛴다 — 아래 동기화 헬퍼들과 같은 규약이다.
-  Future<void> _requireShareableOriginal(String gifticonId) async {
+  /// 않으면(데모 시드의 가짜 gifticonId) 건너뛰고 `null`을 돌려준다 — 아래 동기화
+  /// 헬퍼들과 같은 규약이다. 통과하면 읽은 원본을 돌려줘, 호출자가 레코드를 그 값으로
+  /// 만들게 한다(스냅샷의 옛 만료일을 싣지 않도록).
+  Future<Gifticon?> _requireShareableOriginal(String gifticonId) async {
     final Gifticon? original = await _gifticons.getGifticonById(gifticonId);
     if (original != null && original.status != GifticonStatus.available) {
       throw StateError(
         'Gifticon is not available: $gifticonId (${original.status.name})',
       );
     }
+    return original;
   }
 
   /// 원본 [Gifticon]의 만료일을 함께 옮긴다.

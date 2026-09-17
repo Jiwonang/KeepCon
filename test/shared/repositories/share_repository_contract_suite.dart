@@ -704,6 +704,24 @@ void runShareSourceStatusContract(ShareBackend Function() makeBackend) {
     expect(await sharedInGroup(), hasLength(1));
   });
 
+  test('레코드는 스냅샷이 아니라 현재 원본의 만료일로 만든다', () async {
+    // 팝업이 떠 있는 사이 다른 기기가 원본을 연장했다. 스냅샷의 옛 만료일을 실으면
+    // 그룹 화면과 개인 목록이 같은 기프티콘을 두고 다른 만료일을 말한다 —
+    // `extendSharedExpiry`가 "원본 먼저"로 막으려는 바로 그 어긋남이다.
+    final Gifticon snapshot = await storeAvailable();
+    final DateTime extended = DateTime(2031, 6, 1);
+    await backend.gifticons.extendExpiry(snapshot.id, extended);
+    expect(snapshot.expiryDate, isNot(extended),
+        reason: '화면이 들고 있는 값은 옛 만료일이다 — 이 테스트의 전제');
+
+    final SharedGifticon item =
+        await backend.repo.shareGifticon(groupId: group.id, gifticon: snapshot);
+
+    expect(item.expiryDate, extended);
+    expect((await sharedInGroup()).single.expiryDate, extended,
+        reason: '돌려준 값뿐 아니라 저장된 레코드도 현재 원본을 따라야 한다');
+  });
+
   test('원본을 찾지 못하면 검사를 건너뛴다 — 원본 동기화 경로와 같은 규약', () async {
     // 데모 시드처럼 저장소에 없는 id. 계약은 이 경우를 "건너뛴다"로 정했다
     // (markUsed·extendSharedExpiry의 원본 동기화와 같다).
