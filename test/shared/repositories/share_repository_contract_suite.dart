@@ -674,6 +674,10 @@ void runShareSourceStatusContract(ShareBackend Function() makeBackend) {
   Future<List<SharedGifticon>> sharedInGroup() =>
       backend.repo.getSharedGifticons(group.id);
 
+  /// 행위자가 받는 그룹 알림 — 거부된 공유가 알림만 남기지 않았는지도 본다.
+  Future<List<GroupNotification>> notificationsForMe() =>
+      backend.repo.getNotifications(backend.auth.currentUser!.id);
+
   for (final GifticonStatus moved in <GifticonStatus>[
     GifticonStatus.used,
     GifticonStatus.expired,
@@ -691,6 +695,10 @@ void runShareSourceStatusContract(ShareBackend Function() makeBackend) {
       );
       expect(await sharedInGroup(), isEmpty,
           reason: '거부된 공유가 레코드를 남기면 멤버 화면에 쓸 수 없는 항목이 뜬다');
+      // 레코드만 보면 "알림만 남는" 절반 실패를 놓친다(CodeRabbit) — 그러면 멤버가
+      // 알림을 보고 그룹에 들어왔는데 항목이 없다.
+      expect(await notificationsForMe(), isEmpty,
+          reason: '거부된 공유가 등록 알림을 남기면 안 된다');
     });
   }
 
@@ -720,6 +728,42 @@ void runShareSourceStatusContract(ShareBackend Function() makeBackend) {
     expect(item.expiryDate, extended);
     expect((await sharedInGroup()).single.expiryDate, extended,
         reason: '돌려준 값뿐 아니라 저장된 레코드도 현재 원본을 따라야 한다');
+  });
+
+  test('표시 필드 전부를 현재 원본에서 가져온다 — 스냅샷이 낡았어도', () async {
+    // 만료일만 보면 나머지 셋(brand·productName·barcode)이 스냅샷에서 와도 통과한다
+    // (CodeRabbit). 계약에 그 셋을 바꾸는 API는 없지만, 호출자가 넘기는 값은 그냥
+    // 객체라 **낡은 스냅샷 자체를 만들어** 넘길 수 있다 — 화면이 오래된 목록을 들고
+    // 있는 상황이 정확히 이 모양이다.
+    final Gifticon stored = await storeAvailable();
+    final Gifticon staleSnapshot = Gifticon(
+      id: stored.id,
+      ownerId: stored.ownerId,
+      brand: '옛 브랜드',
+      productName: '옛 상품명',
+      price: stored.price,
+      category: stored.category,
+      barcode: '0000000000000',
+      expiryDate: DateTime(2029, 1, 1),
+      registeredAt: stored.registeredAt,
+    );
+
+    final SharedGifticon item = await backend.repo
+        .shareGifticon(groupId: group.id, gifticon: staleSnapshot);
+
+    for (final SharedGifticon seen in <SharedGifticon>[
+      item,
+      (await sharedInGroup()).single,
+    ]) {
+      expect(seen.brand, stored.brand);
+      expect(seen.productName, stored.productName);
+      expect(seen.barcode, stored.barcode);
+      expect(seen.expiryDate, stored.expiryDate);
+    }
+    // 등록 알림 문구도 같은 원천을 쓴다 — 한쪽만 고치면 목록과 알림이 다른 이름을 말한다.
+    final List<GroupNotification> notifs = await notificationsForMe();
+    expect(notifs.single.message, contains(stored.productName));
+    expect(notifs.single.message, isNot(contains('옛 상품명')));
   });
 
   test('원본을 찾지 못하면 검사를 건너뛴다 — 원본 동기화 경로와 같은 규약', () async {
