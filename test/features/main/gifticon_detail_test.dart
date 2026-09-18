@@ -19,6 +19,7 @@ import 'package:keepcon/features/main/state/gifticon_filter.dart';
 import 'package:keepcon/features/main/state/gifticon_list_providers.dart';
 import 'package:keepcon/shared/providers/raw_gifticons_provider.dart';
 import 'package:keepcon/shared/models/gifticon.dart';
+import 'package:keepcon/shared/providers/now_provider.dart';
 import 'package:keepcon/shared/providers/repositories.dart';
 import 'package:keepcon/shared/providers/shared_gifticons_provider.dart';
 import 'package:keepcon/shared/repositories/gifticon_repository.dart';
@@ -71,6 +72,12 @@ void main() {
             : AsyncValue<Set<String>>.data(sharedIds);
     container = ProviderContainer(
       overrides: <Override>[
+        // 시각을 고정한다. [nowProvider]를 override하지 않으면 화면이 **실제 시계**로
+        // 만료를 판정해, 이 파일의 픽스처(`_now + 30일` = 2026-09-17)가 지나는 날부터
+        // 만료 분기가 켜지고 안내 배너 문구가 '사용 완료' → '사용 완료와 기간 연장'으로
+        // 바뀐다 — 2026-09-18에 실제로 그렇게 깨졌다(코드도 테스트도 안 건드렸는데 하루가
+        // 지나서 red). 시계를 픽스처와 같은 값으로 못박아 날짜에 의존하지 않게 한다.
+        nowProvider.overrideWithValue(_now),
         gifticonRepositoryProvider.overrideWithValue(repo),
         rawGifticonsProvider.overrideWith((_) => repo.watchGifticons(_ownerId)),
         sharedGifticonIdsProvider.overrideWithValue(sharedState),
@@ -258,6 +265,8 @@ void main() {
 
     final ProviderContainer c = ProviderContainer(
       overrides: <Override>[
+        // 시각 고정 — boot()과 같은 이유(픽스처 만료일이 실제 오늘을 지나면 깨진다).
+        nowProvider.overrideWithValue(_now),
         authRepositoryProvider.overrideWithValue(auth),
         gifticonRepositoryProvider.overrideWithValue(gifticons),
         shareRepositoryProvider.overrideWithValue(share),
@@ -323,6 +332,8 @@ void main() {
     boot(<Gifticon>[_gifticon()]);
     final ProviderContainer failing = ProviderContainer(
       overrides: <Override>[
+        // 시각 고정 — boot()과 같은 이유.
+        nowProvider.overrideWithValue(_now),
         gifticonRepositoryProvider
             .overrideWithValue(_FailingUpdateRepo(repo, Exception('오프라인'))),
         rawGifticonsProvider.overrideWith((_) => repo.watchGifticons(_ownerId)),
