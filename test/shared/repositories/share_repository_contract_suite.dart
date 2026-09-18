@@ -667,6 +667,10 @@ void runShareSourceStatusContract(ShareBackend Function() makeBackend) {
         productName: '아메리카노 T',
         price: 4500,
         category: '카페',
+        // 낡은 스냅샷의 '0000000000000'과 다른 **실제 값**을 준다. null로 두면 아래
+        // `expect(seen.barcode, stored.barcode)`가 null == null이 되어, 구현이 바코드를
+        // 통째로 떨어뜨리는 회귀(그룹 항목을 매장에서 스캔할 수 없다)를 못 문다.
+        barcode: '9788901234567',
         expiryDate: DateTime(2030, 1, 1),
         registeredAt: DateTime(2025, 1, 1),
       ));
@@ -732,9 +736,10 @@ void runShareSourceStatusContract(ShareBackend Function() makeBackend) {
 
   test('표시 필드 전부를 현재 원본에서 가져온다 — 스냅샷이 낡았어도', () async {
     // 만료일만 보면 나머지 셋(brand·productName·barcode)이 스냅샷에서 와도 통과한다
-    // (CodeRabbit). 계약에 그 셋을 바꾸는 API는 없지만, 호출자가 넘기는 값은 그냥
-    // 객체라 **낡은 스냅샷 자체를 만들어** 넘길 수 있다 — 화면이 오래된 목록을 들고
-    // 있는 상황이 정확히 이 모양이다.
+    // (CodeRabbit). 지금 계약에는 그 셋을 바꾸는 API가 없어 **실제로 어긋날 수 있는
+    // 것은 `expiryDate`뿐이다**(앞 테스트가 덮는다). 그래도 넷을 함께 묶는 이유는
+    // 레코드를 "인자가 아니라 현재 원본으로 만든다"는 규약 자체를 고정하기 위해서다 —
+    // 편집 API가 생기는 날 이 테스트가 이미 서 있다.
     final Gifticon stored = await storeAvailable();
     final Gifticon staleSnapshot = Gifticon(
       id: stored.id,
@@ -751,19 +756,30 @@ void runShareSourceStatusContract(ShareBackend Function() makeBackend) {
     final SharedGifticon item = await backend.repo
         .shareGifticon(groupId: group.id, gifticon: staleSnapshot);
 
-    for (final SharedGifticon seen in <SharedGifticon>[
-      item,
-      (await sharedInGroup()).single,
-    ]) {
-      expect(seen.brand, stored.brand);
-      expect(seen.productName, stored.productName);
-      expect(seen.barcode, stored.barcode);
-      expect(seen.expiryDate, stored.expiryDate);
+    // 반환값과 저장 레코드를 함께 본다. 실패 메시지로 **어느 쪽이 깨졌는지** 갈리도록
+    // 라벨을 붙인다 — 묶어서 돌리면 `'스타벅스' vs '옛 브랜드'`만 남아 구분되지 않는다.
+    for (final MapEntry<String, SharedGifticon> seen
+        in <String, SharedGifticon>{
+      '반환값': item,
+      '저장 레코드': (await sharedInGroup()).single,
+    }.entries) {
+      expect(seen.value.brand, stored.brand, reason: '${seen.key}의 brand');
+      expect(seen.value.productName, stored.productName,
+          reason: '${seen.key}의 productName');
+      expect(seen.value.barcode, stored.barcode, reason: '${seen.key}의 barcode');
+      expect(seen.value.expiryDate, stored.expiryDate,
+          reason: '${seen.key}의 expiryDate');
     }
     // 등록 알림 문구도 같은 원천을 쓴다 — 한쪽만 고치면 목록과 알림이 다른 이름을 말한다.
+    // 문구는 원본에서 **brand와 productName 둘 다** 끌어오므로 둘 다 건다(하나만 걸면
+    // 나머지가 스냅샷에서 와도 green이다). 부재 단언은 리터럴이 아니라 픽스처를 참조한다
+    // — 리터럴이면 픽스처 문자열만 바뀌는 날 "아무도 쓰지 않는 값의 부재"를 확인하는
+    // 항상-참 단언으로 조용히 퇴화한다.
     final List<GroupNotification> notifs = await notificationsForMe();
+    expect(notifs.single.message, contains(stored.brand));
     expect(notifs.single.message, contains(stored.productName));
-    expect(notifs.single.message, isNot(contains('옛 상품명')));
+    expect(notifs.single.message, isNot(contains(staleSnapshot.brand)));
+    expect(notifs.single.message, isNot(contains(staleSnapshot.productName)));
   });
 
   test('원본을 찾지 못하면 검사를 건너뛴다 — 원본 동기화 경로와 같은 규약', () async {
