@@ -434,8 +434,9 @@ abstract class ShareRepository {
 
   /// 원본 [Gifticon]을 그룹에 공유한다. 행위자가 공유자가 된다.
   ///
-  /// [SharedGifticon.gifticonId]에 [gifticon]의 id를, 표시 필드를 스냅샷으로 담고,
-  /// [ShareStatus.available] 상태로 등록한다. 그룹에 '등록' 알림을 남긴다.
+  /// [SharedGifticon.gifticonId]에 [gifticon]의 id를 담고, 표시 필드는 **다시 읽은
+  /// 원본**으로 채워 [ShareStatus.available] 상태로 등록한다(아래 '원본 상태 가드' 참조 —
+  /// 원본을 찾지 못할 때만 [gifticon]의 값을 쓴다). 그룹에 '등록' 알림을 남긴다.
   ///
   /// 공유 자체는 원본 [Gifticon]의 상태를 바꾸지 않는다(원본은 사용되기 전까지 available).
   ///

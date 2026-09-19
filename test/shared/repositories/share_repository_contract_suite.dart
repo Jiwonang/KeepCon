@@ -501,6 +501,19 @@ void runSharedExpiryExtensionContract(ShareBackend Function() makeBackend) {
       expect(updated.expiryDate, newExpiry);
     });
 
+    // markUsed도 같은 "원본 없으면 건너뛴다" 규약을 약속하는데 두 구현 어디에도
+    // 고정돼 있지 않았다(범위 리뷰가 형제 열거에서 찾았다). 연장 축의 헬퍼를 그대로
+    // 쓰므로 여기 둔다 — 이름으로 축을 밝혀 위치를 오해하지 않게 한다.
+    test('markUsed — 원본이 없어도(데모 시드) 사용 완료는 성공한다', () async {
+      final (_, _, SharedGifticon item) = await shareOne(storeOriginal: false);
+
+      final SharedGifticon used = await backend.repo.markUsed(item.id);
+
+      expect(used.status, ShareStatus.used);
+      expect(await backend.gifticons.getGifticonById(item.gifticonId), isNull,
+          reason: '없는 원본을 만들어 내지 않는다 — 동기화만 건너뛴다');
+    });
+
     test('원본이 이미 더 뒤면 원본은 그대로, 스냅샷만 따라붙는다', () async {
       final (_, Gifticon original, SharedGifticon item) = await shareOne();
       // 스냅샷이 뒤처진 상태를 만든다 — 원본만 2026-12-31로 옮긴다.
@@ -682,6 +695,29 @@ void runShareSourceStatusContract(ShareBackend Function() makeBackend) {
   Future<List<GroupNotification>> notificationsForMe() =>
       backend.repo.getNotifications(backend.auth.currentUser!.id);
 
+  /// 공유 레코드의 표시 필드 넷이 전부 [src]에서 왔는지 본다.
+  ///
+  /// **반환값과 저장 레코드를 함께** 보되 실패 메시지로 어느 쪽이 깨졌는지 갈리도록
+  /// 라벨을 붙인다 — 묶어서 돌리면 `'스타벅스' vs '옛 브랜드'`만 남아 구분되지 않는다.
+  /// 두 테스트(낡은 스냅샷·원본 없음)가 같은 넷을 보므로 헬퍼로 묶었다. 다섯 번째
+  /// 표시 필드가 생기는 날 한쪽만 고쳐 뒤처지는 것을 막는다. **왜 그 값이어야 하는지**는
+  /// 호출부 주석에 남긴다(여기로 옮기면 두 맥락이 섞인다).
+  Future<void> expectDisplayFieldsFrom(
+      SharedGifticon item, Gifticon src) async {
+    for (final MapEntry<String, SharedGifticon> seen
+        in <String, SharedGifticon>{
+      '반환값': item,
+      '저장 레코드': (await sharedInGroup()).single,
+    }.entries) {
+      expect(seen.value.brand, src.brand, reason: '${seen.key}의 brand');
+      expect(seen.value.productName, src.productName,
+          reason: '${seen.key}의 productName');
+      expect(seen.value.barcode, src.barcode, reason: '${seen.key}의 barcode');
+      expect(seen.value.expiryDate, src.expiryDate,
+          reason: '${seen.key}의 expiryDate');
+    }
+  }
+
   for (final GifticonStatus moved in <GifticonStatus>[
     GifticonStatus.used,
     GifticonStatus.expired,
@@ -756,21 +792,8 @@ void runShareSourceStatusContract(ShareBackend Function() makeBackend) {
     final SharedGifticon item = await backend.repo
         .shareGifticon(groupId: group.id, gifticon: staleSnapshot);
 
-    // 반환값과 저장 레코드를 함께 본다. 실패 메시지로 **어느 쪽이 깨졌는지** 갈리도록
-    // 라벨을 붙인다 — 묶어서 돌리면 `'스타벅스' vs '옛 브랜드'`만 남아 구분되지 않는다.
-    for (final MapEntry<String, SharedGifticon> seen
-        in <String, SharedGifticon>{
-      '반환값': item,
-      '저장 레코드': (await sharedInGroup()).single,
-    }.entries) {
-      expect(seen.value.brand, stored.brand, reason: '${seen.key}의 brand');
-      expect(seen.value.productName, stored.productName,
-          reason: '${seen.key}의 productName');
-      expect(seen.value.barcode, stored.barcode,
-          reason: '${seen.key}의 barcode');
-      expect(seen.value.expiryDate, stored.expiryDate,
-          reason: '${seen.key}의 expiryDate');
-    }
+    // 넷 전부가 **저장된 현재 원본**에서 와야 한다 — 인자는 낡은 스냅샷이다.
+    await expectDisplayFieldsFrom(item, stored);
     // 등록 알림 문구도 같은 원천을 쓴다 — 한쪽만 고치면 목록과 알림이 다른 이름을 말한다.
     // 문구는 원본에서 **brand와 productName 둘 다** 끌어오므로 둘 다 건다(하나만 걸면
     // 나머지가 스냅샷에서 와도 green이다). 부재 단언은 리터럴이 아니라 픽스처를 참조한다
@@ -789,14 +812,15 @@ void runShareSourceStatusContract(ShareBackend Function() makeBackend) {
     final Gifticon ghost = Gifticon(
       id: 'ghost-share-guard',
       ownerId: backend.auth.currentUser!.id,
-      // 다른 픽스처와 **다른 값**을 준다 — 같은 값이면 폴백이 죽어도(구현이 빈 값이나
-      // 저장본을 쓰도록 회귀해도) 단언이 통과한다.
+      // 네 표시 필드 전부를 `storeAvailable()`의 값과 **갈라 둔다** — 같으면 폴백이
+      // 죽어(빈 값·기본값으로 회귀해도) 단언이 통과한다. 특히 `barcode`는 이전에 아예
+      // 없어서 `null == null`로 통과하고 있었다.
       brand: '유령 브랜드',
       productName: '유령 상품',
       price: 4500,
       category: '카페',
       barcode: '1111111111111',
-      expiryDate: DateTime(2030, 1, 1),
+      expiryDate: DateTime(2032, 3, 4),
       registeredAt: DateTime(2025, 1, 1),
     );
 
@@ -806,20 +830,16 @@ void runShareSourceStatusContract(ShareBackend Function() makeBackend) {
     expect(item.gifticonId, ghost.id);
     // 가드만 건너뛰는 게 아니라 **표시 필드도 인자로 폴백한다**(CodeRabbit). id만 보면
     // 넷이 전부 비어도 통과하는데, 그러면 그룹 화면에 이름 없는 항목이 뜬다.
-    for (final MapEntry<String, SharedGifticon> seen
-        in <String, SharedGifticon>{
-      '반환값': item,
-      '저장 레코드': (await sharedInGroup()).single,
-    }.entries) {
-      expect(seen.value.brand, ghost.brand, reason: '${seen.key}의 brand');
-      expect(seen.value.productName, ghost.productName,
-          reason: '${seen.key}의 productName');
-      expect(seen.value.barcode, ghost.barcode, reason: '${seen.key}의 barcode');
-      expect(seen.value.expiryDate, ghost.expiryDate,
-          reason: '${seen.key}의 expiryDate');
-    }
+    await expectDisplayFieldsFrom(item, ghost);
+    // 알림에는 부재 단언을 걸지 않는다 — 여기에는 경쟁하는 출처(저장된 원본)가 아예
+    // 없어서 배제할 반대 값이 없다. 폴백이 죽어 빈 값이 되는 회귀는 `contains`가 잡는다.
     final List<GroupNotification> notifs = await notificationsForMe();
     expect(notifs.single.message, contains(ghost.brand));
     expect(notifs.single.message, contains(ghost.productName));
+    // ⚠️ firebase 레그는 fake라 보안 규칙을 거치지 않는다. 실제 Firestore에서는 이
+    // 분기 자체가 `sharedGifticons` 생성 규칙의 `ownsGifticon`(원본 문서 `exists`)에
+    // 막히므로, 이 케이스가 green이라고 프로덕션 경로가 검증된 것이 아니다(계약의
+    // 같은 한정어 참조). firebase 구현을 규칙에 맞춰 조이는 날 여기가 red가 되는 것은
+    // 계약을 깬 것이 아니라 계약이 따라가야 한다는 신호다.
   });
 }
