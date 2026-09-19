@@ -766,7 +766,8 @@ void runShareSourceStatusContract(ShareBackend Function() makeBackend) {
       expect(seen.value.brand, stored.brand, reason: '${seen.key}의 brand');
       expect(seen.value.productName, stored.productName,
           reason: '${seen.key}의 productName');
-      expect(seen.value.barcode, stored.barcode, reason: '${seen.key}의 barcode');
+      expect(seen.value.barcode, stored.barcode,
+          reason: '${seen.key}의 barcode');
       expect(seen.value.expiryDate, stored.expiryDate,
           reason: '${seen.key}의 expiryDate');
     }
