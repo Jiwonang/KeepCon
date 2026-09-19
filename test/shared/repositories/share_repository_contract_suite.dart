@@ -789,10 +789,13 @@ void runShareSourceStatusContract(ShareBackend Function() makeBackend) {
     final Gifticon ghost = Gifticon(
       id: 'ghost-share-guard',
       ownerId: backend.auth.currentUser!.id,
-      brand: '스타벅스',
-      productName: '아메리카노 T',
+      // 다른 픽스처와 **다른 값**을 준다 — 같은 값이면 폴백이 죽어도(구현이 빈 값이나
+      // 저장본을 쓰도록 회귀해도) 단언이 통과한다.
+      brand: '유령 브랜드',
+      productName: '유령 상품',
       price: 4500,
       category: '카페',
+      barcode: '1111111111111',
       expiryDate: DateTime(2030, 1, 1),
       registeredAt: DateTime(2025, 1, 1),
     );
@@ -801,5 +804,22 @@ void runShareSourceStatusContract(ShareBackend Function() makeBackend) {
         await backend.repo.shareGifticon(groupId: group.id, gifticon: ghost);
 
     expect(item.gifticonId, ghost.id);
+    // 가드만 건너뛰는 게 아니라 **표시 필드도 인자로 폴백한다**(CodeRabbit). id만 보면
+    // 넷이 전부 비어도 통과하는데, 그러면 그룹 화면에 이름 없는 항목이 뜬다.
+    for (final MapEntry<String, SharedGifticon> seen
+        in <String, SharedGifticon>{
+      '반환값': item,
+      '저장 레코드': (await sharedInGroup()).single,
+    }.entries) {
+      expect(seen.value.brand, ghost.brand, reason: '${seen.key}의 brand');
+      expect(seen.value.productName, ghost.productName,
+          reason: '${seen.key}의 productName');
+      expect(seen.value.barcode, ghost.barcode, reason: '${seen.key}의 barcode');
+      expect(seen.value.expiryDate, ghost.expiryDate,
+          reason: '${seen.key}의 expiryDate');
+    }
+    final List<GroupNotification> notifs = await notificationsForMe();
+    expect(notifs.single.message, contains(ghost.brand));
+    expect(notifs.single.message, contains(ghost.productName));
   });
 }
