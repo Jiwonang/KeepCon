@@ -434,14 +434,28 @@ abstract class ShareRepository {
 
   /// 원본 [Gifticon]을 그룹에 공유한다. 행위자가 공유자가 된다.
   ///
-  /// [SharedGifticon.gifticonId]에 [gifticon]의 id를, 표시 필드를 스냅샷으로 담고,
-  /// [ShareStatus.available] 상태로 등록한다. 그룹에 '등록' 알림을 남긴다.
+  /// [SharedGifticon.gifticonId]에 [gifticon]의 id를 담고, 표시 필드는 **다시 읽은
+  /// 원본**으로 채워 [ShareStatus.available] 상태로 등록한다(아래 '원본 상태 가드' 참조 —
+  /// 원본을 찾지 못할 때만 [gifticon]의 값을 쓴다). 그룹에 '등록' 알림을 남긴다.
   ///
   /// 공유 자체는 원본 [Gifticon]의 상태를 바꾸지 않는다(원본은 사용되기 전까지 available).
   ///
   /// **불변식: 한 기프티콘은 최대 1회만 공유될 수 있다.** 같은 [Gifticon.id]가 행위자가 속한
   /// 어느 그룹에든 이미 공유돼 있으면 [StateError]를 던진다(이중 사용·[UsageLog] 다중 발생 방지).
   /// [cancelShare]로 회수하면 다시 공유할 수 있고, 사용 완료([markUsed])된 기프티콘은 재공유되지 않는다.
+  ///
+  /// **원본 상태 가드:** 원본을 `GifticonRepository`에서 **다시 읽어**
+  /// `GifticonStatus.available`이 아니면(사용 완료·만료) [StateError]를 던지고 아무것도
+  /// 남기지 않는다. [gifticon]은 화면이 들고 있던 스냅샷이라, 확인 팝업이 떠 있는 사이
+  /// 다른 기기가 원본을 사용 완료로 옮겼을 수 있다 — 그대로 공유하면 멤버가 이미 쓴
+  /// 기프티콘을 매장에서야 알게 된다. 원본을 **찾지 못하면**(데모 시드의 가짜 id 등)
+  /// 이 검사는 건너뛴다 — [markUsed]·[extendSharedExpiry]의 원본 동기화와 같은 규약이다.
+  /// (규칙이 있는 Firestore 백엔드에서는 없는 원본의 공유 자체가 보안 규칙에 거부되므로,
+  /// 이 분기는 원본 없는 데모 데이터를 쓰는 in-memory에서만 의미가 있다.)
+  ///
+  /// 공유 레코드의 표시 필드(브랜드·상품명·만료일·바코드)도 **다시 읽은 원본**으로
+  /// 만든다 — 팝업 사이 다른 기기가 연장한 만료일을 옛 스냅샷으로 실으면 그룹과 개인
+  /// 목록이 같은 기프티콘을 두고 다른 만료일을 말한다. 원본을 찾지 못하면 [gifticon]을 쓴다.
   ///
   /// 그룹 없음/비멤버여도 [StateError].
   Future<SharedGifticon> shareGifticon({

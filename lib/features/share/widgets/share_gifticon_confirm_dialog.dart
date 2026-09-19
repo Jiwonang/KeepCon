@@ -58,13 +58,11 @@ class _ShareGifticonConfirmDialog extends ConsumerWidget {
   /// 사용자는 자기 탭이 먹힌 줄 알고 다시 누른다. 그 사이의 변화는 저장소가 실패로
   /// 돌려주고 호출부가 안내로 바꿔 받는다.
   ///
-  /// ⚠️ **저장소가 막는 축은 셋뿐이다 — 그룹 없음·비멤버·이중 공유.** 두 구현
-  /// (`InMemoryShareRepository`·`FirebaseShareRepository`의 `shareGifticon`) 모두 원본
-  /// [Gifticon]의 상태는 보지 않으므로, 팝업이 떠 있는 사이 다른 기기가 원본을 '사용
-  /// 완료'로 처리해도 공유는 그대로 성공한다(코드리뷰에서 실측). 탭 즉시 공유였을 때도
-  /// 있던 창이지만 이 팝업이 사람이 읽는 시간만큼 넓힌다. 닫으려면 계약
-  /// `ShareRepository.shareGifticon`에 원본 status 축을 더해야 하고, 그것은 두 구현·보안
-  /// 규칙·규칙 검증을 함께 건드리는 별건이다.
+  /// 저장소는 그룹 없음·비멤버·이중 공유에 더해 **원본의 현재 상태**도 본다 — 팝업이
+  /// 떠 있는 사이 다른 기기가 원본을 사용 완료로 옮기면 `shareGifticon`이 [StateError]로
+  /// 거부하고, 레코드의 표시 필드도 이 스냅샷이 아니라 다시 읽은 원본으로 만든다(계약
+  /// `ShareRepository.shareGifticon`의 "원본 상태 가드"). 이 가드는 클라이언트 계층에만
+  /// 있다 — 행위자가 자기 기프티콘을 공유하는 본인이라 보안 규칙 계층은 두지 않았다.
   final Gifticon gifticon;
 
   @override

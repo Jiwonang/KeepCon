@@ -56,7 +56,8 @@
 - **`GroupMember.id` 하드코딩('me') → 세션 기반.** `AuthRepository.currentUser.id`가 행위자 식별의
   단일 기준. `InMemoryShareRepository`가 `AuthRepository`를 주입받아 해석한다.
 - **`MyGifticon` 폐기.** 원본 [Gifticon]을 그대로 소비한다. 공유 시 `shareGifticon(gifticon: ...)`에
-  원본 [Gifticon]을 넘기면 표시 필드를 스냅샷으로 담고 `gifticonId`로 원본을 연결한다.
+  원본 [Gifticon]을 넘기면 `gifticonId`로 원본을 연결하고, 표시 필드는 **다시 읽은 원본**으로
+  채운다(원본을 찾지 못할 때만 넘긴 스냅샷의 값을 쓴다 — v3.16의 원본 상태 가드).
 - **`SharedGifticon`이 원본 [Gifticon.id] 참조(`gifticonId`).** 사용 완료 시 이 참조로 원본을
   `GifticonStatus.used`로 동기화한다(share ↔ main 경계의 핵심).
 - **표시 라벨 문자열 → 실제 타입.** `expiryLabel`/`when`을 `DateTime`으로 승격. 상대 시각("방금",
