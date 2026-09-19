@@ -17,12 +17,20 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:keepcon/features/main/main_page.dart';
+import 'package:keepcon/shared/providers/now_provider.dart';
 import 'package:keepcon/shared/providers/raw_gifticons_provider.dart';
 import 'package:keepcon/features/main/state/highlighted_gifticon.dart';
 import 'package:keepcon/shared/models/gifticon.dart';
 
+/// 픽스처가 기준으로 삼는 '오늘'. 화면도 [nowProvider] override로 같은 값을 본다.
+///
+/// 고정은 예방이 아니라 **정정이다** — `_seed`의 만료일은 2026-09-07~09-12라 그 뒤로는
+/// 카드가 전부 만료로 그려지고 있었다. 이 파일의 단언이 날짜와 무관해(카드 텍스트·강조
+/// id) 드러나지 않았을 뿐, 검증하던 것은 의도한 시나리오가 아니었다. 같은 드리프트가
+/// `gifticon_detail_test.dart`에서는 red로 터졌다.
+final DateTime _now = DateTime(2026, 8, 8);
+
 List<Gifticon> _seed(int count) {
-  final DateTime now = DateTime(2026, 8, 8);
   return <Gifticon>[
     for (int i = 0; i < count; i++)
       Gifticon(
@@ -32,8 +40,8 @@ List<Gifticon> _seed(int count) {
         productName: '상품$i',
         category: '카페',
         price: 4500,
-        expiryDate: now.add(Duration(days: 30 + i)),
-        registeredAt: now,
+        expiryDate: _now.add(Duration(days: 30 + i)),
+        registeredAt: _now,
         status: GifticonStatus.available,
       ),
   ];
@@ -47,6 +55,7 @@ void main() {
     lists = StreamController<List<Gifticon>>.broadcast();
     container = ProviderContainer(
       overrides: <Override>[
+        nowProvider.overrideWithValue(_now),
         rawGifticonsProvider.overrideWith((_) => lists.stream),
       ],
     );
