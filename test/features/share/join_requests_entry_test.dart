@@ -1,0 +1,292 @@
+// 그룹 상세의 **'승인요청목록' 진입점**을 고정한다.
+//
+// 참여 요청 목록은 그룹 상세 안에 인라인으로 펼쳐지다가 전용 화면(`JoinRequestsPage`)으로
+// 옮겨졌고, 그 자리에는 버튼 하나가 남았다. 이 파일이 지키는 것은 셋이다.
+//
+//  ① **방장만 본다.** 아직 멤버가 아닌 사람들의 존재·수를 일반 멤버에게 알리지 않는다
+//     (보안 규칙도 같은 선을 긋는다).
+//  ② **0건에도 버튼이 남는다.** 인라인 섹션은 0건이면 통째로 사라졌는데, 진입점까지
+//     사라지면 방장이 "요청이 없다"는 것조차 확인할 수 없고 화면 구조가 건수에 따라
+//     흔들린다. 이 축이 회귀하면 조용히 예전 동작으로 돌아간다.
+//  ③ **뱃지가 로딩·에러를 0으로 접지 않는다.** 이 스트림은 방장에게 요청 도착을 알리는
+//     유일한 신호라, `valueOrNull?.length ?? 0`으로 접으면 에러일 때 버튼이 당당하게
+//     "대기 중인 요청이 없어요"라고 거짓말한다. 그 거짓말이 곧 승인 누락이다.
+//
+// 목록 본문(승인·거절·행 잠금·재시도)은 `join_request_ui_test.dart`가 고정한다.
+library;
+
+import 'dart:async';
+
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:keepcon/features/share/pages/group_detail_page.dart';
+import 'package:keepcon/features/share/pages/join_requests_page.dart';
+import 'package:keepcon/shared/models/group.dart';
+import 'package:keepcon/shared/models/join_request.dart';
+import 'package:keepcon/shared/providers/repositories.dart';
+import 'package:keepcon/shared/repositories/impl/in_memory_auth_repository.dart';
+import 'package:keepcon/shared/repositories/impl/in_memory_gifticon_repository.dart';
+import 'package:keepcon/shared/repositories/impl/in_memory_share_repository.dart';
+
+/// 대기 목록 스트림의 세 갈래(값·로딩·에러)를 테스트가 고르는 저장소.
+///
+/// 읽기·쓰기의 나머지는 계약 구현에 그대로 위임한다 — 화면이 진짜 그룹 데이터를 그리는
+/// 상태에서 이 축만 흔들어야, 단언이 픽스처가 아니라 화면 동작을 재는 것이 된다.
+class _PendingShareRepository extends InMemoryShareRepository {
+  _PendingShareRepository({
+    required super.authRepository,
+    required super.gifticonRepository,
+  }) : super(seed: false);
+
+  /// [watchGroups]가 대신 방출할 그룹. in-memory 구현으로는 **내가 방장이 아닌** 그룹을
+  /// 만들 수 없어서(생성자가 곧 방장) 비방장 축은 이 주입이 유일한 경로다.
+  List<Group>? groupsOverride;
+
+  /// 대기 목록 방출 모드 — `data`(기본) / `hang`(첫 방출 전) / `error`.
+  _PendingMode mode = _PendingMode.data;
+
+  /// [_PendingMode.data]일 때 방출할 목록.
+  List<JoinRequest> pending = const <JoinRequest>[];
+
+  final List<String> approved = <String>[];
+  final List<String> rejected = <String>[];
+
+  @override
+  Stream<List<Group>> watchGroups(String userId) => groupsOverride == null
+      ? super.watchGroups(userId)
+      : Stream<List<Group>>.value(groupsOverride!);
+
+  @override
+  Stream<List<JoinRequest>> watchPendingJoinRequests(String groupId) {
+    switch (mode) {
+      case _PendingMode.hang:
+        // 값을 주지 않고 열어 둔다 = 로딩 지속.
+        final StreamController<List<JoinRequest>> c =
+            StreamController<List<JoinRequest>>();
+        addTearDown(c.close);
+        return c.stream;
+      case _PendingMode.error:
+        return Stream<List<JoinRequest>>.error(StateError('규칙 거부'));
+      case _PendingMode.data:
+        return Stream<List<JoinRequest>>.value(pending);
+    }
+  }
+
+  @override
+  Future<Group> approveJoinRequest(String joinRequestId) async {
+    approved.add(joinRequestId);
+    // 화면은 반환값을 쓰지 않는다 — 계약 시그니처를 맞추기만 한다.
+    return groupsOverride!.first;
+  }
+
+  @override
+  Future<JoinRequest> rejectJoinRequest(String joinRequestId) async {
+    rejected.add(joinRequestId);
+    return pending
+        .firstWhere((JoinRequest r) => r.id == joinRequestId)
+        .copyWith(status: JoinRequestStatus.rejected);
+  }
+}
+
+enum _PendingMode { data, hang, error }
+
+void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
+  final String me = InMemoryAuthRepository.defaultUser.id;
+
+  late InMemoryAuthRepository auth;
+  late InMemoryGifticonRepository gifticons;
+  late _PendingShareRepository repo;
+
+  setUp(() {
+    auth = InMemoryAuthRepository();
+    gifticons = InMemoryGifticonRepository();
+    repo = _PendingShareRepository(
+      authRepository: auth,
+      gifticonRepository: gifticons,
+    );
+  });
+
+  tearDown(() {
+    repo.dispose();
+    gifticons.dispose();
+    auth.dispose();
+  });
+
+  JoinRequest req(String id, {String displayName = '요청자'}) => JoinRequest(
+        id: id,
+        groupId: 'g1',
+        userId: 'u-$id',
+        displayName: displayName,
+        avatarEmoji: '🙂',
+        requestedAt: DateTime(2026, 1, 1),
+      );
+
+  GroupMember member(String userId, String name, MemberRole role) =>
+      GroupMember(
+        userId: userId,
+        displayName: name,
+        avatarEmoji: '🙂',
+        role: role,
+      );
+
+  /// 내가 방장인 그룹 / 남이 방장인 그룹 픽스처.
+  // `group`은 flutter_test의 최상위 함수라 이름이 겹치면 테스트 그룹 선언이 가려진다.
+  Group groupFixture({required bool iAmOwner}) => Group(
+        id: 'g1',
+        name: '가족',
+        emoji: '🏠',
+        inviteToken: 'tok',
+        members: <GroupMember>[
+          if (iAmOwner)
+            member(me, '나', MemberRole.owner)
+          else ...<GroupMember>[
+            member('owner-2', '방장', MemberRole.owner),
+            member(me, '나', MemberRole.member),
+          ],
+        ],
+      );
+
+  /// 그룹 상세는 [ListView]라 화면 밖 항목을 짓지 않는다 — 뷰포트를 키워 전부 짓게 한다.
+  Future<void> pumpDetail(WidgetTester tester, {bool settle = true}) async {
+    tester.view.physicalSize = const Size(1000, 3000);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: <Override>[
+          authRepositoryProvider.overrideWithValue(auth),
+          gifticonRepositoryProvider.overrideWithValue(gifticons),
+          shareRepositoryProvider.overrideWithValue(repo),
+        ],
+        child: const MaterialApp(home: GroupDetailPage(groupId: 'g1')),
+      ),
+    );
+    if (settle) {
+      await tester.pumpAndSettle();
+      return;
+    }
+    // 로딩 축은 스피너가 계속 돌아 정착하지 않는다 — 프레임 단위로 진행한다.
+    for (int i = 0; i < 5; i++) {
+      await tester.pump(const Duration(milliseconds: 10));
+    }
+  }
+
+  group('진입점 노출', () {
+    testWidgets('방장에게 버튼이 보인다', (WidgetTester tester) async {
+      repo
+        ..groupsOverride = <Group>[groupFixture(iAmOwner: true)]
+        ..pending = <JoinRequest>[req('a'), req('b')];
+      await pumpDetail(tester);
+
+      expect(find.text('승인요청목록'), findsOneWidget);
+      expect(find.text('2명이 참여를 기다리고 있어요'), findsOneWidget);
+      expect(find.text('2'), findsOneWidget);
+    });
+
+    testWidgets('일반 멤버에게는 버튼이 아예 없다', (WidgetTester tester) async {
+      repo
+        ..groupsOverride = <Group>[groupFixture(iAmOwner: false)]
+        ..pending = <JoinRequest>[req('a')];
+      await pumpDetail(tester);
+
+      // 멤버 목록은 떴는데(화면은 정상) 진입점만 없다 — 공허한 통과 방지.
+      expect(find.text('멤버 2/10명'), findsOneWidget);
+      expect(find.text('승인요청목록'), findsNothing);
+    });
+
+    testWidgets('대기 0건에도 버튼은 남는다', (WidgetTester tester) async {
+      // 회귀하면 조용히 예전(인라인 섹션) 동작으로 돌아간다 — 방장은 "요청이 없다"는
+      // 것조차 확인할 수 없고, 진입점이 건수에 따라 나타났다 사라져 구조가 흔들린다.
+      repo
+        ..groupsOverride = <Group>[groupFixture(iAmOwner: true)]
+        ..pending = const <JoinRequest>[];
+      await pumpDetail(tester);
+
+      expect(find.text('승인요청목록'), findsOneWidget);
+      expect(find.text('대기 중인 요청이 없어요'), findsOneWidget);
+      expect(find.text('0'), findsOneWidget);
+    });
+  });
+
+  group('뱃지는 로딩·에러를 0으로 접지 않는다', () {
+    testWidgets('로딩 — 스피너를 보여주고 0이라고 하지 않는다', (WidgetTester tester) async {
+      repo
+        ..groupsOverride = <Group>[groupFixture(iAmOwner: true)]
+        ..mode = _PendingMode.hang;
+      await pumpDetail(tester, settle: false);
+
+      // 본문이 그려진 상태여야 아래 단언이 의미를 갖는다(그룹 로딩 스피너와 혼동 방지).
+      expect(find.text('승인요청목록'), findsOneWidget);
+      expect(find.byType(CircularProgressIndicator), findsOneWidget);
+      expect(find.text('불러오는 중…'), findsOneWidget);
+      expect(find.text('0'), findsNothing);
+      expect(find.text('대기 중인 요청이 없어요'), findsNothing);
+    });
+
+    testWidgets('에러 — 0이 아니라 실패를 말하고, 버튼은 여전히 눌린다',
+        (WidgetTester tester) async {
+      repo
+        ..groupsOverride = <Group>[groupFixture(iAmOwner: true)]
+        ..mode = _PendingMode.error;
+      await pumpDetail(tester);
+
+      expect(find.text('불러오지 못했어요. 눌러서 다시 시도'), findsOneWidget);
+      expect(find.byIcon(Icons.error_outline), findsOneWidget);
+      expect(find.text('0'), findsNothing);
+      expect(find.text('대기 중인 요청이 없어요'), findsNothing);
+
+      // 실패해도 진입은 막히지 않는다 — 안쪽 배너의 '다시 시도'가 복구 경로다.
+      await tester.tap(find.text('승인요청목록'));
+      await tester.pumpAndSettle();
+      expect(find.byType(JoinRequestsPage), findsOneWidget);
+      expect(find.text('다시 시도'), findsOneWidget);
+    });
+  });
+
+  group('진입 → 결정', () {
+    testWidgets('버튼을 누르면 목록 화면이 열리고 승인이 계약 메서드를 부른다',
+        (WidgetTester tester) async {
+      repo
+        ..groupsOverride = <Group>[groupFixture(iAmOwner: true)]
+        ..pending = <JoinRequest>[req('a', displayName: '지원')];
+      await pumpDetail(tester);
+
+      // 진입 전에는 목록 화면이 없다(버튼이 목록을 인라인으로 펼치지 않는다).
+      expect(find.byType(JoinRequestsPage), findsNothing);
+      expect(find.text('지원'), findsNothing);
+
+      await tester.tap(find.text('승인요청목록'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(JoinRequestsPage), findsOneWidget);
+      expect(find.text('지원'), findsOneWidget);
+
+      await tester.tap(find.widgetWithText(FilledButton, '승인'));
+      await tester.pumpAndSettle();
+
+      expect(repo.approved, <String>['a']);
+      expect(repo.rejected, isEmpty);
+      expect(find.text('지원님을 그룹에 추가했어요.'), findsOneWidget);
+    });
+
+    testWidgets('거절도 계약 메서드를 부른다 — 두 버튼이 뒤바뀌지 않았다',
+        (WidgetTester tester) async {
+      repo
+        ..groupsOverride = <Group>[groupFixture(iAmOwner: true)]
+        ..pending = <JoinRequest>[req('a', displayName: '지원')];
+      await pumpDetail(tester);
+
+      await tester.tap(find.text('승인요청목록'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(TextButton, '거절'));
+      await tester.pumpAndSettle();
+
+      expect(repo.rejected, <String>['a']);
+      expect(repo.approved, isEmpty);
+      expect(find.text('참여 요청을 거절했어요.'), findsOneWidget);
+    });
+  });
+}

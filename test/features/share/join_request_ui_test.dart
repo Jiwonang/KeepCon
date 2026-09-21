@@ -6,6 +6,10 @@
 //     선을 긋는다 — 화면이 그 선을 넘으면 규칙이 막아 빈 목록이 되거나 오류가 난다.
 //
 // 두 축 모두 "문구"가 아니라 **무엇이 화면에 있고 없는가**로 검증한다.
+//
+// 방장 쪽 목록은 그룹 상세 안의 인라인 섹션이 아니라 전용 화면(`JoinRequestsPage`)이다.
+// 그 화면으로 들어가는 진입점(그룹 상세의 '승인요청목록' 버튼)과 뱃지의 로딩·에러 규약은
+// `join_requests_entry_test.dart`가 따로 고정한다.
 library;
 
 import 'dart:async';
@@ -14,8 +18,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:keepcon/features/share/pages/join_requests_page.dart';
 import 'package:keepcon/features/share/widgets/my_join_requests_card.dart';
-import 'package:keepcon/features/share/widgets/pending_join_requests_section.dart';
 import 'package:keepcon/shared/diagnostics/error_reporter.dart';
 import 'package:keepcon/shared/models/group.dart';
 import 'package:keepcon/shared/models/join_request.dart';
@@ -69,6 +73,16 @@ class _StubShareRepository implements ShareRepository {
     if (useMineController) return mineController.stream;
     return Stream<List<JoinRequest>>.value(mine);
   }
+
+  /// 승인요청목록 화면이 **방장 여부 이중 방어**를 위해 `myGroupsProvider`를 거쳐
+  /// 내 그룹을 watch한다. noSuchMethod에 맡기면 그룹 축이 항상 에러가 되어
+  /// "그룹을 안다"가 전제인 비방장 안내를 시험할 길이 없다. 기본은 빈 목록
+  /// (= 그룹을 모름 → 막지 않고 통과)이고, 필요한 테스트만 채운다.
+  List<Group> groups = const <Group>[];
+
+  @override
+  Stream<List<Group>> watchGroups(String userId) =>
+      Stream<List<Group>>.value(groups);
 
   @override
   Stream<List<JoinRequest>> watchPendingJoinRequests(String groupId) {
@@ -319,15 +333,17 @@ void main() {
     expect(find.text('요청을 취소하지 못했어요. 다시 시도해 주세요.'), findsOneWidget);
   });
 
-  group('방장 승인 목록', () {
+  group('방장 승인 목록(JoinRequestsPage)', () {
     testWidgets('대기 요청을 이름과 함께 보여준다', (WidgetTester tester) async {
       final _StubShareRepository share = _StubShareRepository(
         pending: <JoinRequest>[_req('a', displayName: '지원')],
       );
       await pump(tester, share,
-          child: const PendingJoinRequestsSection(groupId: 'g-secret'));
+          child: const JoinRequestsPage(groupId: 'g-secret'));
 
-      expect(find.text('참여 요청'), findsOneWidget);
+      // 섹션 제목이 아니라 **화면 제목**이다 — 목록이 전용 페이지로 옮겨졌다.
+      expect(find.text('승인요청목록'), findsOneWidget);
+      expect(find.text('대기 중 1명'), findsOneWidget);
       expect(find.text('지원'), findsOneWidget);
       expect(find.widgetWithText(FilledButton, '승인'), findsOneWidget);
       expect(find.widgetWithText(TextButton, '거절'), findsOneWidget);
@@ -346,7 +362,7 @@ void main() {
           ],
           child: const MaterialApp(
             home: Scaffold(
-              body: PendingJoinRequestsSection(groupId: 'g-secret'),
+              body: JoinRequestsPage(groupId: 'g-secret'),
             ),
           ),
         ),
@@ -363,15 +379,15 @@ void main() {
         pending: <JoinRequest>[_req('a', displayName: '지원')],
       );
       await pump(tester, share,
-          child: const PendingJoinRequestsSection(groupId: 'g-secret'));
+          child: const JoinRequestsPage(groupId: 'g-secret'));
 
       await tester.tap(find.widgetWithText(FilledButton, '승인'));
       await tester.pumpAndSettle();
 
       expect(share.approved, <String>['a']);
       expect(find.textContaining('정원이 찼거나'), findsOneWidget);
-      expect(reporter.contexts,
-          <String>['PendingJoinRequests.approveJoinRequest']);
+      expect(
+          reporter.contexts, <String>['JoinRequestsPage.approveJoinRequest']);
     });
 
     testWidgets('거절은 rejectJoinRequest를 부른다', (WidgetTester tester) async {
@@ -379,7 +395,7 @@ void main() {
         pending: <JoinRequest>[_req('a', displayName: '지원')],
       );
       await pump(tester, share,
-          child: const PendingJoinRequestsSection(groupId: 'g-secret'));
+          child: const JoinRequestsPage(groupId: 'g-secret'));
 
       await tester.tap(find.widgetWithText(TextButton, '거절'));
       await tester.pumpAndSettle();
@@ -405,7 +421,7 @@ void main() {
           ],
           child: const MaterialApp(
             home: Scaffold(
-              body: PendingJoinRequestsSection(groupId: 'g-secret'),
+              body: JoinRequestsPage(groupId: 'g-secret'),
             ),
           ),
         ),
@@ -449,7 +465,7 @@ void main() {
           ],
           child: const MaterialApp(
             home: Scaffold(
-              body: PendingJoinRequestsSection(groupId: 'g-secret'),
+              body: JoinRequestsPage(groupId: 'g-secret'),
             ),
           ),
         ),
@@ -470,8 +486,8 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(share.approved, <String>['a']);
-      expect(reporter.contexts,
-          <String>['PendingJoinRequests.approveJoinRequest']);
+      expect(
+          reporter.contexts, <String>['JoinRequestsPage.approveJoinRequest']);
       expect(find.textContaining('정원이 찼거나'), findsOneWidget);
     });
 
@@ -480,7 +496,7 @@ void main() {
       final _StubShareRepository share = _StubShareRepository()
         ..failStreams = true;
       await pump(tester, share,
-          child: const PendingJoinRequestsSection(groupId: 'g-secret'));
+          child: const JoinRequestsPage(groupId: 'g-secret'));
 
       expect(find.text('참여 요청을 불러오지 못했어요.'), findsOneWidget);
     });
@@ -491,7 +507,7 @@ void main() {
           _StubShareRepository(pending: <JoinRequest>[_req('a')])
             ..failStreams = true;
       await pump(tester, share,
-          child: const PendingJoinRequestsSection(groupId: 'g-secret'));
+          child: const JoinRequestsPage(groupId: 'g-secret'));
       expect(find.text('참여 요청을 불러오지 못했어요.'), findsOneWidget);
 
       share.failStreams = false;
@@ -499,16 +515,55 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('참여 요청을 불러오지 못했어요.'), findsNothing);
-      expect(find.text('참여 요청'), findsOneWidget);
+      expect(find.text('대기 중 1명'), findsOneWidget);
     });
 
-    testWidgets('요청이 없으면 아무것도 그리지 않는다', (WidgetTester tester) async {
+    testWidgets('요청이 0건이어도 빈 화면이 아니라 안내를 보여준다', (WidgetTester tester) async {
+      // 인라인 섹션이던 시절에는 0건이면 통째로 사라졌다(`SizedBox.shrink`).
+      // 사용자가 스스로 들어온 전용 화면에서 그러면 빈 화면만 남는다.
       final _StubShareRepository share =
           _StubShareRepository(pending: const <JoinRequest>[]);
       await pump(tester, share,
-          child: const PendingJoinRequestsSection(groupId: 'g-secret'));
+          child: const JoinRequestsPage(groupId: 'g-secret'));
 
-      expect(find.text('참여 요청'), findsNothing);
+      expect(find.text('대기 중인 참여 요청이 없어요.'), findsOneWidget);
+      expect(find.widgetWithText(FilledButton, '승인'), findsNothing);
+    });
+
+    testWidgets('방장이 아니면 목록 대신 사유를 설명한다 — 재시도는 틀린 처방이다',
+        (WidgetTester tester) async {
+      // 진입점이 방장에게만 보이지만 화면도 한 겹 막는다. 비방장이 닿으면 대기 목록은
+      // 보안 규칙에 막혀 에러가 되고, 그 자리의 '다시 시도'는 **영원히 성공할 수 없다**.
+      final _StubShareRepository share = _StubShareRepository(
+        pending: <JoinRequest>[_req('a', displayName: '지원')],
+      )..groups = <Group>[
+          Group(
+            id: 'g-secret',
+            name: '가족',
+            emoji: '🏠',
+            inviteToken: 'tok',
+            members: <GroupMember>[
+              const GroupMember(
+                userId: 'someone-else',
+                displayName: '방장',
+                avatarEmoji: '👑',
+                role: MemberRole.owner,
+              ),
+              GroupMember(
+                userId: InMemoryAuthRepository.defaultUser.id,
+                displayName: InMemoryAuthRepository.defaultUser.displayName,
+                avatarEmoji: '🙂',
+                role: MemberRole.member,
+              ),
+            ],
+          ),
+        ];
+      await pump(tester, share,
+          child: const JoinRequestsPage(groupId: 'g-secret'));
+
+      expect(find.text('참여 요청은 방장만 볼 수 있어요.'), findsOneWidget);
+      expect(find.text('지원'), findsNothing);
+      expect(find.text('다시 시도'), findsNothing);
     });
   });
 }

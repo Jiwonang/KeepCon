@@ -31,7 +31,7 @@ class MyJoinRequestsCard extends ConsumerWidget {
     final AsyncValue<List<JoinRequest>> async = ref.watch(joinRequestsProvider);
     // 에러를 빈 목록으로 접지 않는다 — 이 카드가 **거절 통보의 유일한 경로**라
     // (비멤버는 그룹 알림을 못 읽는다), 조용히 사라지면 요청자는 결과를 영영 모른다.
-    // 형제인 PendingJoinRequestsSection과 같은 규약이다.
+    // 형제인 JoinRequestsPage(방장의 승인요청목록)와 같은 규약이다.
     if (async.hasError) {
       // 재시도는 원천 family를 되살리는 계약 훅으로 — 이 축의 family는 keepAlive
       // 래퍼(joinRequestsProvider)가 붙잡고 있어 로그아웃 전에는 스스로 해제되지
