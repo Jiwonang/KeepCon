@@ -25,10 +25,10 @@ import '../../../shared/theme/brand_palette.dart';
 import '../../../shared/theme/theme_tokens.dart';
 import '../../../shared/widgets/inline_error_banner.dart';
 import '../state/share_providers.dart';
+import '../widgets/join_requests_dialog.dart';
 import '../widgets/share_common.dart';
 import '../widgets/share_format.dart';
 import '../widgets/share_sheets.dart';
-import 'join_requests_page.dart';
 import 'member_invite_page.dart';
 import 'shared_gifticon_detail_page.dart';
 
@@ -172,7 +172,7 @@ class _GroupDetailBody extends ConsumerWidget {
             // 않는다(보안 규칙도 같은 선을 긋는다). 이 스트림이 요청 도착을 알리는
             // 유일한 신호이므로 멤버 목록 바로 아래, 눈에 띄는 자리에 둔다.
             //
-            // 목록 자체는 [JoinRequestsPage]로 옮겼고 여기는 진입점 + 건수만 남는다.
+            // 목록 자체는 [JoinRequestsDialog]로 옮겼고 여기는 진입점 + 건수만 남는다.
             if (iAmOwner) ...<Widget>[
               const SizedBox(height: 12),
               _JoinRequestsButton(
@@ -256,12 +256,13 @@ class _GroupDetailBody extends ConsumerWidget {
     );
   }
 
+  /// 승인요청목록을 **모달 팝업**으로 띄운다(전체 화면 push가 아니다).
+  ///
+  /// push였을 때는 이 상세 화면이 통째로 덮여 "어느 그룹의 대기자인지"라는 맥락이
+  /// 사라졌다. 팝업은 스크림 너머로 이 화면을 남겨 둔다 — [showJoinRequestsDialog]
+  /// 머리말의 이력 ③.
   void _openJoinRequests(BuildContext context) {
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => JoinRequestsPage(groupId: group.id),
-      ),
-    );
+    showJoinRequestsDialog(context, group.id);
   }
 
   Future<void> _onLeave(
@@ -442,7 +443,7 @@ class _CardShell extends StatelessWidget {
 
 /// '승인요청목록' 진입 버튼(방장 전용) — 멤버 카드와 같은 톤의 카드형 행.
 ///
-/// 목록과 승인·거절은 [JoinRequestsPage]가 갖고, 여기는 **진입점과 대기 건수**만 본다.
+/// 목록과 승인·거절은 [JoinRequestsDialog]가 갖고, 여기는 **진입점과 대기 건수**만 본다.
 ///
 /// ⚠️ **0건에도 버튼을 숨기지 않는다.** 인라인 목록이던 시절에는 0건이면 통째로
 /// 사라졌는데, 진입점까지 사라지면 방장이 "요청이 없다"는 것조차 확인할 수 없고 화면
@@ -450,7 +451,7 @@ class _CardShell extends StatelessWidget {
 /// 아래 `data` 분기).
 ///
 /// ⚠️ **로딩·에러를 0으로 접지 않는다.** 이 스트림은 방장에게 요청 도착을 알리는 유일한
-/// 신호라([JoinRequestsPage] 머리말), `valueOrNull?.length ?? 0`으로 접으면 에러일 때
+/// 신호라([JoinRequestsDialog] 머리말), `valueOrNull?.length ?? 0`으로 접으면 에러일 때
 /// 버튼이 당당하게 "대기 중인 요청이 없어요"라고 **거짓말한다**. 세 갈래를 각각 그린다.
 class _JoinRequestsButton extends ConsumerWidget {
   const _JoinRequestsButton({required this.groupId, required this.onTap});

@@ -1,7 +1,8 @@
 // 그룹 상세의 **'승인요청목록' 진입점**을 고정한다.
 //
-// 참여 요청 목록은 그룹 상세 안에 인라인으로 펼쳐지다가 전용 화면(`JoinRequestsPage`)으로
-// 옮겨졌고, 그 자리에는 버튼 하나가 남았다. 이 파일이 지키는 것은 셋이다.
+// 참여 요청 목록은 그룹 상세 안에 인라인으로 펼쳐지다가 전용 화면으로, 다시 **모달
+// 팝업**(`JoinRequestsDialog`)으로 옮겨졌고, 그 자리에는 버튼 하나가 남았다.
+// 이 파일이 지키는 것은 넷이다.
 //
 //  ① **방장만 본다.** 아직 멤버가 아닌 사람들의 존재·수를 일반 멤버에게 알리지 않는다
 //     (보안 규칙도 같은 선을 긋는다).
@@ -11,8 +12,13 @@
 //  ③ **뱃지가 로딩·에러를 0으로 접지 않는다.** 이 스트림은 방장에게 요청 도착을 알리는
 //     유일한 신호라, `valueOrNull?.length ?? 0`으로 접으면 에러일 때 버튼이 당당하게
 //     "대기 중인 요청이 없어요"라고 거짓말한다. 그 거짓말이 곧 승인 누락이다.
+//  ④ **목록은 팝업으로 열리고 그룹 상세는 그대로 남는다.** 전체 화면 push로 되돌아가면
+//     상세가 통째로 덮여 "어느 그룹의 대기자인지"라는 맥락이 사라진다. 아래 단언은
+//     push였다면 반드시 실패한다(닫힌 라우트는 `skipOffstage` 기본값에 걸려 검색에서
+//     빠진다) — 그것이 이 축의 회귀 감지 원리다.
 //
-// 목록 본문(승인·거절·행 잠금·재시도)은 `join_request_ui_test.dart`가 고정한다.
+// 목록 본문(승인·거절·행 잠금·재시도)은 `join_request_ui_test.dart`가, 팝업의 스크림·
+// 크기·닫기 경로는 `join_requests_dialog_test.dart`가 고정한다.
 library;
 
 import 'dart:async';
@@ -21,7 +27,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:keepcon/features/share/pages/group_detail_page.dart';
-import 'package:keepcon/features/share/pages/join_requests_page.dart';
+import 'package:keepcon/features/share/widgets/join_requests_dialog.dart';
 import 'package:keepcon/shared/models/group.dart';
 import 'package:keepcon/shared/models/join_request.dart';
 import 'package:keepcon/shared/providers/repositories.dart';
@@ -243,35 +249,56 @@ void main() {
       // 실패해도 진입은 막히지 않는다 — 안쪽 배너의 '다시 시도'가 복구 경로다.
       await tester.tap(find.text('승인요청목록'));
       await tester.pumpAndSettle();
-      expect(find.byType(JoinRequestsPage), findsOneWidget);
+      expect(find.byType(JoinRequestsDialog), findsOneWidget);
       expect(find.text('다시 시도'), findsOneWidget);
     });
   });
 
   group('진입 → 결정', () {
-    testWidgets('버튼을 누르면 목록 화면이 열리고 승인이 계약 메서드를 부른다',
+    testWidgets('버튼을 누르면 팝업이 열리고 그룹 상세는 트리에 남는다', (WidgetTester tester) async {
+      // 전체 화면 push로 되돌아가면 아래 두 단언이 깨진다 — 그룹 상세 라우트가
+      // 비활성이 되어 `skipOffstage` 기본값에 걸려 검색에서 빠지기 때문이다.
+      repo
+        ..groupsOverride = <Group>[groupFixture(iAmOwner: true)]
+        ..pending = <JoinRequest>[req('a', displayName: '지원')];
+      await pumpDetail(tester);
+
+      // 진입 전에는 목록이 없다(버튼이 목록을 인라인으로 펼치지 않는다).
+      expect(find.byType(JoinRequestsDialog), findsNothing);
+      expect(find.text('지원'), findsNothing);
+
+      await tester.tap(find.text('승인요청목록'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(JoinRequestsDialog), findsOneWidget);
+      expect(find.byType(Dialog), findsOneWidget);
+      expect(find.text('지원'), findsOneWidget);
+      // 뒤의 그룹 상세가 그대로 보인다 — 팝업의 존재 이유다.
+      expect(find.byType(GroupDetailPage), findsOneWidget);
+      expect(find.text('가족'), findsWidgets);
+      expect(find.text('멤버 1/10명'), findsOneWidget);
+    });
+
+    testWidgets('승인이 계약 메서드를 부르고 결과가 팝업 안에서 사용자에게 닿는다',
         (WidgetTester tester) async {
       repo
         ..groupsOverride = <Group>[groupFixture(iAmOwner: true)]
         ..pending = <JoinRequest>[req('a', displayName: '지원')];
       await pumpDetail(tester);
 
-      // 진입 전에는 목록 화면이 없다(버튼이 목록을 인라인으로 펼치지 않는다).
-      expect(find.byType(JoinRequestsPage), findsNothing);
-      expect(find.text('지원'), findsNothing);
-
       await tester.tap(find.text('승인요청목록'));
       await tester.pumpAndSettle();
-
-      expect(find.byType(JoinRequestsPage), findsOneWidget);
-      expect(find.text('지원'), findsOneWidget);
-
       await tester.tap(find.widgetWithText(FilledButton, '승인'));
       await tester.pumpAndSettle();
 
       expect(repo.approved, <String>['a']);
       expect(repo.rejected, isEmpty);
-      expect(find.text('지원님을 그룹에 추가했어요.'), findsOneWidget);
+      // 스낵바가 아니라 팝업 안이다 — 스낵바는 배리어에 덮여 바랜다(픽셀 실측).
+      expect(
+          find.descendant(
+              of: find.byType(Dialog), matching: find.text('지원님을 그룹에 추가했어요.')),
+          findsOneWidget);
+      expect(find.byType(SnackBar), findsNothing);
     });
 
     testWidgets('거절도 계약 메서드를 부른다 — 두 버튼이 뒤바뀌지 않았다',
@@ -288,7 +315,10 @@ void main() {
 
       expect(repo.rejected, <String>['a']);
       expect(repo.approved, isEmpty);
-      expect(find.text('참여 요청을 거절했어요.'), findsOneWidget);
+      expect(
+          find.descendant(
+              of: find.byType(Dialog), matching: find.text('참여 요청을 거절했어요.')),
+          findsOneWidget);
     });
   });
 }

@@ -510,7 +510,7 @@ final joinRequestsProvider = Provider<AsyncValue<List<JoinRequest>>>((ref) {
 /// family 수명은 위 내부용 family와 같되 **복구 경로가 다르다** — 이쪽은 래퍼 없이
 /// 위젯이 직접 watch하므로 **화면 이탈만으로도** 해제된다(위 family는 keepAlive 래퍼
 /// [joinRequestsProvider]가 붙잡아 로그아웃에서만 해제된다). 화면에 남은 에러는
-/// 승인요청목록 화면(`JoinRequestsPage`)의 재시도 버튼이 이 인스턴스를 invalidate해
+/// 승인요청목록 팝업(`JoinRequestsDialog`)의 재시도 버튼이 이 인스턴스를 invalidate해
 /// 되살린다. 소비자는 둘이다 — 그룹 상세의 진입점 버튼(뱃지)과 그 화면(목록). 둘 다
 /// 로딩·에러를 0건으로 접지 않는다(접으면 "요청 없음"과 구분되지 않는다).
 final AutoDisposeStreamProviderFamily<List<JoinRequest>, String>
