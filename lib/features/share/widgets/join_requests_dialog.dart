@@ -231,8 +231,9 @@ class _DecisionResult {
   const _DecisionResult.failed(this.message) : failed = true;
 
   /// 사용자에게 보여 줄 한국어 문구(내부 예외 메시지 금지 — [InlineErrorBanner] 규약).
-
   final String message;
+
+  /// 실패면 `true` — 배너 톤과 아이콘을 가른다.
   final bool failed;
 }
 
@@ -253,29 +254,37 @@ class _DecisionBanner extends StatelessWidget {
     // 성공은 차분하게(표면 톤), 실패는 error 계열로 — 색은 전부 스킴에서 온다.
     final Color tone = result.failed ? scheme.error : scheme.primary;
 
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      decoration: BoxDecoration(
-        color: tone.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(AppRadii.tile),
-        border: Border.all(color: tone.withValues(alpha: 0.28)),
-      ),
-      child: Row(
-        children: <Widget>[
-          Icon(
-            result.failed ? Icons.error_outline : Icons.check_circle_outline,
-            size: 20,
-            color: tone,
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              result.message,
-              style: theme.textTheme.bodyMedium?.copyWith(height: 1.35),
+    // ⚠️ `liveRegion` — 걷어낸 `SnackBar`가 프레임워크에서 공짜로 받던 것이다
+    //    (Flutter SDK `snack_bar.dart`가 본문을 `Semantics(container: true,
+    //    liveRegion: true)`로 감싼다). 없으면 결과가 스크린리더에 전혀 통지되지 않는데,
+    //    결정을 누른 버튼은 그 행과 함께 사라지므로 포커스로 되짚어 갈 수도 없다.
+    return Semantics(
+      container: true,
+      liveRegion: true,
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: tone.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(AppRadii.tile),
+          border: Border.all(color: tone.withValues(alpha: 0.28)),
+        ),
+        child: Row(
+          children: <Widget>[
+            Icon(
+              result.failed ? Icons.error_outline : Icons.check_circle_outline,
+              size: 20,
+              color: tone,
             ),
-          ),
-        ],
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                result.message,
+                style: theme.textTheme.bodyMedium?.copyWith(height: 1.35),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

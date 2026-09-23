@@ -127,9 +127,14 @@ class _StubShareRepository implements ShareRepository {
     throw StateError('정원이 찼습니다'); // 승인 실패 경로를 재현한다
   }
 
+  /// [approveGate]의 **성공** 짝. 승인 스텁은 항상 던지므로, "팝업이 닫힌 뒤 성공이
+  /// 돌아오는" 칸은 거절로만 잴 수 있다.
+  Completer<void>? rejectGate;
+
   @override
   Future<JoinRequest> rejectJoinRequest(String id) async {
     rejected.add(id);
+    if (rejectGate != null) await rejectGate!.future;
     return _req(id, status: JoinRequestStatus.rejected);
   }
 
@@ -533,6 +538,29 @@ void main() {
 
       expect(find.byType(SnackBar), findsOneWidget);
       expect(find.textContaining('정원이 찼거나'), findsOneWidget);
+    });
+
+    testWidgets('팝업이 닫힌 뒤에 성공이 돌아와도 스낵바로 알린다', (WidgetTester tester) async {
+      // 실패 칸만 고정해 두면 "성공은 목록이 갱신되니 안 알려도 된다"는 단순화가 조용히
+      // 통과한다(뮤테이션으로 실증됨 — 성공 경로를 버려도 테스트가 전부 green이었다).
+      // 그때 방장은 처리가 됐는지 알 길이 없다: 팝업도 없고 스낵바도 없다.
+      final _StubShareRepository share = _StubShareRepository(
+        pending: <JoinRequest>[_req('a', displayName: '지원')],
+      )..rejectGate = Completer<void>();
+      await pumpDialog(tester, share);
+
+      await tester.tap(find.widgetWithText(TextButton, '거절'));
+      await tester.pump();
+
+      await tester.tapAt(const Offset(10, 10));
+      await tester.pumpAndSettle();
+      expect(find.byType(Dialog), findsNothing, reason: '팝업이 닫힌 것이 이 테스트의 전제');
+
+      share.rejectGate!.complete();
+      await tester.pumpAndSettle();
+
+      expect(find.byType(SnackBar), findsOneWidget);
+      expect(find.text('참여 요청을 거절했어요.'), findsOneWidget);
     });
 
     testWidgets('에러를 빈 목록으로 접지 않는다 — 방장이 대기자를 지나치면 안 된다',

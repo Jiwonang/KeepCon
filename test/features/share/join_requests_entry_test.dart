@@ -49,6 +49,10 @@ class _PendingShareRepository extends InMemoryShareRepository {
   /// 만들 수 없어서(생성자가 곧 방장) 비방장 축은 이 주입이 유일한 경로다.
   List<Group>? groupsOverride;
 
+  /// 그룹 목록을 **여러 번** 방출해야 하는 테스트용(그룹이 도중에 사라지는 경우).
+  /// 설정하면 [groupsOverride]보다 우선한다.
+  StreamController<List<Group>>? groupsController;
+
   /// 대기 목록 방출 모드 — `data`(기본) / `hang`(첫 방출 전) / `error`.
   _PendingMode mode = _PendingMode.data;
 
@@ -59,9 +63,23 @@ class _PendingShareRepository extends InMemoryShareRepository {
   final List<String> rejected = <String>[];
 
   @override
-  Stream<List<Group>> watchGroups(String userId) => groupsOverride == null
-      ? super.watchGroups(userId)
-      : Stream<List<Group>>.value(groupsOverride!);
+  Stream<List<Group>> watchGroups(String userId) {
+    final StreamController<List<Group>>? c = groupsController;
+    if (c != null) return _seededGroups(c);
+    return groupsOverride == null
+        ? super.watchGroups(userId)
+        : Stream<List<Group>>.value(groupsOverride!);
+  }
+
+  /// [groupsOverride]를 **먼저 한 번** 흘린 뒤 [groupsController]를 잇는다.
+  ///
+  /// broadcast 스트림은 구독 전에 넣은 값을 되풀이하지 않는다 — 구독은 화면이 push된
+  /// 뒤에 일어나므로, 컨트롤러만 쓰면 첫 값이 유실돼 그룹이 **영원히 로딩**이 된다
+  /// (스피너가 계속 돌아 `pumpAndSettle`이 타임아웃한다 — 실측).
+  Stream<List<Group>> _seededGroups(StreamController<List<Group>> c) async* {
+    if (groupsOverride != null) yield groupsOverride!;
+    yield* c.stream;
+  }
 
   @override
   Stream<List<JoinRequest>> watchPendingJoinRequests(String groupId) {
@@ -319,6 +337,72 @@ void main() {
           find.descendant(
               of: find.byType(Dialog), matching: find.text('참여 요청을 거절했어요.')),
           findsOneWidget);
+    });
+
+    testWidgets('팝업이 열린 채 그룹이 사라지면 팝업도 상세도 닫히고 호출부로 돌아온다',
+        (WidgetTester tester) async {
+      // ⚠️ 이 테스트는 **최종 상태 가드**이지 `popUntil` 한 줄의 회귀 가드가 아니다.
+      // 그 줄을 지우는 뮤테이션으로도 통과한다 — 팝업이 닫히면 아래 라우트가 리빌드돼
+      // postFrameCallback이 한 번 더 걸리고, 그 두 번째 기회가 상세까지 닫기 때문이다
+      // (프레임 단위로 관측해 확인했다). 그래도 이 축을 남기는 이유는, 그 자기 치유가
+      // Navigator 구현 세부에 기대는 것이라 **깨지면 사용자가 빈 화면에 갇힌다**는 데
+      // 있다. 여기서 재는 것은 "무엇이 먼저 닫히는가"가 아니라 "결국 호출부로 돌아오는가"다.
+      // 승인 대기 팝업은 방장이 열어 둔 채 기다리는 자리라 이 창이 특히 넓다.
+      final StreamController<List<Group>> groups =
+          StreamController<List<Group>>.broadcast();
+      addTearDown(groups.close);
+      repo
+        ..groupsOverride = <Group>[groupFixture(iAmOwner: true)]
+        ..groupsController = groups
+        ..pending = <JoinRequest>[req('a')];
+
+      tester.view.physicalSize = const Size(1000, 3000);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      // 상세를 **push된 라우트**로 띄운다 — `home:`으로 두면 최초 라우트라 pop 자체가
+      // 성립하지 않아 이 결함을 잴 수 없다.
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: <Override>[
+            authRepositoryProvider.overrideWithValue(auth),
+            gifticonRepositoryProvider.overrideWithValue(gifticons),
+            shareRepositoryProvider.overrideWithValue(repo),
+          ],
+          child: MaterialApp(
+            home: Builder(
+              builder: (BuildContext context) => Scaffold(
+                body: Center(
+                  child: ElevatedButton(
+                    onPressed: () =>
+                        Navigator.of(context).push(MaterialPageRoute<void>(
+                      builder: (_) => const GroupDetailPage(groupId: 'g1'),
+                    )),
+                    child: const Text('상세 열기'),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('상세 열기'));
+      await tester.pumpAndSettle();
+      expect(find.byType(GroupDetailPage), findsOneWidget);
+
+      await tester.tap(find.text('승인요청목록'));
+      await tester.pumpAndSettle();
+      expect(find.byType(Dialog), findsOneWidget, reason: '팝업이 떠 있는 것이 전제');
+
+      // 다른 기기의 그룹 삭제·소유권 이전 → 내 그룹에서 빠진다.
+      groups.add(const <Group>[]);
+      await tester.pumpAndSettle();
+
+      expect(find.byType(Dialog), findsNothing);
+      expect(find.byType(GroupDetailPage), findsNothing,
+          reason: '팝업만 닫히고 상세가 남으면 빈 화면에 갇힌다');
+      expect(find.text('상세 열기'), findsOneWidget, reason: '호출부로 복귀해야 한다');
     });
   });
 }

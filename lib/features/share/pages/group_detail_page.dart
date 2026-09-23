@@ -52,8 +52,27 @@ class GroupDetailPage extends ConsumerWidget {
           data: (Group? group) {
             if (group == null) {
               // 로딩이 끝났는데도 그룹이 없다 = 나가기/삭제/이전으로 멤버십 소멸 → 복귀.
+              //
+              // ⚠️ 맨 `maybePop()`은 **최상단 라우트**를 닫는다 — 이 상세가 아니라 그 위에
+              // 떠 있는 팝업·시트다. 그래서 이 라우트까지 먼저 걷어낸 뒤 나간다.
+              //
+              // 실측으로는 그렇게 하지 않아도 복구된다 — 위 팝업이 닫히면서 이 라우트가
+              // 리빌드돼 postFrameCallback이 한 번 더 걸리고, 그때 상세까지 닫힌다
+              // (위젯 테스트로 두 갈래를 다 재 봤고 최종 상태가 같았다). 그 자기 치유는
+              // **Navigator가 아래 라우트를 다시 짓는다는 구현 세부에 기대는 것**이라
+              // 보장이 아니다. 아래 두 줄은 그 의존을 끊어, 위에 무엇이 떠 있든 이 화면을
+              // 떠난다는 의도를 코드로 직접 말한다.
+              //
+              // (참고: 걸렸을 때의 모습은 AppBar도 없는 빈 Scaffold다 — 아래 return 참조.
+              //  승인요청목록 팝업은 방장이 열어 둔 채 기다리는 자리라 창이 특히 넓다.)
               WidgetsBinding.instance.addPostFrameCallback((_) {
-                if (context.mounted) Navigator.of(context).maybePop();
+                if (!context.mounted) return;
+                final NavigatorState nav = Navigator.of(context);
+                final ModalRoute<Object?>? route = ModalRoute.of(context);
+                if (route != null && !route.isCurrent) {
+                  nav.popUntil((Route<dynamic> r) => identical(r, route));
+                }
+                nav.maybePop();
               });
               return const Scaffold(body: SizedBox.shrink());
             }
@@ -490,7 +509,8 @@ class _JoinRequestsButton extends ConsumerWidget {
         ),
       ),
       error: (Object e, StackTrace _) => (
-        // 실패해도 버튼은 살아 있다 — 들어가면 배너의 '다시 시도'로 복구할 수 있다.
+        // 실패해도 버튼은 살아 있다 — 탭이 먼저 되살리고(아래 onTap), 그래도 실패하면
+        // 팝업 안 배너의 '다시 시도'가 받는다.
         '불러오지 못했어요. 눌러서 다시 시도',
         Icon(Icons.error_outline, color: scheme.error, size: 20),
       ),
@@ -503,7 +523,14 @@ class _JoinRequestsButton extends ConsumerWidget {
       child: Material(
         type: MaterialType.transparency,
         child: InkWell(
-          onTap: onTap,
+          // 에러 갈래의 부제가 "눌러서 다시 시도"라고 약속한다. 팝업만 열면 **같은
+          // provider 인스턴스**를 watch하므로 에러 그대로여서, 사용자는 팝업 안에서
+          // '다시 시도'를 한 번 더 눌러야 한다 — 라벨이 약속한 동작과 어긋난다.
+          // 열기 전에 되살리고, 그래도 실패하면 팝업 배너가 받는다.
+          onTap: () {
+            if (pending.hasError) retryPendingJoinRequests(ref, groupId);
+            onTap();
+          },
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
             child: Row(
