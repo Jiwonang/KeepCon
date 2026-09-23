@@ -389,6 +389,23 @@ void main() {
       expect(find.widgetWithText(TextButton, '거절'), findsOneWidget);
     });
 
+    testWidgets('승인이 왼쪽, 거절이 오른쪽이다', (WidgetTester tester) async {
+      // 순서가 뒤집히면 **같은 자리를 누르던 손이 반대 결정을 보낸다**. 승인은 멤버
+      // 추가, 거절은 요청자에게 남는 기록이라 둘 다 가볍게 되돌릴 수 없다. Material
+      // 관례(주 동작을 오른쪽 끝에)와 반대 방향이라 무심코 '고쳐질' 위험이 특히 크므로,
+      // 문구 존재가 아니라 **x 좌표**로 못박는다.
+      final _StubShareRepository share = _StubShareRepository(
+        pending: <JoinRequest>[_req('a', displayName: '지원')],
+      );
+      await pumpDialog(tester, share);
+
+      final double approveX =
+          tester.getCenter(find.widgetWithText(FilledButton, '승인')).dx;
+      final double rejectX =
+          tester.getCenter(find.widgetWithText(TextButton, '거절')).dx;
+      expect(approveX, lessThan(rejectX));
+    });
+
     testWidgets('로딩을 빈 목록으로 접지 않는다 — "요청 없음"과 구분되어야 한다',
         (WidgetTester tester) async {
       // 값을 주지 않는 스트림 = 로딩 지속.

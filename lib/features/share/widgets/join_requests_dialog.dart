@@ -498,14 +498,18 @@ class _PendingRowState extends ConsumerState<_PendingRow> {
           Text(r.avatarEmoji, style: Theme.of(context).textTheme.headlineSmall),
           const SizedBox(width: 12),
           Expanded(child: Text(r.displayName)),
-          TextButton(
-            onPressed: _busy ? null : () => _decide(approve: false),
-            child: const Text('거절'),
-          ),
-          const SizedBox(width: 4),
+          // 승인이 왼쪽, 거절이 오른쪽. Material 관례(주 동작을 오른쪽 끝에)와는
+          // 반대이지만 화면 주인의 지시다. 순서를 되돌리면 **같은 자리를 누르던 손이
+          // 반대 결정을 보낸다** — 둘 다 되돌리기 쉽지 않은 결정이라(승인은 멤버 추가,
+          // 거절은 요청자에게 남는 기록) 테스트로 순서를 못박아 둔다.
           FilledButton(
             onPressed: _busy ? null : () => _decide(approve: true),
             child: const Text('승인'),
+          ),
+          const SizedBox(width: 4),
+          TextButton(
+            onPressed: _busy ? null : () => _decide(approve: false),
+            child: const Text('거절'),
           ),
         ],
       ),
