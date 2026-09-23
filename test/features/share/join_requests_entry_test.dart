@@ -197,9 +197,11 @@ void main() {
       expect(find.text('승인요청목록'), findsNothing);
     });
 
-    testWidgets('대기 0건에도 버튼은 남는다', (WidgetTester tester) async {
-      // 회귀하면 조용히 예전(인라인 섹션) 동작으로 돌아간다 — 방장은 "요청이 없다"는
-      // 것조차 확인할 수 없고, 진입점이 건수에 따라 나타났다 사라져 구조가 흔들린다.
+    testWidgets('대기 0건에도 버튼은 남고, 뱃지만 빠진다', (WidgetTester tester) async {
+      // 버튼이 회귀하면 조용히 예전(인라인 섹션) 동작으로 돌아간다 — 방장은 "요청이
+      // 없다"는 것조차 확인할 수 없고, 진입점이 건수에 따라 나타났다 사라져 구조가
+      // 흔들린다. 뱃지 쪽은 반대 방향의 회귀를 막는다 — `0`은 부제가 이미 하는 말이고,
+      // 회색 뱃지는 라이트 모드 대비가 3:1을 밑돈다.
       repo
         ..groupsOverride = <Group>[groupFixture(iAmOwner: true)]
         ..pending = const <JoinRequest>[];
@@ -207,7 +209,7 @@ void main() {
 
       expect(find.text('승인요청목록'), findsOneWidget);
       expect(find.text('대기 중인 요청이 없어요'), findsOneWidget);
-      expect(find.text('0'), findsOneWidget);
+      expect(find.text('0'), findsNothing);
     });
   });
 

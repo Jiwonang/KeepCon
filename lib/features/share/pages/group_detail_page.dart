@@ -444,9 +444,10 @@ class _CardShell extends StatelessWidget {
 ///
 /// 목록과 승인·거절은 [JoinRequestsPage]가 갖고, 여기는 **진입점과 대기 건수**만 본다.
 ///
-/// ⚠️ **0건에도 숨기지 않는다.** 인라인 목록이던 시절에는 0건이면 통째로 사라졌는데,
-/// 진입점까지 사라지면 방장이 "요청이 없다"는 것조차 확인할 수 없고 화면 구조가 건수에
-/// 따라 흔들린다.
+/// ⚠️ **0건에도 버튼을 숨기지 않는다.** 인라인 목록이던 시절에는 0건이면 통째로
+/// 사라졌는데, 진입점까지 사라지면 방장이 "요청이 없다"는 것조차 확인할 수 없고 화면
+/// 구조가 건수에 따라 흔들린다. 숨는 것은 **뱃지뿐**이다(0은 부제가 이미 말한다 —
+/// 아래 `data` 분기).
 ///
 /// ⚠️ **로딩·에러를 0으로 접지 않는다.** 이 스트림은 방장에게 요청 도착을 알리는 유일한
 /// 신호라([JoinRequestsPage] 머리말), `valueOrNull?.length ?? 0`으로 접으면 에러일 때
@@ -471,7 +472,13 @@ class _JoinRequestsButton extends ConsumerWidget {
         requests.isEmpty
             ? '대기 중인 요청이 없어요'
             : '${requests.length}명이 참여를 기다리고 있어요',
-        _PendingCountBadge(count: requests.length),
+        // 0건이면 뱃지를 그리지 않는다 — 부제가 이미 "없어요"라고 말하고 있어 `0`은
+        // 같은 말을 두 번 하는 것이고, 회색 뱃지는 라이트 모드 대비가 3:1을 밑돈다
+        // (배경 onSurfaceVariant #9A9AA0 위 흰 글자 ≈ 2.8:1). **버튼 자체는 남는다**
+        // (위 머리말) — 사라지는 것은 숫자 하나뿐이다.
+        requests.isEmpty
+            ? const SizedBox.shrink()
+            : _PendingCountBadge(count: requests.length),
       ),
       loading: () => (
         '불러오는 중…',
@@ -540,29 +547,31 @@ class _JoinRequestsButton extends ConsumerWidget {
   }
 }
 
-/// 대기 건수 pill. 0건은 중립색(회색)으로, 1건 이상은 주의색(error)으로 구분한다.
+/// 대기 건수 pill(주의색). **1건 이상일 때만 그린다** — 0건은 호출부가 뱃지 자체를
+/// 빼므로 여기에 0 분기를 두지 않는다(두면 쓰이지 않는 색 조합이 남아, 다음 사람이
+/// 그것을 근거로 0건 표시를 되살린다).
 class _PendingCountBadge extends StatelessWidget {
-  const _PendingCountBadge({required this.count});
+  const _PendingCountBadge({required this.count})
+      : assert(count > 0, '0건은 호출부가 뱃지를 그리지 않는다');
 
   final int count;
 
   @override
   Widget build(BuildContext context) {
     final ColorScheme scheme = Theme.of(context).colorScheme;
-    final bool waiting = count > 0;
     return Container(
       height: 22,
       constraints: const BoxConstraints(minWidth: 22),
       alignment: Alignment.center,
       padding: const EdgeInsets.symmetric(horizontal: 7),
       decoration: BoxDecoration(
-        color: waiting ? scheme.error : scheme.onSurfaceVariant,
+        color: scheme.error,
         borderRadius: BorderRadius.circular(AppRadii.pill),
       ),
       child: Text(
         '$count',
         style: TextStyle(
-          color: waiting ? scheme.onError : scheme.surface,
+          color: scheme.onError,
           fontSize: 12,
           fontWeight: FontWeight.w800,
         ),
