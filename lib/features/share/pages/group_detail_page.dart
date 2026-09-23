@@ -53,34 +53,29 @@ class GroupDetailPage extends ConsumerWidget {
             if (group == null) {
               // 로딩이 끝났는데도 그룹이 없다 = 나가기/삭제/이전으로 멤버십 소멸 → 복귀.
               //
-              // ⚠️ 맨 `maybePop()`은 **최상단 라우트**를 닫는다 — 이 상세가 아니라 그 위에
-              // 떠 있는 팝업·시트다. 그래서 이 라우트까지 먼저 걷어낸 뒤 나간다.
-              //
-              // 실측으로는 그렇게 하지 않아도 복구된다 — 위 팝업이 닫히면서 이 라우트가
-              // 리빌드돼 postFrameCallback이 한 번 더 걸리고, 그때 상세까지 닫힌다
-              // (위젯 테스트로 두 갈래를 다 재 봤고 최종 상태가 같았다). 그 자기 치유는
-              // **Navigator가 아래 라우트를 다시 짓는다는 구현 세부에 기대는 것**이라
-              // 보장이 아니다. 아래 두 줄은 그 의존을 끊어, 위에 무엇이 떠 있든 이 화면을
-              // 떠난다는 의도를 코드로 직접 말한다.
-              //
-              // (참고: 걸렸을 때의 모습은 AppBar도 없는 빈 Scaffold다 — 아래 return 참조.
-              //  승인요청목록 팝업은 방장이 열어 둔 채 기다리는 자리라 창이 특히 넓다.)
+              // `maybePop()`은 **최상단 라우트**를 닫는다 — 위에 팝업이 떠 있으면 그것이
+              // 먼저다. 그래도 최종적으로는 이 상세까지 닫힌다(아래 두 번째 주석).
               WidgetsBinding.instance.addPostFrameCallback((_) {
                 if (!context.mounted) return;
-                final NavigatorState nav = Navigator.of(context);
                 final ModalRoute<Object?>? route = ModalRoute.of(context);
                 // ⚠️ **이미 떠난 라우트면 아무것도 하지 않는다.** 이 분기는 빌드마다
-                // 콜백을 새로 등록하므로 닫히는 도중에도 다시 돌 수 있는데, `didPop`은
-                // **exit 애니메이션이 끝나기 전에** 라우트를 history에서 빼므로
-                // `context.mounted`가 참이어도 `isActive`가 거짓일 수 있다. 그 상태로
-                // 아래 `popUntil`을 돌리면 조건에 맞는 라우트가 스택에 없어
-                // **호출부까지 통째로 걷어낸다**(Navigator.popUntil은 predicate가
-                // 참이 될 때까지 pop을 반복한다 — 없으면 끝까지 간다).
+                // 콜백을 새로 등록해 닫히는 도중에도 다시 도는데, `_RouteEntry.handlePop`이
+                // `didPop`을 부르기 **전에** 상태를 `popping`으로 옮기므로(Flutter SDK
+                // `navigator.dart`) `context.mounted`가 참이어도 `isActive`는 거짓이다.
+                // 그때 pop하면 아래 화면이 대신 닫힌다 —
+                // `barcode_scanner_screen.dart`의 같은 가드와 짝이다(그쪽은 위에 라우트가
+                // 쌓이지 않아 `!isCurrent`로 좁혀도 되지만, 이 화면은 팝업이 떠 있는
+                // 상태에서도 동작해야 하므로 `isActive`여야 한다 — 통일하지 말 것).
                 if (route == null || !route.isActive) return;
-                if (!route.isCurrent) {
-                  nav.popUntil((Route<dynamic> r) => identical(r, route));
-                }
-                nav.maybePop();
+                // 위에 팝업이 떠 있으면 그것부터 닫힌다. 이 상세는 팝업이 닫히며 리빌드돼
+                // 여기로 다시 들어와 닫힌다(위젯 테스트가 최종 상태를 고정한다).
+                //
+                // ⚠️ `popUntil((r) => identical(r, route))`로 앞당기지 말 것. predicate에
+                // 맞는 라우트가 스택에 없으면 `popUntil`은 맨 `pop()`을 반복해 **루트까지**
+                // 비운다(`maybePop`과 달리 `isFirst`에서 멈추지 않는다). 여기는 루트
+                // Navigator라 그 결과는 셸까지 사라진 검은 화면이고 복구 경로가 없다.
+                // 실제로 넣어 봤으나 최종 상태는 그대로였다(이득 0) — 되돌렸다.
+                Navigator.of(context).maybePop();
               });
               return const Scaffold(body: SizedBox.shrink());
             }

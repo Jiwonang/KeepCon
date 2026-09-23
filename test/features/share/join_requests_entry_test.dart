@@ -404,5 +404,75 @@ void main() {
           reason: '팝업만 닫히고 상세가 남으면 빈 화면에 갇힌다');
       expect(find.text('상세 열기'), findsOneWidget, reason: '호출부로 복귀해야 한다');
     });
+
+    testWidgets('exit 애니메이션 중 그룹이 사라져도 아래 화면을 닫지 않는다',
+        (WidgetTester tester) async {
+      // 이 분기는 빌드마다 post-frame 콜백을 새로 등록해 **라우트가 닫히는 도중에도**
+      // 다시 돈다. 그런데 `_RouteEntry.handlePop`은 `didPop`보다 먼저 상태를 `popping`
+      // 으로 옮기므로, exit 애니메이션이 도는 동안 `context.mounted`는 참인데
+      // `isActive`는 거짓이다. 그때 pop하면 **호출부가 대신 닫힌다.**
+      //
+      // 이론적 레이스가 아니다 — 방장 소유권 이전(`_onLeave`)이 `navigator.pop()`을
+      // 부른 직후 스트림이 `group == null`을 흘리는 순서가 정확히 이것이고, Firestore
+      // 스냅샷 지연은 300ms 애니메이션 창 안에 들어온다.
+      //
+      // ⚠️ **지금 코드에서는 `!route.isActive` 가드를 지워도 이 테스트가 통과한다**
+      // (뮤테이션으로 확인). 맨 `maybePop()`은 이 라우트가 popping이면 호출부(=`isFirst`)
+      // 에 걸려 bubble로 끝나기 때문이다 — 즉 가드는 **현재 스택 깊이에서만** 무해하다.
+      // 이 테스트가 잡는 것은 `popUntil` 같은 **무제한 pop을 다시 들여오는 변경**이다
+      // (가드 없이 그것을 넣으면 여기서 `HOST=0`으로 깨진다). 가드 자체는 스택이
+      // 깊어질 때를 대비한 보험이고, 그 축은 아직 어떤 테스트도 재지 않는다.
+      final StreamController<List<Group>> groups =
+          StreamController<List<Group>>.broadcast();
+      addTearDown(groups.close);
+      repo
+        ..groupsOverride = <Group>[groupFixture(iAmOwner: true)]
+        ..groupsController = groups
+        ..pending = <JoinRequest>[req('a')];
+
+      final GlobalKey<NavigatorState> navKey = GlobalKey<NavigatorState>();
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: <Override>[
+            authRepositoryProvider.overrideWithValue(auth),
+            gifticonRepositoryProvider.overrideWithValue(gifticons),
+            shareRepositoryProvider.overrideWithValue(repo),
+          ],
+          child: MaterialApp(
+            navigatorKey: navKey,
+            home: Builder(
+              builder: (BuildContext context) => Scaffold(
+                body: Center(
+                  child: ElevatedButton(
+                    onPressed: () =>
+                        Navigator.of(context).push(MaterialPageRoute<void>(
+                      builder: (_) => const GroupDetailPage(groupId: 'g1'),
+                    )),
+                    child: const Text('상세 열기'),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('상세 열기'));
+      await tester.pumpAndSettle();
+      expect(find.byType(GroupDetailPage), findsOneWidget);
+
+      // 뒤로가기 — 애니메이션이 도는 동안 라우트는 mounted지만 isActive는 거짓이다.
+      navKey.currentState!.pop();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
+
+      // 그 창 안에 그룹 소멸이 도착한다.
+      groups.add(const <Group>[]);
+      await tester.pumpAndSettle();
+
+      expect(find.byType(GroupDetailPage), findsNothing);
+      expect(find.text('상세 열기'), findsOneWidget,
+          reason: '호출부까지 pop되면 루트 Navigator가 비어 검은 화면이 된다');
+    });
   });
 }
