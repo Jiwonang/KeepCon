@@ -69,7 +69,15 @@ class GroupDetailPage extends ConsumerWidget {
                 if (!context.mounted) return;
                 final NavigatorState nav = Navigator.of(context);
                 final ModalRoute<Object?>? route = ModalRoute.of(context);
-                if (route != null && !route.isCurrent) {
+                // ⚠️ **이미 떠난 라우트면 아무것도 하지 않는다.** 이 분기는 빌드마다
+                // 콜백을 새로 등록하므로 닫히는 도중에도 다시 돌 수 있는데, `didPop`은
+                // **exit 애니메이션이 끝나기 전에** 라우트를 history에서 빼므로
+                // `context.mounted`가 참이어도 `isActive`가 거짓일 수 있다. 그 상태로
+                // 아래 `popUntil`을 돌리면 조건에 맞는 라우트가 스택에 없어
+                // **호출부까지 통째로 걷어낸다**(Navigator.popUntil은 predicate가
+                // 참이 될 때까지 pop을 반복한다 — 없으면 끝까지 간다).
+                if (route == null || !route.isActive) return;
+                if (!route.isCurrent) {
                   nav.popUntil((Route<dynamic> r) => identical(r, route));
                 }
                 nav.maybePop();
