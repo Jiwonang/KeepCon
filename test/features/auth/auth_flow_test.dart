@@ -69,9 +69,10 @@ void main() {
     // 셸의 탭은 IndexedStack이라(`keepcon_shell.dart`) 탭 전환으로는 해제되지 않는다 —
     // 해제 계기는 이 AuthGate 층의 교체 하나뿐이다. AuthGate가 셸을 Offstage로 보존하는
     // 구조로 바뀌면 그 아래 autoDispose provider가 해제되지 않아 박제가 재발한다.
-    // ⚠️ pending 축은 이 단언이 덮지 않는다 — `PendingJoinRequestsSection`은 루트
-    // Navigator에 push된 `GroupDetailPage` 안이라, 언마운트 계기는 셸 교체가 아니라
-    // 로그아웃 시 `mypage_page.dart`의 `popUntil(isFirst)`이고 그 경로에는 테스트가 없다.
+    // ⚠️ pending 축은 이 단언이 덮지 않는다 — 그 스트림을 watch하는 둘(그룹 상세의
+    // '승인요청목록' 버튼과 `JoinRequestsDialog`)은 모두 루트 Navigator에 push된
+    // `GroupDetailPage` 위에 있어, 언마운트 계기는 셸 교체가 아니라 로그아웃 시
+    // `mypage_page.dart`의 `popUntil(isFirst)`이고 그 경로에는 테스트가 없다.
     final InMemoryAuthRepository auth = InMemoryAuthRepository();
     await tester.binding.setSurfaceSize(const Size(430, 932));
     addTearDown(() => tester.binding.setSurfaceSize(null));

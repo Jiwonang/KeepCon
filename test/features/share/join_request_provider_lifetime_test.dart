@@ -138,7 +138,7 @@ void main() {
       );
       final ProviderContainer container = makeContainer(repo);
 
-      // 방장이 그룹 상세를 연다 — 섹션 위젯이 watch를 시작한다.
+      // 방장이 그룹 상세를 연다 — 진입점 버튼이 watch를 시작한다.
       final ProviderSubscription<AsyncValue<List<JoinRequest>>> sub =
           container.listen<AsyncValue<List<JoinRequest>>>(
         pendingJoinRequestsProvider('g1'),

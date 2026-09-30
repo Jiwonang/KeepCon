@@ -14,6 +14,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../shared/models/group.dart';
+import '../../../shared/models/join_request.dart';
 import '../../../shared/models/share.dart';
 import '../../../shared/models/user.dart';
 import '../../../shared/diagnostics/report_handled_failure.dart';
@@ -24,7 +25,7 @@ import '../../../shared/theme/brand_palette.dart';
 import '../../../shared/theme/theme_tokens.dart';
 import '../../../shared/widgets/inline_error_banner.dart';
 import '../state/share_providers.dart';
-import '../widgets/pending_join_requests_section.dart';
+import '../widgets/join_requests_dialog.dart';
 import '../widgets/share_common.dart';
 import '../widgets/share_format.dart';
 import '../widgets/share_sheets.dart';
@@ -51,8 +52,30 @@ class GroupDetailPage extends ConsumerWidget {
           data: (Group? group) {
             if (group == null) {
               // 로딩이 끝났는데도 그룹이 없다 = 나가기/삭제/이전으로 멤버십 소멸 → 복귀.
+              //
+              // `maybePop()`은 **최상단 라우트**를 닫는다 — 위에 팝업이 떠 있으면 그것이
+              // 먼저다. 그래도 최종적으로는 이 상세까지 닫힌다(아래 두 번째 주석).
               WidgetsBinding.instance.addPostFrameCallback((_) {
-                if (context.mounted) Navigator.of(context).maybePop();
+                if (!context.mounted) return;
+                final ModalRoute<Object?>? route = ModalRoute.of(context);
+                // ⚠️ **이미 떠난 라우트면 아무것도 하지 않는다.** 이 분기는 빌드마다
+                // 콜백을 새로 등록해 닫히는 도중에도 다시 도는데, `_RouteEntry.handlePop`이
+                // `didPop`을 부르기 **전에** 상태를 `popping`으로 옮기므로(Flutter SDK
+                // `navigator.dart`) `context.mounted`가 참이어도 `isActive`는 거짓이다.
+                // 그때 pop하면 아래 화면이 대신 닫힌다 —
+                // `barcode_scanner_screen.dart`의 같은 가드와 짝이다(그쪽은 위에 라우트가
+                // 쌓이지 않아 `!isCurrent`로 좁혀도 되지만, 이 화면은 팝업이 떠 있는
+                // 상태에서도 동작해야 하므로 `isActive`여야 한다 — 통일하지 말 것).
+                if (route == null || !route.isActive) return;
+                // 위에 팝업이 떠 있으면 그것부터 닫힌다. 이 상세는 팝업이 닫히며 리빌드돼
+                // 여기로 다시 들어와 닫힌다(위젯 테스트가 최종 상태를 고정한다).
+                //
+                // ⚠️ `popUntil((r) => identical(r, route))`로 앞당기지 말 것. predicate에
+                // 맞는 라우트가 스택에 없으면 `popUntil`은 맨 `pop()`을 반복해 **루트까지**
+                // 비운다(`maybePop`과 달리 `isFirst`에서 멈추지 않는다). 여기는 루트
+                // Navigator라 그 결과는 셸까지 사라진 검은 화면이고 복구 경로가 없다.
+                // 실제로 넣어 봤으나 최종 상태는 그대로였다(이득 0) — 되돌렸다.
+                Navigator.of(context).maybePop();
               });
               return const Scaffold(body: SizedBox.shrink());
             }
@@ -165,12 +188,20 @@ class _GroupDetailBody extends ConsumerWidget {
                 ],
               ),
             ),
-            // ── 참여 요청(방장 전용) ──
+            // ── 참여 요청 진입점(방장 전용) ──
             //
             // 방장만 본다 — 아직 멤버가 아닌 사람들의 이름이라 일반 멤버에게 열지
             // 않는다(보안 규칙도 같은 선을 긋는다). 이 스트림이 요청 도착을 알리는
             // 유일한 신호이므로 멤버 목록 바로 아래, 눈에 띄는 자리에 둔다.
-            if (iAmOwner) PendingJoinRequestsSection(groupId: group.id),
+            //
+            // 목록 자체는 [JoinRequestsDialog]로 옮겼고 여기는 진입점 + 건수만 남는다.
+            if (iAmOwner) ...<Widget>[
+              const SizedBox(height: 12),
+              _JoinRequestsButton(
+                groupId: group.id,
+                onTap: () => _openJoinRequests(context),
+              ),
+            ],
             const SizedBox(height: 24),
 
             // ── 공유 기프티콘 ──
@@ -245,6 +276,15 @@ class _GroupDetailBody extends ConsumerWidget {
         builder: (_) => MemberInvitePage(groupId: group.id),
       ),
     );
+  }
+
+  /// 승인요청목록을 **모달 팝업**으로 띄운다(전체 화면 push가 아니다).
+  ///
+  /// push였을 때는 이 상세 화면이 통째로 덮여 "어느 그룹의 대기자인지"라는 맥락이
+  /// 사라졌다. 팝업은 스크림 너머로 이 화면을 남겨 둔다 — [showJoinRequestsDialog]
+  /// 머리말의 이력 ③.
+  void _openJoinRequests(BuildContext context) {
+    showJoinRequestsDialog(context, group.id);
   }
 
   Future<void> _onLeave(
@@ -419,6 +459,154 @@ class _CardShell extends StatelessWidget {
       decoration: AppDecorations.softCard(scheme),
       clipBehavior: Clip.antiAlias,
       child: Padding(padding: padding, child: child),
+    );
+  }
+}
+
+/// '승인요청목록' 진입 버튼(방장 전용) — 멤버 카드와 같은 톤의 카드형 행.
+///
+/// 목록과 승인·거절은 [JoinRequestsDialog]가 갖고, 여기는 **진입점과 대기 건수**만 본다.
+///
+/// ⚠️ **0건에도 버튼을 숨기지 않는다.** 인라인 목록이던 시절에는 0건이면 통째로
+/// 사라졌는데, 진입점까지 사라지면 방장이 "요청이 없다"는 것조차 확인할 수 없고 화면
+/// 구조가 건수에 따라 흔들린다. 숨는 것은 **뱃지뿐**이다(0은 부제가 이미 말한다 —
+/// 아래 `data` 분기).
+///
+/// ⚠️ **로딩·에러를 0으로 접지 않는다.** 이 스트림은 방장에게 요청 도착을 알리는 유일한
+/// 신호라([JoinRequestsDialog] 머리말), `valueOrNull?.length ?? 0`으로 접으면 에러일 때
+/// 버튼이 당당하게 "대기 중인 요청이 없어요"라고 **거짓말한다**. 세 갈래를 각각 그린다.
+class _JoinRequestsButton extends ConsumerWidget {
+  const _JoinRequestsButton({required this.groupId, required this.onTap});
+
+  final String groupId;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+    final AsyncValue<List<JoinRequest>> pending =
+        ref.watch(pendingJoinRequestsProvider(groupId));
+
+    // 부제와 우측 표시를 한 갈래에서 함께 정한다 — 따로 계산하면 한쪽만 고쳐 "0건인데
+    // 스피너" 같은 모순 조합이 생긴다.
+    final (String subtitle, Widget trailing) = pending.when(
+      data: (List<JoinRequest> requests) => (
+        requests.isEmpty
+            ? '대기 중인 요청이 없어요'
+            : '${requests.length}명이 참여를 기다리고 있어요',
+        // 0건이면 뱃지를 그리지 않는다 — 부제가 이미 "없어요"라고 말하고 있어 `0`은
+        // 같은 말을 두 번 하는 것이고, 회색 뱃지는 라이트 모드 대비가 3:1을 밑돈다
+        // (배경 onSurfaceVariant #9A9AA0 위 흰 글자 ≈ 2.8:1). **버튼 자체는 남는다**
+        // (위 머리말) — 사라지는 것은 숫자 하나뿐이다.
+        requests.isEmpty
+            ? const SizedBox.shrink()
+            : _PendingCountBadge(count: requests.length),
+      ),
+      loading: () => (
+        '불러오는 중…',
+        const SizedBox(
+          width: 16,
+          height: 16,
+          child: CircularProgressIndicator(strokeWidth: 2),
+        ),
+      ),
+      error: (Object e, StackTrace _) => (
+        // 실패해도 버튼은 살아 있다 — 탭이 먼저 되살리고(아래 onTap), 그래도 실패하면
+        // 팝업 안 배너의 '다시 시도'가 받는다.
+        '불러오지 못했어요. 눌러서 다시 시도',
+        Icon(Icons.error_outline, color: scheme.error, size: 20),
+      ),
+    );
+
+    return Container(
+      // 멤버 카드(_CardShell)와 같은 장식. 클립 반경은 데코의 AppRadii.card를 따른다.
+      decoration: AppDecorations.softCard(scheme),
+      clipBehavior: Clip.antiAlias,
+      child: Material(
+        type: MaterialType.transparency,
+        child: InkWell(
+          // 에러 갈래의 부제가 "눌러서 다시 시도"라고 약속한다. 팝업만 열면 **같은
+          // provider 인스턴스**를 watch하므로 에러 그대로여서, 사용자는 팝업 안에서
+          // '다시 시도'를 한 번 더 눌러야 한다 — 라벨이 약속한 동작과 어긋난다.
+          // 열기 전에 되살리고, 그래도 실패하면 팝업 배너가 받는다.
+          onTap: () {
+            if (pending.hasError) retryPendingJoinRequests(ref, groupId);
+            onTap();
+          },
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+            child: Row(
+              children: <Widget>[
+                Container(
+                  width: 40,
+                  height: 40,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: scheme.primary.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(AppRadii.thumb),
+                  ),
+                  child: Icon(Icons.how_to_reg_outlined,
+                      size: 20, color: scheme.primary),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Text('승인요청목록', style: context.rowTitleStyle),
+                      const SizedBox(height: 2),
+                      Text(
+                        subtitle,
+                        style: theme.textTheme.bodySmall,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                trailing,
+                const SizedBox(width: 6),
+                Icon(Icons.chevron_right, color: scheme.onSurfaceVariant),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 대기 건수 pill(주의색). **1건 이상일 때만 그린다** — 0건은 호출부가 뱃지 자체를
+/// 빼므로 여기에 0 분기를 두지 않는다(두면 쓰이지 않는 색 조합이 남아, 다음 사람이
+/// 그것을 근거로 0건 표시를 되살린다).
+class _PendingCountBadge extends StatelessWidget {
+  const _PendingCountBadge({required this.count})
+      : assert(count > 0, '0건은 호출부가 뱃지를 그리지 않는다');
+
+  final int count;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme scheme = Theme.of(context).colorScheme;
+    return Container(
+      height: 22,
+      constraints: const BoxConstraints(minWidth: 22),
+      alignment: Alignment.center,
+      padding: const EdgeInsets.symmetric(horizontal: 7),
+      decoration: BoxDecoration(
+        color: scheme.error,
+        borderRadius: BorderRadius.circular(AppRadii.pill),
+      ),
+      child: Text(
+        '$count',
+        style: TextStyle(
+          color: scheme.onError,
+          fontSize: 12,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
     );
   }
 }
