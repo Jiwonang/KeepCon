@@ -1429,6 +1429,59 @@ class FirebaseShareRepository implements ShareRepository {
     });
   }
 
+  @override
+  Future<int> reconcileUsedOriginals() async {
+    final User me = _requireUser();
+    final List<Gifticon> mine = await _gifticons.getGifticons(me.id);
+    final List<bool> results = await Future.wait(<Future<bool>>[
+      for (final Gifticon g in mine)
+        if (g.status == GifticonStatus.available)
+          _reconcileOriginal(g.id, me.id),
+    ]);
+    return results.where((bool fixed) => fixed).length;
+  }
+
+  /// 원본 하나를 보정한다. 맞췄으면 `true`.
+  ///
+  /// 공유 항목은 **잠금 문서(`shareLocks/{gifticonId}`)의 `sharedGifticonId`**로 찾는다 —
+  /// 공유 시 함께 쓰이고 회수(`cancelShare`)·그룹 정리 때만 지워지므로 used 항목을
+  /// 끝까지 가리킨다. 조회 비용이 사용 이력이 아니라 **보유 중인 원본 수**에 비례하는
+  /// 것이 이 경로를 고른 이유다(그룹별로 used 항목을 훑으면 이력이 쌓일수록 커진다).
+  ///
+  /// ⚠️ **잠금 문서는 믿지 않는다.** 규칙이 `shareLocks`를 로그인한 누구에게나 쓰기로
+  /// 열어 두어(`allow read, write: if isSignedIn()`), 남이 그 포인터를 소유자의 다른
+  /// used 항목으로 바꿔 놓을 수 있다. 그래서 읽어 온 **항목 자체**의 `gifticonId`·
+  /// `sharedByUserId`로 판정한다 — 두 필드는 생성 규칙이 원본 소유를 검사하고 이후
+  /// 바꿀 수 없다. 포인터를 지우는 위조는 보정을 건너뛰게 할 뿐 원본을 바꾸지 못한다.
+  ///
+  /// 그룹을 떠나 항목 읽기가 거부되는 경우를 포함해 예상된 런타임 실패([Exception])는
+  /// 건너뛴다(계약의 best-effort). [Error]는 삼키지 않는다.
+  Future<bool> _reconcileOriginal(String gifticonId, String userId) async {
+    final DocumentReference<Map<String, dynamic>>? lockRef =
+        _lockRefOrNull(gifticonId);
+    if (lockRef == null) return false;
+    try {
+      final DocumentSnapshot<Map<String, dynamic>> lock = await lockRef.get();
+      if (!lock.exists) return false;
+      final String? sharedId =
+          docStringOrNull(lock.data()?['sharedGifticonId']);
+      if (!isUsableDocId(sharedId)) return false;
+      final DocumentSnapshot<Map<String, dynamic>> doc =
+          await _shared.doc(sharedId!).get();
+      if (!doc.exists) return false;
+      final SharedGifticon item = _sharedFromDoc(doc);
+      if (item.gifticonId != gifticonId ||
+          item.sharedByUserId != userId ||
+          item.status != ShareStatus.used) {
+        return false;
+      }
+      await _gifticons.updateStatus(gifticonId, GifticonStatus.used);
+      return true;
+    } on Exception {
+      return false;
+    }
+  }
+
   /// 원본 [Gifticon]을 `used`로 맞춘다(best-effort — 공유분 사용 완료 자체는 이미 유효).
   ///
   /// 행위자가 **소유자**면 주입된 [GifticonRepository]로 읽고 전이한다. 행위자가 **다른

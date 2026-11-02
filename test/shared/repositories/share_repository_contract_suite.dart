@@ -93,6 +93,14 @@ abstract class ShareBackend {
   /// 봐야 한다 — 한쪽만 보면 갈라진 상태가 그대로 통과한다.
   GifticonRepository get gifticons;
 
+  /// 원본 상태 쓰기([GifticonRepository.updateStatus])를 실패시킨다(`true`인 동안).
+  ///
+  /// 다른 멤버의 사용 완료에서 원본 동기화는 별도 쓰기라 실패할 수 있는데, 두 백엔드
+  /// 모두 그 실패를 자연히 만들지 못한다(머리말 1 — 권한 거부가 없다). 저장소에
+  /// 주입하는 [gifticons] 자체를 감싸 실패를 주입한다 — 어느 구현이든 원본은 이 저장소로만
+  /// 쓰므로 같은 지점에서 같은 실패를 본다.
+  set failOriginalStatusWrites(bool fail);
+
   /// 시간이 [d]만큼 흐른 것으로 만든다.
   ///
   /// ⚠️ **두 구현이 같은 수단을 쓰지 못한다.** in-memory는 주입 시계를 밀지만
@@ -858,5 +866,177 @@ void runShareSourceStatusContract(ShareBackend Function() makeBackend) {
     // 막히므로, 이 케이스가 green이라고 프로덕션 경로가 검증된 것이 아니다(계약의
     // 같은 한정어 참조). firebase 구현을 규칙에 맞춰 조이는 날 여기가 red가 되는 것은
     // 계약을 깬 것이 아니라 계약이 따라가야 한다는 신호다.
+  });
+}
+
+/// 두 구현이 **같은 답을 내야 하는** 원본 사후 보정(`reconcileUsedOriginals`) 계약.
+///
+/// `markUsed`의 원본 동기화는 공유 항목 갱신과 별도 쓰기라, 그 쓰기가 실패하면 공유
+/// 항목은 `used`(끝 상태)인데 원본은 `available`로 남는다. 이 축은 그 어긋남을
+/// **실패 주입으로 실제로 만든 뒤** 소유자 쪽 보정이 맞추는지를 고정한다 — 어긋남을
+/// 문서로 직접 심으면 "동기화가 정말 실패할 수 있는가"를 건너뛴 픽스처가 된다.
+///
+/// [makeBackend]는 `setUp()`마다 새 백엔드를 만든다.
+void runUsedOriginalReconcileContract(ShareBackend Function() makeBackend) {
+  late ShareBackend backend;
+
+  const String password = 'keepcon';
+  const String ownerEmail = 'reconcile-owner@keepcon.test';
+  const String memberEmail = 'reconcile-member@keepcon.test';
+
+  setUp(() async {
+    final ShareBackend created = makeBackend();
+    // 정리는 만들어진 인스턴스에 붙인다(첫 스위트의 ⚠️와 같은 이유).
+    addTearDown(created.stop);
+    backend = created;
+    await backend.auth.signUp(
+      email: ownerEmail,
+      password: password,
+      displayName: '소유자',
+    );
+  });
+
+  Future<User> signInOrUp(String email, String displayName) async {
+    try {
+      return await backend.auth.signIn(email: email, password: password);
+    } on Object {
+      return backend.auth.signUp(
+        email: email,
+        password: password,
+        displayName: displayName,
+      );
+    }
+  }
+
+  Future<User> asOwner() => signInOrUp(ownerEmail, '소유자');
+  Future<User> asMember() => signInOrUp(memberEmail, '다른 멤버');
+
+  Future<Gifticon> storeOriginal(String productName) =>
+      backend.gifticons.addGifticon(Gifticon(
+        id: '',
+        ownerId: backend.auth.currentUser!.id,
+        brand: '스타벅스',
+        productName: productName,
+        price: 4500,
+        category: '카페',
+        expiryDate: DateTime(2030, 1, 1),
+        registeredAt: DateTime(2025, 1, 1),
+      ));
+
+  Future<GifticonStatus?> statusOf(Gifticon g) async =>
+      (await backend.gifticons.getGifticonById(g.id))?.status;
+
+  /// 소유자가 그룹을 만들고 원본 [names]를 공유한 뒤, 승인 흐름으로 멤버를 넣는다.
+  /// 끝나면 소유자 세션이다.
+  Future<(Group, List<Gifticon>, List<SharedGifticon>)> shareAndJoin(
+    List<String> names,
+  ) async {
+    await asOwner();
+    final Group group = await backend.repo
+        .createGroup(name: '보정 계약 그룹', emoji: '🧾', maxMembers: 5);
+    final List<Gifticon> originals = <Gifticon>[];
+    final List<SharedGifticon> items = <SharedGifticon>[];
+    for (final String name in names) {
+      final Gifticon g = await storeOriginal(name);
+      originals.add(g);
+      items.add(
+          await backend.repo.shareGifticon(groupId: group.id, gifticon: g));
+    }
+    await asMember();
+    final JoinRequest req = await backend.repo.requestToJoin(group.inviteToken);
+    await asOwner();
+    await backend.repo.approveJoinRequest(req.id);
+    return (group, originals, items);
+  }
+
+  /// 멤버가 [item]을 사용 완료하되 **원본 동기화 쓰기를 실패시킨다** — 어긋남을 만든다.
+  Future<void> memberUsesWithFailedSync(SharedGifticon item) async {
+    await asMember();
+    backend.failOriginalStatusWrites = true;
+    try {
+      final SharedGifticon used = await backend.repo.markUsed(item.id);
+      expect(used.status, ShareStatus.used,
+          reason: '동기화는 best-effort — 실패해도 사용 완료 자체는 성립한다');
+    } finally {
+      backend.failOriginalStatusWrites = false;
+    }
+    await asOwner();
+  }
+
+  test('동기화 실패로 남은 어긋남을 소유자 보정이 맞춘다', () async {
+    final (_, List<Gifticon> originals, List<SharedGifticon> items) =
+        await shareAndJoin(<String>['아메리카노 T']);
+    await memberUsesWithFailedSync(items.single);
+
+    // 주입이 실제로 어긋남을 만들었는지부터 고정한다 — 아니면 아래 단언은 보정이 아니라
+    // markUsed의 동기화를 검증하게 된다.
+    expect(await statusOf(originals.single), GifticonStatus.available,
+        reason: '실패 주입이 먹지 않았다 — 이 케이스의 전제가 사라졌다');
+
+    final int fixed = await backend.repo.reconcileUsedOriginals();
+
+    expect(fixed, 1);
+    expect(await statusOf(originals.single), GifticonStatus.used,
+        reason: '보정이 없으면 소유자가 이미 쓴 바코드를 매장에서 다시 내민다');
+  });
+
+  test('어긋나지 않은 원본은 건드리지 않는다', () async {
+    final (_, List<Gifticon> originals, List<SharedGifticon> items) =
+        await shareAndJoin(<String>['사용된 것', '공유 중인 것']);
+    await memberUsesWithFailedSync(items[0]);
+    // 공유하지 않은 원본도 하나 둔다.
+    final Gifticon unshared = await storeOriginal('공유 안 한 것');
+
+    expect(await backend.repo.reconcileUsedOriginals(), 1);
+
+    expect(await statusOf(originals[0]), GifticonStatus.used);
+    expect(await statusOf(originals[1]), GifticonStatus.available,
+        reason: '공유 항목이 아직 available이면 원본도 그대로다');
+    expect(await statusOf(unshared), GifticonStatus.available);
+  });
+
+  test('보정 쓰기가 실패해도 던지지 않고, 다음 호출에서 맞춘다', () async {
+    final (_, List<Gifticon> originals, List<SharedGifticon> items) =
+        await shareAndJoin(<String>['아메리카노 T']);
+    await memberUsesWithFailedSync(items.single);
+
+    backend.failOriginalStatusWrites = true;
+    try {
+      expect(await backend.repo.reconcileUsedOriginals(), 0,
+          reason: '원본 하나의 실패는 건너뛴다(best-effort) — 진입 화면을 막지 않는다');
+    } finally {
+      backend.failOriginalStatusWrites = false;
+    }
+    expect(await statusOf(originals.single), GifticonStatus.available);
+
+    expect(await backend.repo.reconcileUsedOriginals(), 1);
+    expect(await statusOf(originals.single), GifticonStatus.used);
+  });
+
+  test('이미 맞은 상태에서는 아무것도 하지 않는다(멱등)', () async {
+    final (_, List<Gifticon> originals, List<SharedGifticon> items) =
+        await shareAndJoin(<String>['아메리카노 T']);
+    await memberUsesWithFailedSync(items.single);
+
+    expect(await backend.repo.reconcileUsedOriginals(), 1);
+    expect(await backend.repo.reconcileUsedOriginals(), 0);
+    expect(await statusOf(originals.single), GifticonStatus.used);
+  });
+
+  test('다른 멤버의 보정은 남의 원본을 건드리지 않는다', () async {
+    final (_, List<Gifticon> originals, List<SharedGifticon> items) =
+        await shareAndJoin(<String>['아메리카노 T']);
+    await memberUsesWithFailedSync(items.single);
+
+    await asMember();
+    expect(await backend.repo.reconcileUsedOriginals(), 0,
+        reason: '대상은 현재 사용자가 소유한 원본뿐이다');
+    await asOwner();
+    expect(await statusOf(originals.single), GifticonStatus.available);
+  });
+
+  test('미로그인이면 StateError', () async {
+    await backend.auth.signOut();
+    await expectLater(backend.repo.reconcileUsedOriginals(), throwsStateError);
   });
 }
