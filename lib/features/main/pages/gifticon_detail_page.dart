@@ -111,10 +111,10 @@ class GifticonDetailPage extends ConsumerWidget {
     final bool expiredNow = expiredByDate || g.status == GifticonStatus.expired;
     final bool mine = myUserId != null && g.ownerId == myUserId;
     // ⑤ 공유 항목이 아직 소진되지 않았을 때만. 다른 멤버가 내 공유분을 사용해도 **내
-    //    원본은 available로 남는다** — `gifticons`는 소유자만 쓸 수 있어 그쪽의 원본
-    //    동기화가 권한으로 건너뛰기 때문이다(계약이 명시한 best-effort). 그래서
-    //    `!used`만으로는 이 상태가 걸러지지 않고, 그대로 두면 눌러도 계약 가드가
-    //    반드시 거부하는 버튼이 남는다.
+    //    원본이 used로 따라온다는 보장은 없다** — 그쪽의 원본 동기화는 best-effort라
+    //    네트워크로 실패할 수 있고, 원본이 저장 상태 `expired`면 전이 표에 `expired →
+    //    used`가 없어 건너뛴다(계약 참조). 그래서 `!used`만으로는 이 상태가 걸러지지
+    //    않고, 그대로 두면 눌러도 계약 가드가 반드시 거부하는 버튼이 남는다.
     final bool canExtend = expiredNow &&
         !used &&
         mine &&

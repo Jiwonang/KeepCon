@@ -40,6 +40,7 @@ import '../../auth_repository.dart';
 import '../../gifticon_repository.dart';
 import '../../share_repository.dart';
 import 'doc_read.dart';
+import 'firebase_gifticon_repository.dart';
 
 /// `whereIn` 질의의 값 개수 상한(Firestore 제약). 사용자가 이보다 많은 그룹에 속하면
 /// 최신 [_whereInLimit]개 그룹의 이력/알림만 관찰한다(문서화된 한계).
@@ -60,8 +61,8 @@ class FirebaseShareRepository implements ShareRepository {
         _db = firestore ?? FirebaseFirestore.instance,
         _writeTimeout = writeTimeout;
 
-  /// 참여 요청 쓰기([requestToJoin]의 `set`·[cancelJoinRequest]의 `delete`)의 단절
-  /// 창을 끊는 상한. 기본 15초.
+  /// 참여 요청 쓰기([requestToJoin]의 `set`·[cancelJoinRequest]의 `delete`)와 다른 멤버의
+  /// 원본 사용 동기화([_markOriginalUsedAsMember]의 `update`)의 단절 창을 끊는 상한. 기본 15초.
   ///
   /// 생성자 파라미터로 빼 둔 것은 **테스트 seam**이다 — fake 위에서는 지연을 주입할
   /// 수 없어(mock_exceptions는 예외만), 영영 미완료 Future를 돌려주는 래퍼와 짧은
@@ -1230,7 +1231,7 @@ class FirebaseShareRepository implements ShareRepository {
     });
 
     // share → main 동기화: 원본 Gifticon을 used로 전이(기존 계약 소비, 트랜잭션 밖).
-    await _syncOriginalUsed(updated.gifticonId);
+    await _syncOriginalUsed(updated.gifticonId, updated.id);
     return updated;
   }
 
@@ -1309,7 +1310,7 @@ class FirebaseShareRepository implements ShareRepository {
   /// 이 시점의 원본은 이미 새 만료일을 갖고 있고([_syncOriginalExpiry]가 먼저 돈다),
   /// 만료 상태였다면 `available`로 되살아나 있다. 그대로 두면 개인 목록에 **이미 소진된
   /// 기프티콘이 더 오래 쓸 수 있는 것처럼** 남는다 — [_syncOriginalUsed]는 best-effort라
-  /// 그쪽이 채워 준다는 보장이 없다(다른 멤버가 사용하면 원본에 권한이 없고, 원본이
+  /// 그쪽이 채워 준다는 보장이 없다(다른 멤버의 원본 쓰기는 별도 요청이라 실패할 수 있고, 원본이
   /// `expired`면 전이 표에 `expired → used`가 없어 건너뛴다).
   ///
   /// 만료일까지 되돌리지는 못한다(계약에 만료일을 앞당기는 API가 없다). 사용 완료된
@@ -1428,13 +1429,24 @@ class FirebaseShareRepository implements ShareRepository {
     });
   }
 
-  Future<void> _syncOriginalUsed(String gifticonId) async {
-    // best-effort 동기화. 보안 규칙상 원본 기프티콘은 **소유자만** 접근 가능하므로,
-    // 사용한 행위자가 소유자가 아니면(다른 멤버가 공유분을 사용) 읽기/쓰기가
-    // PERMISSION_DENIED로 막힌다 — 그 경우 조용히 건너뛴다(공유분 사용완료 자체는 유효).
-    // (교차-멤버 원본 동기화는 추후 Cloud Function 트리거로 처리 예정.)
+  /// 원본 [Gifticon]을 `used`로 맞춘다(best-effort — 공유분 사용 완료 자체는 이미 유효).
+  ///
+  /// 행위자가 **소유자**면 주입된 [GifticonRepository]로 읽고 전이한다. 행위자가 **다른
+  /// 멤버**면 원본 읽기가 보안 규칙에 막혀 permission-denied가 오는데, 그때는
+  /// [_markOriginalUsedAsMember]로 넘어간다 — 규칙이 그 한 가지 쓰기만 멤버에게 열어 둔다.
+  Future<void> _syncOriginalUsed(
+    String gifticonId,
+    String sharedGifticonId,
+  ) async {
     try {
-      final Gifticon? original = await _gifticons.getGifticonById(gifticonId);
+      final Gifticon? original;
+      try {
+        original = await _gifticons.getGifticonById(gifticonId);
+      } on FirebaseException catch (e) {
+        if (e.code != 'permission-denied') rethrow;
+        await _markOriginalUsedAsMember(gifticonId, sharedGifticonId);
+        return;
+      }
       if (original == null) return;
       if (!GifticonStatusTransition.isAllowed(
         original.status,
@@ -1448,6 +1460,36 @@ class FirebaseShareRepository implements ShareRepository {
       // Error(프로그래밍 버그)는 삼키지 않고 전파한다.
       return;
     }
+  }
+
+  /// 소유자가 아닌 멤버가 원본을 `used`로 맞춘다 — **읽지 않고** 두 필드만 쓴다.
+  ///
+  /// 규칙(`firestore.rules`의 `isSharedUseSync`)이 이 모양의 쓰기 하나만 멤버에게 연다:
+  /// `status`를 `available → used`로, 그 근거로 [sharedGifticonId]를 함께 싣는다.
+  /// 전이 검사(원본이 이미 used·expired면 건너뜀)는 읽을 수 없으니 규칙이 대신한다 —
+  /// 그 경우 거부가 오고, 호출자의 best-effort 처리가 삼킨다. 원본이 없을 때도 같다.
+  ///
+  /// 원본 컬렉션에 [GifticonRepository]를 거치지 않고 직접 쓰는 유일한 경로다. 이 분기는
+  /// 규칙 있는 Firestore가 permission-denied를 돌려줄 때만 닿으므로, 원본 저장소가 같은
+  /// Firestore([_db])라는 전제가 성립한다. 원본이 **없을** 때도 읽기 규칙이 거부로
+  /// 답하므로(소유자 본인이어도) 여기로 오지만, 그 쓰기도 규칙 평가 오류(permission-denied)로
+  /// 거부돼 삼켜진다.
+  ///
+  /// 쓰기에는 [_writeTimeout] 상한을 건다. `update`의 Future는 서버 확인에서야 끝나서,
+  /// 거부를 받은 직후 연결이 끊기면 이미 성공한 `markUsed`가 영영 돌아오지 않는다.
+  /// 시간 초과(`TimeoutException`)는 호출자의 best-effort 처리가 삼킨다.
+  Future<void> _markOriginalUsedAsMember(
+    String gifticonId,
+    String sharedGifticonId,
+  ) async {
+    if (!isUsableDocId(gifticonId)) return;
+    await _db
+        .collection(FirebaseGifticonRepository.collectionName)
+        .doc(gifticonId)
+        .update(<String, dynamic>{
+      'status': GifticonStatus.used.name,
+      FirebaseGifticonRepository.usedViaShareIdField: sharedGifticonId,
+    }).timeout(_writeTimeout);
   }
 
   /// 그룹 삭제/정리 시, 그 그룹의 공유 항목과 잠금 문서를 정리한다(best-effort, 트랜잭션 밖).

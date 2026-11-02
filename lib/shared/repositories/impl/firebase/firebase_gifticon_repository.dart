@@ -36,6 +36,15 @@ class FirebaseGifticonRepository implements GifticonRepository {
   /// 기프티콘 컬렉션 이름(SSOT).
   static const String collectionName = 'gifticons';
 
+  /// 원본을 `used`로 맞춘 **근거 공유 항목 id**를 싣는 키(계약 [Gifticon]에는 없다).
+  ///
+  /// 소유자가 아닌 그룹 멤버가 공유 항목을 사용 완료하면, `FirebaseShareRepository`가
+  /// 이 키와 `status`만 담아 원본을 갱신한다. 보안 규칙(`firestore.rules`의
+  /// `isSharedUseSync`)은 이 id로 공유 항목을 찾아 '이 원본을 가리키는 used 항목이고
+  /// 행위자가 그 그룹 멤버인가'를 확인한다 — 규칙은 질의를 못 하므로 근거를 요청이
+  /// 가리켜 줘야 한다. 매퍼([gifticonFromData])는 이 키를 읽지 않는다.
+  static const String usedViaShareIdField = 'usedViaShareId';
+
   CollectionReference<Map<String, dynamic>> get _col =>
       _db.collection(collectionName);
 

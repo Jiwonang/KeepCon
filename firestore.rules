@@ -4,7 +4,8 @@ rules_version = '2';
 //
 // 접근 원칙:
 // - users: 본인 프로필만.
-// - gifticons: 소유자(ownerId)만.
+// - gifticons: 소유자(ownerId)만. 예외: 공유 항목의 그룹 멤버가 `available → used`로 맞추는
+//   쓰기 하나(isSharedUseSync).
 // - groups: 멤버만 읽기·변경 / 방장만 삭제. 비멤버가 스스로 합류하는 경로는 없다
 //   (합류는 방장 승인을 거친다 — 아래 groups 규칙 주석 참조).
 // - sharedGifticons·usageLogs·notifications: 소속 그룹 멤버만.
@@ -115,10 +116,51 @@ service cloud.firestore {
     }
 
 
-    // 개인 기프티콘 — 소유자만.
+    // 개인 기프티콘 — 소유자만. 예외는 아래 '공유 사용 동기화' 쓰기 하나뿐이다.
     match /gifticons/{id} {
-      allow read, update, delete:
+      // 그룹 멤버가 공유 항목을 사용 완료했을 때, 원본을 `available → used`로 맞추는 쓰기.
+      //
+      // 이 예외가 없으면 원본은 소유자만 쓸 수 있어, **다른 멤버의 사용 완료가 원본에
+      // 반영되지 않는다** — 소유자의 개인 목록에는 이미 쓴 기프티콘이 '보유중'으로 남고,
+      // 소유자가 매장에서 같은 바코드를 다시 내밀게 된다(`markUsed`의 원본 동기화).
+      //
+      // 열어 주는 범위를 최소로 묶는다.
+      //   - 바뀌는 키는 `status`와 근거 포인터 `usedViaShareId` 둘뿐이고, 값은
+      //     `available → used` 한 방향뿐이다(역전이·만료일·소유자 변경은 전부 소유자 경로).
+      //   - **읽기는 열지 않는다.** 행위자는 원본을 보지 않고 쓰기만 하며, 바코드 등 원본의
+      //     나머지는 이미 공유 항목 스냅샷에 있는 만큼만 보인다.
+      //   - 근거는 요청이 가리키는 공유 항목이다. 그 항목이 **이 원본을 가리키고**
+      //     (`gifticonId` — 생성 시 원본 소유를 검사하고 이후 불변), **이미 used이고**,
+      //     행위자가 **그 항목의 그룹 멤버**여야 한다. 공유된 적 없는 원본, 다른 원본의
+      //     공유 항목을 끌어다 쓰는 요청, 비멤버는 여기서 걸린다.
+      //
+      // ⚠️ 잔여: 공유 항목의 `status`는 멤버 누구나 `available → used`로 바꿀 수 있어
+      //    (아래 `sharedGifticons` ③등급), 멤버는 **사용 이력·알림 없이** 항목을 used로
+      //    바꾼 뒤 원본을 맞출 수 있다. 공유 항목의 used가 끝 상태라(되돌리기 금지 —
+      //    아래 update 조항) 그룹과 원본이 어긋난 채 남지는 않지만, 흔적이 없다.
+      //    흔적을 강제하려면 이력 생성까지 묶는 서버 경로가 필요하다(별도 작업).
+      function isSharedUseSync() {
+        let before = resource.data;
+        let after = request.resource.data;
+        let shareId = after.get('usedViaShareId', '');
+        let sharePath = /databases/$(database)/documents/sharedGifticons/$(shareId);
+        return after.diff(before).affectedKeys().hasOnly(['status', 'usedViaShareId'])
+          && before.get('status', '') == 'available'
+          && after.status == 'used'
+          && shareId is string
+          // 경로 조각 하나여야 한다 — `/`를 섞으면 다른 컬렉션의 문서를 근거로 들이민다.
+          && shareId.matches('^[A-Za-z0-9_-]+$')
+          && exists(sharePath)
+          && get(sharePath).data.get('gifticonId', '') == id
+          && get(sharePath).data.get('status', '') == 'used'
+          && isGroupMember(get(sharePath).data.groupId);
+      }
+
+      allow read, delete:
         if isSignedIn() && resource.data.ownerId == uid();
+      allow update:
+        if isSignedIn()
+        && (resource.data.ownerId == uid() || isSharedUseSync());
       allow create:
         if isSignedIn() && request.resource.data.ownerId == uid();
     }
@@ -283,6 +325,13 @@ service cloud.firestore {
       allow update:
         if isSignedIn() && isGroupMember(resource.data.groupId)
         && !sharedChangesAny(['groupId', 'gifticonId', 'sharedByUserId'])
+        // status는 `available → used` 한 방향뿐이다(used는 끝 상태). 되돌릴 수 있으면
+        // 멤버가 항목을 used로 바꿔 원본만 소진시킨 뒤(gifticons의 isSharedUseSync)
+        // 그룹 항목은 다시 available로 되살리는 조합이 열린다 — 리뷰에서 에뮬레이터로
+        // 재현(원본 used·항목 available·이력 0건).
+        && (!sharedChangesAny(['status'])
+            || (resource.data.get('status', '') == 'available'
+                && request.resource.data.status == 'used'))
         && (!sharedChangesAny(['expiryDate', 'brand', 'productName', 'barcode'])
             || isSharer());
     }
