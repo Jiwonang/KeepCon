@@ -734,6 +734,8 @@ echo "gifticons — 다른 멤버의 사용 완료를 원본에 맞추기(isShar
 # 규칙은 그 한 가지 쓰기만 멤버에게 연다 — `status` `available → used` + 근거 포인터
 # `usedViaShareId`, 근거 공유 항목은 이 원본을 가리키는 used 항목, 행위자는 그 그룹 멤버.
 # 아래 거부 케이스 각각이 그 조건 하나씩을 지킨다(하나를 지우면 해당 케이스만 200이 된다).
+# 예외: 경로 조각 정규식과 exists()는 방어 장치라 지워도 결과가 같다 — 없는 문서의 get은
+# 평가 오류로 거부되고, catch-all 규칙 때문에 클라이언트가 하위 문서를 만들 수도 없다.
 SG_USE="shared-${SG_RUN}-use"
 SG_USE_EXP="shared-${SG_RUN}-useexp"
 MASK_SYNC='updateMask.fieldPaths=status&updateMask.fieldPaths=usedViaShareId'
@@ -792,6 +794,7 @@ check "B(멤버)가 원본을 available → used로 맞춘다" 200 \
   -X PATCH "${DOCS}/gifticons/gif-use-${SG_RUN}?${MASK_SYNC}" \
   "${AUTH_B[@]}" "${JSON[@]}" -d "$(sync_body used "${SG_USE}")"
 
+check "공유 항목을 used → available로 되돌리기 → 차단(used는 끝 상태)" 403   -X PATCH "${DOCS}/sharedGifticons/${SG_USE}?${MASK_STATUS_ONLY}"   "${AUTH_B[@]}" "${JSON[@]}" -d '{"fields":{"status":{"stringValue":"available"}}}'
 check "used → available 역전이 → 차단" 403 \
   -X PATCH "${DOCS}/gifticons/gif-use-${SG_RUN}?${MASK_SYNC}" \
   "${AUTH_B[@]}" "${JSON[@]}" -d "$(sync_body available "${SG_USE}")"

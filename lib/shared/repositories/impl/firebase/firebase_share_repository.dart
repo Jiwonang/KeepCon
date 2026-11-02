@@ -1472,7 +1472,8 @@ class FirebaseShareRepository implements ShareRepository {
   /// 원본 컬렉션에 [GifticonRepository]를 거치지 않고 직접 쓰는 유일한 경로다. 이 분기는
   /// 규칙 있는 Firestore가 permission-denied를 돌려줄 때만 닿으므로, 원본 저장소가 같은
   /// Firestore([_db])라는 전제가 성립한다. 원본이 **없을** 때도 읽기 규칙이 거부로
-  /// 답하므로(소유자 본인이어도) 여기로 오지만, 그 쓰기는 not-found로 실패해 삼켜진다.
+  /// 답하므로(소유자 본인이어도) 여기로 오지만, 그 쓰기도 규칙 평가 오류(permission-denied)로
+  /// 거부돼 삼켜진다.
   ///
   /// 쓰기에는 [_writeTimeout] 상한을 건다. `update`의 Future는 서버 확인에서야 끝나서,
   /// 거부를 받은 직후 연결이 끊기면 이미 성공한 `markUsed`가 영영 돌아오지 않는다.

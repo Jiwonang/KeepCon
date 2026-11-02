@@ -18,6 +18,8 @@ library;
 
 import 'dart:convert';
 
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:fake_cloud_firestore/fake_cloud_firestore.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -31,6 +33,71 @@ import 'package:keepcon/shared/models/user.dart';
 import 'package:keepcon/shared/repositories/impl/firebase/firebase_gifticon_repository.dart';
 import 'package:keepcon/shared/repositories/impl/firebase/firebase_share_repository.dart';
 import 'package:keepcon/shared/repositories/impl/in_memory_auth_repository.dart';
+
+/// 특정 문서의 `update`만 **영영 미완료** Future로 돌려주는 래퍼 — 서버 ack가 오지 않는
+/// 단절을 흉내 낸다(`firebase_join_request_write_timeout_test.dart`와 같은 seam).
+/// 나머지는 안쪽 fake로 위임하고, 이 테스트가 안 쓰는 멤버는 [noSuchMethod]로 막는다.
+class _HangingUpdateFirestore implements FirebaseFirestore {
+  _HangingUpdateFirestore(this._inner, this._hangDocPath);
+
+  final FakeFirebaseFirestore _inner;
+  final String _hangDocPath;
+
+  @override
+  CollectionReference<Map<String, dynamic>> collection(String collectionPath) =>
+      _HangingUpdateCollection(_inner.collection(collectionPath), this);
+
+  @override
+  Future<T> runTransaction<T>(
+    TransactionHandler<T> transactionHandler, {
+    Duration timeout = const Duration(seconds: 30),
+    int maxAttempts = 5,
+  }) =>
+      _inner.runTransaction(transactionHandler,
+          timeout: timeout, maxAttempts: maxAttempts);
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => throw UnimplementedError(
+      '이 테스트 더블이 지원하지 않는 멤버: ${invocation.memberName}');
+}
+
+// sealed 플러그인 타입의 구현은 이 더블의 존재 이유다(write_timeout 테스트와 같은 사유).
+// ignore: subtype_of_sealed_class
+class _HangingUpdateCollection
+    implements CollectionReference<Map<String, dynamic>> {
+  _HangingUpdateCollection(this._inner, this._db);
+
+  final CollectionReference<Map<String, dynamic>> _inner;
+  final _HangingUpdateFirestore _db;
+
+  @override
+  DocumentReference<Map<String, dynamic>> doc([String? path]) {
+    final DocumentReference<Map<String, dynamic>> ref = _inner.doc(path);
+    return ref.path == _db._hangDocPath ? _HangingUpdateDoc(ref) : ref;
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => throw UnimplementedError(
+      '이 테스트 더블이 지원하지 않는 멤버: ${invocation.memberName}');
+}
+
+// ignore: subtype_of_sealed_class
+class _HangingUpdateDoc implements DocumentReference<Map<String, dynamic>> {
+  _HangingUpdateDoc(this._inner);
+
+  final DocumentReference<Map<String, dynamic>> _inner;
+
+  @override
+  String get id => _inner.id;
+
+  @override
+  Future<void> update(Map<Object, Object?> data) =>
+      Completer<void>().future; // 서버 ack가 영영 오지 않는 쓰기
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => throw UnimplementedError(
+      '이 테스트 더블이 지원하지 않는 멤버: ${invocation.memberName}');
+}
 
 void main() {
   const String password = 'keepcon';
@@ -153,4 +220,25 @@ void main() {
             .containsKey(FirebaseGifticonRepository.usedViaShareIdField),
         isFalse);
   });
+
+  test('멤버 쓰기가 매달려도 주입한 상한이 끊는다 — markUsed는 돌아온다', () async {
+    // `.timeout(_writeTimeout)`을 지우면 이 테스트는 아래 Timeout으로 죽는다.
+    final FirebaseShareRepository hanging = FirebaseShareRepository(
+      authRepository: auth,
+      gifticonRepository: gifticons,
+      firestore: _HangingUpdateFirestore(db, originalRef().path),
+      writeTimeout: const Duration(milliseconds: 120),
+    );
+    await auth.signIn(email: memberEmail, password: password);
+    denyOriginalReadWith('permission-denied');
+
+    final Stopwatch watch = Stopwatch()..start();
+    final SharedGifticon used = await hanging.markUsed(item.id);
+    watch.stop();
+
+    expect(used.status, ShareStatus.used,
+        reason: '시간 초과는 best-effort 동기화가 삼킨다 — 사용 완료 자체는 유효');
+    expect(watch.elapsed, lessThan(const Duration(seconds: 5)),
+        reason: '상한이 주입값이 아니라 하드코딩으로 발화했다(seam 우회 회귀)');
+  }, timeout: const Timeout(Duration(seconds: 10)));
 }

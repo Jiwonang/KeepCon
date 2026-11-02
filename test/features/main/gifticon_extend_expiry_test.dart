@@ -198,8 +198,8 @@ void main() {
     });
 
     testWidgets('그룹에서 이미 사용된 공유 항목에는 버튼이 없다', (WidgetTester tester) async {
-      // 다른 멤버가 내 공유분을 사용해도 **내 원본은 available로 남는다**(원본 동기화는
-      // 소유자 권한이 없어 건너뛴다). `!used`만 보면 이 상태에서 버튼이 뜨고, 누르면
+      // 다른 멤버가 내 공유분을 사용해도 **내 원본이 used로 따라온다는 보장은 없다**(원본
+      // 동기화는 best-effort — 쓰기 실패·저장 상태 expired면 건너뛴다). `!used`만 보면 버튼이 뜨고, 누르면
       // 계약 가드가 반드시 거부한다 — 몇 번을 눌러도 같은 실패다.
       final SharedGifticon usedInGroup = SharedGifticon(
         id: 'shared-1',

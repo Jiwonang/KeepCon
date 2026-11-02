@@ -4,7 +4,8 @@ rules_version = '2';
 //
 // 접근 원칙:
 // - users: 본인 프로필만.
-// - gifticons: 소유자(ownerId)만.
+// - gifticons: 소유자(ownerId)만. 예외: 공유 항목의 그룹 멤버가 `available → used`로 맞추는
+//   쓰기 하나(isSharedUseSync).
 // - groups: 멤버만 읽기·변경 / 방장만 삭제. 비멤버가 스스로 합류하는 경로는 없다
 //   (합류는 방장 승인을 거친다 — 아래 groups 규칙 주석 참조).
 // - sharedGifticons·usageLogs·notifications: 소속 그룹 멤버만.
@@ -133,10 +134,11 @@ service cloud.firestore {
       //     행위자가 **그 항목의 그룹 멤버**여야 한다. 공유된 적 없는 원본, 다른 원본의
       //     공유 항목을 끌어다 쓰는 요청, 비멤버는 여기서 걸린다.
       //
-      // ⚠️ 잔여: 공유 항목의 `status`는 멤버 누구나 쓸 수 있는 필드라(아래
-      //    `sharedGifticons` ③등급), 멤버는 사용 이력 없이 항목을 used로 바꾼 뒤 원본을
-      //    맞출 수 있다. 그 힘은 `markUsed`가 이미 모든 멤버에게 주는 것과 같다 —
-      //    '공유된 기프티콘은 그룹 누구나 사용 완료할 수 있다'가 이 앱의 정책이다.
+      // ⚠️ 잔여: 공유 항목의 `status`는 멤버 누구나 `available → used`로 바꿀 수 있어
+      //    (아래 `sharedGifticons` ③등급), 멤버는 **사용 이력·알림 없이** 항목을 used로
+      //    바꾼 뒤 원본을 맞출 수 있다. 공유 항목의 used가 끝 상태라(되돌리기 금지 —
+      //    아래 update 조항) 그룹과 원본이 어긋난 채 남지는 않지만, 흔적이 없다.
+      //    흔적을 강제하려면 이력 생성까지 묶는 서버 경로가 필요하다(별도 작업).
       function isSharedUseSync() {
         let before = resource.data;
         let after = request.resource.data;
@@ -323,6 +325,13 @@ service cloud.firestore {
       allow update:
         if isSignedIn() && isGroupMember(resource.data.groupId)
         && !sharedChangesAny(['groupId', 'gifticonId', 'sharedByUserId'])
+        // status는 `available → used` 한 방향뿐이다(used는 끝 상태). 되돌릴 수 있으면
+        // 멤버가 항목을 used로 바꿔 원본만 소진시킨 뒤(gifticons의 isSharedUseSync)
+        // 그룹 항목은 다시 available로 되살리는 조합이 열린다 — 리뷰에서 에뮬레이터로
+        // 재현(원본 used·항목 available·이력 0건).
+        && (!sharedChangesAny(['status'])
+            || (resource.data.get('status', '') == 'available'
+                && request.resource.data.status == 'used'))
         && (!sharedChangesAny(['expiryDate', 'brand', 'productName', 'barcode'])
             || isSharer());
     }
