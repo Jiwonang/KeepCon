@@ -23,6 +23,7 @@ import '../../../shared/models/user.dart';
 import '../../../shared/providers/repositories.dart';
 import '../../../shared/providers/session_provider.dart';
 import '../../../shared/providers/shared_gifticons_provider.dart';
+import '../../../shared/repositories/gifticon_repository.dart';
 import '../../../shared/theme/brand_palette.dart';
 import '../../../shared/theme/theme_tokens.dart';
 import '../../../shared/widgets/extend_expiry_dialog.dart';
@@ -526,22 +527,21 @@ class GifticonDetailPage extends ConsumerWidget {
       messenger
         ..hideCurrentSnackBar()
         ..showSnackBar(const SnackBar(content: Text('기프티콘을 삭제했어요.')));
+    } on GifticonShareBlockedException catch (e, st) {
+      // 백엔드가 화면 가드가 못 보는 공유(전에 나간 그룹)·경합을 보고 거부했다. 문서는
+      // 살아 있으므로 닫지 않는다 — 사유는 **타입**으로 받는다(목록 스트림으로 다시
+      // 추측하면 리스너가 늦거나 목록이 에러일 때 틀린다).
+      reportHandledFailure(ref, e, st,
+          context: 'GifticonDetailPage.deleteGifticon(share)');
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(const SnackBar(
+          content: Text('공유 중인 그룹이 있어 삭제할 수 없어요. '
+              '전에 나간 그룹에 공유해 둔 것일 수 있어요.'),
+        ));
     } on StateError catch (e, st) {
       reportHandledFailure(ref, e, st,
           context: 'GifticonDetailPage.deleteGifticon(guard)');
-      // 계약상 [StateError]는 둘 중 하나다 — 이미 없거나, 백엔드가 아직 끝나지 않은
-      // 공유를 보고 거부했다(화면 가드가 못 보는 탈퇴한 그룹의 공유·경합). **목록에 아직
-      // 있는지**로 가른다: 문서가 살아 있는데 "이미 삭제됐다"고 말하고 상세를 닫으면
-      // 사용자는 목록에 그대로 남은 기프티콘을 보고 고장으로 읽는다.
-      if (ref.read(gifticonByIdProvider(g.id)) != null) {
-        messenger
-          ..hideCurrentSnackBar()
-          ..showSnackBar(const SnackBar(
-            content: Text('공유 중인 그룹이 있어 삭제할 수 없어요. '
-                '전에 나간 그룹에 공유해 둔 것일 수 있어요.'),
-          ));
-        return;
-      }
       // 이미 없다 — 다른 기기에서 먼저 지웠다. 다시 눌러도 같은 결과이고, 남겨 두면
       // 성공 경로와 같은 이유로 없는 것을 보여주므로 함께 닫는다.
       closeIfStillShown();

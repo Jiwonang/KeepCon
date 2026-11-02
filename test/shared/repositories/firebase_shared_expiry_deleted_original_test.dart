@@ -21,6 +21,7 @@ import 'package:keepcon/shared/models/gifticon.dart';
 import 'package:keepcon/shared/models/group.dart';
 import 'package:keepcon/shared/models/share.dart';
 import 'package:keepcon/shared/models/user.dart';
+import 'package:keepcon/shared/repositories/gifticon_repository.dart';
 import 'package:keepcon/shared/repositories/impl/firebase/firebase_gifticon_repository.dart';
 import 'package:keepcon/shared/repositories/impl/firebase/firebase_share_repository.dart';
 import 'package:keepcon/shared/repositories/impl/in_memory_auth_repository.dart';
@@ -156,9 +157,10 @@ void main() {
       live = await gifticons.addGifticon(original.copyWith(id: ''));
     });
 
-    test('트랜잭션에서 공유 잠금을 읽는다 — 공유 생성과 충돌시키기 위해', () async {
-      // 잠금을 읽지 않으면 두 기기의 공유·삭제가 서로를 모른 채 둘 다 커밋된다.
-      // 잠금 읽기에 통신 실패를 주입해, 그 읽기가 실제로 일어나는지 본다.
+    // ⚠️ fake에는 낙관적 동시성이 없어 "트랜잭션 **안에서**" 읽는지는 여기서 구분되지
+    //    않는다(`lockRef.get()`으로 바꿔도 통과 — 뮤테이션 실측). 공유 생성과의 충돌
+    //    자체는 실 SDK·에뮬레이터 영역이다.
+    test('삭제는 공유 잠금을 읽는다 — 그 읽기가 실패하면 지우지 않는다', () async {
       whenCalling(Invocation.method(#get, <Object?>[null]))
           .on(db.doc(
               '${FirebaseShareRepository.shareLocksCollection}/${live.id}'))
@@ -178,5 +180,50 @@ void main() {
       expect(await gifticons.getGifticonById(live.id), isNull);
       expect(await gifticons.getGifticons(live.ownerId), isEmpty);
     });
+
+    test('커밋의 거부는 GifticonShareBlockedException으로 알린다', () async {
+      // 읽기가 통과한 뒤 커밋이 permission-denied면 규칙의 `hasActiveShare`다. '없음'으로
+      // 번역하면 화면이 살아 있는 기프티콘의 상세를 닫고, 번역이 없으면 통신 실패로
+      // 안내한다 — 어느 쪽이든 사용자가 다음에 할 일이 틀린다.
+      //
+      // fake의 `tx.delete`는 문서 참조의 `delete`를 거치지 않아 mock_exceptions로 커밋
+      // 거부를 주입할 수 없다(실측). 그래서 트랜잭션 본문이 끝난 뒤 거부를 던지는
+      // 대역을 쓴다 — 본문의 읽기는 실제로 통과한다.
+      final FirebaseGifticonRepository rejecting =
+          FirebaseGifticonRepository(firestore: _CommitRejectingFirestore(db));
+
+      await expectLater(rejecting.deleteGifticon(live.id),
+          throwsA(isA<GifticonShareBlockedException>()));
+    });
   });
+}
+
+/// 트랜잭션 본문은 그대로 돌리고, 끝난 뒤 **커밋 단계의 규칙 거부**를 흉내 내는 대역.
+/// 본문이 던지지 않고 끝나야 거부가 나므로, 읽기 거부(`_txGetOwned`)와 갈라 볼 수 있다.
+class _CommitRejectingFirestore implements FirebaseFirestore {
+  _CommitRejectingFirestore(this._inner);
+
+  final FakeFirebaseFirestore _inner;
+
+  @override
+  CollectionReference<Map<String, dynamic>> collection(String collectionPath) =>
+      _inner.collection(collectionPath);
+
+  @override
+  Future<T> runTransaction<T>(
+    TransactionHandler<T> transactionHandler, {
+    Duration timeout = const Duration(seconds: 30),
+    int maxAttempts = 5,
+  }) =>
+      _inner.runTransaction<T>((Transaction tx) async {
+        await transactionHandler(tx);
+        // ⚠️ fake는 본문의 쓰기를 즉시 적용하므로 문서 잔존은 여기서 볼 수 없다 — 이
+        //    대역이 고정하는 것은 **예외 번역**뿐이다.
+        throw FirebaseException(
+            plugin: 'cloud_firestore', code: 'permission-denied');
+      }, timeout: timeout, maxAttempts: maxAttempts);
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => throw UnimplementedError(
+      '이 테스트 더블이 지원하지 않는 멤버: ${invocation.memberName}');
 }

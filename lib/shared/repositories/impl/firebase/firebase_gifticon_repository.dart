@@ -185,9 +185,9 @@ class FirebaseGifticonRepository implements GifticonRepository {
     } on FirebaseException catch (e) {
       // 읽기는 [_txGetOwned]가 이미 번역했으므로 여기까지 온 permission-denied는
       // **커밋의 거부**, 곧 아직 끝나지 않은 공유다. 문서는 살아 있다 — '없음'으로
-      // 말하면 안 된다(화면은 목록에 남아 있는지로 둘을 가른다).
+      // 말하면 안 된다 — 그래서 '없음'과 다른 타입으로 던진다.
       if (e.code != 'permission-denied') rethrow;
-      throw StateError('Gifticon has an active share: $id');
+      throw GifticonShareBlockedException(id);
     }
   }
 

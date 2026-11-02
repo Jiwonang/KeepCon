@@ -858,6 +858,18 @@ check "  (준비) 회수 — 그 잠금 삭제" 200 -X DELETE "${DOCS}/shareLock
 check "회수 뒤에는 삭제 허용" 200 -X DELETE "${DOCS}/gifticons/gif-act-${SG_RUN}" "${AUTH_A[@]}"
 
 check "  (정리) 위조 잠금 삭제" 200 -X DELETE "${DOCS}/shareLocks/gif-forged-${SG_RUN}" "${AUTH_A[@]}"
+
+# 비정상 모양의 잠금 — 잠금은 누구나 쓰므로 남이 값을 map 등으로 바꿔 넣을 수 있다.
+# `hasActiveShare`의 `is string`·정규식 가드가 없으면 경로 조립이 평가 오류를 내 **소유자의
+# 삭제가 영구히 막힌다**(가드를 지운 뮤테이션에서 map 잠금이 403으로 실측). 이 케이스가 그
+# 가드를 지킨다.
+lock_raw() {
+  printf '{"fields":{"sharedGifticonId":%s}}' "$1"
+}
+check "  (준비) A의 원본(위조 잠금 모양용)" 200 -X PATCH "${DOCS}/gifticons/gif-shape-${SG_RUN}"   "${AUTH_A[@]}" "${JSON[@]}" -d "$(gifticon_doc "${UID_A}")"
+check "  (준비) B가 잠금 값을 map으로 위조" 200 -X PATCH "${DOCS}/shareLocks/gif-shape-${SG_RUN}"   "${AUTH_B[@]}" "${JSON[@]}" -d "$(lock_raw '{"mapValue":{"fields":{"a":{"stringValue":"b"}}}}')"
+check "비정상 모양 잠금(map)은 소유자의 삭제를 막지 못한다" 200   -X DELETE "${DOCS}/gifticons/gif-shape-${SG_RUN}" "${AUTH_A[@]}"
+check "  (정리) map 위조 잠금 삭제" 200 -X DELETE "${DOCS}/shareLocks/gif-shape-${SG_RUN}" "${AUTH_A[@]}"
 check "  (정리) used 잠금 삭제" 200 -X DELETE "${DOCS}/shareLocks/gif-use-${SG_RUN}" "${AUTH_A[@]}"
 
 check "  (정리) 사용 동기화 공유 항목 삭제" 200 -X DELETE "${DOCS}/sharedGifticons/${SG_USE}" "${AUTH_A[@]}"

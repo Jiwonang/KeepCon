@@ -25,6 +25,7 @@ import 'package:keepcon/shared/providers/raw_gifticons_provider.dart';
 import 'package:keepcon/shared/providers/repositories.dart';
 import 'package:keepcon/shared/providers/session_provider.dart';
 import 'package:keepcon/shared/providers/shared_gifticons_provider.dart';
+import 'package:keepcon/shared/repositories/gifticon_repository.dart';
 import 'package:keepcon/shared/repositories/impl/in_memory_gifticon_repository.dart';
 
 final DateTime _now = DateTime(2026, 8, 18);
@@ -264,14 +265,12 @@ void main() {
         reason: '남겨 두면 진입 스냅샷으로 없는 것을 보여준다');
   });
 
-  testWidgets('목록에 살아 있는데 거부되면 공유 때문이라고 알리고 닫지 않는다',
-      (WidgetTester tester) async {
+  testWidgets('백엔드가 공유 때문에 거부하면 그렇게 알리고 닫지 않는다', (WidgetTester tester) async {
     // 규칙이 화면 가드가 못 보는 공유(전에 나간 그룹 등)를 보고 커밋을 거부한 경우.
-    // 계약은 이것도 StateError로 알리므로, "이미 삭제됐다"고 말하고 닫으면 목록에 그대로
-    // 남은 기프티콘을 두고 거짓말을 하게 된다.
+    // 그 타입은 StateError의 하위 타입이라, 순서를 바꿔 잡으면 "이미 삭제됐다"고 말하고
+    // 살아 있는 기프티콘의 상세를 닫는다.
     boot(<Gifticon>[],
-        withRepo: _ThrowingDeleteRepo(
-            StateError('Gifticon has an active share: g1'),
+        withRepo: _ThrowingDeleteRepo(GifticonShareBlockedException('g1'),
             seed: <Gifticon>[_gifticon()]));
     await mountDetail(tester, _gifticon());
 

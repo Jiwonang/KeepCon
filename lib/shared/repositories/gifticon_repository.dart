@@ -11,6 +11,20 @@ library;
 
 import '../models/gifticon.dart';
 
+/// 백엔드가 **아직 끝나지 않은 공유**를 보고 [GifticonRepository.deleteGifticon]을 거부했다.
+///
+/// [StateError]를 상속하므로 기존 `on StateError` 소비자도 그대로 받는다(non-breaking).
+/// 타입으로 따로 둔 이유는 "없음"과 다음 행동이 다르기 때문이다 — 없는 기프티콘은 상세를
+/// 닫아야 하고, 공유 중인 기프티콘은 살아 있으니 그대로 두고 회수를 안내해야 한다. 화면이
+/// 목록 스트림의 현재 값으로 사유를 다시 추측하면, 리스너가 늦거나 목록이 에러일 때
+/// 살아 있는 것을 "이미 삭제됐다"고 말한다(`InviteExpiredException`과 같은 규약 — 판정은
+/// 메시지가 아니라 타입으로).
+class GifticonShareBlockedException extends StateError {
+  /// [id]는 거부된 기프티콘이다. 진단용으로 [message]에 담는다.
+  GifticonShareBlockedException(String id)
+      : super('Gifticon has an active share: $id');
+}
+
 /// 기프티콘 데이터 계약.
 ///
 /// 페이지는 이 abstract 인터페이스에만 의존한다.
@@ -90,9 +104,9 @@ abstract class GifticonRepository {
   /// 회수하게 안내한다. 사용 완료된 공유 항목은 이력이라 원본을 지워도 남는다.
   ///
   /// 규칙 있는 백엔드(Firestore)는 화면 가드가 못 보는 경우 — 지금 속하지 않은 그룹의
-  /// 공유, 두 기기의 공유·삭제가 겹친 경합 — 까지 규칙으로 거부하고, 구현은 그것도
-  /// [StateError]로 알린다. 그래서 [StateError]는 "없음"과 "공유 중이라 거부됨" **둘 중
-  /// 하나**다 — 소비자는 그 기프티콘이 아직 목록에 있는지로 가른다. in-memory 구현은
-  /// 공유를 모르므로 후자를 내지 않는다(두 저장소가 분리돼 있다).
+  /// 공유, 두 기기의 공유·삭제가 겹친 경합 — 까지 규칙으로 거부하고, 구현은 그것을
+  /// [GifticonShareBlockedException]([StateError]의 하위 타입)으로 알린다. 소비자는 그
+  /// 타입을 먼저 받고, 나머지 [StateError]를 "없음"으로 읽는다. in-memory 구현은 공유를
+  /// 모르므로 이 타입을 내지 않는다(두 저장소가 분리돼 있다).
   Future<void> deleteGifticon(String id);
 }
