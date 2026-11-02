@@ -6,14 +6,19 @@
 /// 어긋남이 영구히 남는다.
 library;
 
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:keepcon/features/main/main_page.dart';
 import 'package:keepcon/features/main/state/used_original_reconcile.dart';
 import 'package:keepcon/shared/diagnostics/error_reporter.dart';
+import 'package:keepcon/shared/models/user.dart';
 import 'package:keepcon/shared/providers/error_reporter_provider.dart';
 import 'package:keepcon/shared/providers/repositories.dart';
+import 'package:keepcon/shared/providers/session_provider.dart';
 import 'package:keepcon/shared/repositories/impl/in_memory_auth_repository.dart';
+import 'package:keepcon/shared/repositories/impl/in_memory_gifticon_repository.dart';
 import 'package:keepcon/shared/repositories/share_repository.dart';
 
 class _CountingShareRepository implements ShareRepository {
@@ -112,5 +117,32 @@ void main() {
     expect(state.valueOrNull, 0);
     expect(reporter.contexts, <String>['usedOriginalsReconcileProvider'],
         reason: '조용히 삼키면 보정이 영영 안 도는 결함이 드러나지 않는다');
+  });
+
+  testWidgets('MainPage를 띄우면 보정이 한 번 돈다 — 화면의 구독 연결을 고정한다',
+      (WidgetTester tester) async {
+    // 위 테스트들은 provider를 직접 구독해 MainPage의 `ref.listen` 줄이 빠져도
+    // 통과한다. 여기서는 화면을 실제로 띄워 그 연결을 고정한다.
+    const User me =
+        User(id: 'user-1', email: 'me@keepcon.app', displayName: '나');
+    final InMemoryGifticonRepository gifticons = InMemoryGifticonRepository();
+    addTearDown(gifticons.dispose);
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: <Override>[
+          shareRepositoryProvider.overrideWithValue(repo),
+          authRepositoryProvider.overrideWithValue(auth),
+          errorReporterProvider.overrideWithValue(reporter),
+          gifticonRepositoryProvider.overrideWithValue(gifticons),
+          sessionUserProvider.overrideWith((_) => Stream<User?>.value(me)),
+        ],
+        child: const MaterialApp(home: MainPage()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(repo.calls, 1, reason: '메인 진입이 보정을 트리거해야 한다');
+    expect(reporter.contexts, isEmpty);
   });
 }
