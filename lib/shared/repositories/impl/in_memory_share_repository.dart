@@ -870,20 +870,67 @@ class InMemoryShareRepository implements ShareRepository {
     _emit();
   }
 
+  @override
+  Future<int> reconcileUsedOriginals() async {
+    final User me = _requireUser();
+    final List<Gifticon> mine = await _gifticons.getGifticons(me.id);
+    int fixed = 0;
+    for (final Gifticon g in mine) {
+      if (g.status != GifticonStatus.available) continue;
+      if (!_hasUsedShareOf(g.id, me.id)) continue;
+      try {
+        await _gifticons.updateStatus(g.id, GifticonStatus.used);
+        fixed++;
+      } on Exception {
+        continue; // best-effort — 다음 호출에서 다시 시도된다(계약 참조).
+      }
+    }
+    return fixed;
+  }
+
+  /// [userId]가 **아직 멤버인** 그룹에, 그가 공유한 [gifticonId]의 used 항목이 있는가.
+  ///
+  /// 멤버십을 보는 것은 firebase 구현의 읽기 규칙(그룹 멤버만)과 같은 범위로 맞추기
+  /// 위해서다 — 그룹을 떠난 소유자는 거기서 항목을 읽지 못해 보정되지 않는다.
+  bool _hasUsedShareOf(String gifticonId, String userId) {
+    for (final MapEntry<String, List<SharedGifticon>> e
+        in _sharedByGroup.entries) {
+      if (!_isMemberOf(e.key, userId)) continue;
+      for (final SharedGifticon s in e.value) {
+        if (s.gifticonId == gifticonId &&
+            s.sharedByUserId == userId &&
+            s.status == ShareStatus.used) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
   /// 원본 [Gifticon]을 used로 동기화한다.
   ///
   /// 원본이 조회되지 않거나(데모 시드의 가짜 gifticonId) 이미 used/expired여서
   /// 전이가 불허되면 조용히 건너뛴다(사용 완료 자체는 유효).
+  ///
+  /// 예상된 런타임 실패([Exception])도 삼킨다 — firebase 구현과 같은 best-effort 기준이다.
+  /// 예전에는 전파해서 두 구현이 갈렸다: 여기서는 `markUsed`가 항목을 이미 `used`로 쓰고
+  /// 이력까지 남긴 뒤 **던지고**, 그 바람에 `_emit`도 건너뛰어 화면이 갱신되지 않았다.
+  /// 원본 쓰기 실패 주입(`runUsedOriginalReconcileContract`)이 그 비대칭을 드러냈다.
+  /// 남는 어긋남은 [reconcileUsedOriginals]가 맞춘다. [Error]는 삼키지 않는다.
   Future<void> _syncOriginalUsed(String gifticonId) async {
-    final Gifticon? original = await _gifticons.getGifticonById(gifticonId);
-    if (original == null) return;
-    if (!GifticonStatusTransition.isAllowed(
-      original.status,
-      GifticonStatus.used,
-    )) {
+    try {
+      final Gifticon? original = await _gifticons.getGifticonById(gifticonId);
+      if (original == null) return;
+      if (!GifticonStatusTransition.isAllowed(
+        original.status,
+        GifticonStatus.used,
+      )) {
+        return;
+      }
+      await _gifticons.updateStatus(gifticonId, GifticonStatus.used);
+    } on Exception {
       return;
     }
-    await _gifticons.updateStatus(gifticonId, GifticonStatus.used);
   }
 
   // ── 사용 이력 / 알림 ──────────────────────────────────────────────────

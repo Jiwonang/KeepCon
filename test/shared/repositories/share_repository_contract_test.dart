@@ -12,6 +12,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:fake_cloud_firestore/fake_cloud_firestore.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:keepcon/shared/models/gifticon.dart';
 import 'package:keepcon/shared/models/group.dart';
 import 'package:keepcon/shared/repositories/auth_repository.dart';
 import 'package:keepcon/shared/repositories/gifticon_repository.dart';
@@ -22,6 +23,43 @@ import 'package:keepcon/shared/repositories/impl/in_memory_share_repository.dart
 import 'package:keepcon/shared/repositories/share_repository.dart';
 
 import 'share_repository_contract_suite.dart';
+
+/// 원본 상태 쓰기만 실패시킬 수 있는 [GifticonRepository] 래퍼
+/// ([ShareBackend.failOriginalStatusWrites]의 수단). 나머지는 안쪽 저장소로 그대로 넘긴다.
+class _FlakyGifticonRepository implements GifticonRepository {
+  _FlakyGifticonRepository(this.inner);
+
+  final InMemoryGifticonRepository inner;
+  bool failStatusWrites = false;
+
+  @override
+  Future<Gifticon> updateStatus(String id, GifticonStatus status) {
+    if (failStatusWrites) {
+      // 네트워크 단절 같은 **예상된 런타임 실패**의 모양이다(Error가 아니라 Exception).
+      return Future<Gifticon>.error(Exception('주입된 원본 쓰기 실패'));
+    }
+    return inner.updateStatus(id, status);
+  }
+
+  @override
+  Future<Gifticon> addGifticon(Gifticon gifticon) =>
+      inner.addGifticon(gifticon);
+
+  @override
+  Stream<List<Gifticon>> watchGifticons(String ownerId) =>
+      inner.watchGifticons(ownerId);
+
+  @override
+  Future<List<Gifticon>> getGifticons(String ownerId) =>
+      inner.getGifticons(ownerId);
+
+  @override
+  Future<Gifticon?> getGifticonById(String id) => inner.getGifticonById(id);
+
+  @override
+  Future<Gifticon> extendExpiry(String id, DateTime newExpiryDate) =>
+      inner.extendExpiry(id, newExpiryDate);
+}
 
 /// in-memory 구현 어댑터.
 class _InMemoryBackend implements ShareBackend {
@@ -39,7 +77,8 @@ class _InMemoryBackend implements ShareBackend {
   }
 
   final InMemoryAuthRepository _auth = InMemoryAuthRepository();
-  final InMemoryGifticonRepository _gifticons = InMemoryGifticonRepository();
+  final _FlakyGifticonRepository _gifticons =
+      _FlakyGifticonRepository(InMemoryGifticonRepository());
 
   /// 저장소가 '지금'이라고 믿는 시각.
   ///
@@ -54,7 +93,7 @@ class _InMemoryBackend implements ShareBackend {
   @override
   void stop() {
     _repo.dispose();
-    _gifticons.dispose();
+    _gifticons.inner.dispose();
     _auth.dispose();
   }
 
@@ -66,6 +105,9 @@ class _InMemoryBackend implements ShareBackend {
 
   @override
   GifticonRepository get gifticons => _gifticons;
+
+  @override
+  set failOriginalStatusWrites(bool fail) => _gifticons.failStatusWrites = fail;
 
   @override
   Future<void> passTime(Duration d) async => _clock = _clock.add(d);
@@ -91,7 +133,8 @@ class _FirebaseBackend implements ShareBackend {
   // 인증은 프로젝트 자체 인터페이스(`AuthRepository`)로 주입된다 — `firebase_auth`가
   // 아니라서 목이 필요 없다. 이 저장소가 firebase에 의존하는 부분은 Firestore뿐이다.
   final InMemoryAuthRepository _auth = InMemoryAuthRepository();
-  final InMemoryGifticonRepository _gifticons = InMemoryGifticonRepository();
+  final _FlakyGifticonRepository _gifticons =
+      _FlakyGifticonRepository(InMemoryGifticonRepository());
   final FakeFirebaseFirestore _db = FakeFirebaseFirestore();
 
   // 생성 시점에 준비된다(위 in-memory 어댑터의 ⚠️와 같은 이유).
@@ -104,7 +147,7 @@ class _FirebaseBackend implements ShareBackend {
   @override
   void stop() {
     // `FirebaseShareRepository`에는 `dispose`가 없다(스트림을 자체 보관하지 않는다).
-    _gifticons.dispose();
+    _gifticons.inner.dispose();
     _auth.dispose();
   }
 
@@ -116,6 +159,9 @@ class _FirebaseBackend implements ShareBackend {
 
   @override
   GifticonRepository get gifticons => _gifticons;
+
+  @override
+  set failOriginalStatusWrites(bool fail) => _gifticons.failStatusWrites = fail;
 
   @override
   Future<void> passTime(Duration d) async {
@@ -228,6 +274,9 @@ void main() {
     });
     group('[$label] shareGifticon — 원본 상태 가드', () {
       runShareSourceStatusContract(make);
+    });
+    group('[$label] reconcileUsedOriginals — 원본 사후 보정', () {
+      runUsedOriginalReconcileContract(make);
     });
   });
 }

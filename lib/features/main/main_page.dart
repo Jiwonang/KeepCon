@@ -27,6 +27,7 @@ import 'state/gifticon_filter.dart';
 import 'state/gifticon_list_providers.dart';
 import 'state/gifticon_stats.dart';
 import 'state/highlighted_gifticon.dart';
+import 'state/used_original_reconcile.dart';
 import '../../shared/providers/now_provider.dart';
 import 'widgets/format.dart';
 import 'widgets/gifticon_status_label.dart';
@@ -58,6 +59,10 @@ class _HomeBody extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    // 공유로 사용 완료됐는데 원본만 '보유중'으로 남은 것을 맞춘다(사용자당 한 번).
+    // 결과는 화면에 쓰지 않으므로 watch가 아니라 listen — 완료가 리빌드를 부르지 않는다.
+    // 맞춘 원본은 목록 스트림이 새로 방출해 화면에 반영된다.
+    ref.listen<AsyncValue<int>>(usedOriginalsReconcileProvider, (_, __) {});
     final AsyncValue<List<Gifticon>> visibleAsync =
         ref.watch(visibleGifticonsProvider);
     final GifticonStats stats = ref.watch(gifticonStatsProvider);

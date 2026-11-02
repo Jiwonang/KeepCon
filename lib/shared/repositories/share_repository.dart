@@ -552,6 +552,31 @@ abstract class ShareRepository {
   /// [ShareStatus.available]이어야 한다. 위반/항목 없음이면 [StateError].
   Future<void> cancelShare(String sharedGifticonId);
 
+  /// 공유로 사용 완료됐는데 **원본이 아직 `available`로 남은** 내 기프티콘을 맞춘다
+  /// (원본 소유자 쪽 사후 보정).
+  ///
+  /// [markUsed]의 원본 동기화는 공유 항목 갱신과 **별도 쓰기**라 원자성이 없다. 그
+  /// 쓰기가 실패하면 공유 항목은 [ShareStatus.used](끝 상태)인데 원본은 `available`로
+  /// 남고, [markUsed]·[cancelShare]가 used 항목을 거부하므로 다시 처리할 경로가 없다 —
+  /// 소유자의 개인 목록에 이미 쓴 기프티콘이 '보유중'으로 영구히 남는다. 이 메서드가
+  /// 그 경로다. 원본 소유자 권한으로 쓰므로 보안 규칙 예외가 필요 없다. 앱은 메인 목록
+  /// 진입 시(로그인 사용자마다 한 번) 부른다.
+  ///
+  /// 대상: 현재 사용자가 소유한 `available` 원본 중, 그 원본을 가리키는 공유 항목이
+  /// [ShareStatus.used]인 것. 판정은 **읽어 온 항목 자체**로 한다 — 항목의
+  /// [SharedGifticon.gifticonId]가 원본 id와 같고 [SharedGifticon.sharedByUserId]가
+  /// 현재 사용자일 때만 맞춘다. 구현이 항목을 찾아가는 경로(Firestore에서는 로그인한
+  /// 누구나 쓸 수 있는 공유 잠금 문서)를 믿으면, 남이 그 경로를 위조해 다른 used 항목을
+  /// 가리키게 하는 것만으로 멀쩡한 원본을 사용 완료로 만들 수 있다.
+  ///
+  /// 한계: 현재 사용자가 그 그룹에서 이미 빠졌으면 항목을 읽을 수 없어 맞추지 못한다.
+  ///
+  /// 원본 하나의 실패(권한·네트워크 등 [Exception])는 건너뛰고 나머지를 계속한다
+  /// (best-effort — 다음 호출에서 다시 시도된다. 앱은 다음 실행·계정 전환 때 부른다).
+  /// 원본 목록 조회 실패는 전파한다.
+  /// 맞춘 원본 수를 반환한다. 미로그인이면 [StateError].
+  Future<int> reconcileUsedOriginals();
+
   // ── 사용 이력 / 알림 ─────────────────────────────────────────────────
   /// [userId]가 속한 그룹들의 사용 이력을 반응형으로 관찰한다(최신순).
   Stream<List<UsageLog>> watchUsageLogs(String userId);
