@@ -148,4 +148,35 @@ void main() {
           throwsA(isA<FirebaseException>()));
     });
   });
+
+  group('deleteGifticon — 공유 잠금과 커밋 거부', () {
+    late Gifticon live;
+
+    setUp(() async {
+      live = await gifticons.addGifticon(original.copyWith(id: ''));
+    });
+
+    test('트랜잭션에서 공유 잠금을 읽는다 — 공유 생성과 충돌시키기 위해', () async {
+      // 잠금을 읽지 않으면 두 기기의 공유·삭제가 서로를 모른 채 둘 다 커밋된다.
+      // 잠금 읽기에 통신 실패를 주입해, 그 읽기가 실제로 일어나는지 본다.
+      whenCalling(Invocation.method(#get, <Object?>[null]))
+          .on(db.doc(
+              '${FirebaseShareRepository.shareLocksCollection}/${live.id}'))
+          .thenThrow(FirebaseException(
+              plugin: 'cloud_firestore', code: 'unavailable'));
+
+      await expectLater(
+          gifticons.deleteGifticon(live.id), throwsA(isA<FirebaseException>()));
+      expect(
+          db.hasSavedDocument(
+              '${FirebaseGifticonRepository.collectionName}/${live.id}'),
+          isTrue);
+    });
+
+    test('잠금 문서가 없어도 지워진다 — 공유된 적 없는 기프티콘', () async {
+      await gifticons.deleteGifticon(live.id);
+      expect(await gifticons.getGifticonById(live.id), isNull);
+      expect(await gifticons.getGifticons(live.ownerId), isEmpty);
+    });
+  });
 }

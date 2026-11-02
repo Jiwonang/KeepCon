@@ -529,6 +529,19 @@ class GifticonDetailPage extends ConsumerWidget {
     } on StateError catch (e, st) {
       reportHandledFailure(ref, e, st,
           context: 'GifticonDetailPage.deleteGifticon(guard)');
+      // 계약상 [StateError]는 둘 중 하나다 — 이미 없거나, 백엔드가 아직 끝나지 않은
+      // 공유를 보고 거부했다(화면 가드가 못 보는 탈퇴한 그룹의 공유·경합). **목록에 아직
+      // 있는지**로 가른다: 문서가 살아 있는데 "이미 삭제됐다"고 말하고 상세를 닫으면
+      // 사용자는 목록에 그대로 남은 기프티콘을 보고 고장으로 읽는다.
+      if (ref.read(gifticonByIdProvider(g.id)) != null) {
+        messenger
+          ..hideCurrentSnackBar()
+          ..showSnackBar(const SnackBar(
+            content: Text('공유 중인 그룹이 있어 삭제할 수 없어요. '
+                '전에 나간 그룹에 공유해 둔 것일 수 있어요.'),
+          ));
+        return;
+      }
       // 이미 없다 — 다른 기기에서 먼저 지웠다. 다시 눌러도 같은 결과이고, 남겨 두면
       // 성공 경로와 같은 이유로 없는 것을 보여주므로 함께 닫는다.
       closeIfStillShown();

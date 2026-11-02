@@ -20,6 +20,9 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart' show visibleForTesting;
 
 import 'doc_read.dart';
+// 공유 잠금 컬렉션 이름의 정본. 그 파일도 이 파일을 import한다(Dart는 순환 import를
+// 허용한다) — 값을 복제하면 한쪽만 바뀌어 삭제가 엉뚱한 문서를 읽는다.
+import 'firebase_share_repository.dart' show FirebaseShareRepository;
 
 import '../../../models/gifticon.dart';
 import '../../../util/expiry_policy.dart';
@@ -163,13 +166,29 @@ class FirebaseGifticonRepository implements GifticonRepository {
   Future<void> deleteGifticon(String id) async {
     final DocumentReference<Map<String, dynamic>> ref = _col.doc(id);
 
+    final DocumentReference<Map<String, dynamic>> lockRef =
+        _db.collection(FirebaseShareRepository.shareLocksCollection).doc(id);
+
     // 존재 확인과 삭제를 한 트랜잭션에 묶는다. `delete()`만 부르면 없는 문서에도
     // 조용히 성공해 계약의 "없으면 StateError"를 지키지 못한다(in-memory와 갈라진다).
     // 없는 문서의 읽기 거부는 [_txGetOwned]가 번역한다.
-    await _db.runTransaction<void>((Transaction tx) async {
-      await _txGetOwned(tx, ref);
-      tx.delete(ref);
-    });
+    //
+    // **공유 잠금도 읽는다.** 판정은 규칙(`hasActiveShare`)이 하지만, 읽어 두어야 다른
+    // 기기의 공유 생성(같은 잠금을 쓰는 트랜잭션)과 충돌해 재시도되고, 재시도에서 규칙이
+    // 새 공유를 보고 거부한다 — 읽지 않으면 두 트랜잭션이 서로를 모른 채 둘 다 커밋된다.
+    try {
+      await _db.runTransaction<void>((Transaction tx) async {
+        await _txGetOwned(tx, ref);
+        await tx.get(lockRef);
+        tx.delete(ref);
+      });
+    } on FirebaseException catch (e) {
+      // 읽기는 [_txGetOwned]가 이미 번역했으므로 여기까지 온 permission-denied는
+      // **커밋의 거부**, 곧 아직 끝나지 않은 공유다. 문서는 살아 있다 — '없음'으로
+      // 말하면 안 된다(화면은 목록에 남아 있는지로 둘을 가른다).
+      if (e.code != 'permission-denied') rethrow;
+      throw StateError('Gifticon has an active share: $id');
+    }
   }
 
   // --- 매핑 헬퍼 ---------------------------------------------------------

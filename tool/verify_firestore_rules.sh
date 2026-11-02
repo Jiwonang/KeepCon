@@ -825,6 +825,43 @@ check "저장 상태 expired인 원본은 멤버가 못 맞춘다 → 차단" 40
   -X PATCH "${DOCS}/gifticons/gif-useexp-${SG_RUN}?${MASK_SYNC}" \
   "${AUTH_B[@]}" "${JSON[@]}" -d "$(sync_body used "${SG_USE_EXP}")"
 
+echo "gifticons 삭제 — 아직 끝나지 않은 공유가 있으면 차단"
+
+# `hasActiveShare`(v3.19). 화면 가드가 못 보는 공유(전에 나간 그룹)·경합을 규칙이 막는다.
+# 근거는 잠금이 가리키는 공유 항목이고, 잠금은 누구나 쓸 수 있으므로 **항목 자체**의
+# `gifticonId`를 대조한다. 아래 케이스가 그 조건을 하나씩 지킨다 —
+#   available 항목 → 차단 / 남의 원본 항목을 가리키는 위조 잠금 → 막지 못함 /
+#   used 항목(이력) → 허용 / 잠금을 지우면 → 허용.
+# 이 시점의 픽스처: SG_A(available)는 gif-${SG_RUN}을, SG_USE(used)는 gif-use-${SG_RUN}을 가리킨다.
+lock_doc() {
+  printf '{"fields":{"sharedGifticonId":{"stringValue":"%s"}}}' "$1"
+}
+
+check "  (준비) gif-${SG_RUN}의 공유 잠금 → SG_A(available)" 200 \
+  -X PATCH "${DOCS}/shareLocks/gif-${SG_RUN}" "${AUTH_A[@]}" "${JSON[@]}" -d "$(lock_doc "${SG_A}")"
+check "공유 중(available)인 원본을 소유자가 삭제 → 차단" 403 \
+  -X DELETE "${DOCS}/gifticons/gif-${SG_RUN}" "${AUTH_A[@]}"
+
+check "  (준비) 공유된 적 없는 A의 원본" 200 -X PATCH "${DOCS}/gifticons/gif-forged-${SG_RUN}" \
+  "${AUTH_A[@]}" "${JSON[@]}" -d "$(gifticon_doc "${UID_A}")"
+check "  (준비) B가 그 원본의 잠금을 남의 활성 항목(SG_A)으로 위조" 200 \
+  -X PATCH "${DOCS}/shareLocks/gif-forged-${SG_RUN}" "${AUTH_B[@]}" "${JSON[@]}" -d "$(lock_doc "${SG_A}")"
+check "위조 잠금은 소유자의 삭제를 막지 못한다(항목의 gifticonId가 다름)" 200 \
+  -X DELETE "${DOCS}/gifticons/gif-forged-${SG_RUN}" "${AUTH_A[@]}"
+
+check "  (준비) gif-use-${SG_RUN}의 공유 잠금 → SG_USE(used)" 200 \
+  -X PATCH "${DOCS}/shareLocks/gif-use-${SG_RUN}" "${AUTH_A[@]}" "${JSON[@]}" -d "$(lock_doc "${SG_USE}")"
+check "공유가 사용 완료(used)면 원본 삭제 허용 — 이력은 그룹에 남는다" 200 \
+  -X DELETE "${DOCS}/gifticons/gif-use-${SG_RUN}" "${AUTH_A[@]}"
+
+check "  (정리) 위조 잠금 삭제" 200 -X DELETE "${DOCS}/shareLocks/gif-forged-${SG_RUN}" "${AUTH_A[@]}"
+check "  (정리) used 잠금 삭제" 200 -X DELETE "${DOCS}/shareLocks/gif-use-${SG_RUN}" "${AUTH_A[@]}"
+check "  (정리) 회수 — gif-${SG_RUN}의 잠금 삭제" 200 -X DELETE "${DOCS}/shareLocks/gif-${SG_RUN}" "${AUTH_A[@]}"
+# 잠금 없는 공유는 규칙이 볼 근거가 없다 — 회수(`cancelShare`)가 잠금을 함께 지우므로
+# 이것이 "회수 뒤 삭제"의 모양이다. 잠금을 지우는 위조도 소유자 자신의 삭제를 허용할 뿐이다.
+check "잠금이 없으면 삭제 허용(회수 뒤의 모양)" 200 \
+  -X DELETE "${DOCS}/gifticons/gif-${SG_RUN}" "${AUTH_A[@]}"
+
 check "  (정리) 사용 동기화 공유 항목 삭제" 200 -X DELETE "${DOCS}/sharedGifticons/${SG_USE}" "${AUTH_A[@]}"
 check "  (정리) 만료 원본 공유 항목 삭제" 200 -X DELETE "${DOCS}/sharedGifticons/${SG_USE_EXP}" "${AUTH_A[@]}"
 
