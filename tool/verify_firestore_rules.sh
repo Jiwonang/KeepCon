@@ -831,36 +831,34 @@ echo "gifticons 삭제 — 아직 끝나지 않은 공유가 있으면 차단"
 # 근거는 잠금이 가리키는 공유 항목이고, 잠금은 누구나 쓸 수 있으므로 **항목 자체**의
 # `gifticonId`를 대조한다. 아래 케이스가 그 조건을 하나씩 지킨다 —
 #   available 항목 → 차단 / 남의 원본 항목을 가리키는 위조 잠금 → 막지 못함 /
-#   used 항목(이력) → 허용 / 잠금을 지우면 → 허용.
-# 이 시점의 픽스처: SG_A(available)는 gif-${SG_RUN}을, SG_USE(used)는 gif-use-${SG_RUN}을 가리킨다.
+#   used 항목(이력) → 허용 / 잠금이 없으면(회수 뒤) → 허용.
+# 활성 공유 픽스처는 이 절 전용으로 새로 심는다 — 위 절의 SG_A는 이미 used가 됐다
+# (그것을 재활용했다가 '차단'이 200으로 새는 것을 실측했다).
+SG_ACT="shared-${SG_RUN}-act"
 lock_doc() {
   printf '{"fields":{"sharedGifticonId":{"stringValue":"%s"}}}' "$1"
 }
 
-check "  (준비) gif-${SG_RUN}의 공유 잠금 → SG_A(available)" 200 \
-  -X PATCH "${DOCS}/shareLocks/gif-${SG_RUN}" "${AUTH_A[@]}" "${JSON[@]}" -d "$(lock_doc "${SG_A}")"
-check "공유 중(available)인 원본을 소유자가 삭제 → 차단" 403 \
-  -X DELETE "${DOCS}/gifticons/gif-${SG_RUN}" "${AUTH_A[@]}"
+check "  (준비) A의 원본(활성 공유용)" 200 -X PATCH "${DOCS}/gifticons/gif-act-${SG_RUN}"   "${AUTH_A[@]}" "${JSON[@]}" -d "$(gifticon_doc "${UID_A}")"
+check "  (준비) A가 그 원본을 공유(available)" 200 -X PATCH "${DOCS}/sharedGifticons/${SG_ACT}"   "${AUTH_A[@]}" "${JSON[@]}" -d "$(use_shared_doc "gif-act-${SG_RUN}")"
+check "  (준비) 그 원본의 공유 잠금 → SG_ACT" 200   -X PATCH "${DOCS}/shareLocks/gif-act-${SG_RUN}" "${AUTH_A[@]}" "${JSON[@]}" -d "$(lock_doc "${SG_ACT}")"
+check "공유 중(available)인 원본을 소유자가 삭제 → 차단" 403   -X DELETE "${DOCS}/gifticons/gif-act-${SG_RUN}" "${AUTH_A[@]}"
 
-check "  (준비) 공유된 적 없는 A의 원본" 200 -X PATCH "${DOCS}/gifticons/gif-forged-${SG_RUN}" \
-  "${AUTH_A[@]}" "${JSON[@]}" -d "$(gifticon_doc "${UID_A}")"
-check "  (준비) B가 그 원본의 잠금을 남의 활성 항목(SG_A)으로 위조" 200 \
-  -X PATCH "${DOCS}/shareLocks/gif-forged-${SG_RUN}" "${AUTH_B[@]}" "${JSON[@]}" -d "$(lock_doc "${SG_A}")"
-check "위조 잠금은 소유자의 삭제를 막지 못한다(항목의 gifticonId가 다름)" 200 \
-  -X DELETE "${DOCS}/gifticons/gif-forged-${SG_RUN}" "${AUTH_A[@]}"
+check "  (준비) 공유된 적 없는 A의 원본" 200 -X PATCH "${DOCS}/gifticons/gif-forged-${SG_RUN}"   "${AUTH_A[@]}" "${JSON[@]}" -d "$(gifticon_doc "${UID_A}")"
+check "  (준비) B가 그 원본의 잠금을 남의 활성 항목(SG_ACT)으로 위조" 200   -X PATCH "${DOCS}/shareLocks/gif-forged-${SG_RUN}" "${AUTH_B[@]}" "${JSON[@]}" -d "$(lock_doc "${SG_ACT}")"
+check "위조 잠금은 소유자의 삭제를 막지 못한다(항목의 gifticonId가 다름)" 200   -X DELETE "${DOCS}/gifticons/gif-forged-${SG_RUN}" "${AUTH_A[@]}"
 
-check "  (준비) gif-use-${SG_RUN}의 공유 잠금 → SG_USE(used)" 200 \
-  -X PATCH "${DOCS}/shareLocks/gif-use-${SG_RUN}" "${AUTH_A[@]}" "${JSON[@]}" -d "$(lock_doc "${SG_USE}")"
-check "공유가 사용 완료(used)면 원본 삭제 허용 — 이력은 그룹에 남는다" 200 \
-  -X DELETE "${DOCS}/gifticons/gif-use-${SG_RUN}" "${AUTH_A[@]}"
+# SG_USE는 위 절에서 used가 됐고 gif-use-${SG_RUN}을 가리킨다.
+check "  (준비) gif-use-${SG_RUN}의 공유 잠금 → SG_USE(used)" 200   -X PATCH "${DOCS}/shareLocks/gif-use-${SG_RUN}" "${AUTH_A[@]}" "${JSON[@]}" -d "$(lock_doc "${SG_USE}")"
+check "공유가 사용 완료(used)면 원본 삭제 허용 — 이력은 그룹에 남는다" 200   -X DELETE "${DOCS}/gifticons/gif-use-${SG_RUN}" "${AUTH_A[@]}"
+
+# 회수(`cancelShare`)는 항목과 잠금을 함께 지운다 — 그 뒤의 모양.
+check "  (준비) 회수 — 활성 공유 항목 삭제" 200 -X DELETE "${DOCS}/sharedGifticons/${SG_ACT}" "${AUTH_A[@]}"
+check "  (준비) 회수 — 그 잠금 삭제" 200 -X DELETE "${DOCS}/shareLocks/gif-act-${SG_RUN}" "${AUTH_A[@]}"
+check "회수 뒤에는 삭제 허용" 200 -X DELETE "${DOCS}/gifticons/gif-act-${SG_RUN}" "${AUTH_A[@]}"
 
 check "  (정리) 위조 잠금 삭제" 200 -X DELETE "${DOCS}/shareLocks/gif-forged-${SG_RUN}" "${AUTH_A[@]}"
 check "  (정리) used 잠금 삭제" 200 -X DELETE "${DOCS}/shareLocks/gif-use-${SG_RUN}" "${AUTH_A[@]}"
-check "  (정리) 회수 — gif-${SG_RUN}의 잠금 삭제" 200 -X DELETE "${DOCS}/shareLocks/gif-${SG_RUN}" "${AUTH_A[@]}"
-# 잠금 없는 공유는 규칙이 볼 근거가 없다 — 회수(`cancelShare`)가 잠금을 함께 지우므로
-# 이것이 "회수 뒤 삭제"의 모양이다. 잠금을 지우는 위조도 소유자 자신의 삭제를 허용할 뿐이다.
-check "잠금이 없으면 삭제 허용(회수 뒤의 모양)" 200 \
-  -X DELETE "${DOCS}/gifticons/gif-${SG_RUN}" "${AUTH_A[@]}"
 
 check "  (정리) 사용 동기화 공유 항목 삭제" 200 -X DELETE "${DOCS}/sharedGifticons/${SG_USE}" "${AUTH_A[@]}"
 check "  (정리) 만료 원본 공유 항목 삭제" 200 -X DELETE "${DOCS}/sharedGifticons/${SG_USE_EXP}" "${AUTH_A[@]}"
