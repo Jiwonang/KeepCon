@@ -74,7 +74,8 @@ void main() {
   /// 원본 문서 읽기에 보안 규칙의 응답을 주입한다(없는 문서 → 평가 오류 → 거부).
   void denyOriginalReadWith(String code) {
     whenCalling(Invocation.method(#get, null))
-        .on(db.doc('${FirebaseGifticonRepository.collectionName}/${original.id}'))
+        .on(db
+            .doc('${FirebaseGifticonRepository.collectionName}/${original.id}'))
         .thenThrow(FirebaseException(plugin: 'cloud_firestore', code: code));
   }
 
@@ -114,7 +115,8 @@ void main() {
     // 사용자가 없는 것을 계속 다시 지우려 한다.
     void denyTxReadWith(String code) {
       whenCalling(Invocation.method(#get, <Object?>[null]))
-          .on(db.doc('${FirebaseGifticonRepository.collectionName}/${original.id}'))
+          .on(db.doc(
+              '${FirebaseGifticonRepository.collectionName}/${original.id}'))
           .thenThrow(FirebaseException(plugin: 'cloud_firestore', code: code));
     }
 

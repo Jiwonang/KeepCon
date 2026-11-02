@@ -452,8 +452,8 @@ class GifticonDetailPage extends ConsumerWidget {
   /// 남고 공유자 쪽에서 그 항목을 회수·연장할 근거가 사라진다(계약
   /// [GifticonRepository.deleteGifticon]의 경고). 사용 완료된 공유 항목은 이력이라
   /// 막지 않는다.
-  bool _deleteBlockedByShare(WidgetRef ref, Gifticon g,
-      ScaffoldMessengerState messenger) {
+  bool _deleteBlockedByShare(
+      WidgetRef ref, Gifticon g, ScaffoldMessengerState messenger) {
     final AsyncValue<SharedGifticon?> fresh =
         ref.read(sharedItemForGifticonProvider(g.id));
     final String? message;

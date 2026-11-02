@@ -157,8 +157,7 @@ void main() {
   });
 
   testWidgets('그룹에 공유 중이면 묻지 않고 회수를 안내한다', (WidgetTester tester) async {
-    boot(<Gifticon>[_gifticon()],
-        sharedItem: _shared(ShareStatus.available));
+    boot(<Gifticon>[_gifticon()], sharedItem: _shared(ShareStatus.available));
     await mountDetail(tester, _gifticon());
 
     await tester.tap(deleteButton());
@@ -194,8 +193,7 @@ void main() {
     expect(await repo.getGifticonById('g1'), isNull);
   });
 
-  testWidgets('공유 여부가 확정되기 전에는 막는다(fail-closed)',
-      (WidgetTester tester) async {
+  testWidgets('공유 여부가 확정되기 전에는 막는다(fail-closed)', (WidgetTester tester) async {
     boot(<Gifticon>[_gifticon()], sharedIdsPending: true);
     await mountDetail(tester, _gifticon());
 
@@ -203,13 +201,11 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byType(AlertDialog), findsNothing);
-    expect(find.text('공유 상태를 확인하는 중이에요. 잠시 후 다시 시도해 주세요.'),
-        findsOneWidget);
+    expect(find.text('공유 상태를 확인하는 중이에요. 잠시 후 다시 시도해 주세요.'), findsOneWidget);
     expect(await repo.getGifticonById('g1'), isNotNull);
   });
 
-  testWidgets('다이얼로그가 열린 사이 공유되면 확정 시점에 다시 막는다',
-      (WidgetTester tester) async {
+  testWidgets('다이얼로그가 열린 사이 공유되면 확정 시점에 다시 막는다', (WidgetTester tester) async {
     // 공유 판정을 다이얼로그 **앞에서만** 읽으면, 그 사이 다른 기기가 그룹에 공유한
     // 원본을 지워 그룹에 원본 없는 공유 항목을 남긴다.
     boot(<Gifticon>[_gifticon()]);
@@ -224,8 +220,8 @@ void main() {
       gifticonRepositoryProvider.overrideWithValue(repo),
       rawGifticonsProvider.overrideWith((_) => repo.watchGifticons(_ownerId)),
       sessionUserProvider.overrideWith((_) => Stream<User?>.value(_me)),
-      sharedGifticonIdsProvider
-          .overrideWithValue(const AsyncValue<Set<String>>.data(<String>{'g1'})),
+      sharedGifticonIdsProvider.overrideWithValue(
+          const AsyncValue<Set<String>>.data(<String>{'g1'})),
       allSharedProvider
           .overrideWithValue(<SharedGifticon>[_shared(ShareStatus.available)]),
     ]);
