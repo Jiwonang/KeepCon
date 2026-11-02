@@ -170,6 +170,17 @@ check "B가 A의 기프티콘 조회 → 차단" 403 -X GET "${DOCS}/gifticons/r
 check "B가 A의 기프티콘 수정 → 차단" 403 -X PATCH "${DOCS}/gifticons/rules-g-a" "${AUTH_B[@]}" "${JSON[@]}" -d "$(gifticon_doc "${UID_A}")"
 check "A가 ownerId를 B로 위조해 생성 → 차단" 403 -X PATCH "${DOCS}/gifticons/rules-g-spoof" "${AUTH_A[@]}" "${JSON[@]}" -d "$(gifticon_doc "${UID_B}")"
 
+# 삭제(`GifticonRepository.deleteGifticon`, v3.19). 계약은 행위자를 받지 않으므로
+# "등록한 본인만"은 이 규칙이 유일한 강제다. 순서가 의미를 가진다 — 남의 삭제가
+# 먼저 거부돼야 소유자의 삭제가 '살아 있는 문서'를 지우는 것으로 검증된다.
+check "  (준비) A의 지울 기프티콘" 200 -X PATCH "${DOCS}/gifticons/rules-g-del" "${AUTH_A[@]}" "${JSON[@]}" -d "$(gifticon_doc "${UID_A}")"
+check "B가 A의 기프티콘 삭제 → 차단" 403 -X DELETE "${DOCS}/gifticons/rules-g-del" "${AUTH_B[@]}"
+check "비로그인 삭제 → 차단" 403 -X DELETE "${DOCS}/gifticons/rules-g-del"
+check "A가 자기 기프티콘 삭제" 200 -X DELETE "${DOCS}/gifticons/rules-g-del" "${AUTH_A[@]}"
+# 지운 문서는 소유자에게도 읽히지 않는다(`resource`가 null이라 읽기 규칙이 평가 오류).
+# Firebase 구현이 이 403을 '원본 없음'으로 번역하는 근거다(`_syncOriginalExpiry`).
+check "지운 기프티콘을 소유자가 조회 → 거부(없는 문서)" 403 -X GET "${DOCS}/gifticons/rules-g-del" "${AUTH_A[@]}"
+
 echo "users — 본인 프로필만"
 check "A가 자기 프로필 생성" 200 -X PATCH "${DOCS}/users/${UID_A}" "${AUTH_A[@]}" "${JSON[@]}" -d '{"fields":{"displayName":{"stringValue":"A"}}}'
 check "B가 A의 프로필 조회 → 차단" 403 -X GET "${DOCS}/users/${UID_A}" "${AUTH_B[@]}"

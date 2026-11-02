@@ -101,6 +101,16 @@ class InMemoryGifticonRepository implements GifticonRepository {
     return updated;
   }
 
+  @override
+  Future<void> deleteGifticon(String id) async {
+    final int idx = _store.indexWhere((Gifticon g) => g.id == id);
+    if (idx < 0) {
+      throw StateError('Gifticon not found: $id');
+    }
+    _store.removeAt(idx);
+    _emit();
+  }
+
   List<Gifticon> _ownedBy(String ownerId) => List<Gifticon>.unmodifiable(
         _store.where((Gifticon g) => g.ownerId == ownerId),
       );

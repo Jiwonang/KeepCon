@@ -391,4 +391,7 @@ class _FailingUpdateRepo implements GifticonRepository {
   @override
   Future<Gifticon> extendExpiry(String id, DateTime newExpiryDate) =>
       _inner.extendExpiry(id, newExpiryDate);
+
+  @override
+  Future<void> deleteGifticon(String id) => _inner.deleteGifticon(id);
 }

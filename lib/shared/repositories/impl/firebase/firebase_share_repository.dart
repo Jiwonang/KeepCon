@@ -1372,11 +1372,11 @@ class FirebaseShareRepository implements ShareRepository {
   ///
   /// ⚠️ 규칙 있는 백엔드에서 **없는** 원본은 `null`이 아니라 권한 거부로 온다
   /// (`gifticons` 읽기 규칙이 `resource.data`를 참조한다 — `joinRequests`와 같은 모양).
-  /// 그 경우 이 가드는 건너뛰지 못하고 [FirebaseException]을 올린다. 그대로 둔 것은
-  /// **도달 경로가 없어서다** — 계약에 기프티콘 삭제 API가 없고, 공유 후보는 행위자
-  /// 자신의 원본뿐이라 읽기는 항상 허용된다. 삭제 API가 생기면 이 가정부터 다시 본다.
-  /// (설령 닿아도 결과는 이 가드 이전과 같다 — `sharedGifticons` 생성 규칙의 원본
-  /// 소유 조항이 없는 원본의 공유를 거부한다.)
+  /// 그 경우 이 가드는 건너뛰지 못하고 [FirebaseException]을 올린다. 삭제 API
+  /// (`GifticonRepository.deleteGifticon`, v3.19)가 생기며 이 경로에 닿을 수 있게 됐지만
+  /// — 공유 후보 목록을 띄워 둔 사이 다른 기기가 그 원본을 지운 경우 — **거부가 맞는
+  /// 결과라 그대로 둔다.** 없는 원본은 공유하면 안 되고, `sharedGifticons` 생성 규칙의
+  /// 원본 소유 조항도 같은 요청을 거부한다. 화면은 통신 실패 안내를 띄운다.
   Future<Gifticon?> _requireShareableOriginal(String gifticonId) async {
     final Gifticon? original = await _gifticons.getGifticonById(gifticonId);
     if (original != null && original.status != GifticonStatus.available) {
@@ -1389,15 +1389,32 @@ class FirebaseShareRepository implements ShareRepository {
 
   /// 원본 [Gifticon]의 만료일을 함께 옮긴다.
   ///
-  /// 원본이 없으면(데모 시드의 가짜 gifticonId) 건너뛰고, **이미 그 날짜 이후여도**
-  /// 건너뛴다(스냅샷만 따라붙으면 둘이 만난다 — 계약 문서 참조).
+  /// 원본이 없으면(데모 시드의 가짜 gifticonId, 또는 소유자가 삭제한 원본) 건너뛰고,
+  /// **이미 그 날짜 이후여도** 건너뛴다(스냅샷만 따라붙으면 둘이 만난다 — 계약 문서 참조).
+  ///
+  /// ## 읽기의 permission-denied = 원본 없음
+  /// 행위자는 공유자이고 공유자는 원본 소유자다(`sharedGifticons` 생성 규칙이 원본 소유를
+  /// 검사하고 `sharedByUserId`는 이후 불변). `gifticons` 읽기 규칙은 `ownerId == uid()`만
+  /// 보므로, 소유자 본인의 읽기가 거부되는 경우는 **문서가 없어 `resource.data`가
+  /// 평가 오류를 내는 것뿐이다.** 삭제 API(v3.19) 이전에는 닿지 않던 분기다 — 화면이
+  /// 공유 중인 원본의 삭제를 막지만, 그룹 목록이 도착하기 전 다른 기기에서 지웠거나
+  /// 경합이 있으면 원본 없는 공유 항목이 남을 수 있고, 그 항목의 연장이 여기서 통째로
+  /// 실패하면 **스냅샷마저 연장할 길이 사라진다.** in-memory 구현은 같은 경우
+  /// `getGifticonById`가 `null`을 돌려줘 건너뛰므로, 이 번역이 두 구현을 맞춘다.
+  ///
   /// 그 밖의 실패는 삼키지 않는다: [_syncOriginalUsed]와 달리 행위자가
-  /// 공유자=소유자로 좁혀져 있어 권한 실패가 정상 경로가 아니다.
+  /// 공유자=소유자로 좁혀져 있어 다른 권한 실패가 정상 경로가 아니다.
   Future<void> _syncOriginalExpiry(
     String gifticonId,
     DateTime newExpiryDate,
   ) async {
-    final Gifticon? original = await _gifticons.getGifticonById(gifticonId);
+    final Gifticon? original;
+    try {
+      original = await _gifticons.getGifticonById(gifticonId);
+    } on FirebaseException catch (e) {
+      if (e.code == 'permission-denied') return;
+      rethrow;
+    }
     if (original == null) return;
     if (!isLaterExpiryDate(newExpiryDate, than: original.expiryDate)) return;
     await _gifticons.extendExpiry(gifticonId, newExpiryDate);

@@ -147,6 +147,18 @@ class GifticonDetailPage extends ConsumerWidget {
       appBar: AppBar(
         centerTitle: true,
         title: Text('기프티콘', style: context.navTitleStyle),
+        actions: <Widget>[
+          // 삭제는 **등록한 본인에게만** 보인다(연장의 ③과 같은 이유 — 진입 스냅샷
+          // 폴백으로 남의 것이 표시될 여지를 닫는다). 공유 여부는 여기서 거르지 않고
+          // 누른 시점에 다시 읽는다([_confirmAndDelete] — 막힌 이유를 말해 줘야
+          // 버튼이 사라진 것을 고장으로 읽지 않는다).
+          if (mine)
+            IconButton(
+              tooltip: '삭제',
+              icon: const Icon(Icons.delete_outline),
+              onPressed: () => _confirmAndDelete(context, ref, g),
+            ),
+        ],
       ),
       body: SafeArea(
         top: false,
@@ -429,6 +441,96 @@ class GifticonDetailPage extends ConsumerWidget {
         ..hideCurrentSnackBar()
         ..showSnackBar(
           const SnackBar(content: Text('연장하지 못했어요. 연결을 확인하고 다시 시도해 주세요.')),
+        );
+    }
+  }
+
+  /// 공유 상태를 **지금** 읽어 삭제를 막아야 하면 안내하고 `true`를 돌려준다.
+  ///
+  /// 막는 경우는 둘이다 — 공유 여부가 아직 확정되지 않았거나(fail-closed), 그룹에
+  /// **아직 쓰이지 않은** 공유 항목이 있을 때다. 후자를 지우면 그룹에 원본 없는 항목이
+  /// 남고 공유자 쪽에서 그 항목을 회수·연장할 근거가 사라진다(계약
+  /// [GifticonRepository.deleteGifticon]의 경고). 사용 완료된 공유 항목은 이력이라
+  /// 막지 않는다.
+  bool _deleteBlockedByShare(WidgetRef ref, Gifticon g,
+      ScaffoldMessengerState messenger) {
+    final AsyncValue<SharedGifticon?> fresh =
+        ref.read(sharedItemForGifticonProvider(g.id));
+    final String? message;
+    if (!fresh.hasValue) {
+      message = '공유 상태를 확인하는 중이에요. 잠시 후 다시 시도해 주세요.';
+    } else if (fresh.value != null && fresh.value!.status != ShareStatus.used) {
+      message = '그룹에 공유 중이라 삭제할 수 없어요. 공유 탭에서 공유를 회수한 뒤 삭제해 주세요.';
+    } else {
+      message = null;
+    }
+    if (message == null) return false;
+    messenger
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
+    return true;
+  }
+
+  /// 삭제 확인 → 계약 [GifticonRepository.deleteGifticon] 호출 → 성공하면 화면을 닫는다.
+  ///
+  /// 공유 판정은 **확인 다이얼로그 앞뒤로 두 번** 읽는다. 앞은 물어볼 필요가 없는
+  /// 경우를 먼저 걸러 주고, 뒤는 다이얼로그가 열려 있던 사이 다른 기기가 그룹에 공유한
+  /// 경우를 막는다([_extendExpiry]의 "선택기가 열려 있던 창"과 같은 이유).
+  Future<void> _confirmAndDelete(
+    BuildContext context,
+    WidgetRef ref,
+    Gifticon g,
+  ) async {
+    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
+    if (_deleteBlockedByShare(ref, g, messenger)) return;
+
+    final bool? ok = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext ctx) => AlertDialog(
+        title: const Text('기프티콘 삭제'),
+        content: Text(
+          '${g.productName}${g.productName.eulReul} 삭제할까요?\n'
+          '삭제하면 되돌릴 수 없어요.',
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('닫기'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('삭제'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !context.mounted) return;
+    if (_deleteBlockedByShare(ref, g, messenger)) return;
+
+    final NavigatorState navigator = Navigator.of(context);
+    try {
+      await ref.read(gifticonRepositoryProvider).deleteGifticon(g.id);
+      // 지운 기프티콘의 상세를 남겨 두면 진입 스냅샷으로 떨어져 **없는 것을 보여준다.**
+      navigator.pop();
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(const SnackBar(content: Text('기프티콘을 삭제했어요.')));
+    } on StateError catch (e, st) {
+      reportHandledFailure(ref, e, st,
+          context: 'GifticonDetailPage.deleteGifticon(guard)');
+      // 이미 없다 — 다른 기기에서 먼저 지웠다. 다시 눌러도 같은 결과다.
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(const SnackBar(content: Text('이미 삭제된 기프티콘이에요.')));
+    } catch (e, st) {
+      // 사용 완료 경로와 같은 규약 — 로그를 남기고 재시도를 권한다. 삭제도 트랜잭션이라
+      // 오프라인 큐잉이 되지 않는다.
+      reportHandledFailure(ref, e, st,
+          context: 'GifticonDetailPage.deleteGifticon');
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(content: Text('삭제하지 못했어요. 연결을 확인하고 다시 시도해 주세요.')),
         );
     }
   }

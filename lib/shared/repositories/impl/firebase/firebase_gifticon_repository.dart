@@ -138,6 +138,32 @@ class FirebaseGifticonRepository implements GifticonRepository {
     });
   }
 
+  @override
+  Future<void> deleteGifticon(String id) async {
+    final DocumentReference<Map<String, dynamic>> ref = _col.doc(id);
+
+    // 존재 확인과 삭제를 한 트랜잭션에 묶는다. `delete()`만 부르면 없는 문서에도
+    // 조용히 성공해 계약의 "없으면 StateError"를 지키지 못한다(in-memory와 갈라진다).
+    //
+    // ⚠️ 규칙 있는 백엔드에서 없는 문서 읽기는 `exists == false`가 아니라
+    // permission-denied로 온다(`gifticons` 읽기 규칙이 `resource.data`를 참조한다).
+    // 그대로 두면 "다른 기기가 먼저 지웠다"가 통신 실패로 보고되어 사용자가 없는 것을
+    // 계속 다시 지우려 한다. 그래서 계약의 [StateError]로 번역한다 — 화면이 삭제를
+    // 여는 것은 자기 목록의 기프티콘뿐이라, 이 경로의 거부는 사실상 '이미 없음'이다.
+    try {
+      await _db.runTransaction<void>((Transaction tx) async {
+        final DocumentSnapshot<Map<String, dynamic>> doc = await tx.get(ref);
+        if (!doc.exists) {
+          throw StateError('Gifticon not found: $id');
+        }
+        tx.delete(ref);
+      });
+    } on FirebaseException catch (e) {
+      if (e.code != 'permission-denied') rethrow;
+      throw StateError('Gifticon not found or not owned: $id');
+    }
+  }
+
   // --- 매핑 헬퍼 ---------------------------------------------------------
 
   /// 계약 [Gifticon] → Firestore 문서 맵.
