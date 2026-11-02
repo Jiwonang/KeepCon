@@ -882,7 +882,7 @@ class InMemoryShareRepository implements ShareRepository {
         await _gifticons.updateStatus(g.id, GifticonStatus.used);
         fixed++;
       } on Exception {
-        continue; // best-effort — 다음 진입에서 다시 시도된다(계약 참조).
+        continue; // best-effort — 다음 호출에서 다시 시도된다(계약 참조).
       }
     }
     return fixed;

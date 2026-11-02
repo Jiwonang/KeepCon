@@ -1035,6 +1035,30 @@ void runUsedOriginalReconcileContract(ShareBackend Function() makeBackend) {
     expect(await statusOf(originals.single), GifticonStatus.available);
   });
 
+  test('남이 내 원본 id로 만든 used 항목으로는 맞추지 않는다', () async {
+    // 공유자 검사(`sharedByUserId == 나`)를 고정한다. 이런 항목은 규칙 이전 레거시
+    // 문서나 소유권 검사가 없는 경로에서 생길 수 있고, 검사가 없으면 쓰지도 않은 내
+    // 기프티콘이 사용 완료가 된다. (위조 테스트는 공유자가 나인 항목을 가리키므로
+    // 원본 id 대조만 고정한다.)
+    final (Group group, _, _) = await shareAndJoin(<String>[]);
+    final Gifticon mine = await storeOriginal('내 것');
+    await asMember();
+    final SharedGifticon forged =
+        await backend.repo.shareGifticon(groupId: group.id, gifticon: mine);
+    backend.failOriginalStatusWrites = true;
+    try {
+      await backend.repo.markUsed(forged.id);
+    } finally {
+      backend.failOriginalStatusWrites = false;
+    }
+    await asOwner();
+    expect(await statusOf(mine), GifticonStatus.available);
+
+    expect(await backend.repo.reconcileUsedOriginals(), 0);
+    expect(await statusOf(mine), GifticonStatus.available,
+        reason: '대상은 내가 공유한 항목뿐이다');
+  });
+
   test('미로그인이면 StateError', () async {
     await backend.auth.signOut();
     await expectLater(backend.repo.reconcileUsedOriginals(), throwsStateError);

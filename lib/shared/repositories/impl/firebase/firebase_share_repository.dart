@@ -1465,9 +1465,13 @@ class FirebaseShareRepository implements ShareRepository {
       if (!lock.exists) return false;
       final String? sharedId =
           docStringOrNull(lock.data()?['sharedGifticonId']);
-      if (!isUsableDocId(sharedId)) return false;
+      // 잠금은 누구나 쓴다 — 경로 문자가 섞인 포인터는 `doc()`이 ArgumentError(Error)를
+      // 동기로 던져 아래 `on Exception`을 빠져나가고 보정 전체를 깨뜨린다. 자동 생성
+      // id에는 '/'가 없으므로 그런 값은 위조로 보고 건너뛴다. (fake는 이 검사를 하지
+      // 않아 테스트로 고정할 수 없다 — 이 가드가 방어선이다.)
+      if (!isUsableDocId(sharedId) || sharedId!.contains('/')) return false;
       final DocumentSnapshot<Map<String, dynamic>> doc =
-          await _shared.doc(sharedId!).get();
+          await _shared.doc(sharedId).get();
       if (!doc.exists) return false;
       final SharedGifticon item = _sharedFromDoc(doc);
       if (item.gifticonId != gifticonId ||

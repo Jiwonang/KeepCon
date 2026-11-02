@@ -572,7 +572,8 @@ abstract class ShareRepository {
   /// 한계: 현재 사용자가 그 그룹에서 이미 빠졌으면 항목을 읽을 수 없어 맞추지 못한다.
   ///
   /// 원본 하나의 실패(권한·네트워크 등 [Exception])는 건너뛰고 나머지를 계속한다
-  /// (best-effort — 다음 진입에서 다시 시도된다). 원본 목록 조회 실패는 전파한다.
+  /// (best-effort — 다음 호출에서 다시 시도된다. 앱은 다음 실행·계정 전환 때 부른다).
+  /// 원본 목록 조회 실패는 전파한다.
   /// 맞춘 원본 수를 반환한다. 미로그인이면 [StateError].
   Future<int> reconcileUsedOriginals();
 
