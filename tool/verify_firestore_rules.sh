@@ -728,6 +728,92 @@ check "떠난 공유자의 항목을 일반 멤버가 거두기 → 차단" 403 
 check "떠난 공유자의 항목은 방장이 거둔다" 200 \
   -X DELETE "${DOCS}/sharedGifticons/${SG_GONE}" "${AUTH_A[@]}"
 
+echo "gifticons — 다른 멤버의 사용 완료를 원본에 맞추기(isSharedUseSync)"
+
+# 원본은 소유자만 쓸 수 있는데, 그러면 다른 멤버의 `markUsed`가 원본에 반영되지 않는다.
+# 규칙은 그 한 가지 쓰기만 멤버에게 연다 — `status` `available → used` + 근거 포인터
+# `usedViaShareId`, 근거 공유 항목은 이 원본을 가리키는 used 항목, 행위자는 그 그룹 멤버.
+# 아래 거부 케이스 각각이 그 조건 하나씩을 지킨다(하나를 지우면 해당 케이스만 200이 된다).
+SG_USE="shared-${SG_RUN}-use"
+SG_USE_EXP="shared-${SG_RUN}-useexp"
+MASK_SYNC='updateMask.fieldPaths=status&updateMask.fieldPaths=usedViaShareId'
+MASK_STATUS_ONLY='updateMask.fieldPaths=status'
+
+# 동기화 쓰기 본문. $1=status $2=usedViaShareId
+sync_body() {
+  printf '{"fields":{"status":{"stringValue":"%s"},"usedViaShareId":{"stringValue":"%s"}}}' "$1" "$2"
+}
+
+# 공유 항목. $1=gifticonId (A가 공유자)
+use_shared_doc() {
+  printf '{"fields":{"groupId":{"stringValue":"%s"},"gifticonId":{"stringValue":"%s"},"sharedByUserId":{"stringValue":"%s"},"brand":{"stringValue":"스타벅스"},"productName":{"stringValue":"아메리카노"},"expiryDate":{"timestampValue":"%s"},"status":{"stringValue":"available"}}}' \
+    "${G_JR}" "$1" "${UID_A}" "${SG_EXP_OLD}"
+}
+
+check "  (준비) A의 원본(사용 동기화용)" 200 -X PATCH "${DOCS}/gifticons/gif-use-${SG_RUN}" \
+  "${AUTH_A[@]}" "${JSON[@]}" -d "$(gifticon_doc "${UID_A}")"
+check "  (준비) A가 그 원본을 공유" 200 -X PATCH "${DOCS}/sharedGifticons/${SG_USE}" \
+  "${AUTH_A[@]}" "${JSON[@]}" -d "$(use_shared_doc "gif-use-${SG_RUN}")"
+
+check "공유 항목이 아직 available이면 원본을 못 맞춘다 → 차단" 403 \
+  -X PATCH "${DOCS}/gifticons/gif-use-${SG_RUN}?${MASK_SYNC}" \
+  "${AUTH_B[@]}" "${JSON[@]}" -d "$(sync_body used "${SG_USE}")"
+
+check "  (준비) B(멤버)가 공유 항목을 사용 완료" 200 \
+  -X PATCH "${DOCS}/sharedGifticons/${SG_USE}?${MASK_STATUS_ONLY}" \
+  "${AUTH_B[@]}" "${JSON[@]}" -d '{"fields":{"status":{"stringValue":"used"}}}'
+
+check "비멤버(C)가 원본을 맞추기 → 차단" 403 \
+  -X PATCH "${DOCS}/gifticons/gif-use-${SG_RUN}?${MASK_SYNC}" \
+  "${AUTH_C[@]}" "${JSON[@]}" -d "$(sync_body used "${SG_USE}")"
+check "근거 포인터 없이 status만 → 차단" 403 \
+  -X PATCH "${DOCS}/gifticons/gif-use-${SG_RUN}?${MASK_STATUS_ONLY}" \
+  "${AUTH_B[@]}" "${JSON[@]}" -d '{"fields":{"status":{"stringValue":"used"}}}'
+check "status 외 필드(ownerId)까지 변경 → 차단" 403 \
+  -X PATCH "${DOCS}/gifticons/gif-use-${SG_RUN}?${MASK_SYNC}&updateMask.fieldPaths=ownerId" \
+  "${AUTH_B[@]}" "${JSON[@]}" \
+  -d "{\"fields\":{\"status\":{\"stringValue\":\"used\"},\"usedViaShareId\":{\"stringValue\":\"${SG_USE}\"},\"ownerId\":{\"stringValue\":\"${UID_B}\"}}}"
+check "used가 아닌 값(expired)으로 → 차단" 403 \
+  -X PATCH "${DOCS}/gifticons/gif-use-${SG_RUN}?${MASK_SYNC}" \
+  "${AUTH_B[@]}" "${JSON[@]}" -d "$(sync_body expired "${SG_USE}")"
+# 이 원본(gif-${SG_RUN})을 가리키는 공유 항목은 SG_A(available)뿐이다 — 다른 원본의
+# used 항목을 끌어다 근거로 내미는 요청.
+check "다른 원본의 used 공유 항목을 근거로 → 차단" 403 \
+  -X PATCH "${DOCS}/gifticons/gif-${SG_RUN}?${MASK_SYNC}" \
+  "${AUTH_B[@]}" "${JSON[@]}" -d "$(sync_body used "${SG_USE}")"
+check "근거 포인터에 경로 조각(/)을 섞기 → 차단" 403 \
+  -X PATCH "${DOCS}/gifticons/gif-use-${SG_RUN}?${MASK_SYNC}" \
+  "${AUTH_B[@]}" "${JSON[@]}" -d "$(sync_body used "${SG_USE}/x/y")"
+check "없는 공유 항목을 근거로 → 차단" 403   -X PATCH "${DOCS}/gifticons/gif-use-${SG_RUN}?${MASK_SYNC}"   "${AUTH_B[@]}" "${JSON[@]}" -d "$(sync_body used "shared-${SG_RUN}-absent")"
+check "B(멤버)가 원본을 읽기 → 차단(읽기는 열지 않는다)" 403 \
+  -X GET "${DOCS}/gifticons/gif-use-${SG_RUN}" "${AUTH_B[@]}"
+
+check "B(멤버)가 원본을 available → used로 맞춘다" 200 \
+  -X PATCH "${DOCS}/gifticons/gif-use-${SG_RUN}?${MASK_SYNC}" \
+  "${AUTH_B[@]}" "${JSON[@]}" -d "$(sync_body used "${SG_USE}")"
+
+check "used → available 역전이 → 차단" 403 \
+  -X PATCH "${DOCS}/gifticons/gif-use-${SG_RUN}?${MASK_SYNC}" \
+  "${AUTH_B[@]}" "${JSON[@]}" -d "$(sync_body available "${SG_USE}")"
+check "B(멤버)가 원본 삭제 → 차단" 403 \
+  -X DELETE "${DOCS}/gifticons/gif-use-${SG_RUN}" "${AUTH_B[@]}"
+
+# 저장 상태가 `expired`인 원본 — 전이 표에 `expired → used`가 없다(클라이언트 소유자 경로도
+# 건너뛴다). 멤버 경로가 그 표보다 넓으면 안 된다.
+check "  (준비) A의 만료 원본" 200 -X PATCH "${DOCS}/gifticons/gif-useexp-${SG_RUN}" \
+  "${AUTH_A[@]}" "${JSON[@]}" -d "$(gifticon_doc "${UID_A}" | sed 's/"available"/"expired"/')"
+check "  (준비) A가 그 원본을 공유" 200 -X PATCH "${DOCS}/sharedGifticons/${SG_USE_EXP}" \
+  "${AUTH_A[@]}" "${JSON[@]}" -d "$(use_shared_doc "gif-useexp-${SG_RUN}")"
+check "  (준비) B가 그 공유 항목을 사용 완료" 200 \
+  -X PATCH "${DOCS}/sharedGifticons/${SG_USE_EXP}?${MASK_STATUS_ONLY}" \
+  "${AUTH_B[@]}" "${JSON[@]}" -d '{"fields":{"status":{"stringValue":"used"}}}'
+check "저장 상태 expired인 원본은 멤버가 못 맞춘다 → 차단" 403 \
+  -X PATCH "${DOCS}/gifticons/gif-useexp-${SG_RUN}?${MASK_SYNC}" \
+  "${AUTH_B[@]}" "${JSON[@]}" -d "$(sync_body used "${SG_USE_EXP}")"
+
+check "  (정리) 사용 동기화 공유 항목 삭제" 200 -X DELETE "${DOCS}/sharedGifticons/${SG_USE}" "${AUTH_A[@]}"
+check "  (정리) 만료 원본 공유 항목 삭제" 200 -X DELETE "${DOCS}/sharedGifticons/${SG_USE_EXP}" "${AUTH_A[@]}"
+
 check "  (정리) 공유 항목 삭제(공유자 본인)" 200 -X DELETE "${DOCS}/sharedGifticons/${SG_A}" "${AUTH_A[@]}"
 
 echo

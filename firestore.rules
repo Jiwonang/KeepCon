@@ -115,10 +115,50 @@ service cloud.firestore {
     }
 
 
-    // 개인 기프티콘 — 소유자만.
+    // 개인 기프티콘 — 소유자만. 예외는 아래 '공유 사용 동기화' 쓰기 하나뿐이다.
     match /gifticons/{id} {
-      allow read, update, delete:
+      // 그룹 멤버가 공유 항목을 사용 완료했을 때, 원본을 `available → used`로 맞추는 쓰기.
+      //
+      // 이 예외가 없으면 원본은 소유자만 쓸 수 있어, **다른 멤버의 사용 완료가 원본에
+      // 반영되지 않는다** — 소유자의 개인 목록에는 이미 쓴 기프티콘이 '보유중'으로 남고,
+      // 소유자가 매장에서 같은 바코드를 다시 내밀게 된다(`markUsed`의 원본 동기화).
+      //
+      // 열어 주는 범위를 최소로 묶는다.
+      //   - 바뀌는 키는 `status`와 근거 포인터 `usedViaShareId` 둘뿐이고, 값은
+      //     `available → used` 한 방향뿐이다(역전이·만료일·소유자 변경은 전부 소유자 경로).
+      //   - **읽기는 열지 않는다.** 행위자는 원본을 보지 않고 쓰기만 하며, 바코드 등 원본의
+      //     나머지는 이미 공유 항목 스냅샷에 있는 만큼만 보인다.
+      //   - 근거는 요청이 가리키는 공유 항목이다. 그 항목이 **이 원본을 가리키고**
+      //     (`gifticonId` — 생성 시 원본 소유를 검사하고 이후 불변), **이미 used이고**,
+      //     행위자가 **그 항목의 그룹 멤버**여야 한다. 공유된 적 없는 원본, 다른 원본의
+      //     공유 항목을 끌어다 쓰는 요청, 비멤버는 여기서 걸린다.
+      //
+      // ⚠️ 잔여: 공유 항목의 `status`는 멤버 누구나 쓸 수 있는 필드라(아래
+      //    `sharedGifticons` ③등급), 멤버는 사용 이력 없이 항목을 used로 바꾼 뒤 원본을
+      //    맞출 수 있다. 그 힘은 `markUsed`가 이미 모든 멤버에게 주는 것과 같다 —
+      //    '공유된 기프티콘은 그룹 누구나 사용 완료할 수 있다'가 이 앱의 정책이다.
+      function isSharedUseSync() {
+        let before = resource.data;
+        let after = request.resource.data;
+        let shareId = after.get('usedViaShareId', '');
+        let sharePath = /databases/$(database)/documents/sharedGifticons/$(shareId);
+        return after.diff(before).affectedKeys().hasOnly(['status', 'usedViaShareId'])
+          && before.get('status', '') == 'available'
+          && after.status == 'used'
+          && shareId is string
+          // 경로 조각 하나여야 한다 — `/`를 섞으면 다른 컬렉션의 문서를 근거로 들이민다.
+          && shareId.matches('^[A-Za-z0-9_-]+$')
+          && exists(sharePath)
+          && get(sharePath).data.get('gifticonId', '') == id
+          && get(sharePath).data.get('status', '') == 'used'
+          && isGroupMember(get(sharePath).data.groupId);
+      }
+
+      allow read, delete:
         if isSignedIn() && resource.data.ownerId == uid();
+      allow update:
+        if isSignedIn()
+        && (resource.data.ownerId == uid() || isSharedUseSync());
       allow create:
         if isSignedIn() && request.resource.data.ownerId == uid();
     }

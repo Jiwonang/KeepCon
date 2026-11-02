@@ -791,7 +791,7 @@ class InMemoryShareRepository implements ShareRepository {
   /// 이 시점의 원본은 이미 새 만료일을 갖고 있고([_syncOriginalExpiry]가 먼저 돈다),
   /// 만료 상태였다면 `available`로 되살아나 있다. 그대로 두면 개인 목록에 **이미 소진된
   /// 기프티콘이 더 오래 쓸 수 있는 것처럼** 남는다 — `markUsed`의 원본 동기화는
-  /// best-effort라 그쪽이 채워 준다는 보장이 없다(교차-멤버 권한, `expired → used`
+  /// best-effort라 그쪽이 채워 준다는 보장이 없다(교차-멤버 쓰기 실패, `expired → used`
   /// 전이 부재).
   ///
   /// 만료일까지 되돌리지는 못한다(계약에 만료일을 앞당기는 API가 없다). 사용 완료된

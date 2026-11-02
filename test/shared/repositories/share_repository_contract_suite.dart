@@ -514,6 +514,23 @@ void runSharedExpiryExtensionContract(ShareBackend Function() makeBackend) {
           reason: '없는 원본을 만들어 내지 않는다 — 동기화만 건너뛴다');
     });
 
+    // 소유자가 아닌 멤버의 사용 완료. 두 백엔드 모두 권한 거부를 표현하지 못하므로
+    // (머리말 1) Firestore의 거부 분기 자체는 `firebase_mark_used_cross_member_test.dart`와
+    // 규칙 검증이 덮는다. 여기서는 "행위자가 누구든 원본이 따라온다"는 계약을 고정한다.
+    test('markUsed — 다른 멤버가 사용해도 원본이 used로 따라온다', () async {
+      final (Group group, Gifticon original, SharedGifticon item) =
+          await shareOne();
+      await joinAsMember(group);
+
+      await asMember();
+      await backend.repo.markUsed(item.id);
+
+      await asOwner();
+      expect((await backend.gifticons.getGifticonById(original.id))?.status,
+          GifticonStatus.used,
+          reason: '원본이 남으면 소유자가 이미 쓴 바코드를 매장에서 다시 내민다');
+    });
+
     test('원본이 이미 더 뒤면 원본은 그대로, 스냅샷만 따라붙는다', () async {
       final (_, Gifticon original, SharedGifticon item) = await shareOne();
       // 스냅샷이 뒤처진 상태를 만든다 — 원본만 2026-12-31로 옮긴다.
@@ -595,7 +612,7 @@ void runSharedExpiryExtensionContract(ShareBackend Function() makeBackend) {
       // 여야 한다** — 거부하면서 저장소가 보정한다. 이것이 없으면 개인 목록에 "이미
       // 소진됐는데 더 오래 쓸 수 있는" 기프티콘이 남는다. (이 픽스처는 markUsed의
       // 행위자가 공유자 본인이라 markUsed 쪽 동기화만으로도 `used`가 되지만, 실서비스의
-      // 교차-멤버 경합에서는 그쪽이 권한으로 건너뛰고 보정만 남는다 — 그 조건 자체는
+      // 교차-멤버 경합에서는 그쪽 쓰기가 실패하면 보정만 남는다 — 그 조건 자체는
       // 두 백엔드 모두 표현할 수 없다. 계약 dartdoc 참조.)
       final Gifticon? origin =
           await backend.gifticons.getGifticonById(original.id);
