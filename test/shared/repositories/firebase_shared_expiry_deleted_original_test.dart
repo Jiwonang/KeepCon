@@ -109,7 +109,7 @@ void main() {
       throwsA(isA<FirebaseException>()),
     );
   });
-  group('deleteGifticon — 규칙의 거부를 계약의 StateError로', () {
+  group('소유자 경로의 읽기 거부를 계약의 StateError로', () {
     // 지운 문서를 다시 지우면(다른 기기가 먼저 지운 경우) 실서버는 트랜잭션 읽기를
     // permission-denied로 거부한다. 번역이 없으면 화면이 "연결을 확인하세요"를 띄워
     // 사용자가 없는 것을 계속 다시 지우려 한다.
@@ -124,6 +124,22 @@ void main() {
       denyTxReadWith('permission-denied');
       await expectLater(
           gifticons.deleteGifticon(original.id), throwsStateError);
+    });
+
+    // 형제 경로 — 다른 기기가 지운 뒤 이 기기의 상세가 사용 완료·연장을 거는 경우.
+    // 번역이 deleteGifticon에만 있으면 두 메서드는 통신 실패로 안내한다.
+    test('updateStatus도 읽기 거부를 StateError로 번역한다', () async {
+      denyTxReadWith('permission-denied');
+      await expectLater(
+          gifticons.updateStatus(original.id, GifticonStatus.used),
+          throwsStateError);
+    });
+
+    test('extendExpiry도 읽기 거부를 StateError로 번역한다', () async {
+      denyTxReadWith('permission-denied');
+      await expectLater(
+          gifticons.extendExpiry(original.id, DateTime(2032, 1, 1)),
+          throwsStateError);
     });
 
     test('통신 실패는 번역하지 않는다', () async {

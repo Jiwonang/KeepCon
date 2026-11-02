@@ -10,6 +10,8 @@
 ///  ④ 남의 기프티콘에는 삭제 버튼이 없다.
 library;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -72,8 +74,9 @@ void main() {
     List<Gifticon> seed, {
     SharedGifticon? sharedItem,
     bool sharedIdsPending = false,
+    InMemoryGifticonRepository? withRepo,
   }) {
-    repo = InMemoryGifticonRepository(seed: seed);
+    repo = withRepo ?? InMemoryGifticonRepository(seed: seed);
     container = ProviderContainer(
       overrides: <Override>[
         nowProvider.overrideWithValue(_now),
@@ -176,7 +179,9 @@ void main() {
     await tester.tap(deleteButton());
     await tester.pumpAndSettle();
 
-    expect(find.text(_blockedByShare), findsOneWidget);
+    // 회수(`cancelShare`)는 available만 받으므로 회수를 권하면 안 된다.
+    expect(find.text('그룹에서 사용 중이라 지금은 삭제할 수 없어요.'), findsOneWidget);
+    expect(find.text(_blockedByShare), findsNothing);
     expect(await repo.getGifticonById('g1'), isNotNull);
   });
 
@@ -241,4 +246,83 @@ void main() {
 
     expect(deleteButton(), findsNothing);
   });
+
+  testWidgets('다른 기기가 먼저 지웠으면 그렇게 알리고 상세를 닫는다', (WidgetTester tester) async {
+    boot(<Gifticon>[],
+        withRepo: _ThrowingDeleteRepo(StateError('Gifticon not found: g1'),
+            seed: <Gifticon>[_gifticon()]));
+    await mountDetail(tester, _gifticon());
+
+    await tester.tap(deleteButton());
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(TextButton, '삭제'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('이미 삭제된 기프티콘이에요.'), findsOneWidget);
+    expect(find.byType(GifticonDetailPage), findsNothing,
+        reason: '남겨 두면 진입 스냅샷으로 없는 것을 보여준다');
+  });
+
+  testWidgets('통신 실패는 재시도를 권하고 상세를 그대로 둔다', (WidgetTester tester) async {
+    boot(<Gifticon>[],
+        withRepo: _ThrowingDeleteRepo(Exception('오프라인'),
+            seed: <Gifticon>[_gifticon()]));
+    await mountDetail(tester, _gifticon());
+
+    await tester.tap(deleteButton());
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(TextButton, '삭제'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('삭제하지 못했어요. 연결을 확인하고 다시 시도해 주세요.'), findsOneWidget);
+    expect(find.byType(GifticonDetailPage), findsOneWidget);
+  });
+
+  testWidgets('기다리는 사이 뒤로 갔으면 성공해도 아래 화면을 닫지 않는다', (WidgetTester tester) async {
+    // 미리 잡아 둔 navigator로 그대로 pop하면 상세가 아니라 **홈**이 닫힌다.
+    final _PendingDeleteRepo pending =
+        _PendingDeleteRepo(seed: <Gifticon>[_gifticon()]);
+    boot(<Gifticon>[], withRepo: pending);
+    await mountDetail(tester, _gifticon());
+
+    await tester.tap(deleteButton());
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(TextButton, '삭제'));
+    await tester.pump();
+
+    // 요청이 끝나기 전에 사용자가 뒤로 간다.
+    final NavigatorState nav = tester.state(find.byType(Navigator));
+    nav.pop();
+    await tester.pumpAndSettle();
+    expect(find.text('열기'), findsOneWidget);
+
+    pending.gate.complete();
+    await tester.pumpAndSettle();
+
+    expect(find.text('열기'), findsOneWidget, reason: '홈이 닫히면 빈 화면이 된다');
+    expect(await pending.getGifticonById('g1'), isNull);
+  });
+}
+
+/// [deleteGifticon]만 [error]로 실패시키는 저장소.
+class _ThrowingDeleteRepo extends InMemoryGifticonRepository {
+  _ThrowingDeleteRepo(this.error, {super.seed});
+
+  final Object error;
+
+  @override
+  Future<void> deleteGifticon(String id) async => throw error;
+}
+
+/// [deleteGifticon]이 [gate]가 열릴 때까지 끝나지 않는 저장소(느린 망).
+class _PendingDeleteRepo extends InMemoryGifticonRepository {
+  _PendingDeleteRepo({super.seed});
+
+  final Completer<void> gate = Completer<void>();
+
+  @override
+  Future<void> deleteGifticon(String id) async {
+    await gate.future;
+    return super.deleteGifticon(id);
+  }
 }

@@ -48,6 +48,35 @@ class FirebaseGifticonRepository implements GifticonRepository {
   CollectionReference<Map<String, dynamic>> get _col =>
       _db.collection(collectionName);
 
+  /// 트랜잭션 안에서 소유자 경로의 문서를 읽는다. **읽기 거부를 '문서 없음'으로 번역한다.**
+  ///
+  /// 규칙 있는 백엔드에서 없는 문서 읽기는 `exists == false`가 아니라 permission-denied로
+  /// 온다(`gifticons` 읽기 규칙이 `resource.data`를 참조한다). 삭제 API(v3.19)가 생기며
+  /// 다른 기기가 먼저 지운 문서에 이 기기의 상세 화면이 사용 완료·연장·삭제를 거는 경로가
+  /// 열렸고, 번역이 없으면 화면이 통신 실패로 안내해 사용자가 없는 것을 계속 다시
+  /// 시도한다(in-memory는 계약대로 [StateError]다 — 두 구현이 갈라진다).
+  ///
+  /// 번역은 **읽기에만** 건다. 커밋의 거부까지 감싸면, 언젠가 규칙이 쓰기 조건을 더할 때
+  /// (예: 공유 중 삭제 금지) 살아 있는 문서를 '이미 없음'으로 보고하게 된다.
+  /// [getGifticonById]에는 걸지 않는다 — 공유 계층의 멤버 분기가 그 403을 '남의 원본'의
+  /// 신호로 쓴다.
+  static Future<DocumentSnapshot<Map<String, dynamic>>> _txGetOwned(
+    Transaction tx,
+    DocumentReference<Map<String, dynamic>> ref,
+  ) async {
+    final DocumentSnapshot<Map<String, dynamic>> doc;
+    try {
+      doc = await tx.get(ref);
+    } on FirebaseException catch (e) {
+      if (e.code != 'permission-denied') rethrow;
+      throw StateError('Gifticon not found: ${ref.id}');
+    }
+    if (!doc.exists) {
+      throw StateError('Gifticon not found: ${ref.id}');
+    }
+    return doc;
+  }
+
   @override
   Future<Gifticon> addGifticon(Gifticon gifticon) async {
     // id가 비어 있으면 Firestore가 문서 id를 발급하도록 하고, 그 id를 [Gifticon]에 반영한다.
@@ -86,11 +115,7 @@ class FirebaseGifticonRepository implements GifticonRepository {
     // 상태 전이 검증은 트랜잭션 내부에서 현재 값을 읽어 계약 규칙으로 판정한다.
     // 위반 시 [StateError]를 던지는 것이 계약([GifticonRepository.updateStatus]).
     return _db.runTransaction<Gifticon>((Transaction tx) async {
-      final DocumentSnapshot<Map<String, dynamic>> doc = await tx.get(ref);
-      if (!doc.exists) {
-        throw StateError('Gifticon not found: $id');
-      }
-      final Gifticon current = _fromDoc(doc);
+      final Gifticon current = _fromDoc(await _txGetOwned(tx, ref));
       if (!GifticonStatusTransition.isAllowed(current.status, status)) {
         throw StateError(
           'Illegal status transition: ${current.status} -> $status',
@@ -108,11 +133,7 @@ class FirebaseGifticonRepository implements GifticonRepository {
     // 가드는 트랜잭션 내부에서 현재 값을 읽어 판정한다 — 읽고 쓰는 사이에 다른 기기가
     // 만료일을 옮기면 "이미 더 뒤로 간 만료일"을 앞으로 당기게 된다.
     return _db.runTransaction<Gifticon>((Transaction tx) async {
-      final DocumentSnapshot<Map<String, dynamic>> doc = await tx.get(ref);
-      if (!doc.exists) {
-        throw StateError('Gifticon not found: $id');
-      }
-      final Gifticon current = _fromDoc(doc);
+      final Gifticon current = _fromDoc(await _txGetOwned(tx, ref));
       if (current.status == GifticonStatus.used) {
         throw StateError('A used gifticon cannot be extended: $id');
       }
@@ -144,24 +165,11 @@ class FirebaseGifticonRepository implements GifticonRepository {
 
     // 존재 확인과 삭제를 한 트랜잭션에 묶는다. `delete()`만 부르면 없는 문서에도
     // 조용히 성공해 계약의 "없으면 StateError"를 지키지 못한다(in-memory와 갈라진다).
-    //
-    // ⚠️ 규칙 있는 백엔드에서 없는 문서 읽기는 `exists == false`가 아니라
-    // permission-denied로 온다(`gifticons` 읽기 규칙이 `resource.data`를 참조한다).
-    // 그대로 두면 "다른 기기가 먼저 지웠다"가 통신 실패로 보고되어 사용자가 없는 것을
-    // 계속 다시 지우려 한다. 그래서 계약의 [StateError]로 번역한다 — 화면이 삭제를
-    // 여는 것은 자기 목록의 기프티콘뿐이라, 이 경로의 거부는 사실상 '이미 없음'이다.
-    try {
-      await _db.runTransaction<void>((Transaction tx) async {
-        final DocumentSnapshot<Map<String, dynamic>> doc = await tx.get(ref);
-        if (!doc.exists) {
-          throw StateError('Gifticon not found: $id');
-        }
-        tx.delete(ref);
-      });
-    } on FirebaseException catch (e) {
-      if (e.code != 'permission-denied') rethrow;
-      throw StateError('Gifticon not found or not owned: $id');
-    }
+    // 없는 문서의 읽기 거부는 [_txGetOwned]가 번역한다.
+    await _db.runTransaction<void>((Transaction tx) async {
+      await _txGetOwned(tx, ref);
+      tx.delete(ref);
+    });
   }
 
   // --- 매핑 헬퍼 ---------------------------------------------------------

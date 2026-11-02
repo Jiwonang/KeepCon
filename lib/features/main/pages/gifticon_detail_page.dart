@@ -456,11 +456,15 @@ class GifticonDetailPage extends ConsumerWidget {
       WidgetRef ref, Gifticon g, ScaffoldMessengerState messenger) {
     final AsyncValue<SharedGifticon?> fresh =
         ref.read(sharedItemForGifticonProvider(g.id));
+    final ShareStatus? shareStatus = fresh.valueOrNull?.status;
     final String? message;
     if (!fresh.hasValue) {
       message = '공유 상태를 확인하는 중이에요. 잠시 후 다시 시도해 주세요.';
-    } else if (fresh.value != null && fresh.value!.status != ShareStatus.used) {
+    } else if (shareStatus == ShareStatus.available) {
       message = '그룹에 공유 중이라 삭제할 수 없어요. 공유 탭에서 공유를 회수한 뒤 삭제해 주세요.';
+    } else if (shareStatus == ShareStatus.inUse) {
+      // 회수(`cancelShare`)는 available만 받으므로 회수를 권하지 않는다.
+      message = '그룹에서 사용 중이라 지금은 삭제할 수 없어요.';
     } else {
       message = null;
     }
@@ -508,17 +512,26 @@ class GifticonDetailPage extends ConsumerWidget {
     if (_deleteBlockedByShare(ref, g, messenger)) return;
 
     final NavigatorState navigator = Navigator.of(context);
+    final ModalRoute<Object?>? route = ModalRoute.of(context);
+    // 지운 기프티콘의 상세를 남겨 두면 진입 스냅샷으로 떨어져 **없는 것을 보여준다.**
+    // 다만 요청을 기다리는 사이 사용자가 이미 뒤로 갔으면 닫지 않는다 — 미리 잡아 둔
+    // navigator로 그대로 pop하면 **아래 화면(홈)을 닫는다**(느린 망에서 재현됨).
+    void closeIfStillShown() {
+      if (route != null && route.isCurrent) navigator.pop();
+    }
+
     try {
       await ref.read(gifticonRepositoryProvider).deleteGifticon(g.id);
-      // 지운 기프티콘의 상세를 남겨 두면 진입 스냅샷으로 떨어져 **없는 것을 보여준다.**
-      navigator.pop();
+      closeIfStillShown();
       messenger
         ..hideCurrentSnackBar()
         ..showSnackBar(const SnackBar(content: Text('기프티콘을 삭제했어요.')));
     } on StateError catch (e, st) {
       reportHandledFailure(ref, e, st,
           context: 'GifticonDetailPage.deleteGifticon(guard)');
-      // 이미 없다 — 다른 기기에서 먼저 지웠다. 다시 눌러도 같은 결과다.
+      // 이미 없다 — 다른 기기에서 먼저 지웠다. 다시 눌러도 같은 결과이고, 남겨 두면
+      // 성공 경로와 같은 이유로 없는 것을 보여주므로 함께 닫는다.
+      closeIfStillShown();
       messenger
         ..hideCurrentSnackBar()
         ..showSnackBar(const SnackBar(content: Text('이미 삭제된 기프티콘이에요.')));
