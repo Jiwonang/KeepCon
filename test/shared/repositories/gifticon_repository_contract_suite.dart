@@ -17,6 +17,8 @@
 /// [GifticonRepository.deleteGifticon] — 완전 삭제. 조회 경로 셋(단건·목록·스트림)에서
 /// 사라지는지와 "없으면 거부"를 본다.
 ///
+/// [GifticonRepository.updateDetails] — 내용 수정. 부분 갱신, 바코드 지우기, 입력 정리와 거부.
+///
 /// ## ⚠️ 이 스위트가 대체하지 못하는 것
 ///
 /// `fake_cloud_firestore`는 서버가 아니라 자료구조다. **보안 규칙이 평가되지 않으므로**
@@ -241,5 +243,169 @@ void runDeleteContract(GifticonBackend Function() makeBackend) {
     await backend.repo.deleteGifticon(g.id);
 
     await expectLater(backend.repo.deleteGifticon(g.id), throwsStateError);
+  });
+}
+
+/// 두 구현이 같은 답을 내야 하는 내용 수정 계약.
+///
+/// 핵심 축은 **고치지 않는 필드가 그대로인가**(부분 갱신)와 **바코드를 지울 수 있는가**다.
+/// `copyWith`는 null로 지우지 못해, 그것으로 구현하면 바코드 지우기가 조용히 무시된다.
+void runUpdateDetailsContract(GifticonBackend Function() makeBackend) {
+  late GifticonBackend backend;
+
+  setUp(() => backend = makeBackend());
+  tearDown(() => backend.stop());
+
+  const GifticonDetails edited = GifticonDetails(
+    brand: '투썸',
+    productName: '라떼',
+    price: 5000,
+    barcode: '111',
+    category: '베이커리',
+  );
+
+  Future<Gifticon> seed({GifticonStatus status = GifticonStatus.available}) {
+    return backend.repo.addGifticon(Gifticon(
+      id: '',
+      ownerId: 'owner-1',
+      brand: '스타벅스',
+      productName: '아메리카노 T',
+      price: 4500,
+      barcode: '999',
+      category: '카페/음료',
+      expiryDate: DateTime(2030, 1, 1),
+      registeredAt: DateTime(2025, 1, 1),
+      status: status,
+      imagePath: '/img.png',
+    ));
+  }
+
+  test('다섯 필드가 저장소에 반영되고 반환값과 같다', () async {
+    final Gifticon g = await seed();
+
+    final Gifticon returned = await backend.repo.updateDetails(g.id, edited);
+    final Gifticon? stored = await backend.repo.getGifticonById(g.id);
+
+    for (final Gifticon x in <Gifticon>[returned, stored!]) {
+      expect(x.brand, '투썸');
+      expect(x.productName, '라떼');
+      expect(x.price, 5000);
+      expect(x.barcode, '111');
+      expect(x.category, '베이커리');
+    }
+  });
+
+  test('나머지 필드는 그대로다 — 부분 갱신', () async {
+    final Gifticon g = await seed();
+
+    await backend.repo.updateDetails(g.id, edited);
+    final Gifticon stored = (await backend.repo.getGifticonById(g.id))!;
+
+    expect(stored.ownerId, 'owner-1');
+    expect(stored.expiryDate, DateTime(2030, 1, 1));
+    expect(stored.registeredAt, DateTime(2025, 1, 1));
+    expect(stored.status, GifticonStatus.available);
+    expect(stored.imagePath, '/img.png');
+  });
+
+  test('바코드를 지울 수 있다 — null도 빈 값도 지움이다', () async {
+    for (final String? cleared in <String?>[null, '   ']) {
+      final Gifticon g = await seed();
+      final Gifticon returned = await backend.repo.updateDetails(
+        g.id,
+        GifticonDetails(
+          brand: '투썸',
+          productName: '라떼',
+          price: 0,
+          barcode: cleared,
+          category: '기타',
+        ),
+      );
+      expect(returned.barcode, isNull);
+      expect((await backend.repo.getGifticonById(g.id))!.barcode, isNull);
+    }
+  });
+
+  test('앞뒤 공백은 빼고 저장한다', () async {
+    final Gifticon g = await seed();
+    await backend.repo.updateDetails(
+      g.id,
+      const GifticonDetails(
+        brand: ' 투썸 ',
+        productName: ' 라떼 ',
+        price: 1,
+        barcode: ' 111 ',
+        category: ' 기타 ',
+      ),
+    );
+    final Gifticon stored = (await backend.repo.getGifticonById(g.id))!;
+    expect(stored.brand, '투썸');
+    expect(stored.productName, '라떼');
+    expect(stored.barcode, '111');
+    expect(stored.category, '기타');
+  });
+
+  test('사용 완료·만료도 고칠 수 있고 상태는 그대로다', () async {
+    for (final GifticonStatus status in <GifticonStatus>[
+      GifticonStatus.used,
+      GifticonStatus.expired,
+    ]) {
+      final Gifticon g = await seed(status: status);
+      final Gifticon returned = await backend.repo.updateDetails(g.id, edited);
+      expect(returned.status, status);
+      expect((await backend.repo.getGifticonById(g.id))!.status, status);
+    }
+  });
+
+  test('목록 스트림이 변경을 방출한다', () async {
+    final Gifticon g = await seed();
+    final Future<void> sawEdit = expectLater(
+      backend.repo
+          .watchGifticons('owner-1')
+          .map((List<Gifticon> l) => l.single.brand),
+      emitsThrough('투썸'),
+    );
+    await backend.repo.updateDetails(g.id, edited);
+    await sawEdit;
+  });
+
+  group('거부', () {
+    GifticonDetails details({
+      String brand = '투썸',
+      String productName = '라떼',
+      int price = 1,
+      String category = '기타',
+    }) =>
+        GifticonDetails(
+          brand: brand,
+          productName: productName,
+          price: price,
+          barcode: null,
+          category: category,
+        );
+
+    test('없는 기프티콘', () async {
+      await expectLater(
+        backend.repo.updateDetails('no-such-id', edited),
+        throwsStateError,
+      );
+    });
+
+    final Map<String, GifticonDetails> invalid = <String, GifticonDetails>{
+      '빈 브랜드': details(brand: '  '),
+      '빈 상품명': details(productName: '  '),
+      '빈 카테고리': details(category: '  '),
+      '음수 금액': details(price: -1),
+    };
+    invalid.forEach((String label, GifticonDetails bad) {
+      test('$label — 거부되고 아무것도 바뀌지 않는다', () async {
+        final Gifticon g = await seed();
+        await expectLater(
+          backend.repo.updateDetails(g.id, bad),
+          throwsStateError,
+        );
+        expect((await backend.repo.getGifticonById(g.id))!.brand, '스타벅스');
+      });
+    });
   });
 }

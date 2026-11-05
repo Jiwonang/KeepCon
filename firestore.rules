@@ -167,6 +167,10 @@ service cloud.firestore {
       // 이 원본을 가리키는지(`gifticonId` — 생성 시 원본 소유 검사·이후 불변) 본다. 그래서
       // 남이 포인터를 다른 활성 항목으로 바꿔 소유자의 삭제를 막을 수는 없다(포인터를
       // 지우는 위조는 소유자 자신의 삭제를 허용할 뿐이다). `used`는 이력이라 막지 않는다.
+      //
+      // **그룹이 없으면 끝난 공유다.** 그룹 삭제 뒤 공유 항목 정리는 멤버 검사가 그룹 문서를
+      // 읽지 못해 실패할 수 있어 `available` 항목과 잠금이 남는다. 쓸 사람도 회수할 사람도
+      // 없는 항목이 원본을 막으면 그 기프티콘은 영영 지우지도 고치지도 못한다.
       function hasActiveShare() {
         let lockPath = /databases/$(database)/documents/shareLocks/$(id);
         let shareId = exists(lockPath) ? get(lockPath).data.get('sharedGifticonId', '') : '';
@@ -175,16 +179,33 @@ service cloud.firestore {
           && shareId.matches('^[A-Za-z0-9_-]+$')
           && exists(sharePath)
           && get(sharePath).data.get('gifticonId', '') == id
-          && get(sharePath).data.get('status', '') in ['available', 'inUse'];
+          && get(sharePath).data.get('status', '') in ['available', 'inUse']
+          && exists(/databases/$(database)/documents/groups/$(get(sharePath).data.get('groupId', '')));
       }
 
       allow read:
         if isSignedIn() && resource.data.ownerId == uid();
       allow delete:
         if isSignedIn() && resource.data.ownerId == uid() && !hasActiveShare();
+      // 소유자의 수정(`GifticonRepository.updateDetails`, v3.20).
+      //
+      // ① 소유자·등록 시각은 **누구도 바꾸지 못한다.** 예전에는 소유자 쓰기에 키 제한이
+      //    없어 `ownerId`를 넘겨 남의 목록에 밀어 넣을 수 있었다.
+      // ② 내용 다섯 필드를 바꾸는 쓰기는 공유가 끝나지 않았으면 거부한다 — 공유 항목은
+      //    그중 일부의 스냅샷을 들고 있어 원본만 고치면 그룹이 옛 정보를 본다. 만료일·상태는
+      //    여기 없다: `extendSharedExpiry`와 `markUsed`가 공유 중에 원본을 옮기는 정상
+      //    경로다. 키를 먼저 보므로 그 경로에는 잠금 조회 비용도 들지 않는다.
+      function isOwnerUpdate() {
+        let changed = request.resource.data.diff(resource.data).affectedKeys();
+        return resource.data.ownerId == uid()
+          && !changed.hasAny(['ownerId', 'registeredAt'])
+          && (!changed.hasAny(['brand', 'productName', 'price', 'barcode', 'category'])
+              || !hasActiveShare());
+      }
+
       allow update:
         if isSignedIn()
-        && (resource.data.ownerId == uid() || isSharedUseSync());
+        && (isOwnerUpdate() || isSharedUseSync());
       allow create:
         if isSignedIn() && request.resource.data.ownerId == uid();
     }

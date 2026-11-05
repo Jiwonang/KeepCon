@@ -59,5 +59,8 @@ void main() {
     group('[$label] deleteGifticon — 삭제', () {
       runDeleteContract(make);
     });
+    group('[$label] updateDetails — 내용 수정', () {
+      runUpdateDetailsContract(make);
+    });
   });
 }

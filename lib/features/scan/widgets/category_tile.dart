@@ -8,24 +8,7 @@ library;
 
 import 'package:flutter/material.dart';
 
-enum GifticonCategory {
-  cafe(label: '카페/음료', emoji: '☕', icon: null),
-  chicken(label: '치킨/피자', emoji: '🍗', icon: null),
-  convenience(label: '편의점', emoji: '🏪', icon: null),
-  bakery(label: '베이커리', emoji: '🥐', icon: null),
-  voucher(label: '상품권/금액권', emoji: '💳', icon: null),
-  etc(label: '기타', emoji: null, icon: Icons.more_horiz_rounded);
-
-  const GifticonCategory({
-    required this.label,
-    required this.emoji,
-    required this.icon,
-  });
-
-  final String label;
-  final String? emoji;
-  final IconData? icon;
-}
+import '../../../shared/models/gifticon_category.dart';
 
 class CategoryTile extends StatelessWidget {
   const CategoryTile({

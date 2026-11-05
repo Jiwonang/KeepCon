@@ -29,6 +29,7 @@ import 'package:keepcon/features/scan/util/keep_all_ko.dart';
 import 'package:keepcon/features/scan/pages/gifticon_form_page.dart';
 import 'package:keepcon/features/scan/widgets/barcode_scanner_screen.dart';
 import 'package:keepcon/features/scan/widgets/category_tile.dart';
+import 'package:keepcon/shared/models/gifticon_category.dart';
 import 'package:keepcon/features/scan/widgets/scan_method_card.dart';
 import 'package:keepcon/features/scan/widgets/target_tile.dart';
 import 'package:keepcon/shared/diagnostics/error_reporter.dart';
