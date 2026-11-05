@@ -16,9 +16,12 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:keepcon/features/main/pages/gifticon_detail_page.dart';
 import 'package:keepcon/features/main/pages/gifticon_edit_page.dart';
+import 'package:keepcon/features/main/state/gifticon_filter.dart';
+import 'package:keepcon/features/main/state/gifticon_list_providers.dart';
 import 'package:keepcon/shared/models/gifticon.dart';
 import 'package:keepcon/shared/models/share.dart';
 import 'package:keepcon/shared/models/user.dart';
+import 'package:keepcon/shared/providers/my_groups_provider.dart';
 import 'package:keepcon/shared/providers/now_provider.dart';
 import 'package:keepcon/shared/providers/raw_gifticons_provider.dart';
 import 'package:keepcon/shared/providers/repositories.dart';
@@ -70,17 +73,26 @@ void main() {
   late InMemoryGifticonRepository repo;
   late ProviderContainer container;
 
-  List<Override> overrides(SharedGifticon? sharedItem, bool pending) =>
+  late _CountingRetry retry;
+
+  List<Override> overrides(
+    SharedGifticon? sharedItem,
+    bool pending, {
+    bool failed = false,
+  }) =>
       <Override>[
+        myGroupsRetryProvider.overrideWithValue(retry),
         nowProvider.overrideWithValue(_now),
         gifticonRepositoryProvider.overrideWithValue(repo),
         rawGifticonsProvider.overrideWith((_) => repo.watchGifticons(_ownerId)),
         sessionUserProvider.overrideWith((_) => Stream<User?>.value(_me)),
-        sharedGifticonIdsProvider.overrideWithValue(pending
-            ? const AsyncValue<Set<String>>.loading()
-            : AsyncValue<Set<String>>.data(<String>{
-                if (sharedItem != null) sharedItem.gifticonId,
-              })),
+        sharedGifticonIdsProvider.overrideWithValue(failed
+            ? const AsyncValue<Set<String>>.error('boom', StackTrace.empty)
+            : pending
+                ? const AsyncValue<Set<String>>.loading()
+                : AsyncValue<Set<String>>.data(<String>{
+                    if (sharedItem != null) sharedItem.gifticonId,
+                  })),
         allSharedProvider.overrideWithValue(
           <SharedGifticon>[if (sharedItem != null) sharedItem],
         ),
@@ -90,10 +102,14 @@ void main() {
     List<Gifticon> seed, {
     SharedGifticon? sharedItem,
     bool pending = false,
+    bool failed = false,
     InMemoryGifticonRepository? withRepo,
   }) {
     repo = withRepo ?? InMemoryGifticonRepository(seed: seed);
-    container = ProviderContainer(overrides: overrides(sharedItem, pending));
+    retry = _CountingRetry();
+    container = ProviderContainer(
+      overrides: overrides(sharedItem, pending, failed: failed),
+    );
     addTearDown(() {
       container.dispose();
       repo.dispose();
@@ -239,13 +255,7 @@ void main() {
 
   testWidgets('공유 조회가 실패하면 "확인 중"이라 하지 않고 막는다', (WidgetTester tester) async {
     // 실패를 로딩처럼 말하면 끝나지 않을 일을 기다리게 한다.
-    boot(<Gifticon>[_gifticon()]);
-    container.updateOverrides(<Override>[
-      ...overrides(null, false).take(4),
-      sharedGifticonIdsProvider.overrideWithValue(
-          const AsyncValue<Set<String>>.error('boom', StackTrace.empty)),
-      allSharedProvider.overrideWithValue(const <SharedGifticon>[]),
-    ]);
+    boot(<Gifticon>[_gifticon()], failed: true);
     await mountDetail(tester, _gifticon());
 
     await openEdit(tester);
@@ -427,6 +437,204 @@ void main() {
         reason: '미리 잡아 둔 경로로 pop하면 상세가 닫힌다');
   });
 
+  testWidgets('뒤로 간 뒤 저장이 끝나도 결과를 알린다', (WidgetTester tester) async {
+    // 화면이 없다고 안내를 삼키면 저장됐는지 알 길이 없다.
+    final _PendingUpdateRepo pending =
+        _PendingUpdateRepo(seed: <Gifticon>[_gifticon()]);
+    boot(<Gifticon>[], withRepo: pending);
+    await mountDetail(tester, _gifticon());
+    await openEdit(tester);
+    await tester.enterText(field('상품명'), '라떼');
+    await tester.tap(find.widgetWithText(ElevatedButton, '저장'));
+    await tester.pump();
+    final NavigatorState nav = tester.state(find.byType(Navigator));
+    nav.pop();
+    await tester.pumpAndSettle();
+
+    pending.gate.complete();
+    await tester.pumpAndSettle();
+
+    expect(find.text('수정했어요.'), findsOneWidget);
+  });
+
+  testWidgets('뒤로 간 뒤 저장이 실패해도 알린다', (WidgetTester tester) async {
+    final _PendingFailingRepo pending =
+        _PendingFailingRepo(seed: <Gifticon>[_gifticon()]);
+    boot(<Gifticon>[], withRepo: pending);
+    await mountDetail(tester, _gifticon());
+    await openEdit(tester);
+    await tester.enterText(field('상품명'), '라떼');
+    await tester.tap(find.widgetWithText(ElevatedButton, '저장'));
+    await tester.pump();
+    final NavigatorState nav = tester.state(find.byType(Navigator));
+    nav.pop();
+    await tester.pumpAndSettle();
+
+    pending.gate.complete();
+    await tester.pumpAndSettle();
+
+    expect(find.text('저장하지 못했어요. 연결을 확인하고 다시 시도해 주세요.'), findsOneWidget);
+  });
+
+  testWidgets('열어 둔 사이 다른 기기가 같은 번호로 바꿨으면 자기 자신과 겹친다고 막지 않는다',
+      (WidgetTester tester) async {
+    boot(<Gifticon>[_gifticon()]);
+    await mountDetail(tester, _gifticon());
+    await openEdit(tester);
+
+    await repo.updateDetails(
+      'g1',
+      const GifticonDetails(
+        brand: '스타벅스',
+        productName: '아메리카노 T',
+        price: 4500,
+        barcode: '222',
+        category: '카페/음료',
+      ),
+    );
+    await tester.enterText(field('바코드 번호'), '222');
+    await tapSave(tester);
+
+    expect(find.text('이미 등록된 바코드 번호입니다.'), findsNothing);
+    expect(find.byType(GifticonEditPage), findsNothing);
+  });
+
+  testWidgets('빈 카테고리(손상 문서)도 저장이 막히지 않는다', (WidgetTester tester) async {
+    final Gifticon broken = _gifticon(category: '');
+    boot(<Gifticon>[broken]);
+    await mountDetail(tester, broken);
+    await openEdit(tester);
+
+    await tapSave(tester);
+
+    expect(tester.takeException(), isNull);
+    expect((await repo.getGifticonById('g1'))!.category, '기타');
+  });
+
+  testWidgets('레거시 카테고리에서 다른 값을 골라도 원래 값으로 되돌릴 수 있다',
+      (WidgetTester tester) async {
+    final Gifticon legacy = _gifticon(category: '카페');
+    boot(<Gifticon>[legacy]);
+    await mountDetail(tester, legacy);
+    await openEdit(tester);
+
+    await tester.tap(find.text('카페'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('베이커리').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('베이커리'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('카페'), findsWidgets);
+  });
+
+  testWidgets('공유 조회가 실패했으면 상세의 시도가 구독을 되살린다', (WidgetTester tester) async {
+    // 스트림 provider는 스스로 재구독하지 않고, 사용 완료된 기프티콘에는 재시도 배너도 없다.
+    boot(<Gifticon>[_gifticon()], failed: true);
+    await mountDetail(tester, _gifticon());
+
+    await openEdit(tester);
+
+    expect(retry.calls, 1);
+  });
+
+  testWidgets('공유 조회가 저장 시점에 실패했으면 구독을 되살린다', (WidgetTester tester) async {
+    boot(<Gifticon>[_gifticon()]);
+    await mountDetail(tester, _gifticon());
+    await openEdit(tester);
+    await tester.enterText(field('상품명'), '라떼');
+
+    container.updateOverrides(overrides(null, false, failed: true));
+    await tester.pump();
+    await tapSave(tester);
+
+    expect(retry.calls, 1);
+    expect((await repo.getGifticonById('g1'))!.productName, '아메리카노 T');
+  });
+
+  group('걸어 둔 카테고리의 마지막 기프티콘이 사라지면 필터가 풀린다', () {
+    Future<void> filterBy(String category) async {
+      container.listen(filterProvider, (_, __) {});
+      container.listen(availableCategoriesProvider, (_, __) {});
+      await container.read(rawGifticonsProvider.future);
+      await Future<void>.delayed(Duration.zero);
+      container.read(filterProvider.notifier).state =
+          GifticonFilter.none.withCategory(category);
+    }
+
+    test('수정으로 카테고리를 옮기면', () async {
+      boot(<Gifticon>[_gifticon()]);
+      await filterBy('카페/음료');
+
+      await repo.updateDetails(
+        'g1',
+        const GifticonDetails(
+          brand: '스타벅스',
+          productName: '아메리카노 T',
+          price: 4500,
+          barcode: '111',
+          category: '베이커리',
+        ),
+      );
+      await Future<void>.delayed(Duration.zero);
+
+      expect(container.read(filterProvider).categoryFilter, isNull);
+    });
+
+    test('삭제로 사라지면', () async {
+      boot(<Gifticon>[_gifticon()]);
+      await filterBy('카페/음료');
+
+      await repo.deleteGifticon('g1');
+      await Future<void>.delayed(Duration.zero);
+
+      expect(container.read(filterProvider).categoryFilter, isNull);
+    });
+
+    test('같은 카테고리가 남아 있으면 그대로다', () async {
+      boot(<Gifticon>[_gifticon(), _gifticon(id: 'g2', barcode: '222')]);
+      await filterBy('카페/음료');
+
+      await repo.deleteGifticon('g1');
+      await Future<void>.delayed(Duration.zero);
+
+      expect(container.read(filterProvider).categoryFilter, '카페/음료');
+    });
+  });
+
+  test('withDetails는 내용 밖의 필드를 그대로 둔다', () {
+    final Gifticon g = Gifticon(
+      id: 'g1',
+      ownerId: _ownerId,
+      brand: 'a',
+      productName: 'b',
+      price: 1,
+      barcode: '111',
+      category: 'c',
+      expiryDate: _now,
+      registeredAt: _now,
+      status: GifticonStatus.used,
+      imagePath: '/img.png',
+      targetGroupId: 'group-1',
+    );
+
+    final Gifticon edited = g.withDetails(const GifticonDetails(
+      brand: 'x',
+      productName: 'y',
+      price: 2,
+      barcode: null,
+      category: 'z',
+    ));
+
+    expect(edited.barcode, isNull);
+    expect(edited.status, GifticonStatus.used);
+    expect(edited.imagePath, '/img.png');
+    expect(edited.targetGroupId, 'group-1');
+    expect(edited.ownerId, _ownerId);
+    expect(edited.expiryDate, _now);
+    expect(edited.registeredAt, _now);
+  });
+
   testWidgets('남의 기프티콘에는 수정 버튼이 없다', (WidgetTester tester) async {
     final Gifticon others = _gifticon(ownerId: 'someone-else');
     boot(<Gifticon>[others]);
@@ -434,6 +642,30 @@ void main() {
 
     expect(find.byTooltip('수정'), findsNothing);
   });
+}
+
+/// `retry()` 호출만 세는 재시도 실행기.
+class _CountingRetry implements MyGroupsRetry {
+  int calls = 0;
+
+  @override
+  void retry() => calls++;
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+/// [updateDetails]가 [gate]가 열린 뒤 통신 실패로 끝나는 저장소.
+class _PendingFailingRepo extends InMemoryGifticonRepository {
+  _PendingFailingRepo({super.seed});
+
+  final Completer<void> gate = Completer<void>();
+
+  @override
+  Future<Gifticon> updateDetails(String id, GifticonDetails details) async {
+    await gate.future;
+    throw Exception('오프라인');
+  }
 }
 
 class _CountingRepo extends InMemoryGifticonRepository {

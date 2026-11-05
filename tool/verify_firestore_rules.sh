@@ -848,7 +848,7 @@ check "  (준비) 공유된 적 없는 A의 원본" 200 -X PATCH "${DOCS}/giftic
 check "  (준비) B가 그 원본의 잠금을 남의 활성 항목(SG_ACT)으로 위조" 200   -X PATCH "${DOCS}/shareLocks/gif-forged-${SG_RUN}" "${AUTH_B[@]}" "${JSON[@]}" -d "$(lock_doc "${SG_ACT}")"
 check "위조 잠금은 소유자의 삭제를 막지 못한다(항목의 gifticonId가 다름)" 200   -X DELETE "${DOCS}/gifticons/gif-forged-${SG_RUN}" "${AUTH_A[@]}"
 
-# 그룹이 사라진 공유 — 그룹 삭제 뒤 항목 정리가 실패하면 available 항목과 잠금이 남는다.
+# 그룹이 사라진 공유 — 그룹 삭제 뒤 항목 정리는 규칙상 실패해 available 항목과 잠금이 남는다.
 # 쓸 사람도 회수할 사람도 없는 항목이 원본을 막으면 영영 못 지운다. 픽스처는 관리자로
 # 심는다(없는 그룹의 항목은 create 규칙의 멤버 검사를 못 지난다).
 SG_ORPHAN="shared-${SG_RUN}-orphan"

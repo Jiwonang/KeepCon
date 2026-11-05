@@ -27,7 +27,7 @@ import 'money_format.dart' show digitsOnly, groupThousands;
 
 /// 공유 정본의 천 단위 포맷 함수를 그대로 노출한다.
 ///
-/// scan 소비자가 import 경로를 바꾸지 않고 쓰도록 재export하며,
+/// 입력칸 초기값을 만드는 등록·수정 화면이 포매터와 함께 쓰도록 재export하며,
 /// 구현은 `lib/shared/util/money_format.dart` 한 곳뿐이다.
 export 'money_format.dart' show formatThousands;
 

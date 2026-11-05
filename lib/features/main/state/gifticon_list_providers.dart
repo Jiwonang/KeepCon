@@ -129,6 +129,20 @@ final filterProvider = StateProvider<GifticonFilter>((ref) {
       if (previous != next) ref.controller.state = GifticonFilter.none;
     },
   );
+  // 고른 카테고리의 마지막 기프티콘을 고치거나 지우면 그 값이 선택지에서 사라진다. 남겨 두면
+  // 목록은 0개인데 시트 드롭다운은 "전체"로 접혀 보인다.
+  ref.listen<List<String>>(
+    availableCategoriesProvider,
+    (List<String>? previous, List<String> next) {
+      final GifticonFilter current = ref.controller.state;
+      final String? selected = current.categoryFilter;
+      if (selected != null &&
+          (previous?.contains(selected) ?? false) &&
+          !next.contains(selected)) {
+        ref.controller.state = current.withCategory(null);
+      }
+    },
+  );
   return GifticonFilter.none;
 });
 

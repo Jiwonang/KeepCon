@@ -16,10 +16,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../shared/diagnostics/error_reporter.dart';
 import '../../../shared/diagnostics/report_handled_failure.dart';
 import '../../../shared/models/gifticon.dart';
 import '../../../shared/models/gifticon_category.dart';
 import '../../../shared/models/share.dart';
+import '../../../shared/providers/error_reporter_provider.dart';
 import '../../../shared/providers/repositories.dart';
 import '../../../shared/providers/shared_gifticons_provider.dart';
 import '../../../shared/repositories/gifticon_repository.dart';
@@ -93,7 +95,10 @@ class _GifticonEditPageState extends ConsumerState<GifticonEditPage> {
     final List<String> labels = <String>[
       for (final GifticonCategory c in GifticonCategory.values) c.label,
     ];
-    return labels.contains(_category) ? labels : <String>[_category, ...labels];
+    final String original = widget.gifticon.category;
+    return original.trim().isEmpty || labels.contains(original)
+        ? labels
+        : <String>[original, ...labels];
   }
 
   void _showSnack(String message) {
@@ -115,7 +120,7 @@ class _GifticonEditPageState extends ConsumerState<GifticonEditPage> {
   ///
   /// 등록 폼의 중복 검사(모든 상태 대상)와 같은 조건이다 — 여기가 없으면 "다른 번호로
   /// 등록 → 수정으로 같은 번호"가 그 검사를 우회한다. 자기 자신은 뺀다.
-  Future<bool?> _isBarcodeTaken(String barcode) async {
+  Future<bool?> _isBarcodeTaken(String barcode, ErrorReporter reporter) async {
     try {
       final List<Gifticon> mine = await ref
           .read(gifticonRepositoryProvider)
@@ -124,7 +129,7 @@ class _GifticonEditPageState extends ConsumerState<GifticonEditPage> {
         (Gifticon g) => g.id != widget.gifticon.id && g.barcode == barcode,
       );
     } catch (e, st) {
-      reportHandledFailure(ref, e, st,
+      reportHandledFailureTo(reporter, e, st,
           context: 'GifticonEditPage.duplicateCheck');
       return null;
     }
@@ -167,13 +172,21 @@ class _GifticonEditPageState extends ConsumerState<GifticonEditPage> {
       return;
     }
 
+    // 저장을 기다리는 사이 사용자가 뒤로 갈 수 있다. 화면이 없어도 결과를 남기고 알리도록
+    // await 전에 잡는다(`report_handled_failure.dart`의 선택 기준).
+    final ErrorReporter reporter = ref.read(errorReporterProvider);
+    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
+    void notify(String message) => messenger
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
+
     setState(() => _saving = true);
     try {
       final String? barcode = details.barcode;
       // 그대로인 번호는 검사하지 않는다 — 이미 겹쳐 있는 옛 데이터가 다른 필드의 수정까지
       // 막으면 고칠 길이 없다.
       if (barcode != null && barcode != g.barcode) {
-        final bool? taken = await _isBarcodeTaken(barcode);
+        final bool? taken = await _isBarcodeTaken(barcode, reporter);
         if (!mounted) return;
         if (taken == null) {
           _showSnack('바코드 중복을 확인하지 못했어요. 연결을 확인하고 다시 시도해 주세요.');
@@ -187,25 +200,24 @@ class _GifticonEditPageState extends ConsumerState<GifticonEditPage> {
       }
 
       await ref.read(gifticonRepositoryProvider).updateDetails(g.id, details);
+      if (!mounted) notify('수정했어요.');
       _closeWith(GifticonEditResult.saved);
     } on GifticonShareBlockedException catch (e, st) {
       // 화면 가드가 못 보는 공유(전에 나간 그룹)·경합을 백엔드가 막았다. 입력은 살려 둔다.
-      reportHandledFailure(ref, e, st,
+      reportHandledFailureTo(reporter, e, st,
           context: 'GifticonEditPage.updateDetails(share)');
-      if (mounted) {
-        _showSnack('공유 중인 그룹이 있어 수정할 수 없어요. '
-            '전에 나간 그룹에 공유해 둔 것일 수 있어요.');
-      }
+      notify('공유 중인 그룹이 있어 수정할 수 없어요. '
+          '전에 나간 그룹에 공유해 둔 것일 수 있어요.');
     } on StateError catch (e, st) {
       // 입력은 위 validate와 normalized()를 이미 통과했으므로 남는 것은 "문서 없음"이다.
-      reportHandledFailure(ref, e, st,
+      reportHandledFailureTo(reporter, e, st,
           context: 'GifticonEditPage.updateDetails(guard)');
       _closeWith(GifticonEditResult.gone);
     } catch (e, st) {
       // 수정도 트랜잭션이라 오프라인 큐잉이 되지 않는다. 입력을 살려 두고 재시도를 권한다.
-      reportHandledFailure(ref, e, st,
+      reportHandledFailureTo(reporter, e, st,
           context: 'GifticonEditPage.updateDetails');
-      if (mounted) _showSnack('저장하지 못했어요. 연결을 확인하고 다시 시도해 주세요.');
+      notify('저장하지 못했어요. 연결을 확인하고 다시 시도해 주세요.');
     } finally {
       if (mounted) setState(() => _saving = false);
     }
