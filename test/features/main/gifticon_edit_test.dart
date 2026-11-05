@@ -511,6 +511,18 @@ void main() {
     expect((await repo.getGifticonById('g1'))!.category, '기타');
   });
 
+  testWidgets('카테고리 버튼이 터치하기 충분히 크다', (WidgetTester tester) async {
+    // `isDense`면 24dp라 필드의 나머지를 눌러도 메뉴가 열리지 않는다.
+    boot(<Gifticon>[_gifticon()]);
+    await mountDetail(tester, _gifticon());
+    await openEdit(tester);
+
+    expect(
+      tester.getSize(find.byType(DropdownButton<String>)).height,
+      greaterThanOrEqualTo(48),
+    );
+  });
+
   testWidgets('레거시 카테고리에서 다른 값을 골라도 원래 값으로 되돌릴 수 있다',
       (WidgetTester tester) async {
     final Gifticon legacy = _gifticon(category: '카페');

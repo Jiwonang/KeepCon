@@ -295,14 +295,16 @@ class _GifticonEditPageState extends ConsumerState<GifticonEditPage> {
               // 다르다(`initialValue`는 pubspec 하한 3.29에 없고 `value`는 CI 버전에서
               // deprecated다). 값은 항상 유효해 폼 검증도 필요 없다.
               InputDecorator(
+                // 버튼이 필드 높이를 채우도록 세로 여백을 뺀다 — 여백은 버튼 밖이라 눌러도
+                // 메뉴가 열리지 않는다.
                 decoration: const InputDecoration(
                   labelText: '카테고리',
                   border: OutlineInputBorder(),
+                  contentPadding: EdgeInsets.symmetric(horizontal: 12),
                 ),
                 child: DropdownButtonHideUnderline(
                   child: DropdownButton<String>(
                     value: _category,
-                    isDense: true,
                     isExpanded: true,
                     items: <DropdownMenuItem<String>>[
                       for (final String label in _categoryOptions)
