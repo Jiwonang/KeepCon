@@ -931,9 +931,11 @@ check "공유 중에도 소유자의 상태 변경은 허용(markUsed 동기화 
 
 check "  (준비) B가 공유 항목을 사용 완료" 200 -X PATCH "${DOCS}/sharedGifticons/${SG_EDIT}?${MASK_STATUS_ONLY}" \
   "${AUTH_B[@]}" "${JSON[@]}" -d '{"fields":{"status":{"stringValue":"used"}}}'
+# 앞서 저장한 EDIT_BODY와 **다른 값**이어야 한다 — 값이 같으면 `affectedKeys`가 비어
+# `hasActiveShare`를 평가하지 않고 통과해 이 케이스가 아무것도 검증하지 못한다.
 check "공유가 used면 내용 수정 허용 — 스냅샷은 이력으로 남는다" 200 \
   -X PATCH "${DOCS}/gifticons/gif-edit-${SG_RUN}?${MASK_DETAILS}" \
-  "${AUTH_A[@]}" "${JSON[@]}" -d "${EDIT_BODY}"
+  "${AUTH_A[@]}" "${JSON[@]}" -d "${EDIT_BODY//라떼/모카}"
 check "  (정리) 수정용 잠금 삭제" 200 -X DELETE "${DOCS}/shareLocks/gif-edit-${SG_RUN}" "${AUTH_A[@]}"
 check "  (정리) 수정용 공유 항목 삭제" 200 -X DELETE "${DOCS}/sharedGifticons/${SG_EDIT}" "${AUTH_A[@]}"
 

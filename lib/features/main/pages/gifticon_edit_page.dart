@@ -291,19 +291,29 @@ class _GifticonEditPageState extends ConsumerState<GifticonEditPage> {
                 validator: (_) => _parsedPrice == null ? '금액을 확인해 주세요.' : null,
               ),
               const SizedBox(height: 16),
-              DropdownButtonFormField<String>(
-                initialValue: _category,
+              // `DropdownButtonFormField`를 쓰지 않는다 — 초기값 인자가 Flutter 버전에 따라
+              // 다르다(`initialValue`는 pubspec 하한 3.29에 없고 `value`는 CI 버전에서
+              // deprecated다). 값은 항상 유효해 폼 검증도 필요 없다.
+              InputDecorator(
                 decoration: const InputDecoration(
                   labelText: '카테고리',
                   border: OutlineInputBorder(),
                 ),
-                items: <DropdownMenuItem<String>>[
-                  for (final String label in _categoryOptions)
-                    DropdownMenuItem<String>(value: label, child: Text(label)),
-                ],
-                onChanged: (String? v) {
-                  if (v != null) setState(() => _category = v);
-                },
+                child: DropdownButtonHideUnderline(
+                  child: DropdownButton<String>(
+                    value: _category,
+                    isDense: true,
+                    isExpanded: true,
+                    items: <DropdownMenuItem<String>>[
+                      for (final String label in _categoryOptions)
+                        DropdownMenuItem<String>(
+                            value: label, child: Text(label)),
+                    ],
+                    onChanged: (String? v) {
+                      if (v != null) setState(() => _category = v);
+                    },
+                  ),
+                ),
               ),
               const SizedBox(height: 24),
               ElevatedButton(
