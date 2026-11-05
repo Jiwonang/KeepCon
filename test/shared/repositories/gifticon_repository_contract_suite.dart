@@ -14,6 +14,9 @@
 /// [GifticonStatus.available]). 계약 전이 표의 유일한 예외라, 한쪽 구현만 그 예외를
 /// 구현하면 백엔드에 따라 만료된 기프티콘이 되살아나거나 안 되살아난다.
 ///
+/// [GifticonRepository.deleteGifticon] — 완전 삭제. 조회 경로 셋(단건·목록·스트림)에서
+/// 사라지는지와 "없으면 거부"를 본다.
+///
 /// ## ⚠️ 이 스위트가 대체하지 못하는 것
 ///
 /// `fake_cloud_firestore`는 서버가 아니라 자료구조다. **보안 규칙이 평가되지 않으므로**
@@ -159,5 +162,84 @@ void runExpiryExtensionContract(GifticonBackend Function() makeBackend) {
         throwsStateError,
       );
     });
+  });
+}
+
+/// 두 구현이 같은 답을 내야 하는 삭제 계약.
+///
+/// 축은 셋이다 — 지운 것이 **모든 조회 경로**에서 사라지는가(단건·목록·스트림),
+/// 남의 것을 건드리지 않는가, 없는 것은 거부하는가. Firebase 구현만 `delete()`를
+/// 그대로 부르면 없는 문서에도 성공해 마지막 축에서 갈라진다.
+void runDeleteContract(GifticonBackend Function() makeBackend) {
+  late GifticonBackend backend;
+
+  setUp(() => backend = makeBackend());
+  tearDown(() => backend.stop());
+
+  Future<Gifticon> seed({
+    String productName = '아메리카노 T',
+    GifticonStatus status = GifticonStatus.available,
+  }) {
+    return backend.repo.addGifticon(Gifticon(
+      id: '',
+      ownerId: 'owner-1',
+      brand: '스타벅스',
+      productName: productName,
+      price: 4500,
+      category: '카페',
+      expiryDate: DateTime(2030, 1, 1),
+      registeredAt: DateTime(2025, 1, 1),
+      status: status,
+    ));
+  }
+
+  test('지운 기프티콘은 단건·목록 조회에서 사라지고, 나머지는 남는다', () async {
+    final Gifticon gone = await seed(productName: '지울 것');
+    final Gifticon kept = await seed(productName: '남길 것');
+
+    await backend.repo.deleteGifticon(gone.id);
+
+    expect(await backend.repo.getGifticonById(gone.id), isNull);
+    final List<Gifticon> all = await backend.repo.getGifticons('owner-1');
+    expect(all.map((Gifticon g) => g.id), <String>[kept.id],
+        reason: '한 건을 지우는데 다른 기프티콘까지 사라지면 안 된다');
+  });
+
+  test('목록 스트림이 삭제를 방출한다 — 메인 목록이 따라 사라진다', () async {
+    final Gifticon g = await seed();
+    final Stream<List<Gifticon>> stream =
+        backend.repo.watchGifticons('owner-1');
+
+    // 첫 방출(삭제 전)과 삭제 뒤 방출을 순서대로 기다린다.
+    final Future<void> sawRemoval = expectLater(
+      stream.map((List<Gifticon> l) => l.map((Gifticon x) => x.id).toList()),
+      emitsThrough(isEmpty),
+    );
+    await backend.repo.deleteGifticon(g.id);
+    await sawRemoval;
+  });
+
+  test('상태를 가리지 않는다 — 사용 완료·만료도 지울 수 있다', () async {
+    final Gifticon used = await seed(status: GifticonStatus.used);
+    final Gifticon expired = await seed(status: GifticonStatus.expired);
+
+    await backend.repo.deleteGifticon(used.id);
+    await backend.repo.deleteGifticon(expired.id);
+
+    expect(await backend.repo.getGifticons('owner-1'), isEmpty);
+  });
+
+  test('없는 기프티콘은 StateError', () async {
+    await expectLater(
+      backend.repo.deleteGifticon('no-such-id'),
+      throwsStateError,
+    );
+  });
+
+  test('두 번 지우면 두 번째는 StateError — 조용히 성공하지 않는다', () async {
+    final Gifticon g = await seed();
+    await backend.repo.deleteGifticon(g.id);
+
+    await expectLater(backend.repo.deleteGifticon(g.id), throwsStateError);
   });
 }

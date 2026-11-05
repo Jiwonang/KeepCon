@@ -11,6 +11,20 @@ library;
 
 import '../models/gifticon.dart';
 
+/// 백엔드가 **아직 끝나지 않은 공유**를 보고 [GifticonRepository.deleteGifticon]을 거부했다.
+///
+/// [StateError]를 상속하므로 기존 `on StateError` 소비자도 그대로 받는다(non-breaking).
+/// 타입으로 따로 둔 이유는 "없음"과 다음 행동이 다르기 때문이다 — 없는 기프티콘은 상세를
+/// 닫아야 하고, 공유 중인 기프티콘은 살아 있으니 그대로 두고 회수를 안내해야 한다. 화면이
+/// 목록 스트림의 현재 값으로 사유를 다시 추측하면, 리스너가 늦거나 목록이 에러일 때
+/// 살아 있는 것을 "이미 삭제됐다"고 말한다(`InviteExpiredException`과 같은 규약 — 판정은
+/// 메시지가 아니라 타입으로).
+class GifticonShareBlockedException extends StateError {
+  /// [id]는 거부된 기프티콘이다. 진단용으로 [message]에 담는다.
+  GifticonShareBlockedException(String id)
+      : super('Gifticon has an active share: $id');
+}
+
 /// 기프티콘 데이터 계약.
 ///
 /// 페이지는 이 abstract 인터페이스에만 의존한다.
@@ -69,4 +83,30 @@ abstract class GifticonRepository {
   /// 스냅샷과 원본을 함께 옮긴다(같은 이유로 `updateStatus`도 공유 중에는 부르지 않는다 —
   /// 그 규약은 main 상세 화면의 사용 완료 가드에 이미 적혀 있다).
   Future<Gifticon> extendExpiry(String id, DateTime newExpiryDate);
+
+  /// 기프티콘을 **완전히 삭제한다.** 되돌리기는 없다(숨김·휴지통이 아니다).
+  ///
+  /// 가드 — 문서가 없으면 [StateError]. 상태는 가리지 않는다(보유중·사용 완료·만료 모두
+  /// 지울 수 있다). 무료 한도는 보유중이고 날짜상 만료되지 않은 것만 세므로, 그런
+  /// 기프티콘을 지우면 한 자리가 비고 같은 바코드로 다시 등록할 수 있다.
+  ///
+  /// ## 행위자(누가 지울 수 있는가)
+  /// [extendExpiry]와 같다 — 인터페이스는 행위자를 받지 않고, **등록한 본인만** 지울 수
+  /// 있다. 화면은 자기 목록에서만 이 경로를 열고, 백엔드는 `firestore.rules`의
+  /// `gifticons` 삭제 규칙이 `ownerId == uid()`만 허용한다.
+  ///
+  /// ## ⚠️ 그룹에 공유 중(`ShareStatus.available`)이면 부르지 마라
+  /// 이 계약은 공유를 모른다(저장소가 분리돼 있다). 공유 중인 원본을 지우면 그룹에는
+  /// 원본 없는 공유 항목이 남는다 — 멤버가 그것을 쓰면 원본 동기화는 best-effort라
+  /// 조용히 건너뛰지만, 공유자 화면에서 그 항목을 회수·연장할 근거가 사라진다. 그래서
+  /// 화면이 공유 여부를 확정한 뒤 **공유가 없거나 이미 사용 완료된 경우에만** 이 경로를
+  /// 연다(main 상세 화면의 삭제 가드). 공유 중이면 먼저 `ShareRepository.cancelShare`로
+  /// 회수하게 안내한다. 사용 완료된 공유 항목은 이력이라 원본을 지워도 남는다.
+  ///
+  /// 규칙 있는 백엔드(Firestore)는 화면 가드가 못 보는 경우 — 지금 속하지 않은 그룹의
+  /// 공유, 두 기기의 공유·삭제가 겹친 경합 — 까지 규칙으로 거부하고, 구현은 그것을
+  /// [GifticonShareBlockedException]([StateError]의 하위 타입)으로 알린다. 소비자는 그
+  /// 타입을 먼저 받고, 나머지 [StateError]를 "없음"으로 읽는다. in-memory 구현은 공유를
+  /// 모르므로 이 타입을 내지 않는다(두 저장소가 분리돼 있다).
+  Future<void> deleteGifticon(String id);
 }

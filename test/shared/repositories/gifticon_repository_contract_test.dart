@@ -56,5 +56,8 @@ void main() {
     group('[$label] extendExpiry — 유효기간 연장', () {
       runExpiryExtensionContract(make);
     });
+    group('[$label] deleteGifticon — 삭제', () {
+      runDeleteContract(make);
+    });
   });
 }

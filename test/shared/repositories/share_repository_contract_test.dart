@@ -59,6 +59,9 @@ class _FlakyGifticonRepository implements GifticonRepository {
   @override
   Future<Gifticon> extendExpiry(String id, DateTime newExpiryDate) =>
       inner.extendExpiry(id, newExpiryDate);
+
+  @override
+  Future<void> deleteGifticon(String id) => inner.deleteGifticon(id);
 }
 
 /// in-memory 구현 어댑터.

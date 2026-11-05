@@ -156,8 +156,32 @@ service cloud.firestore {
           && isGroupMember(get(sharePath).data.groupId);
       }
 
-      allow read, delete:
+      // 삭제를 막는 '아직 끝나지 않은 공유'(`GifticonRepository.deleteGifticon`, v3.19).
+      //
+      // 원본이 사라지면 그룹에 원본 없는 공유 항목이 남는다. 화면 가드는 **지금 속한
+      // 그룹**의 공유만 보고, 두 기기의 공유·삭제가 겹치는 창도 못 닫는다 — 그래서 규칙에서
+      // 한 번 더 막는다(클라이언트는 삭제 트랜잭션에서 잠금을 읽어 공유 생성과 충돌시킨다).
+      //
+      // 근거는 `shareLocks/{id}`가 가리키는 공유 항목이다. ⚠️ **잠금은 믿지 않는다** —
+      // 로그인한 누구나 쓸 수 있으므로(아래 `shareLocks`), 포인터가 가리키는 항목 **자체가**
+      // 이 원본을 가리키는지(`gifticonId` — 생성 시 원본 소유 검사·이후 불변) 본다. 그래서
+      // 남이 포인터를 다른 활성 항목으로 바꿔 소유자의 삭제를 막을 수는 없다(포인터를
+      // 지우는 위조는 소유자 자신의 삭제를 허용할 뿐이다). `used`는 이력이라 막지 않는다.
+      function hasActiveShare() {
+        let lockPath = /databases/$(database)/documents/shareLocks/$(id);
+        let shareId = exists(lockPath) ? get(lockPath).data.get('sharedGifticonId', '') : '';
+        let sharePath = /databases/$(database)/documents/sharedGifticons/$(shareId);
+        return shareId is string
+          && shareId.matches('^[A-Za-z0-9_-]+$')
+          && exists(sharePath)
+          && get(sharePath).data.get('gifticonId', '') == id
+          && get(sharePath).data.get('status', '') in ['available', 'inUse'];
+      }
+
+      allow read:
         if isSignedIn() && resource.data.ownerId == uid();
+      allow delete:
+        if isSignedIn() && resource.data.ownerId == uid() && !hasActiveShare();
       allow update:
         if isSignedIn()
         && (resource.data.ownerId == uid() || isSharedUseSync());
