@@ -4,8 +4,8 @@
 /// ## 왜 이 테스트가 있는가
 ///
 /// Firestore 구현은 원본의 공유 항목을 `shareLocks/{gifticonId}`의 `sharedGifticonId`로
-/// 찾는다. 그런데 `shareLocks`는 규칙이 로그인한 누구에게나 쓰기를 연다
-/// (`allow read, write: if isSignedIn()`). 그 포인터를 믿고 판정하면, 남이 잠금 하나를
+/// 찾는다. 지금 규칙은 잠금을 항목과 짝이 맞게만 쓰게 하지만, 좁혀지기 전에는 로그인한
+/// 누구나 쓸 수 있어 위조된 값이 남아 있을 수 있다. 그 포인터를 믿고 판정하면, 남이 잠금 하나를
 /// 고쳐 소유자의 **다른** used 항목을 가리키게 하는 것만으로 멀쩡한 원본이 사용 완료가
 /// 된다. 판정은 읽어 온 항목 자체(`gifticonId`·`sharedByUserId`)로 해야 한다.
 ///
@@ -100,7 +100,7 @@ void main() {
     await repo.markUsed(sb.id);
     expect(await statusOf(b), GifticonStatus.used);
 
-    // 누구나 쓸 수 있는 잠금을 B의 used 항목으로 돌려 놓는다. 그 항목은 **소유자가
+    // 규칙이 좁혀지기 전에 위조된 잠금처럼 B의 used 항목으로 돌려 놓는다. 그 항목은 **소유자가
     // 공유한 used 항목**이라 공유자·상태 검사만으로는 통과한다 — 원본 id 대조만이
     // 이 위조를 거른다.
     await lockRef(a).set(<String, dynamic>{

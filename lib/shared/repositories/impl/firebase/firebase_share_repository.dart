@@ -1465,11 +1465,10 @@ class FirebaseShareRepository implements ShareRepository {
   /// 끝까지 가리킨다. 조회 비용이 사용 이력이 아니라 **보유 중인 원본 수**에 비례하는
   /// 것이 이 경로를 고른 이유다(그룹별로 used 항목을 훑으면 이력이 쌓일수록 커진다).
   ///
-  /// ⚠️ **잠금 문서는 믿지 않는다.** 규칙이 `shareLocks`를 로그인한 누구에게나 쓰기로
-  /// 열어 두어(`allow read, write: if isSignedIn()`), 남이 그 포인터를 소유자의 다른
-  /// used 항목으로 바꿔 놓을 수 있다. 그래서 읽어 온 **항목 자체**의 `gifticonId`·
-  /// `sharedByUserId`로 판정한다 — 두 필드는 생성 규칙이 원본 소유를 검사하고 이후
-  /// 바꿀 수 없다. 포인터를 지우는 위조는 보정을 건너뛰게 할 뿐 원본을 바꾸지 못한다.
+  /// ⚠️ **잠금 문서는 믿지 않는다.** 지금 규칙은 잠금을 항목과 짝이 맞게만 쓰게 하지만,
+  /// 그 전에는 로그인한 누구나 쓸 수 있어 위조된 포인터가 남아 있을 수 있다. 그래서 읽어
+  /// 온 **항목 자체**의 `gifticonId`·`sharedByUserId`로 판정한다 — 두 필드는 생성 규칙이
+  /// 원본 소유를 검사하고 이후 바꿀 수 없다.
   ///
   /// 그룹을 떠나 항목 읽기가 거부되는 경우를 포함해 예상된 런타임 실패([Exception])는
   /// 건너뛴다(계약의 best-effort). [Error]는 삼키지 않는다.
@@ -1482,7 +1481,7 @@ class FirebaseShareRepository implements ShareRepository {
       if (!lock.exists) return false;
       final String? sharedId =
           docStringOrNull(lock.data()?['sharedGifticonId']);
-      // 잠금은 누구나 쓴다 — 경로 문자가 섞인 포인터는 `doc()`이 ArgumentError(Error)를
+      // 옛 위조 값일 수 있다 — 경로 문자가 섞인 포인터는 `doc()`이 ArgumentError(Error)를
       // 동기로 던져 아래 `on Exception`을 빠져나가고 보정 전체를 깨뜨린다. 자동 생성
       // id에는 '/'가 없으므로 그런 값은 위조로 보고 건너뛴다. (fake는 이 검사를 하지
       // 않아 테스트로 고정할 수 없다 — 이 가드가 방어선이다.)
@@ -1644,8 +1643,10 @@ class FirebaseShareRepository implements ShareRepository {
         await _shared.where('groupId', isEqualTo: groupId).get();
     if (snap.docs.isEmpty) return;
 
-    // 항목당 최대 2 op(share + lock). 여유 있게 200개(≤400 op)씩 커밋한다.
-    const int chunkSize = 200;
+    // op 한도(500)보다 규칙 호출 한도(배치 전체 20회)가 먼저 걸린다. 항목+잠금 한 쌍이 규칙
+    // 호출을 최대 6회 쓴다. 같은 문서 재조회가 캐시되는지는 공식 문서가 보장하지 않고
+    // 에뮬레이터는 이 한도를 강제하지 않으므로, 캐시 없는 최악을 기준으로 잡는다(3 × 6 = 18).
+    const int chunkSize = 3;
     final List<QueryDocumentSnapshot<Map<String, dynamic>>> docs = snap.docs;
     for (int i = 0; i < docs.length; i += chunkSize) {
       final WriteBatch batch = _db.batch();
