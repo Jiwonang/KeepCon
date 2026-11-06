@@ -828,7 +828,7 @@ check "저장 상태 expired인 원본은 멤버가 못 맞춘다 → 차단" 40
 echo "gifticons 삭제 — 아직 끝나지 않은 공유가 있으면 차단"
 
 # `hasActiveShare`(v3.19). 화면 가드가 못 보는 공유(전에 나간 그룹)·경합을 규칙이 막는다.
-# 근거는 잠금이 가리키는 공유 항목이고, 잠금은 누구나 쓸 수 있으므로 **항목 자체**의
+# 근거는 잠금이 가리키는 공유 항목이고, 쓰기를 좁히기 전의 옛 값이 남아 있을 수 있으므로 **항목 자체**의
 # `gifticonId`를 대조한다. 아래 케이스가 그 조건을 하나씩 지킨다 —
 #   available 항목 → 차단 / 남의 원본 항목을 가리키는 위조 잠금 → 막지 못함 /
 #   used 항목(이력) → 허용 / 잠금이 없으면(회수 뒤) → 허용.
@@ -845,7 +845,8 @@ check "  (준비) 그 원본의 공유 잠금 → SG_ACT" 200   -X PATCH "${DOCS
 check "공유 중(available)인 원본을 소유자가 삭제 → 차단" 403   -X DELETE "${DOCS}/gifticons/gif-act-${SG_RUN}" "${AUTH_A[@]}"
 
 check "  (준비) 공유된 적 없는 A의 원본" 200 -X PATCH "${DOCS}/gifticons/gif-forged-${SG_RUN}"   "${AUTH_A[@]}" "${JSON[@]}" -d "$(gifticon_doc "${UID_A}")"
-check "  (준비) B가 그 원본의 잠금을 남의 활성 항목(SG_ACT)으로 위조" 200   -X PATCH "${DOCS}/shareLocks/gif-forged-${SG_RUN}" "${AUTH_B[@]}" "${JSON[@]}" -d "$(lock_doc "${SG_ACT}")"
+# 지금 규칙으로는 이 잠금을 만들 수 없다 — 쓰기를 좁히기 전의 옛 값을 관리자로 심는다.
+check "  (준비) 그 원본의 잠금이 남의 활성 항목(SG_ACT)을 가리키는 옛 값" 200 -X PATCH "${DOCS}/shareLocks/gif-forged-${SG_RUN}" "${AUTH_ADMIN[@]}" "${JSON[@]}" -d "$(lock_doc "${SG_ACT}")"
 check "위조 잠금은 소유자의 삭제를 막지 못한다(항목의 gifticonId가 다름)" 200   -X DELETE "${DOCS}/gifticons/gif-forged-${SG_RUN}" "${AUTH_A[@]}"
 
 # 그룹이 사라진 공유 — 그룹 삭제 뒤 항목 정리는 규칙상 실패해 available 항목과 잠금이 남는다.
@@ -857,14 +858,15 @@ check "  (준비) A의 원본(삭제된 그룹 공유용)" 200 -X PATCH "${DOCS}
 check "  (준비) 없는 그룹을 가리키는 available 공유 항목" 200 -X PATCH "${DOCS}/sharedGifticons/${SG_ORPHAN}" \
   "${AUTH_ADMIN[@]}" "${JSON[@]}" \
   -d "{\"fields\":{\"groupId\":{\"stringValue\":\"gone-${SG_RUN}\"},\"gifticonId\":{\"stringValue\":\"gif-orphan-${SG_RUN}\"},\"sharedByUserId\":{\"stringValue\":\"${UID_A}\"},\"status\":{\"stringValue\":\"available\"}}}"
-check "  (준비) 그 원본의 공유 잠금" 200 -X PATCH "${DOCS}/shareLocks/gif-orphan-${SG_RUN}" \
-  "${AUTH_A[@]}" "${JSON[@]}" -d "$(lock_doc "${SG_ORPHAN}")"
+check "  (준비) 그 원본의 공유 잠금(그룹 삭제 잔여물)" 200 -X PATCH "${DOCS}/shareLocks/gif-orphan-${SG_RUN}" \
+  "${AUTH_ADMIN[@]}" "${JSON[@]}" -d "$(lock_doc "${SG_ORPHAN}")"
 check "삭제된 그룹의 공유는 내용 수정을 막지 않는다" 200 \
   -X PATCH "${DOCS}/gifticons/gif-orphan-${SG_RUN}?updateMask.fieldPaths=brand" \
   "${AUTH_A[@]}" "${JSON[@]}" -d '{"fields":{"brand":{"stringValue":"x"}}}'
 check "삭제된 그룹의 공유는 원본 삭제를 막지 않는다" 200 \
   -X DELETE "${DOCS}/gifticons/gif-orphan-${SG_RUN}" "${AUTH_A[@]}"
-check "  (정리) 그 잠금 삭제" 200 -X DELETE "${DOCS}/shareLocks/gif-orphan-${SG_RUN}" "${AUTH_A[@]}"
+# 항목이 아직 있어도 그룹이 없으면 끝난 공유다 — 아무도 항목을 못 지우므로 규칙상 이 길은 남겨 둔다(앱 경로는 아직 없다).
+check "삭제된 그룹에 남은 잠금은 규칙상 삭제 가능" 200 -X DELETE "${DOCS}/shareLocks/gif-orphan-${SG_RUN}" "${AUTH_A[@]}"
 check "  (정리) 그 공유 항목 삭제" 200 -X DELETE "${DOCS}/sharedGifticons/${SG_ORPHAN}" "${AUTH_ADMIN[@]}"
 
 # SG_USE는 위 절에서 used가 됐고 gif-use-${SG_RUN}을 가리킨다.
@@ -878,7 +880,7 @@ check "회수 뒤에는 삭제 허용" 200 -X DELETE "${DOCS}/gifticons/gif-act-
 
 check "  (정리) 위조 잠금 삭제" 200 -X DELETE "${DOCS}/shareLocks/gif-forged-${SG_RUN}" "${AUTH_A[@]}"
 
-# 비정상 모양의 잠금 — 잠금은 누구나 쓰므로 남이 값을 map 등으로 바꿔 넣을 수 있다.
+# 비정상 모양의 잠금 — 쓰기를 좁히기 전에 남이 값을 map 등으로 바꿔 넣었을 수 있다.
 # `hasActiveShare`의 `is string`·정규식 가드가 없으면 경로 조립이 평가 오류를 내 **소유자의
 # 삭제가 영구히 막힌다**(가드를 지운 뮤테이션에서 map 잠금이 403으로 실측). 이 케이스가 그
 # 가드를 지킨다.
@@ -886,10 +888,9 @@ lock_raw() {
   printf '{"fields":{"sharedGifticonId":%s}}' "$1"
 }
 check "  (준비) A의 원본(위조 잠금 모양용)" 200 -X PATCH "${DOCS}/gifticons/gif-shape-${SG_RUN}"   "${AUTH_A[@]}" "${JSON[@]}" -d "$(gifticon_doc "${UID_A}")"
-check "  (준비) B가 잠금 값을 map으로 위조" 200 -X PATCH "${DOCS}/shareLocks/gif-shape-${SG_RUN}"   "${AUTH_B[@]}" "${JSON[@]}" -d "$(lock_raw '{"mapValue":{"fields":{"a":{"stringValue":"b"}}}}')"
+check "  (준비) 잠금 값이 map인 옛 값" 200 -X PATCH "${DOCS}/shareLocks/gif-shape-${SG_RUN}" "${AUTH_ADMIN[@]}" "${JSON[@]}" -d "$(lock_raw '{"mapValue":{"fields":{"a":{"stringValue":"b"}}}}')"
 check "비정상 모양 잠금(map)은 소유자의 삭제를 막지 못한다" 200   -X DELETE "${DOCS}/gifticons/gif-shape-${SG_RUN}" "${AUTH_A[@]}"
 check "  (정리) map 위조 잠금 삭제" 200 -X DELETE "${DOCS}/shareLocks/gif-shape-${SG_RUN}" "${AUTH_A[@]}"
-check "  (정리) used 잠금 삭제" 200 -X DELETE "${DOCS}/shareLocks/gif-use-${SG_RUN}" "${AUTH_A[@]}"
 
 echo "gifticons 수정 — 금지 필드와 공유 중 내용 변경"
 
@@ -936,10 +937,97 @@ check "  (준비) B가 공유 항목을 사용 완료" 200 -X PATCH "${DOCS}/sha
 check "공유가 used면 내용 수정 허용 — 스냅샷은 이력으로 남는다" 200 \
   -X PATCH "${DOCS}/gifticons/gif-edit-${SG_RUN}?${MASK_DETAILS}" \
   "${AUTH_A[@]}" "${JSON[@]}" -d "${EDIT_BODY//라떼/모카}"
-check "  (정리) 수정용 잠금 삭제" 200 -X DELETE "${DOCS}/shareLocks/gif-edit-${SG_RUN}" "${AUTH_A[@]}"
 check "  (정리) 수정용 공유 항목 삭제" 200 -X DELETE "${DOCS}/sharedGifticons/${SG_EDIT}" "${AUTH_A[@]}"
+check "  (정리) 수정용 잠금 삭제" 200 -X DELETE "${DOCS}/shareLocks/gif-edit-${SG_RUN}" "${AUTH_A[@]}"
+
+echo "shareLocks — 공유 항목과 짝이 맞는 쓰기만"
+
+# 정상 쓰기는 전부 항목과 **같은 커밋**이라(`getAfter`) 단건 PATCH로는 검증되지 않는다.
+# `documents:commit`으로 앱의 트랜잭션·배치와 같은 모양을 보낸다.
+COMMIT_URL="${DOCS}:commit"
+DOC_NAME_PREFIX="projects/${PROJECT}/databases/(default)/documents"
+# $1=컬렉션/문서 경로 $2={"fields":...} 본문
+write_update() {
+  local body="${2#\{}"
+  printf '{"update":{"name":"%s/%s",%s}' "${DOC_NAME_PREFIX}" "$1" "${body}"
+}
+write_delete() {
+  printf '{"delete":"%s/%s"}' "${DOC_NAME_PREFIX}" "$1"
+}
+commit_body() {
+  local IFS=,
+  printf '{"writes":[%s]}' "$*"
+}
+
+SL_SHARE="shared-${SG_RUN}-sl"
+SL_GIF="gif-sl-${SG_RUN}"
+check "  (준비) A의 원본(잠금 검증용)" 200 -X PATCH "${DOCS}/gifticons/${SL_GIF}" \
+  "${AUTH_A[@]}" "${JSON[@]}" -d "$(gifticon_doc "${UID_A}")"
+check "  (준비) A의 공유 안 된 원본" 200 -X PATCH "${DOCS}/gifticons/${SL_GIF}-free" \
+  "${AUTH_A[@]}" "${JSON[@]}" -d "$(gifticon_doc "${UID_A}")"
+
+# 잠금에는 그룹 id가 들어 있다 — 목록을 열면 모든 그룹 id가 나간다. 단건 조회는 앱이 쓴다.
+check "로그인 사용자가 잠금 목록 조회 → 차단" 403 -X GET "${DOCS}/shareLocks?pageSize=10" "${AUTH_B[@]}"
+check "로그인 사용자가 잠금 단건 조회(없는 문서 포함)" 404 -X GET "${DOCS}/shareLocks/${SL_GIF}" "${AUTH_B[@]}"
+
+check "공유 항목 없이 잠금만 생성 → 차단" 403 -X PATCH "${DOCS}/shareLocks/${SL_GIF}" \
+  "${AUTH_A[@]}" "${JSON[@]}" -d "$(lock_doc "shared-${SG_RUN}-none")"
+check "공유(항목+잠금 같은 커밋)" 200 -X POST "${COMMIT_URL}" "${AUTH_A[@]}" "${JSON[@]}" \
+  -d "$(commit_body "$(write_update "sharedGifticons/${SL_SHARE}" "$(use_shared_doc "${SL_GIF}")")" \
+        "$(write_update "shareLocks/${SL_GIF}" "$(lock_doc "${SL_SHARE}")")")"
+check "다른 원본 id에 남의 공유 항목으로 잠금 생성 → 차단(gifticonId 불일치)" 403 \
+  -X PATCH "${DOCS}/shareLocks/${SL_GIF}-b" "${AUTH_B[@]}" "${JSON[@]}" -d "$(lock_doc "${SL_SHARE}")"
+check "다른 원본의 항목을 가리키는 잠금 생성 → 차단(공유 방해)" 403 \
+  -X PATCH "${DOCS}/shareLocks/${SL_GIF}-free" "${AUTH_A[@]}" "${JSON[@]}" -d "$(lock_doc "${SL_SHARE}")"
+check "경로 조각이 섞인 포인터로 잠금 생성 → 차단" 403 \
+  -X PATCH "${DOCS}/shareLocks/${SL_GIF}-free" "${AUTH_A[@]}" "${JSON[@]}" -d "$(lock_doc "a/b")"
+check "소유자도 잠금 포인터 변경 → 차단" 403 -X PATCH "${DOCS}/shareLocks/${SL_GIF}" \
+  "${AUTH_A[@]}" "${JSON[@]}" -d "$(lock_doc "shared-${SG_RUN}-other")"
+check "B가 잠금 포인터 변경 → 차단" 403 -X PATCH "${DOCS}/shareLocks/${SL_GIF}" \
+  "${AUTH_B[@]}" "${JSON[@]}" -d "$(lock_doc "shared-${SG_RUN}-other")"
+check "B가 활성 공유의 잠금 삭제 → 차단" 403 -X DELETE "${DOCS}/shareLocks/${SL_GIF}" "${AUTH_B[@]}"
+check "소유자도 활성 공유의 잠금만 삭제 → 차단(차단 우회)" 403 \
+  -X DELETE "${DOCS}/shareLocks/${SL_GIF}" "${AUTH_A[@]}"
+check "회수(항목+잠금 같은 커밋)" 200 -X POST "${COMMIT_URL}" "${AUTH_A[@]}" "${JSON[@]}" \
+  -d "$(commit_body "$(write_delete "sharedGifticons/${SL_SHARE}")" "$(write_delete "shareLocks/${SL_GIF}")")"
+check "회수 뒤 다시 공유" 200 -X POST "${COMMIT_URL}" "${AUTH_A[@]}" "${JSON[@]}" \
+  -d "$(commit_body "$(write_update "sharedGifticons/${SL_SHARE}" "$(use_shared_doc "${SL_GIF}")")" \
+        "$(write_update "shareLocks/${SL_GIF}" "$(lock_doc "${SL_SHARE}")")")"
+# `inUse`도 끝나지 않은 공유다. 이 상태는 앱 쓰기 경로에 없어 관리자로 심는다.
+check "  (준비) 공유 항목을 inUse로" 200 -X PATCH "${DOCS}/sharedGifticons/${SL_SHARE}?${MASK_STATUS_ONLY}" \
+  "${AUTH_ADMIN[@]}" "${JSON[@]}" -d '{"fields":{"status":{"stringValue":"inUse"}}}'
+check "공유가 inUse면 원본 삭제 → 차단" 403 -X DELETE "${DOCS}/gifticons/${SL_GIF}" "${AUTH_A[@]}"
+check "  (준비) 공유 항목을 available로 되돌림" 200 -X PATCH "${DOCS}/sharedGifticons/${SL_SHARE}?${MASK_STATUS_ONLY}" \
+  "${AUTH_ADMIN[@]}" "${JSON[@]}" -d '{"fields":{"status":{"stringValue":"available"}}}'
+# 잠금 없는 옛 공유의 회수·그룹 정리 — 없는 잠금 삭제(`resource == null`)가 커밋을 깨면 안 된다.
+check "  (준비) 항목만 지워 낡은 잠금을 만든다" 200 -X DELETE "${DOCS}/sharedGifticons/${SL_SHARE}" "${AUTH_A[@]}"
+check "낡은 잠금은 규칙상 삭제 가능" 200 -X DELETE "${DOCS}/shareLocks/${SL_GIF}" "${AUTH_B[@]}"
+check "  (준비) 잠금 없는 공유 항목" 200 -X PATCH "${DOCS}/sharedGifticons/${SL_SHARE}" \
+  "${AUTH_A[@]}" "${JSON[@]}" -d "$(use_shared_doc "${SL_GIF}")"
+# 앞의 불일치 케이스와 달리 이 항목은 원본 id까지 맞으므로 **공유자 검사**에만 걸린다.
+check "B가 잠금 없는 남의 항목으로 잠금 생성 → 차단(공유자가 아님)" 403 \
+  -X PATCH "${DOCS}/shareLocks/${SL_GIF}" "${AUTH_B[@]}" "${JSON[@]}" -d "$(lock_doc "${SL_SHARE}")"
+check "허용 외 키가 섞인 잠금 생성 → 차단" 403 -X PATCH "${DOCS}/shareLocks/${SL_GIF}" "${AUTH_A[@]}" "${JSON[@]}" \
+  -d "{\"fields\":{\"sharedGifticonId\":{\"stringValue\":\"${SL_SHARE}\"},\"evil\":{\"stringValue\":\"1\"}}}"
+check "잠금 없는 공유의 회수 — 없는 잠금 삭제가 커밋을 깨지 않는다" 200 -X POST "${COMMIT_URL}" \
+  "${AUTH_A[@]}" "${JSON[@]}" \
+  -d "$(commit_body "$(write_delete "sharedGifticons/${SL_SHARE}")" "$(write_delete "shareLocks/${SL_GIF}")")"
+
+# 그룹이 **살아 있을 때** 방장의 항목+잠금 배치(`_cascadeDeleteGroupShares`의 쓰기 모양) —
+# 행위자가 공유자가 아니라 방장이다. 실제 정리는 그룹 삭제 뒤에 불려 질의에서 먼저 막힌다.
+SL_B_SHARE="shared-${SG_RUN}-slb"
+SL_B_GIF="gif-slb-${SG_RUN}"
+check "  (준비) B의 원본" 200 -X PATCH "${DOCS}/gifticons/${SL_B_GIF}" \
+  "${AUTH_B[@]}" "${JSON[@]}" -d "$(gifticon_doc "${UID_B}")"
+check "  (준비) B가 공유(항목+잠금)" 200 -X POST "${COMMIT_URL}" "${AUTH_B[@]}" "${JSON[@]}" \
+  -d "$(commit_body "$(write_update "sharedGifticons/${SL_B_SHARE}" "$(use_shared_doc "${SL_B_GIF}" | sed "s/${UID_A}/${UID_B}/")")" \
+        "$(write_update "shareLocks/${SL_B_GIF}" "$(lock_doc "${SL_B_SHARE}")")")"
+check "방장(A)이 남의 공유 항목과 잠금을 함께 삭제" 200 -X POST "${COMMIT_URL}" \
+  "${AUTH_A[@]}" "${JSON[@]}" \
+  -d "$(commit_body "$(write_delete "sharedGifticons/${SL_B_SHARE}")" "$(write_delete "shareLocks/${SL_B_GIF}")")"
 
 check "  (정리) 사용 동기화 공유 항목 삭제" 200 -X DELETE "${DOCS}/sharedGifticons/${SG_USE}" "${AUTH_A[@]}"
+check "  (정리) used 잠금 삭제" 200 -X DELETE "${DOCS}/shareLocks/gif-use-${SG_RUN}" "${AUTH_A[@]}"
 check "  (정리) 만료 원본 공유 항목 삭제" 200 -X DELETE "${DOCS}/sharedGifticons/${SG_USE_EXP}" "${AUTH_A[@]}"
 
 check "  (정리) 공유 항목 삭제(공유자 본인)" 200 -X DELETE "${DOCS}/sharedGifticons/${SG_A}" "${AUTH_A[@]}"
