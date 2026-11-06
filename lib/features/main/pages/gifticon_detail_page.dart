@@ -36,6 +36,7 @@ import '../state/gifticon_list_providers.dart';
 import '../../../shared/providers/now_provider.dart';
 import '../widgets/format.dart';
 import '../widgets/gifticon_status_label.dart';
+import 'gifticon_edit_page.dart';
 
 /// 기프티콘 상세 화면. 목록에서 `MaterialPageRoute`로 push한다.
 class GifticonDetailPage extends ConsumerWidget {
@@ -149,10 +150,16 @@ class GifticonDetailPage extends ConsumerWidget {
         centerTitle: true,
         title: Text('기프티콘', style: context.navTitleStyle),
         actions: <Widget>[
-          // 삭제는 **등록한 본인에게만** 보인다(연장의 ③과 같은 이유 — 진입 스냅샷
+          // 수정·삭제는 **등록한 본인에게만** 보인다(연장의 ③과 같은 이유 — 진입 스냅샷
           // 폴백으로 남의 것이 표시될 여지를 닫는다). 공유 여부는 여기서 거르지 않고
-          // 누른 시점에 다시 읽는다([_confirmAndDelete] — 막힌 이유를 말해 줘야
-          // 버튼이 사라진 것을 고장으로 읽지 않는다).
+          // 누른 시점에 다시 읽는다(막힌 이유를 말해 줘야 버튼이 사라진 것을 고장으로
+          // 읽지 않는다).
+          if (mine)
+            IconButton(
+              tooltip: '수정',
+              icon: const Icon(Icons.edit_outlined),
+              onPressed: () => _openEdit(context, ref, g),
+            ),
           if (mine)
             IconButton(
               tooltip: '삭제',
@@ -446,34 +453,59 @@ class GifticonDetailPage extends ConsumerWidget {
     }
   }
 
-  /// 공유 상태를 **지금** 읽어 삭제를 막아야 하면 안내하고 `true`를 돌려준다.
+  /// 공유 상태를 **지금** 읽어 [action]을 막아야 하면 안내하고 `true`를 돌려준다.
   ///
-  /// 막는 경우는 둘이다 — 공유 여부가 아직 확정되지 않았거나(fail-closed), 그룹에
-  /// **아직 쓰이지 않은** 공유 항목이 있을 때다. 후자를 지우면 그룹에 원본 없는 항목이
-  /// 남고 공유자 쪽에서 그 항목을 회수·연장할 근거가 사라진다(계약
-  /// [GifticonRepository.deleteGifticon]의 경고). 사용 완료된 공유 항목은 이력이라
-  /// 막지 않는다.
-  bool _deleteBlockedByShare(
-      WidgetRef ref, Gifticon g, ScaffoldMessengerState messenger) {
-    final AsyncValue<SharedGifticon?> fresh =
+  /// 판정은 [shareBlockMessage] 하나다. 삭제하면 그룹에 원본 없는 항목이 남아 공유자 쪽에서
+  /// 회수·연장할 근거가 사라지고, 수정하면 그룹이 옛 스냅샷을 본다(계약
+  /// [GifticonRepository.deleteGifticon]·[GifticonRepository.updateDetails]의 경고).
+  bool _blockedByShare(
+    WidgetRef ref,
+    Gifticon g,
+    ScaffoldMessengerState messenger, {
+    required String action,
+  }) {
+    final AsyncValue<SharedGifticon?> shareState =
         ref.read(sharedItemForGifticonProvider(g.id));
-    final ShareStatus? shareStatus = fresh.valueOrNull?.status;
-    final String? message;
-    if (!fresh.hasValue) {
-      message = '공유 상태를 확인하는 중이에요. 잠시 후 다시 시도해 주세요.';
-    } else if (shareStatus == ShareStatus.available) {
-      message = '그룹에 공유 중이라 삭제할 수 없어요. 공유 탭에서 공유를 회수한 뒤 삭제해 주세요.';
-    } else if (shareStatus == ShareStatus.inUse) {
-      // 회수(`cancelShare`)는 available만 받으므로 회수를 권하지 않는다.
-      message = '그룹에서 사용 중이라 지금은 삭제할 수 없어요.';
-    } else {
-      message = null;
-    }
+    final String? message = shareBlockMessage(shareState, action: action);
     if (message == null) return false;
+    // 스트림 provider는 스스로 재구독하지 않는다. 사용 완료된 기프티콘에는 재시도 배너가
+    // 뜨지 않으므로, 여기서 되살려 두지 않으면 다음 시도도 같은 실패를 본다.
+    if (shareState.hasError) retrySharedGifticonIds(ref);
     messenger
       ..hideCurrentSnackBar()
       ..showSnackBar(SnackBar(content: Text(message)));
     return true;
+  }
+
+  /// 수정 화면을 연다. 공유 중이면 입력하기 전에 막는다(입력을 다 한 뒤 거부당하지 않게).
+  ///
+  /// 저장 시점의 재판정은 수정 화면이 한다 — 여는 사이와 입력하는 사이의 공유는 거기서 걸린다.
+  Future<void> _openEdit(
+      BuildContext context, WidgetRef ref, Gifticon g) async {
+    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
+    if (_blockedByShare(ref, g, messenger, action: '수정')) return;
+
+    final NavigatorState navigator = Navigator.of(context);
+    final ModalRoute<Object?>? route = ModalRoute.of(context);
+    final GifticonEditResult? result = await navigator.push<GifticonEditResult>(
+      MaterialPageRoute<GifticonEditResult>(
+        builder: (BuildContext _) => GifticonEditPage(gifticon: g),
+      ),
+    );
+    switch (result) {
+      case GifticonEditResult.saved:
+        messenger
+          ..hideCurrentSnackBar()
+          ..showSnackBar(const SnackBar(content: Text('수정했어요.')));
+      case GifticonEditResult.gone:
+        // 삭제 경로의 '이미 없음'과 같다 — 남겨 두면 없는 것을 보여준다.
+        if (route != null && route.isCurrent) navigator.pop();
+        messenger
+          ..hideCurrentSnackBar()
+          ..showSnackBar(const SnackBar(content: Text('이미 삭제된 기프티콘이에요.')));
+      case null:
+        break;
+    }
   }
 
   /// 삭제 확인 → 계약 [GifticonRepository.deleteGifticon] 호출 → 성공하면 화면을 닫는다.
@@ -487,7 +519,7 @@ class GifticonDetailPage extends ConsumerWidget {
     Gifticon g,
   ) async {
     final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
-    if (_deleteBlockedByShare(ref, g, messenger)) return;
+    if (_blockedByShare(ref, g, messenger, action: '삭제')) return;
 
     final bool? ok = await showDialog<bool>(
       context: context,
@@ -510,7 +542,7 @@ class GifticonDetailPage extends ConsumerWidget {
       ),
     );
     if (ok != true || !context.mounted) return;
-    if (_deleteBlockedByShare(ref, g, messenger)) return;
+    if (_blockedByShare(ref, g, messenger, action: '삭제')) return;
 
     final NavigatorState navigator = Navigator.of(context);
     final ModalRoute<Object?>? route = ModalRoute.of(context);

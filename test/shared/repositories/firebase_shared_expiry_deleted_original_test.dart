@@ -181,6 +181,47 @@ void main() {
       expect(await gifticons.getGifticons(live.ownerId), isEmpty);
     });
 
+    const GifticonDetails details = GifticonDetails(
+      brand: '투썸',
+      productName: '라떼',
+      price: 1,
+      barcode: null,
+      category: '기타',
+    );
+
+    test('내용 수정도 공유 잠금을 읽는다 — 그 읽기가 실패하면 고치지 않는다', () async {
+      whenCalling(Invocation.method(#get, <Object?>[null]))
+          .on(db.doc(
+              '${FirebaseShareRepository.shareLocksCollection}/${live.id}'))
+          .thenThrow(FirebaseException(
+              plugin: 'cloud_firestore', code: 'unavailable'));
+
+      await expectLater(gifticons.updateDetails(live.id, details),
+          throwsA(isA<FirebaseException>()));
+      expect((await gifticons.getGifticonById(live.id))!.brand, '스타벅스');
+    });
+
+    test('내용 수정의 커밋 거부도 GifticonShareBlockedException으로 알린다', () async {
+      final FirebaseGifticonRepository rejecting =
+          FirebaseGifticonRepository(firestore: _CommitRejectingFirestore(db));
+
+      await expectLater(rejecting.updateDetails(live.id, details),
+          throwsA(isA<GifticonShareBlockedException>()));
+    });
+
+    test('내용 수정의 읽기 거부는 "없음"이다', () async {
+      whenCalling(Invocation.method(#get, <Object?>[null]))
+          .on(db.doc('${FirebaseGifticonRepository.collectionName}/${live.id}'))
+          .thenThrow(FirebaseException(
+              plugin: 'cloud_firestore', code: 'permission-denied'));
+
+      await expectLater(
+        gifticons.updateDetails(live.id, details),
+        throwsA(isA<StateError>().having((StateError e) => e, 'type',
+            isNot(isA<GifticonShareBlockedException>()))),
+      );
+    });
+
     test('커밋의 거부는 GifticonShareBlockedException으로 알린다', () async {
       // 읽기가 통과한 뒤 커밋이 permission-denied면 규칙의 `hasActiveShare`다. '없음'으로
       // 번역하면 화면이 살아 있는 기프티콘의 상세를 닫고, 번역이 없으면 통신 실패로

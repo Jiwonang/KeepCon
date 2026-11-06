@@ -848,6 +848,25 @@ check "  (준비) 공유된 적 없는 A의 원본" 200 -X PATCH "${DOCS}/giftic
 check "  (준비) B가 그 원본의 잠금을 남의 활성 항목(SG_ACT)으로 위조" 200   -X PATCH "${DOCS}/shareLocks/gif-forged-${SG_RUN}" "${AUTH_B[@]}" "${JSON[@]}" -d "$(lock_doc "${SG_ACT}")"
 check "위조 잠금은 소유자의 삭제를 막지 못한다(항목의 gifticonId가 다름)" 200   -X DELETE "${DOCS}/gifticons/gif-forged-${SG_RUN}" "${AUTH_A[@]}"
 
+# 그룹이 사라진 공유 — 그룹 삭제 뒤 항목 정리는 규칙상 실패해 available 항목과 잠금이 남는다.
+# 쓸 사람도 회수할 사람도 없는 항목이 원본을 막으면 영영 못 지운다. 픽스처는 관리자로
+# 심는다(없는 그룹의 항목은 create 규칙의 멤버 검사를 못 지난다).
+SG_ORPHAN="shared-${SG_RUN}-orphan"
+check "  (준비) A의 원본(삭제된 그룹 공유용)" 200 -X PATCH "${DOCS}/gifticons/gif-orphan-${SG_RUN}" \
+  "${AUTH_A[@]}" "${JSON[@]}" -d "$(gifticon_doc "${UID_A}")"
+check "  (준비) 없는 그룹을 가리키는 available 공유 항목" 200 -X PATCH "${DOCS}/sharedGifticons/${SG_ORPHAN}" \
+  "${AUTH_ADMIN[@]}" "${JSON[@]}" \
+  -d "{\"fields\":{\"groupId\":{\"stringValue\":\"gone-${SG_RUN}\"},\"gifticonId\":{\"stringValue\":\"gif-orphan-${SG_RUN}\"},\"sharedByUserId\":{\"stringValue\":\"${UID_A}\"},\"status\":{\"stringValue\":\"available\"}}}"
+check "  (준비) 그 원본의 공유 잠금" 200 -X PATCH "${DOCS}/shareLocks/gif-orphan-${SG_RUN}" \
+  "${AUTH_A[@]}" "${JSON[@]}" -d "$(lock_doc "${SG_ORPHAN}")"
+check "삭제된 그룹의 공유는 내용 수정을 막지 않는다" 200 \
+  -X PATCH "${DOCS}/gifticons/gif-orphan-${SG_RUN}?updateMask.fieldPaths=brand" \
+  "${AUTH_A[@]}" "${JSON[@]}" -d '{"fields":{"brand":{"stringValue":"x"}}}'
+check "삭제된 그룹의 공유는 원본 삭제를 막지 않는다" 200 \
+  -X DELETE "${DOCS}/gifticons/gif-orphan-${SG_RUN}" "${AUTH_A[@]}"
+check "  (정리) 그 잠금 삭제" 200 -X DELETE "${DOCS}/shareLocks/gif-orphan-${SG_RUN}" "${AUTH_A[@]}"
+check "  (정리) 그 공유 항목 삭제" 200 -X DELETE "${DOCS}/sharedGifticons/${SG_ORPHAN}" "${AUTH_ADMIN[@]}"
+
 # SG_USE는 위 절에서 used가 됐고 gif-use-${SG_RUN}을 가리킨다.
 check "  (준비) gif-use-${SG_RUN}의 공유 잠금 → SG_USE(used)" 200   -X PATCH "${DOCS}/shareLocks/gif-use-${SG_RUN}" "${AUTH_A[@]}" "${JSON[@]}" -d "$(lock_doc "${SG_USE}")"
 check "공유가 사용 완료(used)면 원본 삭제 허용 — 이력은 그룹에 남는다" 200   -X DELETE "${DOCS}/gifticons/gif-use-${SG_RUN}" "${AUTH_A[@]}"
@@ -871,6 +890,54 @@ check "  (준비) B가 잠금 값을 map으로 위조" 200 -X PATCH "${DOCS}/sha
 check "비정상 모양 잠금(map)은 소유자의 삭제를 막지 못한다" 200   -X DELETE "${DOCS}/gifticons/gif-shape-${SG_RUN}" "${AUTH_A[@]}"
 check "  (정리) map 위조 잠금 삭제" 200 -X DELETE "${DOCS}/shareLocks/gif-shape-${SG_RUN}" "${AUTH_A[@]}"
 check "  (정리) used 잠금 삭제" 200 -X DELETE "${DOCS}/shareLocks/gif-use-${SG_RUN}" "${AUTH_A[@]}"
+
+echo "gifticons 수정 — 금지 필드와 공유 중 내용 변경"
+
+# `isOwnerUpdate`(v3.20). 내용 변경은 소유자만·공유가 끝났을 때만, 소유자·등록 시각은 누구도
+# 못 바꾼다. 만료일·상태는 공유 중에도 원본을 옮기는 정상 경로라 막으면 안 된다(대조군).
+SG_EDIT="shared-${SG_RUN}-edit"
+EDIT_BODY='{"fields":{"brand":{"stringValue":"투썸"},"productName":{"stringValue":"라떼"},"price":{"integerValue":"5000"},"barcode":{"stringValue":"123"},"category":{"stringValue":"기타"}}}'
+MASK_DETAILS='updateMask.fieldPaths=brand&updateMask.fieldPaths=productName&updateMask.fieldPaths=price&updateMask.fieldPaths=barcode&updateMask.fieldPaths=category'
+
+check "  (준비) A의 원본(수정용)" 200 -X PATCH "${DOCS}/gifticons/gif-edit-${SG_RUN}" \
+  "${AUTH_A[@]}" "${JSON[@]}" -d "$(gifticon_doc "${UID_A}")"
+check "소유자가 내용 다섯 필드 수정" 200 -X PATCH "${DOCS}/gifticons/gif-edit-${SG_RUN}?${MASK_DETAILS}" \
+  "${AUTH_A[@]}" "${JSON[@]}" -d "${EDIT_BODY}"
+check "비소유자(B)가 내용 수정 → 차단" 403 -X PATCH "${DOCS}/gifticons/gif-edit-${SG_RUN}?${MASK_DETAILS}" \
+  "${AUTH_B[@]}" "${JSON[@]}" -d "${EDIT_BODY}"
+check "소유자가 ownerId를 B로 변경 → 차단" 403 -X PATCH "${DOCS}/gifticons/gif-edit-${SG_RUN}?updateMask.fieldPaths=ownerId" \
+  "${AUTH_A[@]}" "${JSON[@]}" -d "{\"fields\":{\"ownerId\":{\"stringValue\":\"${UID_B}\"}}}"
+check "소유자가 registeredAt 변경 → 차단" 403 -X PATCH "${DOCS}/gifticons/gif-edit-${SG_RUN}?updateMask.fieldPaths=registeredAt" \
+  "${AUTH_A[@]}" "${JSON[@]}" -d '{"fields":{"registeredAt":{"timestampValue":"2020-01-01T00:00:00Z"}}}'
+
+check "  (준비) A가 그 원본을 공유(available)" 200 -X PATCH "${DOCS}/sharedGifticons/${SG_EDIT}" \
+  "${AUTH_A[@]}" "${JSON[@]}" -d "$(use_shared_doc "gif-edit-${SG_RUN}")"
+check "  (준비) 그 원본의 공유 잠금" 200 -X PATCH "${DOCS}/shareLocks/gif-edit-${SG_RUN}" \
+  "${AUTH_A[@]}" "${JSON[@]}" -d "$(lock_doc "${SG_EDIT}")"
+for f in brand productName price barcode category; do
+  case "${f}" in
+    price) v='{"integerValue":"1"}' ;;
+    *) v='{"stringValue":"x"}' ;;
+  esac
+  check "공유 중 ${f} 수정 → 차단" 403 -X PATCH "${DOCS}/gifticons/gif-edit-${SG_RUN}?updateMask.fieldPaths=${f}" \
+    "${AUTH_A[@]}" "${JSON[@]}" -d "{\"fields\":{\"${f}\":${v}}}"
+done
+check "공유 중에도 만료일 연장은 허용(extendSharedExpiry 경로)" 200 \
+  -X PATCH "${DOCS}/gifticons/gif-edit-${SG_RUN}?updateMask.fieldPaths=expiryDate" \
+  "${AUTH_A[@]}" "${JSON[@]}" -d "{\"fields\":{\"expiryDate\":{\"timestampValue\":\"${SG_EXP_NEW}\"}}}"
+check "공유 중에도 소유자의 상태 변경은 허용(markUsed 동기화 경로)" 200 \
+  -X PATCH "${DOCS}/gifticons/gif-edit-${SG_RUN}?${MASK_STATUS_ONLY}" \
+  "${AUTH_A[@]}" "${JSON[@]}" -d '{"fields":{"status":{"stringValue":"used"}}}'
+
+check "  (준비) B가 공유 항목을 사용 완료" 200 -X PATCH "${DOCS}/sharedGifticons/${SG_EDIT}?${MASK_STATUS_ONLY}" \
+  "${AUTH_B[@]}" "${JSON[@]}" -d '{"fields":{"status":{"stringValue":"used"}}}'
+# 앞서 저장한 EDIT_BODY와 **다른 값**이어야 한다 — 값이 같으면 `affectedKeys`가 비어
+# `hasActiveShare`를 평가하지 않고 통과해 이 케이스가 아무것도 검증하지 못한다.
+check "공유가 used면 내용 수정 허용 — 스냅샷은 이력으로 남는다" 200 \
+  -X PATCH "${DOCS}/gifticons/gif-edit-${SG_RUN}?${MASK_DETAILS}" \
+  "${AUTH_A[@]}" "${JSON[@]}" -d "${EDIT_BODY//라떼/모카}"
+check "  (정리) 수정용 잠금 삭제" 200 -X DELETE "${DOCS}/shareLocks/gif-edit-${SG_RUN}" "${AUTH_A[@]}"
+check "  (정리) 수정용 공유 항목 삭제" 200 -X DELETE "${DOCS}/sharedGifticons/${SG_EDIT}" "${AUTH_A[@]}"
 
 check "  (정리) 사용 동기화 공유 항목 삭제" 200 -X DELETE "${DOCS}/sharedGifticons/${SG_USE}" "${AUTH_A[@]}"
 check "  (정리) 만료 원본 공유 항목 삭제" 200 -X DELETE "${DOCS}/sharedGifticons/${SG_USE_EXP}" "${AUTH_A[@]}"

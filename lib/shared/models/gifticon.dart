@@ -92,6 +92,61 @@ enum FilterOption {
   category,
 }
 
+/// 사용자가 등록 뒤에 고칠 수 있는 기프티콘 내용.
+///
+/// `GifticonRepository.updateDetails`의 입력이다. 만료일은 여기 없다 — 만료일에는
+/// `GifticonRepository.extendExpiry`의 정책(뒤로만·사용 완료 거부)이 있어 별도 경로로
+/// 옮긴다. 이미지도 범위 밖이다(사용자 결정).
+class GifticonDetails {
+  /// 브랜드명. 앞뒤 공백을 뺀 값이 비어 있으면 안 된다.
+  final String brand;
+
+  /// 상품명. 앞뒤 공백을 뺀 값이 비어 있으면 안 된다.
+  final String productName;
+
+  /// 금액(원). 0은 허용하고 음수는 허용하지 않는다.
+  final int price;
+
+  /// 바코드 번호. **null이나 빈 값은 '번호 지움'이다**(값 유지가 아니다).
+  final String? barcode;
+
+  /// 카테고리. 앞뒤 공백을 뺀 값이 비어 있으면 안 된다([Gifticon.category] 계약).
+  final String category;
+
+  /// 값을 그대로 담는다. 판정·정리는 [normalized]가 한다.
+  const GifticonDetails({
+    required this.brand,
+    required this.productName,
+    required this.price,
+    required this.barcode,
+    required this.category,
+  });
+
+  /// 저장할 형태로 정리한 값을 돌려준다. 계약을 어기면 [StateError].
+  ///
+  /// 두 저장소 구현이 이 메서드 하나를 거친다 — 구현마다 판정을 적으면 한쪽만 공백을
+  /// 저장해 백엔드에 따라 목록·필터가 달라진다.
+  GifticonDetails normalized() {
+    final String trimmedBrand = brand.trim();
+    final String trimmedProductName = productName.trim();
+    final String trimmedCategory = category.trim();
+    final String trimmedBarcode = barcode?.trim() ?? '';
+    if (trimmedBrand.isEmpty) throw StateError('Brand must not be blank');
+    if (trimmedProductName.isEmpty) {
+      throw StateError('Product name must not be blank');
+    }
+    if (trimmedCategory.isEmpty) throw StateError('Category must not be blank');
+    if (price < 0) throw StateError('Price must not be negative: $price');
+    return GifticonDetails(
+      brand: trimmedBrand,
+      productName: trimmedProductName,
+      price: price,
+      barcode: trimmedBarcode.isEmpty ? null : trimmedBarcode,
+      category: trimmedCategory,
+    );
+  }
+}
+
 /// 기프티콘.
 ///
 /// 불변 값 객체. 상태/필드 변경은 [copyWith]로 새 인스턴스를 만든다.
@@ -161,6 +216,27 @@ class Gifticon {
     this.imagePath,
     this.targetGroupId,
   });
+
+  /// 내용만 [details]로 바꾼 새 인스턴스를 반환한다. [details]는 정리된 값이어야 한다.
+  ///
+  /// [copyWith]는 바코드를 null로 지우지 못해 따로 둔다. 두 저장소 구현이 이것을 거치므로
+  /// 필드가 늘어도 한 곳만 고치면 된다.
+  Gifticon withDetails(GifticonDetails details) {
+    return Gifticon(
+      id: id,
+      ownerId: ownerId,
+      brand: details.brand,
+      productName: details.productName,
+      price: details.price,
+      barcode: details.barcode,
+      category: details.category,
+      expiryDate: expiryDate,
+      registeredAt: registeredAt,
+      status: status,
+      imagePath: imagePath,
+      targetGroupId: targetGroupId,
+    );
+  }
 
   /// 일부 필드만 교체한 새 인스턴스를 반환한다.
   ///

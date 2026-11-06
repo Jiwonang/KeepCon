@@ -43,6 +43,7 @@ import '../../../shared/providers/error_reporter_provider.dart';
 import '../../../shared/providers/now_provider.dart';
 import '../../../shared/providers/repositories.dart';
 import '../../../shared/util/expiry_policy.dart';
+import 'package:keepcon/shared/util/money_format.dart' show parseWonInput;
 
 /// scan 입력 경로 구분.
 enum ScanSource {
@@ -168,13 +169,7 @@ class GifticonFormState {
   /// 금액은 선택 입력이므로 **비워 두면 0원**으로 본다. 계약상 [Gifticon.price]는
   /// non-nullable이지만 0(무료/사은품)은 허용하므로, 빈 값을 0으로 채워도 계약을
   /// 어기지 않는다. 숫자로 해석할 수 없는 값이면 `null`(검증 실패).
-  int? get parsedPrice {
-    final String digits = price.replaceAll(',', '').trim();
-    if (digits.isEmpty) {
-      return 0;
-    }
-    return int.tryParse(digits);
-  }
+  int? get parsedPrice => parseWonInput(price);
 
   String? validate() {
     if (brand.trim().isEmpty) {

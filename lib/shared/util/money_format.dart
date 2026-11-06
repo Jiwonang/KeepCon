@@ -6,7 +6,7 @@
 ///
 /// - main 목록/통계 표시 — `formatWon(int)` (lib/features/main/widgets/format.dart)
 /// - scan 금액 입력 포매터 — `formatThousands(String)`
-///   (lib/features/scan/util/price_input_formatter.dart)
+///   (lib/shared/util/price_input_formatter.dart)
 ///
 /// 두 소비자의 요구가 달라(한쪽은 부호 있는 `int`, 다른 쪽은 "숫자만 문자열")
 /// **코어는 하나([groupThousands])로 두고 소비자별 진입점을 얇게** 얹었다.
@@ -116,4 +116,13 @@ String formatThousands(String input) => groupThousands(digitsOnly(input));
 String formatWon(int won) {
   final String grouped = groupThousands(won.abs().toString());
   return won < 0 ? '-$grouped' : grouped;
+}
+
+/// 금액 입력칸의 글자를 원 단위 금액으로 바꾼다. 등록·수정 화면이 같은 규칙을 쓴다.
+///
+/// 금액은 선택 입력이므로 **비워 두면 0원**이다(`Gifticon.price`는 0을 허용한다). 콤마는
+/// 무시하고, 숫자로 해석할 수 없으면 `null`이다.
+int? parseWonInput(String input) {
+  final String digits = input.replaceAll(',', '').trim();
+  return digits.isEmpty ? 0 : int.tryParse(digits);
 }

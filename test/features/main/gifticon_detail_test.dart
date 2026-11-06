@@ -394,4 +394,8 @@ class _FailingUpdateRepo implements GifticonRepository {
 
   @override
   Future<void> deleteGifticon(String id) => _inner.deleteGifticon(id);
+
+  @override
+  Future<Gifticon> updateDetails(String id, GifticonDetails details) =>
+      _inner.updateDetails(id, details);
 }

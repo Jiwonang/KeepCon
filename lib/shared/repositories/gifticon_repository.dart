@@ -11,7 +11,8 @@ library;
 
 import '../models/gifticon.dart';
 
-/// 백엔드가 **아직 끝나지 않은 공유**를 보고 [GifticonRepository.deleteGifticon]을 거부했다.
+/// 백엔드가 **아직 끝나지 않은 공유**를 보고 [GifticonRepository.deleteGifticon]이나
+/// [GifticonRepository.updateDetails]를 거부했다.
 ///
 /// [StateError]를 상속하므로 기존 `on StateError` 소비자도 그대로 받는다(non-breaking).
 /// 타입으로 따로 둔 이유는 "없음"과 다음 행동이 다르기 때문이다 — 없는 기프티콘은 상세를
@@ -109,4 +110,22 @@ abstract class GifticonRepository {
   /// 타입을 먼저 받고, 나머지 [StateError]를 "없음"으로 읽는다. in-memory 구현은 공유를
   /// 모르므로 이 타입을 내지 않는다(두 저장소가 분리돼 있다).
   Future<void> deleteGifticon(String id);
+
+  /// 기프티콘 내용([GifticonDetails])을 고친다. 성공 시 갱신된 [Gifticon]을 반환한다.
+  ///
+  /// 가드 — 위반 시 [StateError]: 문서가 없거나, [GifticonDetails.normalized]가 거부하는
+  /// 값일 때. **상태는 가리지 않는다** — 사용 완료·만료된 기프티콘의 오타도 고칠 수 있다.
+  /// 만료일·상태·소유자·등록 시각은 바꾸지 않는다(부분 갱신).
+  ///
+  /// 행위자는 [deleteGifticon]과 같다 — **등록한 본인만**이고, 강제는 화면과
+  /// `firestore.rules`의 `gifticons` 규칙이 한다.
+  ///
+  /// ## ⚠️ 그룹에 공유 중(`ShareStatus.available`·`inUse`)이면 부르지 마라
+  /// `SharedGifticon`은 브랜드·상품명·바코드를 **스냅샷**으로 들고 있어 원본만 고치면
+  /// 그룹이 옛 정보를 본다. 사용자 결정은 스냅샷 동기화가 아니라 "회수한 뒤 수정"이다.
+  /// 강제와 예외 타입은 [deleteGifticon]과 같다 — 화면이 공유 여부를 확정한 뒤 경로를
+  /// 열고, Firestore는 규칙으로도 거부해 [GifticonShareBlockedException]을 낸다.
+  /// in-memory 구현은 공유를 모르므로 이 타입을 내지 않는다. 사용 완료된 공유 항목은
+  /// 이력이라 고쳐도 그 시점의 스냅샷을 그대로 남긴다.
+  Future<Gifticon> updateDetails(String id, GifticonDetails details);
 }

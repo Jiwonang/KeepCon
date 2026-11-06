@@ -126,7 +126,7 @@ List<Override> _inMemoryOverrides() {
   final DateTime now = DateTime.now();
   final InMemoryGifticonRepository sharedGifticonRepo =
       InMemoryGifticonRepository(seed: <Gifticon>[
-    // category는 스캔 페이지 선택지(`features/scan/widgets/category_tile.dart`의
+    // category는 스캔 페이지 선택지(`shared/models/gifticon_category.dart`의
     // GifticonCategory 라벨)와 글자 그대로 같아야 한다 — 홈 필터가 저장된 문자열을
     // 그대로 선택지로 만들어, 다른 라벨을 넣으면 중복 카테고리가 뜬다(#156).
     Gifticon(

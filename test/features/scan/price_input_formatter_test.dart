@@ -10,7 +10,7 @@ library;
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:keepcon/features/scan/state/gifticon_form_state.dart';
-import 'package:keepcon/features/scan/util/price_input_formatter.dart';
+import 'package:keepcon/shared/util/price_input_formatter.dart';
 
 /// 사용자가 [text]를 입력하고 커서가 맨 뒤에 있는 상태를 만든다.
 TextEditingValue _typed(String text) {

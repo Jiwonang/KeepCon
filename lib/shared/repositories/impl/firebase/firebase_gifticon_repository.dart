@@ -191,6 +191,38 @@ class FirebaseGifticonRepository implements GifticonRepository {
     }
   }
 
+  @override
+  Future<Gifticon> updateDetails(String id, GifticonDetails details) async {
+    final GifticonDetails d = details.normalized();
+    final DocumentReference<Map<String, dynamic>> ref = _col.doc(id);
+    final DocumentReference<Map<String, dynamic>> lockRef =
+        _db.collection(FirebaseShareRepository.shareLocksCollection).doc(id);
+
+    // [deleteGifticon]과 같은 구조다 — 잠금을 함께 읽어 공유 생성과 충돌시키고, 커밋의
+    // permission-denied는 규칙의 `hasActiveShare`로 읽는다(읽기 거부는 [_txGetOwned]가
+    // 이미 '없음'으로 번역했다).
+    try {
+      return await _db.runTransaction<Gifticon>((Transaction tx) async {
+        final Gifticon current = _fromDoc(await _txGetOwned(tx, ref));
+        await tx.get(lockRef);
+        // 이 다섯 필드만 담은 **부분 갱신**이다([extendExpiry]와 같은 이유). 규칙도
+        // 바뀐 키를 보고 판정하므로, 전체를 되쓰면 레거시 문서의 소유자·등록 시각 키가
+        // 함께 바뀌어 거부된다.
+        tx.update(ref, <String, dynamic>{
+          'brand': d.brand,
+          'productName': d.productName,
+          'price': d.price,
+          'barcode': d.barcode,
+          'category': d.category,
+        });
+        return current.withDetails(d);
+      });
+    } on FirebaseException catch (e) {
+      if (e.code != 'permission-denied') rethrow;
+      throw GifticonShareBlockedException(id);
+    }
+  }
+
   // --- 매핑 헬퍼 ---------------------------------------------------------
 
   /// 계약 [Gifticon] → Firestore 문서 맵.

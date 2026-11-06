@@ -62,6 +62,10 @@ class _FlakyGifticonRepository implements GifticonRepository {
 
   @override
   Future<void> deleteGifticon(String id) => inner.deleteGifticon(id);
+
+  @override
+  Future<Gifticon> updateDetails(String id, GifticonDetails details) =>
+      inner.updateDetails(id, details);
 }
 
 /// in-memory 구현 어댑터.

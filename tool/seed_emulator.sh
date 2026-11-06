@@ -267,6 +267,30 @@ if ! curl -s -o /dev/null --max-time 3 "http://${FS_HOST}/"; then
   exit 1
 fi
 
+# 카테고리 라벨 정본 — 공유 계약 enum에서 **직접 읽는다.**
+# **기존 데이터를 지우기 전에** 판정한다 — 여기서 실패하면 개발자의 에뮬레이터 데이터만
+# 날리고 끝난다(정본 파일을 옮겼을 때 실제로 그렇게 깨졌다).
+# 기댓값을 여기 리터럴로 적으면 가드의 양쪽이 같은 파일이 되어, enum 라벨이 바뀌어도
+# 검사가 통과한다(#156이 초록불 아래서 재발). sed 패턴은 ASCII이고 한글은 stdout으로만
+# 흐르므로 위 인코딩 관례(네이티브 바이너리에 한글 인자 금지)를 지킨다.
+CATEGORY_SRC='lib/shared/models/gifticon_category.dart'
+mapfile -t VALID_CATEGORIES < <(sed -n "s/^  [a-z]*(label: '\([^']*\)'.*/\1/p" "${CATEGORY_SRC}")
+if [[ "${#VALID_CATEGORIES[@]}" -lt 2 ]]; then
+  echo "✗ ${CATEGORY_SRC}에서 카테고리 라벨을 읽지 못했습니다(enum 형식이 바뀌었나요?)."
+  exit 1
+fi
+
+# 시드에 쓸 카테고리가 정본에 있는지 — **지우고 쓰기 전에** 막는다(fail-closed). 시드 라벨이
+# 선택지와 다르면 홈 필터에 같은 뜻의 항목이 둘로 갈린다(#156).
+assert_category() {
+  local c="$1" v
+  for v in "${VALID_CATEGORIES[@]}"; do [[ "${v}" == "${c}" ]] && return 0; done
+  echo "✗ 카테고리 '${c}' 는 ${CATEGORY_SRC}의 GifticonCategory 라벨에 없습니다."
+  echo "  정본: ${VALID_CATEGORIES[*]}"
+  exit 1
+}
+for c in '카페/음료' '치킨/피자' '편의점' '기타'; do assert_category "${c}"; done
+
 echo "기존 데이터 삭제 중…"
 fs_code=$(curl -s -o /dev/null -w '%{http_code}' -X DELETE "${FS_CLEAR}")
 auth_code=$(curl -s -o /dev/null -w '%{http_code}' -X DELETE \
@@ -287,28 +311,6 @@ MEMBER_TOKEN="${SEED_TOKEN}"
 
 echo "그룹 생성 중…"
 seed_group "${OWNER_UID}" "${OWNER_TOKEN}" '방장' "${MEMBER_UID}" '파티원' || exit 1
-
-# 카테고리 라벨 정본 — 스캔 페이지 enum에서 **직접 읽는다.**
-# 기댓값을 여기 리터럴로 적으면 가드의 양쪽이 같은 파일이 되어, enum 라벨이 바뀌어도
-# 검사가 통과한다(#156이 초록불 아래서 재발). sed 패턴은 ASCII이고 한글은 stdout으로만
-# 흐르므로 위 인코딩 관례(네이티브 바이너리에 한글 인자 금지)를 지킨다.
-CATEGORY_SRC='lib/features/scan/widgets/category_tile.dart'
-mapfile -t VALID_CATEGORIES < <(sed -n "s/^  [a-z]*(label: '\([^']*\)'.*/\1/p" "${CATEGORY_SRC}")
-if [[ "${#VALID_CATEGORIES[@]}" -lt 2 ]]; then
-  echo "✗ ${CATEGORY_SRC}에서 카테고리 라벨을 읽지 못했습니다(enum 형식이 바뀌었나요?)."
-  exit 1
-fi
-
-# 시드에 쓸 카테고리가 정본에 있는지 — **쓰기 전에** 막는다(fail-closed). 시드 라벨이
-# 선택지와 다르면 홈 필터에 같은 뜻의 항목이 둘로 갈린다(#156).
-assert_category() {
-  local c="$1" v
-  for v in "${VALID_CATEGORIES[@]}"; do [[ "${v}" == "${c}" ]] && return 0; done
-  echo "✗ 카테고리 '${c}' 는 ${CATEGORY_SRC}의 GifticonCategory 라벨에 없습니다."
-  echo "  정본: ${VALID_CATEGORIES[*]}"
-  exit 1
-}
-for c in '카페/음료' '치킨/피자' '편의점' '기타'; do assert_category "${c}"; done
 
 echo "개인 기프티콘 생성 중…"
 seed_gifticon 'seed-gift-star' "${OWNER_UID}" "${OWNER_TOKEN}" \

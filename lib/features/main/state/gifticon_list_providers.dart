@@ -129,6 +129,20 @@ final filterProvider = StateProvider<GifticonFilter>((ref) {
       if (previous != next) ref.controller.state = GifticonFilter.none;
     },
   );
+  // 고른 카테고리의 마지막 기프티콘을 고치거나 지우면 그 값이 선택지에서 사라진다. 남겨 두면
+  // 목록은 0개인데 시트 드롭다운은 "전체"로 접혀 보인다.
+  ref.listen<List<String>>(
+    availableCategoriesProvider,
+    (List<String>? previous, List<String> next) {
+      final GifticonFilter current = ref.controller.state;
+      final String? selected = current.categoryFilter;
+      if (selected != null &&
+          (previous?.contains(selected) ?? false) &&
+          !next.contains(selected)) {
+        ref.controller.state = current.withCategory(null);
+      }
+    },
+  );
   return GifticonFilter.none;
 });
 
@@ -164,3 +178,25 @@ final visibleGifticonsProvider = Provider<AsyncValue<List<Gifticon>>>((ref) {
     return sortGifticons(filtered, sort);
   });
 });
+
+/// 공유 상태가 이 행동([action] — 삭제·수정)을 막으면 안내 문구를, 막지 않으면 `null`을 돌려준다.
+///
+/// 상세 화면의 삭제·수정과 수정 화면의 저장이 같은 판정을 쓴다. 공유 여부가 확정되기 전에도
+/// 막는다(fail-closed). 사용 완료된 공유 항목은 이력이라 막지 않는다. 회수(`cancelShare`)는
+/// `available`만 받으므로 `inUse`에는 회수를 권하지 않는다.
+///
+/// 조회 **실패**와 로딩은 문구를 나눈다 — 실패를 "확인하는 중"이라 하면 끝나지 않을 일을
+/// 기다리게 한다. 호출자는 실패일 때 `retrySharedGifticonIds`로 구독을 되살린다.
+String? shareBlockMessage(
+  AsyncValue<SharedGifticon?> shareState, {
+  required String action,
+}) {
+  if (shareState.hasError) return '공유 상태를 확인하지 못했어요. 잠시 후 다시 시도해 주세요.';
+  if (!shareState.hasValue) return '공유 상태를 확인하는 중이에요. 잠시 후 다시 시도해 주세요.';
+  return switch (shareState.value?.status) {
+    ShareStatus.available =>
+      '그룹에 공유 중이라 $action할 수 없어요. 공유 탭에서 공유를 회수한 뒤 $action해 주세요.',
+    ShareStatus.inUse => '그룹에서 사용 중이라 지금은 $action할 수 없어요.',
+    ShareStatus.used || null => null,
+  };
+}

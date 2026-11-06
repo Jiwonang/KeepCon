@@ -1,7 +1,7 @@
 /// 금액 입력 천 단위 콤마 포매터.
 ///
-/// 커서 복원·선행 0 처리 같은 **입력 UX 로직만 scan 로컬**이고,
-/// 콤마 포맷 자체의 정본은 `lib/shared/util/money_format.dart`다(아래 승격 상태).
+/// 콤마 포맷 자체의 정본은 `lib/shared/util/money_format.dart`이고, 이 파일은 그 위의
+/// 입력 UX(커서 복원·선행 0 처리)다. 등록(scan)과 수정(main) 두 화면이 쓴다.
 ///
 /// 사용자가 금액을 입력하는 동안 "4500" → "4,500"처럼 천 단위 콤마를
 /// 실시간으로 붙여 준다.
@@ -16,20 +16,20 @@
 /// 확인됐고(규칙 ③), 공유 정본 `lib/shared/util/money_format.dart`로 승격했다.
 /// 이 파일의 [formatThousands]는 이제 로컬 사본이 아니라 그 정본의 재export이며,
 /// 아래 [ThousandsSeparatorInputFormatter]도 정본의 `digitsOnly`를 소비한다.
-/// (입력 중 커서 위치·선행 0 처리는 scan 입력 UX 고유 로직이므로 로컬에 남긴다)
+/// 입력 포매터 자체도 수정 화면이 두 번째 소비자가 되어 이 위치로 승격했다.
 library;
 
 import 'package:flutter/services.dart';
 
 // 실제로 소비하는 심벌만 가져온다 — formatWon 등 나머지가
 // 이 파일 스코프에 암묵적으로 들어오지 않게 한다.
-import '../../../shared/util/money_format.dart' show digitsOnly, groupThousands;
+import 'money_format.dart' show digitsOnly, groupThousands;
 
 /// 공유 정본의 천 단위 포맷 함수를 그대로 노출한다.
 ///
-/// scan 소비자가 import 경로를 바꾸지 않고 쓰도록 재export하며,
+/// 입력칸 초기값을 만드는 등록·수정 화면이 포매터와 함께 쓰도록 재export하며,
 /// 구현은 `lib/shared/util/money_format.dart` 한 곳뿐이다.
-export '../../../shared/util/money_format.dart' show formatThousands;
+export 'money_format.dart' show formatThousands;
 
 /// 선행 0 (예: "007"의 "00").
 ///
