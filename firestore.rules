@@ -12,7 +12,7 @@ rules_version = '2';
 // - inviteTokens: 링크 토큰 → 그룹 조회. **get만** 열고 list는 막는다 / 쓰기는 방장만.
 // - inviteCodes: 6자리 초대코드 → 그룹 조회. 같은 규약이되 만료 정본이 5분짜리다.
 // - joinRequests: 요청자 본인과 그 그룹의 방장만. 생성은 비멤버가 만료 전에만.
-// - shareLocks: 내부 잠금 메커니즘(민감 데이터 없음) — 로그인 사용자면 관리.
+// - shareLocks: 공유 잠금 — 단건 읽기는 로그인 사용자, 쓰기는 공유 항목과 짝이 맞을 때만.
 // - 그 외: 기본 차단.
 //
 // ⚠️ 방어 수준(defense-in-depth): 세밀한 행위 가드(방장만 소유권 이전, 공유자만 취소,
@@ -163,10 +163,10 @@ service cloud.firestore {
       // 한 번 더 막는다(클라이언트는 삭제 트랜잭션에서 잠금을 읽어 공유 생성과 충돌시킨다).
       //
       // 근거는 `shareLocks/{id}`가 가리키는 공유 항목이다. ⚠️ **잠금은 믿지 않는다** —
-      // 로그인한 누구나 쓸 수 있으므로(아래 `shareLocks`), 포인터가 가리키는 항목 **자체가**
+      // 쓰기를 좁히기 전(아래 `shareLocks`)의 값이 남아 있을 수 있으므로, 포인터가 가리키는
+      // 항목 **자체가**
       // 이 원본을 가리키는지(`gifticonId` — 생성 시 원본 소유 검사·이후 불변) 본다. 그래서
-      // 남이 포인터를 다른 활성 항목으로 바꿔 소유자의 삭제를 막을 수는 없다(포인터를
-      // 지우는 위조는 소유자 자신의 삭제를 허용할 뿐이다). `used`는 이력이라 막지 않는다.
+      // 옛 위조 값이 소유자의 삭제를 막을 수는 없다. `used`는 이력이라 막지 않는다.
       //
       // **그룹이 없으면 끝난 공유다.** 그룹 삭제 뒤의 공유 항목 정리는 멤버 검사가 지워진
       // 그룹 문서를 읽지 못해 규칙상 실패하므로 `available` 항목과 잠금이 남는다. 쓸 사람도 회수할 사람도
@@ -395,10 +395,57 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
-    // 공유 잠금(내부 메커니즘) — 민감 데이터 없음. 그룹 삭제 후 정리(cascade)도
-    // 허용해야 하므로 로그인 사용자 수준으로 둔다.
+    // 공유 잠금(내부 메커니즘) — "한 기프티콘 최대 1회 공유"의 원자적 강제이자 삭제·수정
+    // 차단(`hasActiveShare`)의 근거다. 그래서 **공유 항목과 어긋나게 쓰지 못한다.**
+    //
+    // 정상 쓰기는 전부 공유 항목과 같은 커밋이다 — 공유(`shareGifticon`: 항목+잠금 생성),
+    // 회수(`cancelShare`: 항목+잠금 삭제), 그룹 정리(`_cascadeDeleteGroupShares`: 배치).
+    // `getAfter`로 그 커밋 **뒤의** 항목을 본다. 항목 쪽 권한은 `sharedGifticons` 규칙이
+    // 이미 검사하므로(생성은 원본 소유, 삭제는 공유자·방장) 잠금은 짝만 맞는지 본다.
+    //
+    // 예전에는 로그인만 하면 쓸 수 있어, 남이 잠금을 지워 공유 중인 원본의 차단을 풀거나
+    // 재공유를 허용하고, 잠금을 만들어 소유자의 공유를 막을 수 있었다.
     match /shareLocks/{gifticonId} {
-      allow read, write: if isSignedIn();
+      // 이 잠금이 가리키는 항목이 커밋 뒤에도 살아 있고 **이 기프티콘을 가리키는가**.
+      //
+      // 그룹이 사라진 항목은 살아 있는 것으로 치지 않는다(`hasActiveShare`와 같은 기준).
+      // 그 항목은 멤버 검사가 그룹 문서를 읽지 못해 아무도 지울 수 없으므로, 여기서까지
+      // 살아 있다고 보면 규칙상으로도 잠금을 지울 길이 없어진다(앱에는 아직 그 경로가 없다).
+      function targetsLiveShare(shareId) {
+        let sharePath = /databases/$(database)/documents/sharedGifticons/$(shareId);
+        return shareId is string
+          && shareId.matches('^[A-Za-z0-9_-]+$')
+          && existsAfter(sharePath)
+          && getAfter(sharePath).data.get('gifticonId', '') == gifticonId
+          && existsAfter(/databases/$(database)/documents/groups/$(getAfter(sharePath).data.get('groupId', '')));
+      }
+
+      // 단건 읽기만 연다 — 앱의 모든 조회는 기프티콘 id로 문서를 집는다(공유·삭제·수정·보정).
+      // **목록은 막는다.** 잠금에는 그룹 id가 들어 있어, 열어 두면 로그인한 누구나 모든 그룹
+      // id를 얻는다(`inviteTokens`의 `list`를 막은 것과 같은 이유).
+      allow get: if isSignedIn();
+      allow list: if false;
+
+      // 생성: 커밋 뒤의 항목이 이 기프티콘을 가리키고 **행위자가 그 공유자**여야 한다.
+      // 공유자는 생성 규칙의 `ownsGifticon`으로 원본 소유자이므로, 남의 기프티콘에 잠금을
+      // 미리 만들어 공유를 막는 길이 닫힌다.
+      allow create: if isSignedIn()
+        && request.resource.data.keys().hasOnly(['sharedGifticonId', 'groupId'])
+        && targetsLiveShare(request.resource.data.get('sharedGifticonId', ''))
+        && getAfter(/databases/$(database)/documents/sharedGifticons/$(request.resource.data.sharedGifticonId)).data.get('sharedByUserId', '') == uid();
+
+      // 변경: 정상 경로에 없다. 포인터를 바꾸는 것은 곧 위조다.
+      allow update: if false;
+
+      // 삭제: 가리키는 항목이 커밋 뒤에 남아 있지 않을 때만 — 회수·방장의 항목 삭제, 그리고 항목만
+      // 먼저 지워져 남은 낡은 잠금. 살아 있는 항목의 잠금만 지우는 요청은 거부된다.
+      //
+      // `resource == null`은 없는 잠금을 지우는 경우다 — `cancelShare`·그룹 정리는 잠금
+      // 유무를 묻지 않고 함께 지운다. 예외가 없으면 `resource.data`가 평가 오류를 내 잠금
+      // 없는 옛 공유의 회수까지 통째로 거부된다.
+      allow delete: if isSignedIn()
+        && (resource == null
+            || !targetsLiveShare(resource.data.get('sharedGifticonId', '')));
     }
 
     // 알림 읽음 상태(마지막 읽음 시각) — 본인 것만 읽기/쓰기.
