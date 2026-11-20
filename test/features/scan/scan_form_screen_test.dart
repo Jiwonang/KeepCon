@@ -444,6 +444,54 @@ void main() {
     expect(saved.expiryDate, DateTime(2031, 1, 31));
   });
 
+  test('앞 세션의 제출 결과가 새 세션의 진행 상태를 덮어쓰지 않는다', () async {
+    // A의 조회를 기다리는 사이 B를 시작해 제출까지 누른 상황이다. A가 먼저 끝나며
+    // 결과를 state에 쓰면 B가 세워 둔 '저장 중'이 A의 성공으로 바뀌어 저장 버튼과
+    // 재진입 가드가 다시 열린다 — 그때 한 번 더 누르면 B가 두 번 저장된다
+    // (CodeRabbit, PR #194).
+    final _SequencedGateRepository gated = _SequencedGateRepository();
+    addTearDown(gated.releaseAll);
+    final ProviderContainer container =
+        makeContainer(gifticonRepository: gated);
+    final GifticonFormController controller =
+        container.read(gifticonFormControllerProvider.notifier);
+
+    void fill(String barcode) {
+      controller.setBrand('스타벅스');
+      controller.setProductName('아메리카노 T');
+      controller.setBarcode(barcode);
+      controller.setExpiryDate(DateTime(2031, 1, 31));
+    }
+
+    controller.startWith(ScanSource.manual);
+    fill('1111111111111');
+    final Future<Gifticon?> a = controller.submit(); // 첫 조회에서 대기
+
+    controller.startWith(ScanSource.manual);
+    fill('2222222222222');
+    final Future<Gifticon?> b = controller.submit(); // 둘째 조회에서 대기
+
+    // A만 풀어 끝까지 보낸다 — 저장은 되지만 결과는 B의 state에 쓰이지 않는다.
+    gated.release(0);
+    expect((await a)?.barcode, '1111111111111');
+    expect(
+      container.read(gifticonFormControllerProvider).submit,
+      isA<ScanSubmitInProgress>(),
+      reason: 'B는 아직 저장 중이다 — A의 결과가 그 상태를 바꾸면 안 된다',
+    );
+    // 그래서 연타는 여전히 무시된다.
+    expect(await controller.submit(), isNull);
+
+    gated.release(1);
+    expect((await b)?.barcode, '2222222222222');
+    expect(
+      container.read(gifticonFormControllerProvider).submit,
+      isA<ScanSubmitSuccess>(),
+    );
+    gated.releaseAll();
+    expect(await gated.getGifticons(myId), hasLength(2));
+  });
+
   group('무료 플랜 저장 한도', () {
     const int limit = UserPlan.freeGifticonLimit;
 
@@ -1130,6 +1178,38 @@ class _ThrowingGifticonRepository extends InMemoryGifticonRepository {
 ///
 /// 타이머가 아니라 [Completer]로 막는다 — `Stream.periodic`류는 teardown에서
 /// `Pending timers`로 죽는다(이 저장소의 알려진 함정).
+/// `getGifticons` 호출을 **호출 순서대로 따로** 붙잡는 저장소.
+///
+/// [_GatedGifticonRepository]는 문이 하나라 겹친 두 제출이 함께 풀린다. 한 제출만
+/// 먼저 끝내야 하는 테스트는 n번째 호출을 골라 풀 수 있어야 한다.
+class _SequencedGateRepository extends InMemoryGifticonRepository {
+  final List<Completer<void>> _gates = <Completer<void>>[];
+  bool _open = false;
+
+  /// [index]번째(0부터) `getGifticons` 호출을 풀어 준다.
+  void release(int index) {
+    if (!_gates[index].isCompleted) _gates[index].complete();
+  }
+
+  /// 지금까지의 호출을 모두 풀고, 이후 호출은 막지 않는다(멱등).
+  void releaseAll() {
+    _open = true;
+    for (final Completer<void> gate in _gates) {
+      if (!gate.isCompleted) gate.complete();
+    }
+  }
+
+  @override
+  Future<List<Gifticon>> getGifticons(String ownerId) async {
+    if (!_open) {
+      final Completer<void> gate = Completer<void>();
+      _gates.add(gate);
+      await gate.future;
+    }
+    return super.getGifticons(ownerId);
+  }
+}
+
 class _GatedGifticonRepository extends InMemoryGifticonRepository {
   final Completer<void> _gate = Completer<void>();
 
