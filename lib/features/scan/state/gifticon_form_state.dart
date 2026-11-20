@@ -299,10 +299,12 @@ class GifticonFormController extends StateNotifier<GifticonFormState> {
       return null;
     }
 
-    // 검증을 통과한 번호를 **지금** 잡아 둔다. 아래에서 `state.barcode`를 다시 읽으면
-    // 조회를 기다리는 사이 세션이 새로 시작됐을 때([startWith]가 state를 비운다) 빈
-    // 값이 중복 검사와 저장으로 흘러간다 — 위 검증이 막은 바로 그 값이다.
-    final String trimmedBarcode = state.barcode.trim();
+    // 검증을 통과한 **입력 전체**를 지금 고정한다. 아래 조회들을 기다리는 사이 사용자가
+    // 폼을 나가 새 등록을 시작하면 [startWith]가 state를 통째로 갈아끼운다 — 그 뒤에
+    // `state`를 다시 읽으면 검증하지 않은 값(빈 번호·null 만료일)이나 다른 세션의 값이
+    // 섞여 저장된다. 결과 상태(`submit`)만 최신 state에 쓴다.
+    final GifticonFormState input = state;
+    final String trimmedBarcode = input.barcode.trim();
 
     final currentUser = _ref.read(authRepositoryProvider).currentUser;
 
@@ -430,7 +432,7 @@ class GifticonFormController extends StateNotifier<GifticonFormState> {
       }
     }
 
-    // 바코드 중복 검증. 번호는 검증 직후 잡아 둔 값이다(빈 값일 수 없다).
+    // 바코드 중복 검증. 번호는 검증 직후 고정한 입력의 것이다(빈 값일 수 없다).
     Gifticon? duplicate;
 
     for (final Gifticon g in allGifticons) {
@@ -447,9 +449,9 @@ class GifticonFormController extends StateNotifier<GifticonFormState> {
       return null;
     }
 
-    final String category = state.category.trim().isEmpty
+    final String category = input.category.trim().isEmpty
         ? kDefaultCategory
-        : state.category.trim();
+        : input.category.trim();
 
     // [Gifticon.imagePath]는 **일부러 채우지 않는다.**
     //
@@ -481,15 +483,15 @@ class GifticonFormController extends StateNotifier<GifticonFormState> {
     final Gifticon draft = Gifticon(
       id: '',
       ownerId: currentUser.id,
-      brand: state.brand.trim(),
-      productName: state.productName.trim(),
-      price: state.parsedPrice!,
+      brand: input.brand.trim(),
+      productName: input.productName.trim(),
+      price: input.parsedPrice!,
       barcode: trimmedBarcode,
       category: category,
-      expiryDate: state.expiryDate!,
+      expiryDate: input.expiryDate!,
       registeredAt: DateTime.now(),
       status: GifticonStatus.available,
-      targetGroupId: state.targetGroupId,
+      targetGroupId: input.targetGroupId,
     );
 
     try {

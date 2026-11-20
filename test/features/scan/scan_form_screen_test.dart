@@ -402,11 +402,46 @@ void main() {
     controller.setExpiryDate(DateTime(2031, 1, 31));
 
     expect(await controller.submit(), isNull);
+    // 실패의 종류만 보면 다른 필드가 검증에 걸려도 통과한다 — 사유까지 본다.
     expect(
       container.read(gifticonFormControllerProvider).submit,
-      isA<ScanSubmitFailure>(),
+      isA<ScanSubmitFailure>().having(
+        (ScanSubmitFailure f) => f.message,
+        'message',
+        '바코드 번호를 입력하세요.',
+      ),
     );
     expect(await repo.getGifticons(myId), isEmpty);
+  });
+
+  test('저장을 기다리는 사이 새 등록이 시작돼도 검증한 입력 그대로 저장된다', () async {
+    // 조회가 끝나기 전에 사용자가 폼을 나가 새 등록을 시작하면 [startWith]가 state를
+    // 갈아끼운다. submit()이 그 뒤에 state를 다시 읽으면 새 세션의 값(여기서는 빈
+    // 입력)이 저장 경로로 들어온다 — 검증을 통과한 것은 옛 입력이다.
+    final _GatedGifticonRepository gated = _GatedGifticonRepository();
+    addTearDown(gated.release);
+    final ProviderContainer container =
+        makeContainer(gifticonRepository: gated);
+    final GifticonFormController controller =
+        container.read(gifticonFormControllerProvider.notifier);
+
+    controller.startWith(ScanSource.manual);
+    controller.setBrand('스타벅스');
+    controller.setProductName('아메리카노 T');
+    controller.setBarcode('8801234567890');
+    controller.setExpiryDate(DateTime(2031, 1, 31));
+
+    final Future<Gifticon?> pending = controller.submit();
+    // 조회가 게이트에 걸려 있는 동안 새 세션이 시작된다.
+    controller.startWith(ScanSource.manual);
+    gated.release();
+
+    final Gifticon? saved = await pending;
+    expect(saved, isNotNull);
+    expect(saved!.brand, '스타벅스');
+    expect(saved.productName, '아메리카노 T');
+    expect(saved.barcode, '8801234567890');
+    expect(saved.expiryDate, DateTime(2031, 1, 31));
   });
 
   group('무료 플랜 저장 한도', () {
