@@ -158,6 +158,7 @@ void main() {
         brand: '스타벅스',
         productName: '아메리카노 T',
         price: formatted,
+        barcode: '8801234567890',
         expiryDate: DateTime(2026, 12, 31),
       );
 
@@ -169,6 +170,7 @@ void main() {
         brand: '스타벅스',
         productName: '사은품 쿠폰',
         price: '0',
+        barcode: '8801234567890',
         expiryDate: DateTime(2026, 12, 31),
       );
 

@@ -186,15 +186,70 @@ void main() {
     expect(find.text('수정했어요.'), findsOneWidget);
   });
 
-  testWidgets('바코드를 비우면 지워진다', (WidgetTester tester) async {
+  testWidgets('있던 바코드는 비워서 저장할 수 없다(#159)', (WidgetTester tester) async {
+    // 이 앱은 번호에서 바코드를 다시 그린다 — 번호를 지우면 매장에서 제시할 것이 없다.
+    // 등록 폼이 번호를 필수로 받으므로, 여기를 열어 두면 "등록 → 수정으로 번호 지움"이
+    // 그 검증을 우회한다. (전에는 이 자리가 '바코드를 비우면 지워진다'였다.)
     boot(<Gifticon>[_gifticon()]);
     await mountDetail(tester, _gifticon());
     await openEdit(tester);
 
     await tester.enterText(field('바코드 번호'), '');
+    // 다른 필드를 함께 고쳐도 통째로 막힌다 — 번호만 빼고 저장되지 않는다.
+    await tester.enterText(field('상품명'), '라떼');
     await tapSave(tester);
 
-    expect((await repo.getGifticonById('g1'))!.barcode, isNull);
+    expect(find.text('바코드 번호를 입력해 주세요.'), findsOneWidget);
+    expect(find.byType(GifticonEditPage), findsOneWidget);
+    final Gifticon stored = (await repo.getGifticonById('g1'))!;
+    expect(stored.barcode, '111');
+    expect(stored.productName, '아메리카노 T');
+  });
+
+  testWidgets('공백뿐인 번호도 지운 것으로 본다(#159)', (WidgetTester tester) async {
+    // 계약 정리([GifticonDetails.normalized])가 공백을 null로 접으므로, 검증이 trim 없이
+    // 보면 공백 한 칸으로 번호를 지울 수 있다.
+    boot(<Gifticon>[_gifticon()]);
+    await mountDetail(tester, _gifticon());
+    await openEdit(tester);
+
+    await tester.enterText(field('바코드 번호'), '   ');
+    await tapSave(tester);
+
+    expect(find.text('바코드 번호를 입력해 주세요.'), findsOneWidget);
+    expect((await repo.getGifticonById('g1'))!.barcode, '111');
+  });
+
+  testWidgets('처음부터 번호가 없던 것은 비운 채로 다른 필드를 고칠 수 있다',
+      (WidgetTester tester) async {
+    // 등록 폼이 필수가 되기 전에 저장된 문서다. 번호를 모른다는 이유로 상품명 수정까지
+    // 막으면 고칠 길이 없다 — 막는 것은 "있던 번호를 지우는 것"이지 "없는 채로 두는 것"이
+    // 아니다.
+    final Gifticon legacy = _gifticon(barcode: null);
+    boot(<Gifticon>[legacy]);
+    await mountDetail(tester, legacy);
+    await openEdit(tester);
+
+    await tester.enterText(field('상품명'), '라떼');
+    await tapSave(tester);
+
+    expect(find.text('바코드 번호를 입력해 주세요.'), findsNothing);
+    final Gifticon stored = (await repo.getGifticonById('g1'))!;
+    expect(stored.productName, '라떼');
+    expect(stored.barcode, isNull);
+  });
+
+  testWidgets('번호가 없던 것에 번호를 채워 넣을 수 있다', (WidgetTester tester) async {
+    // 번호 없이 저장된 옛 기프티콘을 쓸 수 있게 만드는 유일한 경로다.
+    final Gifticon legacy = _gifticon(barcode: null);
+    boot(<Gifticon>[legacy]);
+    await mountDetail(tester, legacy);
+    await openEdit(tester);
+
+    await tester.enterText(field('바코드 번호'), '8801234567890');
+    await tapSave(tester);
+
+    expect((await repo.getGifticonById('g1'))!.barcode, '8801234567890');
   });
 
   testWidgets('바꾼 것이 없으면 쓰지 않고 닫는다', (WidgetTester tester) async {

@@ -178,6 +178,12 @@ class GifticonFormState {
     if (productName.trim().isEmpty) {
       return '상품명을 입력하세요.';
     }
+    // 필수다(#159). 이 앱은 이미지를 저장하지 않고 번호에서 바코드를 다시 그리므로,
+    // 번호 없이 저장하면 매장에서 제시할 것이 없다. 화면 validator가 먼저 막지만
+    // 폼을 거치지 않는 호출도 같은 결과를 내도록 여기서도 본다.
+    if (barcode.trim().isEmpty) {
+      return '바코드 번호를 입력하세요.';
+    }
     final int? parsed = parsedPrice;
     if (parsed == null) {
       return '금액(원)은 숫자로 입력하세요.';
@@ -293,6 +299,11 @@ class GifticonFormController extends StateNotifier<GifticonFormState> {
       return null;
     }
 
+    // 검증을 통과한 번호를 **지금** 잡아 둔다. 아래에서 `state.barcode`를 다시 읽으면
+    // 조회를 기다리는 사이 세션이 새로 시작됐을 때([startWith]가 state를 비운다) 빈
+    // 값이 중복 검사와 저장으로 흘러간다 — 위 검증이 막은 바로 그 값이다.
+    final String trimmedBarcode = state.barcode.trim();
+
     final currentUser = _ref.read(authRepositoryProvider).currentUser;
 
     if (currentUser == null) {
@@ -345,12 +356,13 @@ class GifticonFormController extends StateNotifier<GifticonFormState> {
     // 직접 쏘면 11개째도 그대로 저장된다. 진짜 강제는 서버 쪽 카운터 스키마가
     // 필요하고 그건 계약 소유자 영역이다.
     //
-    // **보유 중([GifticonStatus.available])만 센다.** 전체 개수로 세면 무료
-    // 사용자가 막다른 골목에 갇힌다 — 10개를 등록해 전부 사용 완료해도 개수는
-    // 그대로인데, 계약에 삭제 API가 없고(전수 확인: 5개 메서드, delete 없음)
-    // dev/prod에서는 보안 규칙이 plan 쓰기를 막아 프리미엄 전환도 되지 않는다.
-    // 그러면 등록이 영구히 정지한다. available 기준이면 '사용 완료 처리'가 곧
-    // 자리를 비우는 탈출구가 되고, "10개까지 **보관**"이라는 제품 의도에도 맞는다.
+    // **보유 중([GifticonStatus.available])만 센다.** 전체 개수로 세면 다 쓴
+    // 기프티콘이 자리를 계속 차지한다 — 10개를 등록해 전부 사용 완료해도 개수는
+    // 그대로라, 쓴 기록을 지워야만 새로 등록할 수 있게 된다(dev/prod에서는 보안
+    // 규칙이 plan 쓰기를 막아 프리미엄 전환도 되지 않는다). available 기준이면
+    // '사용 완료 처리'가 곧 자리를 비우고, "10개까지 **보관**"이라는 제품 의도에도
+    // 맞는다. (이 기준을 정할 때는 계약에 삭제가 없어 전체 개수 방식이 등록을 영구히
+    // 멈추게 했다. 지금은 삭제가 있지만 — `deleteGifticon` — 기준은 그대로 옳다.)
     //
     // **날짜가 지난 것도 세지 않는다(#175).** `status`를 expired로 옮기는 주체가
     // 없어 만료품도 저장값은 available 그대로다 — 그대로 세면 만료품이 쌓인 무료
@@ -418,26 +430,21 @@ class GifticonFormController extends StateNotifier<GifticonFormState> {
       }
     }
 
-    // 바코드 중복 검증
-    final String? trimmedBarcode =
-        state.barcode.trim().isEmpty ? null : state.barcode.trim();
+    // 바코드 중복 검증. 번호는 검증 직후 잡아 둔 값이다(빈 값일 수 없다).
+    Gifticon? duplicate;
 
-    if (trimmedBarcode != null) {
-      Gifticon? duplicate;
-
-      for (final Gifticon g in allGifticons) {
-        if (g.barcode == trimmedBarcode) {
-          duplicate = g;
-          break;
-        }
+    for (final Gifticon g in allGifticons) {
+      if (g.barcode == trimmedBarcode) {
+        duplicate = g;
+        break;
       }
+    }
 
-      if (duplicate != null) {
-        state = state.copyWith(
-          submit: ScanSubmitDuplicate(duplicate),
-        );
-        return null;
-      }
+    if (duplicate != null) {
+      state = state.copyWith(
+        submit: ScanSubmitDuplicate(duplicate),
+      );
+      return null;
     }
 
     final String category = state.category.trim().isEmpty

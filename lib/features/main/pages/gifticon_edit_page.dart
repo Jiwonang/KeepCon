@@ -4,6 +4,10 @@
 /// 필드(브랜드·상품명·바코드·금액·카테고리)뿐이다. 만료일은 연장 정책을 따르는 별도
 /// 경로이고, 이미지는 범위 밖이다(사용자 결정).
 ///
+/// 바코드는 **바꿀 수는 있어도 지울 수는 없다**(#159 — `_validateBarcode`). 계약
+/// [GifticonDetails.barcode]는 빈 값을 '번호 지움'으로 받지만, 이 화면이 그 입력을
+/// 만들지 않는다. 처음부터 번호가 없던 것만 비운 채로 둘 수 있다.
+///
 /// ## 등록 폼을 재사용하지 않는 이유
 /// scan의 `GifticonFormScreen`은 스캔 출처·무료 한도 게이트·공유 대상 그룹·저장 뒤 공유를
 /// 한 컨트롤러([GifticonFormController])에 묶고 있고, 이미 등록한 기프티콘에는 그 전부가
@@ -226,6 +230,24 @@ class _GifticonEditPageState extends ConsumerState<GifticonEditPage> {
   String? _required(String? value, String message) =>
       (value == null || value.trim().isEmpty) ? message : null;
 
+  /// 바코드 칸 검증. **있던 번호는 지울 수 없다(#159).**
+  ///
+  /// 이 앱은 이미지를 저장하지 않고 번호에서 바코드를 다시 그리므로, 번호를 지우면
+  /// 매장에서 제시할 것이 없는 기프티콘이 된다. 등록 폼이 번호를 필수로 받는 것과 같은
+  /// 이유다 — 여기를 열어 두면 "등록 → 수정으로 번호 지움"이 그 검증을 우회한다.
+  ///
+  /// 처음부터 번호가 없던 것(등록 폼이 필수가 되기 전의 문서)은 비운 채로 둘 수 있다 —
+  /// 번호를 모른다는 이유로 브랜드·상품명 같은 다른 필드의 수정까지 막으면 고칠 길이
+  /// 없다(아래 중복 검사가 그대로인 번호를 건너뛰는 것과 같은 판단).
+  String? _validateBarcode(String? value) {
+    final String trimmed = value?.trim() ?? '';
+    if (trimmed.isEmpty) {
+      final bool hadBarcode = (widget.gifticon.barcode ?? '').trim().isNotEmpty;
+      return hadBarcode ? '바코드 번호를 입력해 주세요.' : null;
+    }
+    return trimmed == _duplicateBarcode ? '이미 등록된 바코드 번호입니다.' : null;
+  }
+
   @override
   Widget build(BuildContext context) {
     // 저장 시점의 `ref.read`가 살아 있는 값을 보도록 구독을 붙들어 둔다(autoDispose).
@@ -271,10 +293,7 @@ class _GifticonEditPageState extends ConsumerState<GifticonEditPage> {
                   labelText: '바코드 번호',
                   border: OutlineInputBorder(),
                 ),
-                validator: (String? v) =>
-                    v != null && v.trim() == _duplicateBarcode
-                        ? '이미 등록된 바코드 번호입니다.'
-                        : null,
+                validator: _validateBarcode,
               ),
               const SizedBox(height: 16),
               TextFormField(
