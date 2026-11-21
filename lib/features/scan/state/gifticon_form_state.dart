@@ -178,6 +178,12 @@ class GifticonFormState {
     if (productName.trim().isEmpty) {
       return '상품명을 입력하세요.';
     }
+    // 필수다(#159). 이 앱은 이미지를 저장하지 않고 번호에서 바코드를 다시 그리므로,
+    // 번호 없이 저장하면 매장에서 제시할 것이 없다. 화면 validator가 먼저 막지만
+    // 폼을 거치지 않는 호출도 같은 결과를 내도록 여기서도 본다.
+    if (barcode.trim().isEmpty) {
+      return '바코드 번호를 입력하세요.';
+    }
     final int? parsed = parsedPrice;
     if (parsed == null) {
       return '금액(원)은 숫자로 입력하세요.';
@@ -197,7 +203,15 @@ class GifticonFormController extends StateNotifier<GifticonFormState> {
 
   final Ref _ref;
 
+  /// 지금 열려 있는 등록 세션의 번호. [startWith]·[reset]이 올린다.
+  ///
+  /// [submit]은 조회·저장을 기다리는 동안에도 살아 있는데, 그 사이 사용자가 폼을 나가
+  /// 새 등록을 시작할 수 있다. 끝난 제출이 자기 세션이 아닌 state에 결과를 쓰면 새
+  /// 세션의 진행 상태를 덮어쓴다([_setSubmit]).
+  int _session = 0;
+
   void startWith(ScanSource source, {String? targetGroupId}) {
+    _session++;
     state = GifticonFormState(
       source: source,
       targetGroupId: targetGroupId,
@@ -233,7 +247,19 @@ class GifticonFormController extends StateNotifier<GifticonFormState> {
   void setImagePath(String v) => state = state.copyWith(imagePath: v);
 
   void reset() {
+    _session++;
     state = const GifticonFormState();
+  }
+
+  /// 제출 결과를 state에 쓴다 — **[session]이 아직 현재 세션일 때만.**
+  ///
+  /// 세션이 바뀐 뒤에 끝난 제출은 결과를 버린다. 쓰면 새 세션이 세워 둔
+  /// [ScanSubmitInProgress]가 옛 제출의 성공·실패로 바뀌어 저장 버튼과 재진입 가드가
+  /// 다시 열리고, 그때 한 번 더 누르면 같은 번호가 두 번 저장된다(CodeRabbit, PR #194).
+  /// 저장 자체는 끝까지 간다 — 버리는 것은 화면에 알릴 결과뿐이고, 그 화면은 이미 없다.
+  void _setSubmit(int session, ScanSubmitState submit) {
+    if (session != _session) return;
+    state = state.copyWith(submit: submit);
   }
 
   /// 현재 사용자의 플랜을 한 번만 읽는다 — 서버 확인(`AuthRepository.getPlan`).
@@ -284,20 +310,33 @@ class GifticonFormController extends StateNotifier<GifticonFormState> {
       return null;
     }
 
+    // 이 제출이 속한 세션. 아래 결과 기록은 전부 [_setSubmit]을 거친다.
+    final int session = _session;
+
     final String? error = state.validate();
 
     if (error != null) {
-      state = state.copyWith(
-        submit: ScanSubmitFailure(error),
+      _setSubmit(
+        session,
+        ScanSubmitFailure(error),
       );
       return null;
     }
 
+    // 검증을 통과한 **입력 전체**를 지금 고정한다. 아래 조회들을 기다리는 사이 사용자가
+    // 폼을 나가 새 등록을 시작하면 [startWith]가 state를 통째로 갈아끼운다 — 그 뒤에
+    // `state`를 다시 읽으면 검증하지 않은 값(빈 번호·null 만료일)이나 다른 세션의 값이
+    // 섞여 저장된다. 결과 상태(`submit`)는 이 세션이 아직 현재일 때만 쓴다
+    // ([_setSubmit]).
+    final GifticonFormState input = state;
+    final String trimmedBarcode = input.barcode.trim();
+
     final currentUser = _ref.read(authRepositoryProvider).currentUser;
 
     if (currentUser == null) {
-      state = state.copyWith(
-        submit: const ScanSubmitFailure('로그인이 필요합니다.'),
+      _setSubmit(
+        session,
+        const ScanSubmitFailure('로그인이 필요합니다.'),
       );
       return null;
     }
@@ -308,8 +347,9 @@ class GifticonFormController extends StateNotifier<GifticonFormState> {
     // 눌리는 상태가 된다. 연타하면 두 호출이 나란히 조회를 돌고, **둘 다 아직
     // 아무것도 저장되지 않은 목록을 보므로 둘 다 "중복 없음"으로 통과**해
     // 같은 바코드가 두 번 저장된다 — 이 함수가 막으려는 바로 그 상태다.
-    state = state.copyWith(
-      submit: const ScanSubmitInProgress(),
+    _setSubmit(
+      session,
+      const ScanSubmitInProgress(),
     );
 
     // 저장 목록을 **한 번만** 읽어 한도 검사와 중복 검사가 함께 쓴다.
@@ -327,8 +367,9 @@ class GifticonFormController extends StateNotifier<GifticonFormState> {
       // 같은 내부 식별자는 사용자가 읽을 것도, 할 수 있는 것도 없다. 원인은
       // 로그로 남기고 화면에는 다음 행동만 적는다.
       _reportFailure('getGifticons', e, s);
-      state = state.copyWith(
-        submit: const ScanSubmitFailure(
+      _setSubmit(
+        session,
+        const ScanSubmitFailure(
           '저장 목록을 확인하지 못했어요. 네트워크 연결을 확인한 뒤 다시 시도해 주세요.',
         ),
       );
@@ -345,12 +386,13 @@ class GifticonFormController extends StateNotifier<GifticonFormState> {
     // 직접 쏘면 11개째도 그대로 저장된다. 진짜 강제는 서버 쪽 카운터 스키마가
     // 필요하고 그건 계약 소유자 영역이다.
     //
-    // **보유 중([GifticonStatus.available])만 센다.** 전체 개수로 세면 무료
-    // 사용자가 막다른 골목에 갇힌다 — 10개를 등록해 전부 사용 완료해도 개수는
-    // 그대로인데, 계약에 삭제 API가 없고(전수 확인: 5개 메서드, delete 없음)
-    // dev/prod에서는 보안 규칙이 plan 쓰기를 막아 프리미엄 전환도 되지 않는다.
-    // 그러면 등록이 영구히 정지한다. available 기준이면 '사용 완료 처리'가 곧
-    // 자리를 비우는 탈출구가 되고, "10개까지 **보관**"이라는 제품 의도에도 맞는다.
+    // **보유 중([GifticonStatus.available])만 센다.** 전체 개수로 세면 다 쓴
+    // 기프티콘이 자리를 계속 차지한다 — 10개를 등록해 전부 사용 완료해도 개수는
+    // 그대로라, 쓴 기록을 지워야만 새로 등록할 수 있게 된다(dev/prod에서는 보안
+    // 규칙이 plan 쓰기를 막아 프리미엄 전환도 되지 않는다). available 기준이면
+    // '사용 완료 처리'가 곧 자리를 비우고, "10개까지 **보관**"이라는 제품 의도에도
+    // 맞는다. (이 기준을 정할 때는 계약에 삭제가 없어 전체 개수 방식이 등록을 영구히
+    // 멈추게 했다. 지금은 삭제가 있지만 — `deleteGifticon` — 기준은 그대로 옳다.)
     //
     // **날짜가 지난 것도 세지 않는다(#175).** `status`를 expired로 옮기는 주체가
     // 없어 만료품도 저장값은 available 그대로다 — 그대로 세면 만료품이 쌓인 무료
@@ -399,8 +441,9 @@ class GifticonFormController extends StateNotifier<GifticonFormState> {
         // 문자열이 상태에 실려 그대로 스낵바의 접근성 라벨이 되고, 위젯이 아니라
         // 상태가 표현을 들고 있어 `semanticsLabel`로 원문을 되살릴 수도 없다.
         // 어절 보호는 표시 지점에서만 건다(`KeepAllText`).
-        state = state.copyWith(
-          submit: const ScanSubmitFailure(
+        _setSubmit(
+          session,
+          const ScanSubmitFailure(
             '플랜 정보를 확인하지 못했어요. 네트워크 연결을 확인한 뒤 다시 시도해 주세요.',
           ),
         );
@@ -408,8 +451,9 @@ class GifticonFormController extends StateNotifier<GifticonFormState> {
       }
 
       if (plan == UserPlan.free) {
-        state = state.copyWith(
-          submit: ScanSubmitLimitReached(
+        _setSubmit(
+          session,
+          ScanSubmitLimitReached(
             saved: activeCount,
             limit: UserPlan.freeGifticonLimit,
           ),
@@ -418,31 +462,27 @@ class GifticonFormController extends StateNotifier<GifticonFormState> {
       }
     }
 
-    // 바코드 중복 검증
-    final String? trimmedBarcode =
-        state.barcode.trim().isEmpty ? null : state.barcode.trim();
+    // 바코드 중복 검증. 번호는 검증 직후 고정한 입력의 것이다(빈 값일 수 없다).
+    Gifticon? duplicate;
 
-    if (trimmedBarcode != null) {
-      Gifticon? duplicate;
-
-      for (final Gifticon g in allGifticons) {
-        if (g.barcode == trimmedBarcode) {
-          duplicate = g;
-          break;
-        }
-      }
-
-      if (duplicate != null) {
-        state = state.copyWith(
-          submit: ScanSubmitDuplicate(duplicate),
-        );
-        return null;
+    for (final Gifticon g in allGifticons) {
+      if (g.barcode == trimmedBarcode) {
+        duplicate = g;
+        break;
       }
     }
 
-    final String category = state.category.trim().isEmpty
+    if (duplicate != null) {
+      _setSubmit(
+        session,
+        ScanSubmitDuplicate(duplicate),
+      );
+      return null;
+    }
+
+    final String category = input.category.trim().isEmpty
         ? kDefaultCategory
-        : state.category.trim();
+        : input.category.trim();
 
     // [Gifticon.imagePath]는 **일부러 채우지 않는다.**
     //
@@ -474,15 +514,15 @@ class GifticonFormController extends StateNotifier<GifticonFormState> {
     final Gifticon draft = Gifticon(
       id: '',
       ownerId: currentUser.id,
-      brand: state.brand.trim(),
-      productName: state.productName.trim(),
-      price: state.parsedPrice!,
+      brand: input.brand.trim(),
+      productName: input.productName.trim(),
+      price: input.parsedPrice!,
       barcode: trimmedBarcode,
       category: category,
-      expiryDate: state.expiryDate!,
+      expiryDate: input.expiryDate!,
       registeredAt: DateTime.now(),
       status: GifticonStatus.available,
-      targetGroupId: state.targetGroupId,
+      targetGroupId: input.targetGroupId,
     );
 
     try {
@@ -538,8 +578,9 @@ class GifticonFormController extends StateNotifier<GifticonFormState> {
         }
       }
 
-      state = state.copyWith(
-        submit: ScanSubmitSuccess(
+      _setSubmit(
+        session,
+        ScanSubmitSuccess(
           saved,
           shareError: shareError,
           sharedGroupName: sharedGroupName,
@@ -549,8 +590,9 @@ class GifticonFormController extends StateNotifier<GifticonFormState> {
       return saved;
     } catch (e, s) {
       _reportFailure('submit', e, s);
-      state = state.copyWith(
-        submit: const ScanSubmitFailure(
+      _setSubmit(
+        session,
+        const ScanSubmitFailure(
           '저장하지 못했어요. 네트워크 연결을 확인한 뒤 다시 시도해 주세요.',
         ),
       );

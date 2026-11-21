@@ -150,6 +150,7 @@ void main() {
     controller.setBrand('스타벅스');
     controller.setProductName('아메리카노 T');
     controller.setPrice('4,500');
+    controller.setBarcode('8801234567890');
     controller.setCategory('카페');
     controller.setExpiryDate(DateTime(2027, 1, 31));
   }

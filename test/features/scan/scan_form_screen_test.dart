@@ -357,7 +357,11 @@ void main() {
     expect(find.text('유효기간을 선택해 주세요.'), findsNothing);
   });
 
-  testWidgets('바코드 없이도 등록된다(계약상 nullable)', (WidgetTester tester) async {
+  testWidgets('바코드만 비어도 저장되지 않는다(#159)', (WidgetTester tester) async {
+    // 이 앱은 이미지를 저장하지 않고 번호에서 바코드를 다시 그린다 — 번호 없이
+    // 저장되면 매장에서 제시할 것이 없는 기프티콘이 된다. 한때 계약 타입이
+    // nullable이라는 이유로 통과시켰고(d02eab5), 그때는 이 자리가 "바코드 없이도
+    // 등록된다"였다.
     await openManualForm(tester);
 
     // 바코드만 비워 둔다.
@@ -368,10 +372,124 @@ void main() {
     await pickExpiryDate(tester);
     await tapSave(tester);
 
-    final List<Gifticon> saved = await repo.getGifticons(myId);
+    expect(find.text('바코드 번호를 입력해 주세요.'), findsOneWidget);
+    expect(keepAllText('기프티콘이 성공적으로 저장되었습니다.'), findsNothing);
+    expect(find.text('기프티콘 정보 확인'), findsOneWidget);
+    expect(await repo.getGifticons(myId), isEmpty);
 
+    // 번호를 채우면 안내가 사라지고 저장된다 — 막힌 채로 굳지 않는다.
+    await tester.enterText(fieldByLabel('바코드 번호'), '8801234567890');
+    await tester.pumpAndSettle();
+    expect(find.text('바코드 번호를 입력해 주세요.'), findsNothing);
+
+    await tapSave(tester);
+
+    final List<Gifticon> saved = await repo.getGifticons(myId);
     expect(saved, hasLength(1));
-    expect(saved.single.barcode, isNull);
+    expect(saved.single.barcode, '8801234567890');
+  });
+
+  test('폼을 거치지 않은 저장도 바코드가 없으면 거부된다(#159)', () async {
+    // 화면 validator만 막으면 컨트롤러를 직접 부르는 경로가 그대로 통과한다.
+    final ProviderContainer container = makeContainer();
+    final GifticonFormController controller =
+        container.read(gifticonFormControllerProvider.notifier);
+
+    controller.startWith(ScanSource.manual);
+    controller.setBrand('스타벅스');
+    controller.setProductName('아메리카노 T');
+    controller.setBarcode('   '); // 공백뿐인 값도 빈 값이다.
+    controller.setExpiryDate(DateTime(2031, 1, 31));
+
+    expect(await controller.submit(), isNull);
+    // 실패의 종류만 보면 다른 필드가 검증에 걸려도 통과한다 — 사유까지 본다.
+    expect(
+      container.read(gifticonFormControllerProvider).submit,
+      isA<ScanSubmitFailure>().having(
+        (ScanSubmitFailure f) => f.message,
+        'message',
+        '바코드 번호를 입력하세요.',
+      ),
+    );
+    expect(await repo.getGifticons(myId), isEmpty);
+  });
+
+  test('저장을 기다리는 사이 새 등록이 시작돼도 검증한 입력 그대로 저장된다', () async {
+    // 조회가 끝나기 전에 사용자가 폼을 나가 새 등록을 시작하면 [startWith]가 state를
+    // 갈아끼운다. submit()이 그 뒤에 state를 다시 읽으면 새 세션의 값(여기서는 빈
+    // 입력)이 저장 경로로 들어온다 — 검증을 통과한 것은 옛 입력이다.
+    final _GatedGifticonRepository gated = _GatedGifticonRepository();
+    addTearDown(gated.release);
+    final ProviderContainer container =
+        makeContainer(gifticonRepository: gated);
+    final GifticonFormController controller =
+        container.read(gifticonFormControllerProvider.notifier);
+
+    controller.startWith(ScanSource.manual);
+    controller.setBrand('스타벅스');
+    controller.setProductName('아메리카노 T');
+    controller.setBarcode('8801234567890');
+    controller.setExpiryDate(DateTime(2031, 1, 31));
+
+    final Future<Gifticon?> pending = controller.submit();
+    // 조회가 게이트에 걸려 있는 동안 새 세션이 시작된다.
+    controller.startWith(ScanSource.manual);
+    gated.release();
+
+    final Gifticon? saved = await pending;
+    expect(saved, isNotNull);
+    expect(saved!.brand, '스타벅스');
+    expect(saved.productName, '아메리카노 T');
+    expect(saved.barcode, '8801234567890');
+    expect(saved.expiryDate, DateTime(2031, 1, 31));
+  });
+
+  test('앞 세션의 제출 결과가 새 세션의 진행 상태를 덮어쓰지 않는다', () async {
+    // A의 조회를 기다리는 사이 B를 시작해 제출까지 누른 상황이다. A가 먼저 끝나며
+    // 결과를 state에 쓰면 B가 세워 둔 '저장 중'이 A의 성공으로 바뀌어 저장 버튼과
+    // 재진입 가드가 다시 열린다 — 그때 한 번 더 누르면 B가 두 번 저장된다
+    // (CodeRabbit, PR #194).
+    final _SequencedGateRepository gated = _SequencedGateRepository();
+    addTearDown(gated.releaseAll);
+    final ProviderContainer container =
+        makeContainer(gifticonRepository: gated);
+    final GifticonFormController controller =
+        container.read(gifticonFormControllerProvider.notifier);
+
+    void fill(String barcode) {
+      controller.setBrand('스타벅스');
+      controller.setProductName('아메리카노 T');
+      controller.setBarcode(barcode);
+      controller.setExpiryDate(DateTime(2031, 1, 31));
+    }
+
+    controller.startWith(ScanSource.manual);
+    fill('1111111111111');
+    final Future<Gifticon?> a = controller.submit(); // 첫 조회에서 대기
+
+    controller.startWith(ScanSource.manual);
+    fill('2222222222222');
+    final Future<Gifticon?> b = controller.submit(); // 둘째 조회에서 대기
+
+    // A만 풀어 끝까지 보낸다 — 저장은 되지만 결과는 B의 state에 쓰이지 않는다.
+    gated.release(0);
+    expect((await a)?.barcode, '1111111111111');
+    expect(
+      container.read(gifticonFormControllerProvider).submit,
+      isA<ScanSubmitInProgress>(),
+      reason: 'B는 아직 저장 중이다 — A의 결과가 그 상태를 바꾸면 안 된다',
+    );
+    // 그래서 연타는 여전히 무시된다.
+    expect(await controller.submit(), isNull);
+
+    gated.release(1);
+    expect((await b)?.barcode, '2222222222222');
+    expect(
+      container.read(gifticonFormControllerProvider).submit,
+      isA<ScanSubmitSuccess>(),
+    );
+    gated.releaseAll();
+    expect(await gated.getGifticons(myId), hasLength(2));
   });
 
   group('무료 플랜 저장 한도', () {
@@ -514,6 +632,7 @@ void main() {
       ctrl.setBrand('새것');
       ctrl.setProductName('새상품');
       ctrl.setPrice('3000');
+      ctrl.setBarcode('8801234567890');
       ctrl.setExpiryDate(DateTime(2031, 1, 1));
 
       expect(await ctrl.submit(), isNotNull,
@@ -685,6 +804,9 @@ void main() {
     WidgetTester tester, {
     String? ocrBarcode,
     List<Gifticon> seed = const <Gifticon>[],
+    // 카메라 도착도 같은 컨트롤러 호출(startWith → 프리필)로 재현된다. 카메라는
+    // 바코드를 인식해야만 폼이 열리므로, 그 경로를 흉내 낼 때는 [ocrBarcode]를 준다.
+    ScanSource source = ScanSource.gallery,
   }) async {
     setFormViewport(tester);
 
@@ -692,7 +814,7 @@ void main() {
     final GifticonFormController controller =
         container.read(gifticonFormControllerProvider.notifier);
 
-    controller.startWith(ScanSource.gallery);
+    controller.startWith(source);
     controller.prefillFromRecognition(
       brand: '스타벅스',
       productName: '아메리카노 T',
@@ -742,24 +864,59 @@ void main() {
       (WidgetTester tester) async {
     await openGalleryForm(tester, ocrBarcode: null);
 
-    // 안내가 뜬다 — 바코드는 계약상 선택 항목이라 이 안내가 없으면 빈 채로
-    // 조용히 저장되고, 사용자는 매장에서야 제시할 것이 없다는 걸 안다.
+    // 안내가 뜬다 — 사진을 골랐는데 왜 번호 칸이 비어 있는지 알린다. 저장을 막는
+    // 것은 필수 검증이고(#159), 이 안내는 그 이유를 설명하는 쪽이다.
     expect(find.text(barcodeUnreadNotice), findsOneWidget);
+    // 아직 손대지 않았으므로 검증 문구는 없다 — 열자마자 빨간 오류부터 보이지 않는다.
+    expect(find.text('바코드 번호를 입력해 주세요.'), findsNothing);
 
     // 직접 채우면 안내는 할 일을 다한 것 — 사라진다.
     await tester.enterText(fieldByLabel('바코드 번호'), '8801234567890');
     await tester.pumpAndSettle();
     expect(find.text(barcodeUnreadNotice), findsNothing);
 
-    // 도로 지우면 다시 뜬다 — "이미지에서 못 읽었다"는 사실은 그대로다.
+    // 도로 지우면 필수 검증 문구가 그 자리를 차지한다 — 한 번 손댄 필드는 즉시
+    // 재검증되고(onUserInteraction), errorText가 있으면 helperText는 그려지지 않는다.
     await tester.enterText(fieldByLabel('바코드 번호'), '');
     await tester.pumpAndSettle();
-    expect(find.text(barcodeUnreadNotice), findsOneWidget);
+    expect(find.text('바코드 번호를 입력해 주세요.'), findsOneWidget);
+    expect(find.text(barcodeUnreadNotice), findsNothing);
+  });
+
+  testWidgets('카메라로 인식된 번호를 지우고 저장해도 막힌다(#159)', (WidgetTester tester) async {
+    // 카메라는 번호를 인식해야만 폼이 열리므로 "카메라는 늘 번호가 있다"는 말은
+    // 도착 시점에만 맞다 — 폼에서 지울 수 있다. 출처로 검증을 건너뛰면 여기가 샌다.
+    await openGalleryForm(
+      tester,
+      ocrBarcode: '8801234567890',
+      source: ScanSource.camera,
+    );
+
+    await tester.enterText(fieldByLabel('바코드 번호'), '');
+    await pickExpiryDate(tester);
+    await tapSave(tester);
+
+    expect(find.text('바코드 번호를 입력해 주세요.'), findsOneWidget);
+    expect(find.text('기프티콘 정보 확인'), findsOneWidget);
+    expect(await repo.getGifticons(myId), isEmpty);
+  });
+
+  testWidgets('갤러리-미인식 안내를 무시하고 저장하면 막힌다(#159)', (WidgetTester tester) async {
+    // #159가 겨눈 바로 그 경로다 — OCR이 번호를 못 읽은 채 폼이 열리고, 사용자가
+    // 빨간 안내를 지나쳐 저장을 누른다. 전에는 번호 없이 그대로 저장됐다.
+    await openGalleryForm(tester, ocrBarcode: null);
+
+    await pickExpiryDate(tester);
+    await tapSave(tester);
+
+    expect(find.text('바코드 번호를 입력해 주세요.'), findsOneWidget);
+    expect(find.text('기프티콘 정보 확인'), findsOneWidget);
+    expect(await repo.getGifticons(myId), isEmpty);
   });
 
   // 폭 회귀 가드 — 안내(helperMaxLines: 2)가 좁은 기기에서 말줄임으로 잘리면
-  // 해소 경로('비워 두어도 돼요')가 사라져 끊긴 명령문만 남는다. 실제로 문구를
-  // 49자로 늘렸다가 320~375px 전부에서 잘리는 회귀가 리뷰 실측으로 잡혔다.
+  // 문장 꼬리('직접 입력해 주세요')가 사라져 이유만 남고 할 일이 안 보인다. 실제로
+  // 문구를 49자로 늘렸다가 320~375px 전부에서 잘리는 회귀가 리뷰 실측으로 잡혔다.
   // 폭 목록은 scan_dialog_layout_test의 narrowWidths와 같은 기기 근거를 쓴다.
   // ⚠️ physicalSize는 openGalleryForm **뒤에** 바꾼다 — 하네스가 1200으로 덮어쓴다.
   for (final double w in <double>[320, 360, 375]) {
@@ -855,9 +1012,8 @@ void main() {
   });
 
   testWidgets('공백뿐인 바코드가 프리필돼도 미인식 안내가 뜬다', (WidgetTester tester) async {
-    // 판정이 trim 없이 isEmpty만 보면 공백 프리필이 안내를 우회하고, 저장
-    // 단계에서 null로 접혀 침묵 저장된다 — 표시 조건과 같은 기준(trim)임을
-    // 고정한다.
+    // 판정이 trim 없이 isEmpty만 보면 공백 프리필이 안내를 우회한다 — 빈 칸으로
+    // 보이는데 이유가 안 적힌다. 표시 조건과 같은 기준(trim)임을 고정한다.
     await openGalleryForm(tester, ocrBarcode: '   ');
 
     expect(find.text(barcodeUnreadNotice), findsOneWidget);
@@ -1022,6 +1178,38 @@ class _ThrowingGifticonRepository extends InMemoryGifticonRepository {
 ///
 /// 타이머가 아니라 [Completer]로 막는다 — `Stream.periodic`류는 teardown에서
 /// `Pending timers`로 죽는다(이 저장소의 알려진 함정).
+/// `getGifticons` 호출을 **호출 순서대로 따로** 붙잡는 저장소.
+///
+/// [_GatedGifticonRepository]는 문이 하나라 겹친 두 제출이 함께 풀린다. 한 제출만
+/// 먼저 끝내야 하는 테스트는 n번째 호출을 골라 풀 수 있어야 한다.
+class _SequencedGateRepository extends InMemoryGifticonRepository {
+  final List<Completer<void>> _gates = <Completer<void>>[];
+  bool _open = false;
+
+  /// [index]번째(0부터) `getGifticons` 호출을 풀어 준다.
+  void release(int index) {
+    if (!_gates[index].isCompleted) _gates[index].complete();
+  }
+
+  /// 지금까지의 호출을 모두 풀고, 이후 호출은 막지 않는다(멱등).
+  void releaseAll() {
+    _open = true;
+    for (final Completer<void> gate in _gates) {
+      if (!gate.isCompleted) gate.complete();
+    }
+  }
+
+  @override
+  Future<List<Gifticon>> getGifticons(String ownerId) async {
+    if (!_open) {
+      final Completer<void> gate = Completer<void>();
+      _gates.add(gate);
+      await gate.future;
+    }
+    return super.getGifticons(ownerId);
+  }
+}
+
 class _GatedGifticonRepository extends InMemoryGifticonRepository {
   final Completer<void> _gate = Completer<void>();
 
